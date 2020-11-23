@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
+
+:root {
+    --dark-blue: #2B4570;
+    
+    --light-blue: #9EB7E5;
+    
+    --rose: #F76F8E;
+    
+    --cream: #FFEAD0;
+    
+    }
+html{
+    background-color: var(--cream);
+    font-family: MontSerrat;
+}
+    button{
+        color: var(--cream);
+        background-color: var(--dark-blue);
+        padding: 10px;
+        font-size: x-large;
+    }
+
+    header{
+        color: var(--dark-blue);
+        font-size: xx-large;
+    }
+
+    .tile{ 
+        background-color: var(--light-blue);
+        width: 400px;
+        height: 400px;
+        color: var(--cream);
+        border: 5px;
+        padding: 10px;
+        border-radius: 10px;
+        padding-block: 10px;
+
+
+    }

@@ -1,9 +1,12 @@
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
      :root {
-        --dark-blue: #2B4570;
-        --light-blue: #9EB7E5;
-        --rose: #F76F8E;
+        --dark-blue: #090446;
+        --light-blue: #3E6990;
+        --rose: #FE938C;
         --cream: #FFEAD0;
+        --magenta: #883955;
+        --apple: #B0E298;
+        --yelloworange: #FFA630;
     }
     
     html {
@@ -70,4 +73,26 @@
     
     .tasks-assigned {
         margin-top: 50px;
+    }
+
+    #mom{
+        background-color: var(--rose);
+    }
+    #bro{
+    background-color: var(--apple);
+    }
+
+    #sis{
+        background-color: var(--magenta);
+
+    }
+
+    #dad{
+        background-color: var(--light-blue);
+    }
+
+    .day{
+        background-color: var(--rose);
+        width: 200px;
+        height: 300px;
     }

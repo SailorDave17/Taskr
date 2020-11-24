@@ -53,8 +53,8 @@ header {
 
 .single-user-tile {
     display: grid;
-    grid-template-columns: 1fr 1fr;
     grid-template-rows: 2fr 1fr 1fr;
+
 }
 
 .user-icon {
@@ -70,6 +70,24 @@ header {
 .task-status-pie {
     display: grid;
     position: absolute;
-    left: 35%;
+    left: 30%;
     top: 100%;
+}
+
+.mom-progress-bar{
+    margin-top: 80px;
+}
+
+.calander{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    margin-top: 50px ;
+    grid-column-gap: 50px;
+}
+
+.username{
+    display: grid;
+    justify-items: center;
+    margin-top: 40px;
+    font-size: 3rem;
 }

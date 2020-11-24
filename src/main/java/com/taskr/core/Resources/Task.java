@@ -15,6 +15,7 @@ public class Task {
     private long minutesExpectedToComplete;
     private long templateId;
     private Date dueBy;
+    private boolean done;
 
     public Task(User owner, TaskTemplate taskTemplate) {
         this.title = taskTemplate.getName();
@@ -76,7 +77,14 @@ public class Task {
         return ownedBy;
     }
 
-    public void setOwnedBy(User ownedBy) {
-        this.ownedBy = ownedBy;
+    public void setOwnedBy(User newOwner) {
+        this.ownedBy = newOwner;
+    }
+    public boolean isDone() {
+        return done;
+    }
+
+    public void setDone(boolean trueOrFalse) {
+        this.done = trueOrFalse;
     }
 }

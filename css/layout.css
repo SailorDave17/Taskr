@@ -69,6 +69,7 @@ header {
 
 .task-status-pie {
     display: grid;
-    grid-row-end: 5;
-    grid-column-end: 3;
+    position: absolute;
+    left: 35%;
+    top: 100%;
 }

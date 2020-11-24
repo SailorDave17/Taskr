@@ -1,40 +1,73 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
-
-:root {
-    --dark-blue: #2B4570;
-    
-    --light-blue: #9EB7E5;
-    
-    --rose: #F76F8E;
-    
-    --cream: #FFEAD0;
-    
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
+     :root {
+        --dark-blue: #2B4570;
+        --light-blue: #9EB7E5;
+        --rose: #F76F8E;
+        --cream: #FFEAD0;
     }
-html{
-    background-color: var(--cream);
-    font-family: MontSerrat;
-}
-    button{
-        color: var(--cream);
-        background-color: var(--dark-blue);
+    
+    html {
+        background-color: var(--cream);
+        font-family: MontSerrat;
+    }
+    
+    button {
+        color: var(--dark-blue);
+        background-color: var(--light-blue);
         padding: 10px;
+        border-radius: 10px;
         font-size: x-large;
     }
-
-    header{
+    
+    header {
         color: var(--dark-blue);
-        font-size: xx-large;
+        font-size: 6rem;
     }
-
-    .tile{ 
-        background-color: var(--light-blue);
+    
+    .tile {
+        display: grid;
+        grid-template-rows: 3fr repeat(5, 1fr);
+        background-color: var(--dark-blue);
         width: 400px;
         height: 400px;
         color: var(--cream);
-        border: 5px;
+        border: 15px;
         padding: 10px;
         border-radius: 10px;
-        padding-block: 10px;
-
-
+        padding: 10px;
+    }
+    
+    .single-user-tile {
+        display: grid;
+        grid-template-rows: 3fr repeat(5, 1fr);
+        background-color: var(--dark-blue);
+        width: 400px;
+        height: 400px;
+        color: var(--cream);
+        border: 15px;
+        padding: 10px;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    
+    .task-name {
+        background-color: var(--rose);
+        font-size: 4rem;
+        text-align: center;
+    }
+    
+    .user-name {
+        margin-top: 50px;
+    }
+    
+    .task-duration {
+        margin-top: 50px;
+    }
+    
+    .single-user-name {
+        font-size: 5rem;
+    }
+    
+    .tasks-assigned {
+        margin-top: 50px;
     }

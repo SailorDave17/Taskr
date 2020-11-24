@@ -1,5 +1,8 @@
 package com.taskr.core;
 
+import com.taskr.core.Resources.User;
+import com.taskr.core.Storages.UserRepository;
+import com.taskr.core.Storages.UserStorage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -10,24 +13,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 public class JPAWiringTest {
 
+
     @Autowired
-    private HouseholdRepository householdRepo;
+    private UserStorage userStorage;
 
     @Autowired
     private TestEntityManager entityManager;
 
     @Test
-    public void householdRepoShouldSaveAndRetrieveUsersAndTasks() {
-        Household testHousehold = new Household("user", "task");
+    public void userStorageShouldSaveAndRetrieveUsersAndTasks() {
+        User testUser = new User("user");
 
-        householdRepo.save(testHousehold);
+        userStorage.save(testUser);
 
         entityManager.flush();
         entityManager.clear();
 
-        Household retrievedHousehold = householdRepo.findById(testHousehold.getId()).get();
+        User retrievedUser = userStorage.findById(testUser.getId());
 
-        assertThat(retrievedHousehold).isEqualTo(testHousehold);
+        assertThat(retrievedUser).isEqualTo(testUser);
 
     }
 }

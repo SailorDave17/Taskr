@@ -13,8 +13,8 @@ public class UserStorage {
         this.userRepo = userRepo;
     }
 
-    public static Object retrieveAllHousehold() {
-        return "";
+    public static Iterable<User> retrieveAllHousehold() {
+        return null;
     }
 
     public void save(User user) {

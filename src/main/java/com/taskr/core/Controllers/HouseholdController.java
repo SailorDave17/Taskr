@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class HouseholdController {
 
-    UserStorage userStorage;
+    private UserStorage userStorage;
 
     public HouseholdController(UserStorage userStorage) {
         this.userStorage = userStorage;
@@ -24,5 +24,5 @@ public class HouseholdController {
     public User retrieveHouseholdById(Long id){
         return userStorage.findById(id);
     }
-
+//  missing adding user to household
 }

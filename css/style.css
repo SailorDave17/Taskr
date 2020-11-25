@@ -1,4 +1,5 @@
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap');
      :root {
         --dark-blue: #090446;
         --light-blue: #3E6990;
@@ -95,4 +96,33 @@
         background-color: var(--rose);
         width: 200px;
         height: 300px;
+    }
+    .user-task-list{
+        font-size: 2rem;
+        text-align: center;
+        margin-top: 10%;
+        font-family: 'Shadows Into Light';
+
+    }
+
+    .chores-list{ 
+        border: 10px;
+        width: 400px;
+        height: 250px;  
+        background-color: var(--yelloworange) ;
+        list-style-position: inside;
+        text-align: left;
+        padding: 20px;
+    }
+
+    li{
+        text-decoration-line: underline;
+
+    }
+    .chores-button{
+        background-color: black;
+    }
+
+    .chore{
+      text-align: center;
     }

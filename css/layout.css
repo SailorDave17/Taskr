@@ -91,3 +91,17 @@ header {
     margin-top: 40px;
     font-size: 3rem;
 }
+.mom-progress-bar{
+    width: 1500px;
+    height: 50px;
+    margin-left: 7%;
+}
+
+.user-task-list{
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+.chore{
+    margin-left: 50%;
+}

@@ -1,0 +1,25 @@
+package com.taskr.core;
+
+import com.taskr.core.Controllers.HouseholdController;
+import com.taskr.core.Resources.User;
+import com.taskr.core.Storages.UserStorage;
+import org.junit.jupiter.api.Test;
+
+import java.util.Collections;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+public class HouseholdControllerTest {
+    
+    @Test
+    public void shouldRetrieveAllHousehold() {
+        UserStorage userStorage = mock(UserStorage.class);
+        HouseholdController underTest = new HouseholdController(userStorage);
+        when(UserStorage.retrieveAllHousehold()).thenReturn(Collections.singletonList(new User("Aloo")));
+        Iterable<User> users = underTest.retrieveAllHousehold();
+        assertThat(users).contains(new User("Aloo"));
+    }
+}

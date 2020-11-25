@@ -13,6 +13,10 @@ public class UserStorage {
         this.userRepo = userRepo;
     }
 
+    public static Object retrieveAllHousehold() {
+        return "";
+    }
+
     public void save(User user) {
         userRepo.save(user);
     }

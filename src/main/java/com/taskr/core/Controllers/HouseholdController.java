@@ -18,7 +18,6 @@ public class HouseholdController {
     @GetMapping("/api/household")
     public Iterable<User> retrieveAllHousehold(){
         return userStorage.findAll();
-
     }
 
     @GetMapping("/api/household/(id)")

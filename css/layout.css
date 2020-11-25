@@ -54,7 +54,6 @@ header {
 .single-user-tile {
     display: grid;
     grid-template-rows: 2fr 1fr 1fr;
-
 }
 
 .user-icon {
@@ -74,34 +73,45 @@ header {
     top: 100%;
 }
 
-.mom-progress-bar{
+.mom-progress-bar {
     margin-top: 80px;
 }
 
-.calander{
+.calander {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    margin-top: 50px ;
+    margin-top: 50px;
     grid-column-gap: 50px;
 }
 
-.username{
+.username {
     display: grid;
     justify-items: center;
-    margin-top: 40px;
+    margin-top: 100px;
     font-size: 3rem;
 }
-.mom-progress-bar{
+
+.mom-progress-bar {
     width: 1500px;
     height: 50px;
     margin-left: 7%;
 }
 
-.user-task-list{
-    padding-top: 10px;
+.user-task-list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: 1fr 1fr auto;
+    grid-column-gap: 50px;
+    grid-row-gap: 50px;
     padding-bottom: 10px;
 }
 
-.chore{
+.chore {
     margin-left: 50%;
+}
+
+.user-page-header {
+    display: grid;
+    grid-template-columns: 3fr 1fr;
+    margin-top: 200px;
 }

@@ -1,128 +1,135 @@
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
-    @import url('https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap');
-     :root {
-        --dark-blue: #090446;
-        --light-blue: #3E6990;
-        --rose: #FE938C;
-        --cream: #FFEAD0;
-        --magenta: #883955;
-        --apple: #B0E298;
-        --yelloworange: #FFA630;
-    }
-    
-    html {
-        background-color: var(--cream);
-        font-family: MontSerrat;
-    }
-    
-    button {
-        color: var(--dark-blue);
-        background-color: var(--light-blue);
-        padding: 10px;
-        border-radius: 10px;
-        font-size: x-large;
-    }
-    
-    header {
-        color: var(--dark-blue);
-        font-size: 6rem;
-    }
-    
-    .tile {
-        display: grid;
-        grid-template-rows: 3fr repeat(5, 1fr);
-        background-color: var(--dark-blue);
-        width: 400px;
-        height: 400px;
-        color: var(--cream);
-        border: 15px;
-        padding: 10px;
-        border-radius: 10px;
-        padding: 10px;
-    }
-    
-    .single-user-tile {
-        display: grid;
-        grid-template-rows: 3fr repeat(5, 1fr);
-        background-color: var(--dark-blue);
-        width: 400px;
-        height: 400px;
-        color: var(--cream);
-        border: 15px;
-        padding: 10px;
-        border-radius: 10px;
-        padding: 10px;
-    }
-    
-    .task-name {
-        background-color: var(--rose);
-        font-size: 4rem;
-        text-align: center;
-    }
-    
-    .user-name {
-        margin-top: 50px;
-    }
-    
-    .task-duration {
-        margin-top: 50px;
-    }
-    
-    .single-user-name {
-        font-size: 5rem;
-    }
-    
-    .tasks-assigned {
-        margin-top: 50px;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap');
+ :root {
+    --dark-blue: #090446;
+    --light-blue: #3E6990;
+    --rose: #FE938C;
+    --cream: #FFEAD0;
+    --magenta: #883955;
+    --apple: #B0E298;
+    --yelloworange: #FFA630;
+}
 
-    #mom{
-        background-color: var(--rose);
-    }
-    #bro{
+html {
+    background-color: var(--cream);
+    font-family: MontSerrat;
+}
+
+button {
+    color: var(--dark-blue);
+    background-color: var(--light-blue);
+    padding: 10px;
+    border-radius: 10px;
+    font-size: x-large;
+}
+
+header {
+    color: var(--dark-blue);
+    font-size: 6rem;
+}
+
+.tile {
+    display: grid;
+    grid-template-rows: 3fr repeat(5, 1fr);
+    background-color: var(--dark-blue);
+    width: 400px;
+    height: 400px;
+    color: var(--cream);
+    border: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.single-user-tile {
+    display: grid;
+    grid-template-rows: 3fr repeat(5, 1fr);
+    background-color: var(--dark-blue);
+    width: 400px;
+    height: 400px;
+    color: var(--cream);
+    border: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.task-name {
+    background-color: var(--rose);
+    font-size: 4rem;
+    text-align: center;
+}
+
+.user-name {
+    margin-top: 50px;
+}
+
+.task-duration {
+    margin-top: 50px;
+}
+
+.single-user-name {
+    font-size: 5rem;
+}
+
+.tasks-assigned {
+    margin-top: 50px;
+}
+
+#mom {
+    background-color: var(--rose);
+}
+
+#bro {
     background-color: var(--apple);
-    }
+}
 
-    #sis{
-        background-color: var(--magenta);
+#sis {
+    background-color: var(--magenta);
+}
 
-    }
+#dad {
+    background-color: var(--light-blue);
+}
 
-    #dad{
-        background-color: var(--light-blue);
-    }
+.day {
+    background-color: var(--rose);
+    width: 200px;
+    height: 300px;
+}
 
-    .day{
-        background-color: var(--rose);
-        width: 200px;
-        height: 300px;
-    }
-    .user-task-list{
-        font-size: 2rem;
-        text-align: center;
-        margin-top: 10%;
-        font-family: 'Shadows Into Light';
+.user-task-list {
+    font-size: 2rem;
+    text-align: center;
+    margin-top: 10%;
+    font-family: 'Shadows Into Light';
+}
 
-    }
+.chores-list {
+    border: 10px;
+    width: 400px;
+    height: 350px;
+    background-color: var(--yelloworange);
+    list-style-position: inside;
+    text-align: left;
+    padding: 40px;
+}
 
-    .chores-list{ 
-        border: 10px;
-        width: 400px;
-        height: 250px;  
-        background-color: var(--yelloworange) ;
-        list-style-position: inside;
-        text-align: left;
-        padding: 20px;
-    }
+li {
+    text-decoration-line: underline;
+    padding: 10px;
+}
 
-    li{
-        text-decoration-line: underline;
+.chore-name {
+    font-size: 2.5rem;
+}
 
-    }
-    .chores-button{
-        background-color: black;
-    }
+.chore-done {
+    width: 30px;
+    height: 30px;
+}
 
-    .chore{
-      text-align: center;
-    }
+.user-page-header {
+    background-color: var(--rose);
+    border-radius: 20px;
+}

@@ -18,8 +18,9 @@ public class HouseholdControllerTest {
     public void shouldRetrieveAllHousehold() {
         UserStorage userStorage = mock(UserStorage.class);
         HouseholdController underTest = new HouseholdController(userStorage);
-        when(UserStorage.retrieveAllHousehold()).thenReturn(Collections.singletonList(new User("Aloo")));
+        User testUser = new User("Aloo");
+        when(userStorage.findAll()).thenReturn(Collections.singletonList(testUser));
         Iterable<User> users = underTest.retrieveAllHousehold();
-        assertThat(users).contains(new User("Aloo"));
+        assertThat(users).contains(testUser);
     }
 }

@@ -13,23 +13,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 public class JPAWiringTest {
 
-
     @Autowired
-    private UserStorage userStorage;
+    private UserRepository userRepo;
 
     @Autowired
     private TestEntityManager entityManager;
+
+    private UserStorage userStorage = new UserStorage(userRepo);
 
     @Test
     public void userStorageShouldSaveAndRetrieveUsersAndTasks() {
         User testUser = new User("user");
 
-        userStorage.save(testUser);
+        userRepo.save(testUser);
 
         entityManager.flush();
         entityManager.clear();
 
-        User retrievedUser = userStorage.findById(testUser.getId());
+        User retrievedUser = userRepo.findUserByName(testUser.getName());
 
         assertThat(retrievedUser).isEqualTo(testUser);
 

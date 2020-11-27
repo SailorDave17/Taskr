@@ -4,6 +4,7 @@ package com.taskr.core.Resources;
 import javax.persistence.*;
 
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 
@@ -51,5 +52,17 @@ public class User {
         return id;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        User user = (User) o;
+        return name.equals(user.name) &&
+                id.equals(user.id);
+    }
 
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, id);
+    }
 }

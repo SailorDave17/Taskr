@@ -1,6 +1,7 @@
 package com.taskr.core;
 
 import com.taskr.core.Controllers.HouseholdController;
+import com.taskr.core.Controllers.UserController;
 import com.taskr.core.Resources.User;
 import com.taskr.core.Storages.UserStorage;
 import org.junit.jupiter.api.Test;

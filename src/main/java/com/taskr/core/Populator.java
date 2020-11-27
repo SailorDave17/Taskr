@@ -14,8 +14,6 @@ public class Populator implements CommandLineRunner {
     public void run(String... args) throws Exception {
         User testUser = new User("sample user");
         TaskTemplate testTemplate = new TaskTemplate("Sample task Template");
-
-
         userStorage.save(testUser);
     }
 }

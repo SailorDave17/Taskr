@@ -128,3 +128,30 @@ header {
     padding: 50px;
     justify-self: center;
 }
+
+.users-customization-grid-header {
+    display: grid;
+    grid-template-columns: 10% auto 10%;
+    grid-column-gap: 10px;
+    padding: 50px;
+}
+
+.user-header-line {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr) auto;
+    justify-items: center;
+    align-items: center;
+}
+
+.list-of-default-tasks {
+    display: grid;
+    grid-template-rows: auto;
+    grid-template-columns: 20% repeat(3, 1fr) 24%;
+    grid-row-gap: 15px;
+    grid-column-gap: 30px;
+}
+
+.list-of-default-tasks input {
+    display: grid;
+    grid-row-gap: 40px;
+}

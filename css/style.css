@@ -186,3 +186,63 @@ li {
     border-radius: 50%;
     background-image: conic-gradient( var(--rose) 70deg, var(--light-blue) 70deg 100deg, var(--magenta) 100deg 200deg, var(--apple) 0);
 }
+
+.user-header-user1 {
+    background-color: var(--rose);
+    font-size: xx-large;
+    color: var(--cream);
+    text-align: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 150px;
+    height: 50px;
+}
+
+.user-header-user2 {
+    background-color: var(--light-blue);
+    font-size: xx-large;
+    color: var(--cream);
+    text-align: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 150px;
+    height: 50px;
+}
+
+.user-header-user3 {
+    background-color: var(--apple);
+    font-size: xx-large;
+    color: var(--cream);
+    text-align: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 150px;
+    height: 50px;
+}
+
+.user-header-user4 {
+    background-color: var(--magenta);
+    font-size: xx-large;
+    color: var(--cream);
+    text-align: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 150px;
+    height: 50px;
+}
+
+.list-of-default-tasks p {
+    background-color: var(--yelloworange);
+    font-size: large;
+    text-align: center;
+    justify-self: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 150px;
+    height: 50px;
+}
+
+.list-of-default-tasks input {
+    width: 50px;
+    height: 50px;
+}

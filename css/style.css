@@ -133,3 +133,14 @@ li {
     background-color: var(--rose);
     border-radius: 20px;
 }
+
+.piechart { 
+    width: 600px; 
+    height: 600px; 
+    border-radius: 50%; 
+    background-image: conic-gradient( 
+    var(--rose) 70deg,  
+    var(--light-blue) 70deg 100deg,  
+    var(--magenta) 100deg 200deg,
+    var(--apple) 0); 
+} 

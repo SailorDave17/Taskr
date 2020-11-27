@@ -119,3 +119,11 @@ header {
 .user-page-icon{
 height: 125px;
 }
+
+
+
+.piechart { 
+    justify-self: center;
+    margin-top: -300px;
+    
+}

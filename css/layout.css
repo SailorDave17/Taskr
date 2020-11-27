@@ -111,19 +111,20 @@ header {
 }
 
 .user-page-header {
-   height: 375px;
+    height: 375px;
     margin-top: 150px;
-
 }
 
-.user-page-icon{
-height: 125px;
+.user-page-icon {
+    height: 125px;
 }
 
-
-
-.piechart { 
+.piechart {
     justify-self: center;
     margin-top: -300px;
-    
+}
+
+.footer {
+    padding: 50px;
+    justify-self: center;
 }

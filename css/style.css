@@ -6,7 +6,7 @@
     --rose: #FE938C;
     --cream: #FFEAD0;
     --magenta: #883955;
-    --apple: #B0E298;
+    --apple: #53917E;
     --yelloworange: #FFA630;
 }
 
@@ -16,7 +16,7 @@ html {
 }
 
 button {
-    color: var(--dark-blue);
+    color: var(--cream);
     background-color: var(--light-blue);
     padding: 10px;
     border-radius: 10px;
@@ -31,7 +31,6 @@ header {
 .tile {
     display: grid;
     grid-template-rows: 3fr repeat(5, 1fr);
-    background-color: var(--dark-blue);
     width: 400px;
     height: 400px;
     color: var(--cream);
@@ -41,10 +40,57 @@ header {
     padding: 10px;
 }
 
+#task1 {
+    background-color: var(--rose);
+}
+
+#task2 {
+    background-color: var(--apple);
+}
+
+#task3 {
+    background-color: var(--magenta);
+}
+
+#task4 {
+    background-color: var(--light-blue);
+}
+
+#task5 {
+    background-color: var(--apple);
+}
+
+#task6 {
+    background-color: var(--rose);
+}
+
+#task7 {
+    background-color: var(--magenta);
+}
+
+#task8 {
+    background-color: var(--light-blue);
+}
+
+#task9 {
+    background-color: var(--apple);
+}
+
+#task10 {
+    background-color: var(--rose);
+}
+
+#task11 {
+    background-color: var(--light-blue);
+}
+
+#task12 {
+    background-color: var(--apple);
+}
+
 .single-user-tile {
     display: grid;
     grid-template-rows: 3fr repeat(5, 1fr);
-    /* background-color: var(--dark-blue); */
     width: 400px;
     height: 400px;
     color: var(--cream);
@@ -55,7 +101,7 @@ header {
 }
 
 .task-name {
-    background-color: var(--rose);
+    background-color: var(--dark-blue);
     font-size: 4rem;
     text-align: center;
 }
@@ -134,13 +180,9 @@ li {
     border-radius: 20px;
 }
 
-.piechart { 
-    width: 600px; 
-    height: 600px; 
-    border-radius: 50%; 
-    background-image: conic-gradient( 
-    var(--rose) 70deg,  
-    var(--light-blue) 70deg 100deg,  
-    var(--magenta) 100deg 200deg,
-    var(--apple) 0); 
-} 
+.piechart {
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    background-image: conic-gradient( var(--rose) 70deg, var(--light-blue) 70deg 100deg, var(--magenta) 100deg 200deg, var(--apple) 0);
+}

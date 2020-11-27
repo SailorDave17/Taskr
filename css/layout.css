@@ -73,7 +73,7 @@ header {
     top: 100%;
 }
 
-.mom-progress-bar {
+.progress-bar {
     margin-top: 80px;
 }
 
@@ -91,7 +91,7 @@ header {
     font-size: 3rem;
 }
 
-.mom-progress-bar {
+.user-progress-bar {
     width: 1500px;
     height: 50px;
     margin-left: 7%;

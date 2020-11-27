@@ -44,7 +44,7 @@ header {
 .single-user-tile {
     display: grid;
     grid-template-rows: 3fr repeat(5, 1fr);
-    background-color: var(--dark-blue);
+    /* background-color: var(--dark-blue); */
     width: 400px;
     height: 400px;
     color: var(--cream);

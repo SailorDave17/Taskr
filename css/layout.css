@@ -111,7 +111,11 @@ header {
 }
 
 .user-page-header {
-    display: grid;
-    grid-template-columns: 3fr 1fr;
-    margin-top: 200px;
+   height: 375px;
+    margin-top: 150px;
+
+}
+
+.user-page-icon{
+height: 125px;
 }

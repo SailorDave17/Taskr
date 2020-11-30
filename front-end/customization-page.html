@@ -12,18 +12,18 @@
 </head>
 
 <body class="container">
-    <header class="title">Taskr Customization View </header>
-    <div class="navigation-button">
-        <button class="All-Users">
-            All Users        
-        </button>
-        <button class="All-Task">
-            All Tasks 
-        </button>
-        <button class="Customize"> 
-            Customize
-        </button>
-    </div>
+    <header class="title">
+        <div class="dropdown">
+            <button class="dropbtn"><img class = "hamburger" src = "/front-end/images/menu.png" width = 100px></button>
+            <div class="dropdown-content">
+                <a href="/front-end/household-userview.html">All Users</a>
+                <a href="/front-end/household-taskview.html">All Tasks</a>
+                <a href="/front-end/user-view.html">My Tasks</a>
+                <a href="/front-end/customization-page.html">Customize</a>
+            </div>
+        </div>
+        Taskr Customization View </header>
+
     <div class="users-customization-grid-header">
         <button class="add-task">Add Task</button>
         <div class="user-header-line">
@@ -60,8 +60,11 @@
         <p>Vacuum Family Room</p><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
         <p>Dust Ceiling Fans</p><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
     </div>
+
+
+
+
 </body>
 <footer class=" footer ">&copy 2020 - Team Taskr - We Can {Code} IT</footer>
-
 
 </html>

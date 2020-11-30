@@ -12,18 +12,19 @@
 </head>
 
 <body class="container">
-    <header class="title">Taskr Household Task View </header>
-    <div class="navigation-button">
-        <button class="All-Users">
-            All Users        
-        </button>
-        <button class="All-Task">
-            All Tasks 
-        </button>
-        <button class="Customize"> 
-            Customize
-        </button>
-    </div>
+    <header class="title">
+        <div class="dropdown">
+            <button class="dropbtn"><img class = "hamburger" src = "/front-end/images/menu.png" width = 100px></button>
+            <div class="dropdown-content">
+                <a href="/front-end/household-userview.html">All Users</a>
+                <a href="/front-end/household-taskview.html">All Tasks</a>
+                <a href="/front-end/user-view.html">My Tasks</a>
+                <a href="/front-end/customization-page.html">Customize</a>
+            </div>
+        </div>
+        Taskr Household Task View
+
+    </header>
     <section class="task-tiles">
         <div class="tile" id="task1">
             <h1 class="task-name">Washing Dishes </h1>

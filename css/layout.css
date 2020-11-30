@@ -9,11 +9,12 @@
     max-width: 100zw;
     max-height: 75vh;
     padding: 5rem;
-    grid-template-rows: 200px 50px auto;
+    grid-template-rows: 200px auto;
 }
 
 header {
     display: grid;
+    grid-template-columns: 1fr 9fr;
     text-align: center;
     margin-top: 10px;
 }

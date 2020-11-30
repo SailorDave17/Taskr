@@ -3,6 +3,11 @@ package com.taskr.core.Resources;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
+import javax.persistence.OneToMany;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 public class TaskTemplate {
@@ -10,8 +15,11 @@ public class TaskTemplate {
     @GeneratedValue
     private long id;
     private String name;
-    private long minutesExpectedToComplete = 0;
+    private int minutesExpectedToComplete = 0;
     private String description;
+    private int actualWorkTime = 0;
+    @OneToMany
+    private Set<User> usersWhoCanDoThisTask;
 
     public TaskTemplate(String name) {
         this.name = name;
@@ -33,12 +41,20 @@ public class TaskTemplate {
         return id;
     }
 
-    public long getMinutesExpectedToComplete() {
+    public int getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(long minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(int minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+    }
+
+    public void setActualWorkTime(int actualWorkTime) {
+        this.actualWorkTime = actualWorkTime;
+    }
+
+    public int getActualWorkTime() {
+        return actualWorkTime;
     }
 
     public String getDescription() {
@@ -47,5 +63,12 @@ public class TaskTemplate {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+    public Set<User> getUsersWhoCanDoThisTask(){
+        return usersWhoCanDoThisTask;
+    }
+
+    public void setUsersWhoCanDoThisTask(Set<User> usersWhoCanDoThisTask) {
+        this.usersWhoCanDoThisTask = usersWhoCanDoThisTask;
     }
 }

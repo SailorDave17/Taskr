@@ -19,6 +19,7 @@ public class User {
     @Id
     @GeneratedValue
     private Long id;
+    private int availableTime;
 
     protected User() {
     }
@@ -52,6 +53,14 @@ public class User {
         return id;
     }
 
+    public int getAvailableTime() {
+        return availableTime;
+    }
+
+    public void setAvailableTime(int availableTime) {
+        this.availableTime = availableTime;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -65,4 +74,5 @@ public class User {
     public int hashCode() {
         return Objects.hash(name, id);
     }
+
 }

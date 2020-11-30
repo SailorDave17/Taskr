@@ -132,7 +132,7 @@ header {
 
 .users-customization-grid-header {
     display: grid;
-    grid-template-columns: 10% auto 10%;
+    grid-template-columns: 15% 15% auto 10%;
     grid-column-gap: 10px;
     padding: 50px;
 }
@@ -147,12 +147,17 @@ header {
 .list-of-default-tasks {
     display: grid;
     grid-template-rows: auto;
-    grid-template-columns: 20% repeat(3, 1fr) 24%;
+    grid-template-columns: 12.5% 16% repeat(3, 1fr) 19.5%;
     grid-row-gap: 15px;
-    grid-column-gap: 30px;
+    grid-column-gap: 145px;
 }
 
 .list-of-default-tasks input {
     display: grid;
     grid-row-gap: 40px;
+}
+
+#task-time{
+    width: 300px;
+    height: 50px;
 }

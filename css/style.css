@@ -239,14 +239,14 @@ li {
   );
 }
 
-.list-of-default-tasks p {
+.list-of-default-tasks p{
   background-color: var(--yelloworange);
   font-size: large;
   text-align: center;
   justify-self: center;
   padding: 5px;
   border-radius: 10px;
-  width: 300px;
+  width: 200px;
   height: 50px;
 }
 
@@ -269,10 +269,10 @@ li {
   background-color: var(--dark-blue);
   color: var(--cream);
   padding: 5px;
-  font-size: xx-large;
+  font-size: large;
   border-radius: 10px;
   text-align: center;
-  width: 300px;
+  width: 150px;
   height: 50px;
 }
 
@@ -280,9 +280,67 @@ li {
     background-color: var(--dark-blue);
     color: var(--cream);
     padding: 5px;
-    font-size: xx-large;
+    font-size: large;
     border-radius: 10px;
     text-align: center;
-    width: 300px;
+    width: 150px;
     height: 50px;
 }
+
+.due-date{
+  background-color: var(--dark-blue);
+  color: var(--cream);
+  padding: 5px;
+  font-size: large;
+  border-radius: 10px;
+  text-align: center;
+  width: 150px;
+  height: 50px;
+}
+
+.task-frequency{
+  background-color: var(--dark-blue);
+  color: var(--cream);
+  padding: 5px;
+  font-size: large;
+  border-radius: 10px;
+  text-align: center;
+  width: 150px;
+  height: 50px;
+}
+
+.multiple-user-option{
+  background-color: var(--dark-blue);
+  color: var(--cream);
+  padding: 5px;
+  font-size: large;
+  border-radius: 10px;
+  text-align: center;
+  width: 150px;
+  height: 50px;
+}
+
+.dropdown-content-mu {
+    display: none;
+    position: absolute;
+    background-color: var(--cream);
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px var(--dark-blue);
+    z-index: 1;
+  }
+  
+.dropdown-content-mu a {
+    color: var(--dark-blue);
+    padding: 12px 16px;
+    text-decoration: none;
+    font-size: 1rem;
+    display: block;
+  }
+  
+.dropdown-content-mu a:hover {
+    background-color: var(--rose);
+  }
+
+  .dropdown:hover .dropdown-content-mu {
+    display: block;
+  }

@@ -30,4 +30,20 @@ public class UserStorageTest {
         userStorage.delete(testUser);
         verify(userStorage).delete(testUser);
     }
+
+    @Test
+    public void shouldHaveAFindAllMethod(){
+        UserStorage userStorage = mock(UserStorage.class);
+        userStorage.findAll();
+        verify(userStorage).findAll();
+
+    }
+
+    @Test
+    public void shouldBeAbleToFindUserByName(){
+        UserStorage userStorage = mock(UserStorage.class);
+        userStorage.findUserByName("");
+        verify(userStorage).findUserByName("");
+
+    }
 }

@@ -1,0 +1,21 @@
+
+
+### Get a user with the given id
+GET localhost:8080/api/users/1
+Accept: application/json
+
+### Get all users
+GET http://localhost:8080/api/users
+
+###
+GET http://localhost:8080/api/users/1
+
+###
+POST http://localhost:8080/api/users
+Content-Type: application/json
+
+{"name": "test"}
+###
+PUT http://localhost:8080/api/users
+Content-Type: application/json
+

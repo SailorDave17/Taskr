@@ -1,5 +1,7 @@
 package com.taskr.core.Resources;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 import javax.persistence.*;
 import java.util.Date;
 
@@ -8,6 +10,7 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
+    @JsonBackReference
     @ManyToOne
     private User ownedBy;
     private String title;

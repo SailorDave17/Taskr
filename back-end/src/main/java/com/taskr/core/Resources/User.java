@@ -1,6 +1,9 @@
 package com.taskr.core.Resources;
 
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
 import javax.persistence.*;
 
 import java.util.HashSet;
@@ -13,6 +16,7 @@ public class User {
     private String name;
     // Reminder to self that the error "OneToMany attribute type should not be(...) was caused
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
+    @JsonManagedReference
     @OneToMany(mappedBy = "ownedBy")
     private Set<Task> taskList;
 

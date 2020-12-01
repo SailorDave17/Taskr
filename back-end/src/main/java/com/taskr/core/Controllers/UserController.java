@@ -2,9 +2,7 @@ package com.taskr.core.Controllers;
 
 import com.taskr.core.Resources.User;
 import com.taskr.core.Storages.UserStorage;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 public class UserController {
@@ -15,13 +13,14 @@ public class UserController {
         this.userStorage = userStorage;
     }
 
-    @GetMapping("/api/user/(id)")
-    public User retrieveUserById(Long id) {
+    @GetMapping("/api/user/{id}")
+    public User retrieveUserById(@PathVariable Long id) {
         return userStorage.findById(id);
     }
 
     @PostMapping("/api/user/new")
-    public Iterable<User> addNewUser(User user) {
+    public Iterable<User> addNewUser(@RequestBody User user) {
+//        User newUser = new User(user.getName());
         userStorage.save(user);
         return userStorage.findAll();
     }

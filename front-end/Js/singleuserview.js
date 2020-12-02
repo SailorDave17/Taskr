@@ -39,11 +39,6 @@ const displaySingleUserView = function (user) {
         listOfTasks.appendChild(taskInfoList);
         listOfTasks.appendChild(taskDueDate);
         listOfTasks.appendChild(taskDuration); //not sure if appending them all to the same thing is the right choice//
-        
-
-
-
-
 
     });
 }

@@ -23,8 +23,13 @@ public class User {
     @Id
     @GeneratedValue
     private Long id;
-    private Integer availableTime;
+    private Integer totalAvailableTime;
+    private Integer remainingAvailableTime;
+    private Integer userCommittedTime;
     private String userColor;
+    private String userIcon;
+    private Integer userNumberTasksAssigned;
+    private Integer userNumberTasksComplete;
 
     protected User() {
     }
@@ -32,15 +37,17 @@ public class User {
     public User(String name) {
         this.name = name;
         Set<Task> taskList = new HashSet<>();
-        this.availableTime = 0;
+        this.totalAvailableTime = 0;
     }
 
     public void addTask(Task task) {
         taskList.add(task);
+        updateUser();
     }
 
     public void deleteTask(Task task) {
         this.taskList.remove(task);
+        updateUser();
     }
 
     public Set<Task> getTaskList() {
@@ -59,12 +66,46 @@ public class User {
         return id;
     }
 
-    public Integer getAvailableTime() {
-        return availableTime;
+    public Integer getTotalAvailableTime() {
+        return totalAvailableTime;
     }
 
-    public void setAvailableTime(Integer availableTime) {
-        this.availableTime = availableTime;
+    public void setTotalAvailableTime(Integer availableTime) {
+        this.totalAvailableTime = availableTime;
+    }
+
+    public Integer getRemainingAvailableTime() {
+        return remainingAvailableTime;
+    }
+
+    public Integer getUserNumberTasksAssigned() {
+        return userNumberTasksAssigned;
+    }
+    public void updateUser(){
+        updateUserNumberTasksAssigned();
+        updateUserNumberTasksCompleted();
+        updateUserTimeCommitment();
+    }
+
+    public void updateUserNumberTasksAssigned() {
+        this.userNumberTasksAssigned = taskList.size();
+    }
+
+    public void updateUserNumberTasksCompleted() {
+        this.userNumberTasksComplete = userNumberTasksAssigned;
+        for (Task task : taskList) {
+            if (!task.isDone()) {
+                userNumberTasksComplete -= 1;
+            }
+        }
+    }
+
+    public void updateUserTimeCommitment() {
+        this.userCommittedTime = 0;
+        for (Task task : taskList) {
+            this.userCommittedTime += task.getActualWorkTime();
+        }
+        this.remainingAvailableTime = this.totalAvailableTime - this.userCommittedTime;
     }
 
     public String getUserColor() {
@@ -73,6 +114,14 @@ public class User {
 
     public void setUserColor(String userColor) {
         this.userColor = userColor;
+    }
+
+    public String getUserIcon() {
+        return userIcon;
+    }
+
+    public void setUserIcon(String userIcon) {
+        this.userIcon = userIcon;
     }
 
     @Override

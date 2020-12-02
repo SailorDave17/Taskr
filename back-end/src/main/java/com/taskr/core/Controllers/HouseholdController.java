@@ -41,6 +41,7 @@ public class HouseholdController {
 
     @GetMapping("/api/household/delete_household_task/{id}")
     public Iterable<TaskTemplate> deleteTaskFromHousehold(@PathVariable Long id){
+        taskStorage.deleteByTemplateId(id);
         taskTemplateStorage.deleteById(id);
         return taskTemplateStorage.findAll();
     }
@@ -64,6 +65,7 @@ public class HouseholdController {
             existingTaskTemplate.setUsersWhoCanDoThisTask(taskTemplate.getUsersWhoCanDoThisTask());
         }
         taskTemplateStorage.save(existingTaskTemplate);
+        taskStorage.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
         return existingTaskTemplate;
     }
 

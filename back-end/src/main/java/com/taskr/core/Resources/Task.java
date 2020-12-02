@@ -30,6 +30,7 @@ public class Task {
         }
         if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
+            ownedBy.updateUser();
         }
     }
 
@@ -55,6 +56,7 @@ public class Task {
 
     public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+        ownedBy.updateUser();
     }
 
     public Date getDueBy() {
@@ -83,6 +85,8 @@ public class Task {
 
     public void setOwnedBy(User newOwner) {
         this.ownedBy = newOwner;
+        this.ownedBy.updateUser();
+
     }
     public Boolean isDone() {
         return done;
@@ -90,6 +94,7 @@ public class Task {
 
     public void setDone(Boolean trueOrFalse) {
         this.done = trueOrFalse;
+        this.ownedBy.updateUser();
     }
 
     public Integer getActualWorkTime() {

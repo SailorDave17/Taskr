@@ -59,12 +59,14 @@ public class UserController {
         if(user.getName() != null){
             existingUser.setName(user.getName());
         }
-        if(user.getAvailableTime() != null){
-            existingUser.setAvailableTime(user.getAvailableTime());
+        if(user.getTotalAvailableTime() != null){
+            existingUser.setTotalAvailableTime(user.getTotalAvailableTime());
         }
         if(user.getUserColor() != null){
             existingUser.setUserColor(user.getUserColor());
         }
+        existingUser.updateUserTimeCommitment();
+        existingUser.updateUserNumberTasksCompleted();
         userStorage.save(existingUser);
         return userStorage.findAll();
     }

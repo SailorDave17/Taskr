@@ -23,7 +23,7 @@ public class User {
     @Id
     @GeneratedValue
     private Long id;
-    private int availableTime;
+    private Integer availableTime;
     private String userColor;
 
     protected User() {
@@ -58,11 +58,11 @@ public class User {
         return id;
     }
 
-    public int getAvailableTime() {
+    public Integer getAvailableTime() {
         return availableTime;
     }
 
-    public void setAvailableTime(int availableTime) {
+    public void setAvailableTime(Integer availableTime) {
         this.availableTime = availableTime;
     }
 

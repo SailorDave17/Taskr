@@ -44,8 +44,18 @@ public class UserController {
     }
 
     @PatchMapping("/api/user/{id}/update")
-    public Iterable<User> updateUserInfo(@RequestBody User user) {
-        userStorage.save(user);
+    public Iterable<User> updateUserInfo(@PathVariable Long id, @RequestBody User user) {
+        User existingUser = userStorage.findById(id);
+        if(user.getName() != null){
+            existingUser.setName(user.getName());
+        }
+        if(user.getAvailableTime() != null){
+            existingUser.setAvailableTime(user.getAvailableTime());
+        }
+        if(user.getUserColor() != null){
+            existingUser.setUserColor(user.getUserColor());
+        }
+        userStorage.save(existingUser);
         return userStorage.findAll();
     }
 

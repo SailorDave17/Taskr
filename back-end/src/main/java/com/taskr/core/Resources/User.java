@@ -24,6 +24,7 @@ public class User {
     @GeneratedValue
     private Long id;
     private int availableTime;
+    private String userColor;
 
     protected User() {
     }
@@ -63,6 +64,14 @@ public class User {
 
     public void setAvailableTime(int availableTime) {
         this.availableTime = availableTime;
+    }
+
+    public String getUserColor() {
+        return userColor;
+    }
+
+    public void setUserColor(String userColor) {
+        this.userColor = userColor;
     }
 
     @Override

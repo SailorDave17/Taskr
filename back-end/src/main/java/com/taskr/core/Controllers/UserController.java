@@ -29,7 +29,7 @@ public class UserController {
     //Not necessary in the final project
     //TODO remove this once auto-assign algorithm exists.
     @PatchMapping("/api/user/{userId}/assign-task")
-    public User assignTaskToUser(@PathVariable Long userId, @RequestBody Long taskTemplateId){
+    public User assignTaskToUser(@PathVariable Long userId, @RequestBody Long taskTemplateId) {
         User user = userStorage.findById(userId);
         TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateId);
         Task newTask = new Task(user, taskTemplate);
@@ -39,8 +39,22 @@ public class UserController {
 
     @PostMapping("/api/user/new")
     public Iterable<User> addNewUser(@RequestBody User user) {
-//        User newUser = new User(user.getName());
         userStorage.save(user);
+        return userStorage.findAll();
+    }
+
+    @PatchMapping("/api/user/{id}/update")
+    public Iterable<User> updateUserInfo(@RequestBody User user) {
+        userStorage.save(user);
+        return userStorage.findAll();
+    }
+
+    @GetMapping("/api/user/{id}/delete")
+    public Iterable<User> deleteUser(@PathVariable Long id) {
+        if (userStorage.findById(id) != null) {
+            User userToDelete = userStorage.findById(id);
+            userStorage.delete(userToDelete);
+        }
         return userStorage.findAll();
     }
 

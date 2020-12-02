@@ -6,6 +6,7 @@ import com.taskr.core.Resources.User;
 import com.taskr.core.Storages.TaskStorage;
 import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserStorage;
+import java.util.Date;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -25,10 +26,13 @@ public class Populator implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         User testUser = new User("sample user");
-        TaskTemplate testTemplate = new TaskTemplate("Sample task Template");
+        TaskTemplate testTemplate = new TaskTemplate("Final Project Demo");
         taskTemplateStorage.save(testTemplate);
         userStorage.save(testUser);
         Task testTask = new Task(testUser, testTemplate);
+        Date dueDate = new Date(1607576400000L);
+        testTask.setDueBy(dueDate);
+        testTask.setDescription(testTask.getDueBy().toString());
         taskStorage.save(testTask);
     }
 }

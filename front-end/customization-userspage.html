@@ -14,224 +14,93 @@
 <body class="container">
     <header class="title">
         <div class="dropdown">
-            <button class="dropbtn"><img class="hamburger" src="/front-end/images/menu.png" width=100px></button>
+            <button class="dropbtn"><img class = "hamburger" src = "/front-end/images/menu.png" width = 100px></button>
             <div class="dropdown-content">
                 <a href="/front-end/household-userview.html">All Users</a>
                 <a href="/front-end/household-taskview.html">All Tasks</a>
                 <a href="/front-end/user-view.html">My Tasks</a>
                 <a href="/front-end/customization-taskpage.html">Customize tasks</a>
-                <a href="/front-end/customization-userspage.html">Customize users</a> </div>
+                <a href="/front-end/customization-userspage.html">Customize users</a>    </div>
 
         </div>
 
-        Taskr User Customization View
-    </header>
+        Taskr User Customization View </header>
 
-    <div class="users-customization">
-
-        <p class="user-box">User Set-up Information </p>
-        <div class="customization-buttons">
-<div class="user-name-entry">
-            <input type="text" > </div>
-
+    <div class="users-customization-grid-header">
+        <p class="add-task">Add Task</p>
+        <p class="task-duration-header">Task Duration</p>
+        <div class="user-header-line">
+            <!-- make each of these a menu that allows user to change name or delete user -->
+            
             <div class="dropdown">
-                <button class="dropbtn-user" id="color">Choose your color</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">Dark Blue</a>
-                    <a href="#">Light Blue</a>
-                    <a href="#">Rose</a>
-                    <a href="#">Magenta</a>
-                    <a href="#">Green</a>
-                    <a href="#">Orange</a>
+                <button class="dropbtn-user" id = "mom">Mom</button>
+                <div class="dropdown-content">
+                    <a href="#">Change Name</a>
+                    <a href="#">Change Icon</a>
+                    <a href="#">Delete User</a>
+                    <a href="#">Upload Picture</a>
                 </div>
             </div>
+            
             <div class="dropdown">
-                <button class="dropbtn-user" id="image">Choose Image/Icon</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">Mom Icon</a>
-                    <a href="#">Dad Icon</a>
-                    <a href="#">Bro Iconr</a>
-                    <a href="#">Sis Icon</a>
-                    <a href="#">Upload Image</a>
+                <button class="dropbtn-user" id = "dad">Dad</button>
+                <div class="dropdown-content">
+                    <a href="#">Change Name</a>
+                    <a href="#">Change Icon</a>
+                    <a href="#">Delete User</a>
+                    <a href="#">Upload Picture</a>
                 </div>
             </div>
-
+            
+            <div class="dropdown">
+                <button class="dropbtn-user" id = "bro">Bro</button>
+                <div class="dropdown-content">
+                    <a href="#">Change Name</a>
+                    <a href="#">Change Icon</a>
+                    <a href="#">Delete User</a>
+                    <a href="#">Upload Picture</a>
+                </div>
+            </div>
+            
+            <div class="dropdown">
+                <button class="dropbtn-user" id = "sis">Sis</button>
+                <div class="dropdown-content">
+                    <a href="#">Change Name</a>
+                    <a href="#">Change Icon</a>
+                    <a href="#">Delete User</a>
+                    <a href="#">Upload Picture</a>
+                </div>
+            </div>
         </div>
-        <div class="user-available-hours">
-
-            <p id="Sunday"> Su </p>
-            <p id="Monday"> M </p>
-            <p id="Tuesday"> T </p>
-            <p id="Wednesday"> W </p>
-            <p id="Thursday"> TH </p>
-            <p id="Friday"> F </p>
-            <p id="Saturday"> Sa </p>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Sunday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Monday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Tuesday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Wednesday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Thursday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Friday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-            <div class="dropdown">
-                <button class="dropbtn-time" id="Saturday">Hours</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">0</a>
-                    <a href="#">1</a>
-                    <a href="#">2</a>
-                    <a href="#">3</a>
-                    <a href="#">4</a>
-                    <a href="#">5</a>
-                    <a href="#">6</a>
-                    <a href="#">7</a>
-                    <a href="#">8</a>
-                    <a href="#">9</a>
-                    <a href="#">10</a>
-                    <a href="#">11</a>
-                    <a href="#">12</a>
-                </div>
-            </div>
-
-        </div>
-
-        <div class="reward-system">
-            <p class= "reward-condition">When user completes</p>
-            <div class="dropdown">
-                <button class="dropbtn-user" id="number-of-tasks">Number of Tasks</button>
-                <div class="dropdown-content-user-customization">
-                    <a href="#">1 Task</a>
-                    <a href="#">2 Tasks</a>
-                    <a href="#">3 Tasks</a>
-                    <a href="#">4 Tasks</a>
-                    <a href="#">5 Tasks</a>
-                    <a href="#">6 Tasks</a>
-                    <a href="#">7 Tasks</a>
-                    <a href="#">8 Tasks</a>
-                    <a href="#">9 Tasks</a>
-                    <a href="#">10 Tasks</a>
-                    <a href="#">All Assigned Tasks</a>
-                </div>
-            </div>
-            <p class= "reward-line">This user will receive the following reward:</p>
-            <input type="text" class="reward">
-
-
-        </div>
-
-
-
-
+        <button class="add-user-button">Add User</button>
     </div>
 
-    <button class="add-user-button">Add User</button>
+    <div class="list-of-default-tasks">
+        <p>Clean Common Area</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Clean Garage</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Clean Bathrooms</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Take Out Trash</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Wash Dishes</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Wash/Dry Laundry</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Fold/Put Away Laundry</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Rake Leaves</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Mow Lawn</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Clean Bedroom</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Deep Clean Kitchen</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Tidy Kitchen</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Vacuum Living Room</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Mop/Sweep Kitchen</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Change Litter Box</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Walk Dog</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Clean Up Yard</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Get Mail</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Dust Living Room</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Dust Family Room</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Vacuum Family Room</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+        <p>Dust Ceiling Fans</p><input type = "text" id="task-time"><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked><input type="checkbox" checked>
+    </div>
+
+
 
 
 </body>

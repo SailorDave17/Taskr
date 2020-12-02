@@ -1,4 +1,0 @@
-com/taskr/core/JPAWiringTest.java
- com.taskr.core.JPAWiringTest
-com/taskr/core/TaskrBackendApplicationTests.java
- com.taskr.core.TaskrBackendApplicationTests

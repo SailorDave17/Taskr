@@ -42,6 +42,7 @@ public class UserController {
         User user = userStorage.findById(id);
         Task task = taskStorage.findById(taskInput.getId());
         user.deleteTask(task);
+        taskStorage.deleteById(task.getId());
         userStorage.save(user);
         return user;
     }

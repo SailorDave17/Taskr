@@ -51,4 +51,9 @@ public class TaskController {
         }
         return taskStorage.findAll();
     }
+
+    @GetMapping("/api/tasks")
+    public Iterable<Task> getAllTasks(){
+        return taskStorage.findAll();
+    }
 }

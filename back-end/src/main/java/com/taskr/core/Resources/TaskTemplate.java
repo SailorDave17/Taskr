@@ -15,9 +15,9 @@ public class TaskTemplate {
     @GeneratedValue
     private long id;
     private String name;
-    private int minutesExpectedToComplete = 0;
+    private Long minutesExpectedToComplete = 0L;
     private String description;
-    private int actualWorkTime = 0;
+    private Long actualWorkTime = 0L;
     @OneToMany
     private Set<User> usersWhoCanDoThisTask;
 
@@ -41,19 +41,19 @@ public class TaskTemplate {
         return id;
     }
 
-    public int getMinutesExpectedToComplete() {
+    public Long getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(int minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Long minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
-    public void setActualWorkTime(int actualWorkTime) {
+    public void setActualWorkTime(Long actualWorkTime) {
         this.actualWorkTime = actualWorkTime;
     }
 
-    public int getActualWorkTime() {
+    public Long getActualWorkTime() {
         return actualWorkTime;
     }
 

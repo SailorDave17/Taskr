@@ -1,7 +1,10 @@
 package com.taskr.core.Storages;
 
+import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 public class TaskTemplateStorage {
@@ -30,4 +33,6 @@ public class TaskTemplateStorage {
         } else return null;
     }
 
+    public void allocateTasks(List<Task> taskList) {
+    }
 }

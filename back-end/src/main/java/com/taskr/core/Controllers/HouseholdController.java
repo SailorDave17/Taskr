@@ -4,18 +4,23 @@ package com.taskr.core.Controllers;
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
+import com.taskr.core.Storages.TaskStorage;
 import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserStorage;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 public class HouseholdController {
 
     private UserStorage userStorage;
     private TaskTemplateStorage taskTemplateStorage;
-    public HouseholdController(UserStorage userStorage, TaskTemplateStorage taskTemplateStorage) {
+    private TaskStorage taskStorage;
+    public HouseholdController(TaskStorage taskStorage, UserStorage userStorage, TaskTemplateStorage taskTemplateStorage) {
         this.userStorage = userStorage;
         this.taskTemplateStorage = taskTemplateStorage;
+        this.taskStorage = taskStorage;
     }
 
     @GetMapping("/api/household")
@@ -60,5 +65,11 @@ public class HouseholdController {
         }
         taskTemplateStorage.save(existingTaskTemplate);
         return existingTaskTemplate;
+    }
+
+    @PostMapping("/api/household/assign_tasks")
+    public Iterable<Task> assignTasks(@RequestBody List<Task> taskList){
+        taskTemplateStorage.allocateTasks(taskList);
+        return taskStorage.findAll();
     }
 }

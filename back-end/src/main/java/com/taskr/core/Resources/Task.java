@@ -15,11 +15,11 @@ public class Task {
     private User ownedBy;
     private String title;
     private String description;
-    private Long minutesExpectedToComplete;
+    private Integer minutesExpectedToComplete;
     private long templateId;
     private Date dueBy;
     private Boolean done;
-    private Long actualWorkTime = 0L;
+    private Integer actualWorkTime = 0;
 
     public Task(User owner, TaskTemplate taskTemplate) {
         this.title = taskTemplate.getName();
@@ -28,7 +28,7 @@ public class Task {
         if (taskTemplate.getDescription() != null){
             this.description = taskTemplate.getDescription();
         }
-        if (taskTemplate.getMinutesExpectedToComplete() != 0L){
+        if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
         }
     }
@@ -49,11 +49,11 @@ public class Task {
         this.description = description;
     }
 
-    public Long getMinutesExpectedToComplete() {
+    public Integer getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(Long minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
@@ -92,11 +92,11 @@ public class Task {
         this.done = trueOrFalse;
     }
 
-    public Long getActualWorkTime() {
+    public Integer getActualWorkTime() {
         return actualWorkTime;
     }
 
-    public void setActualWorkTime(Long actualWorkTime) {
+    public void setActualWorkTime(Integer actualWorkTime) {
         this.actualWorkTime = actualWorkTime;
     }
 }

@@ -3,6 +3,7 @@ package com.taskr.core;
 import com.taskr.core.Controllers.HouseholdController;
 import com.taskr.core.Controllers.UserController;
 import com.taskr.core.Resources.User;
+import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserStorage;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +19,8 @@ public class HouseholdControllerTest {
     @Test
     public void shouldRetrieveAllHousehold() {
         UserStorage userStorage = mock(UserStorage.class);
-        HouseholdController underTest = new HouseholdController(userStorage);
+        TaskTemplateStorage taskTemplateStorage = mock(TaskTemplateStorage.class);
+        HouseholdController underTest = new HouseholdController(userStorage, taskTemplateStorage);
         User testUser = new User("Aloo");
         when(userStorage.findAll()).thenReturn(Collections.singletonList(testUser));
         Iterable<User> users = underTest.retrieveAllHousehold();

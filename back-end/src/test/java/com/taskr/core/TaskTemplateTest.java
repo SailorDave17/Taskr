@@ -16,7 +16,7 @@ public class TaskTemplateTest {
     @Test
     public void taskTemplateCanSetExpectedTimeToComplete() {
         TaskTemplate underTest = new TaskTemplate("Clean your room");
-        underTest.setMinutesExpectedToComplete(10L);
+        underTest.setMinutesExpectedToComplete(10);
         assertThat(underTest.getMinutesExpectedToComplete()).isEqualTo(10);
     }
 
@@ -29,8 +29,8 @@ public class TaskTemplateTest {
     @Test
     public void taskTemplateCanHaveDifferentExpectedVersusActualWorkTime(){
         TaskTemplate underTest = new TaskTemplate("Do the laundry");
-        underTest.setMinutesExpectedToComplete(150L);
-        underTest.setActualWorkTime(20L);
+        underTest.setMinutesExpectedToComplete(150);
+        underTest.setActualWorkTime(20);
         assertThat(underTest.getMinutesExpectedToComplete()).isEqualTo(150);
         assertThat(underTest.getActualWorkTime()).isEqualTo(20);
     }

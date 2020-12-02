@@ -32,6 +32,7 @@ public class User {
     public User(String name) {
         this.name = name;
         Set<Task> taskList = new HashSet<>();
+        this.availableTime = 0;
     }
 
     public void addTask(Task task) {

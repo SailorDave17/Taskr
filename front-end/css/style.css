@@ -344,3 +344,125 @@ li {
   .dropdown:hover .dropdown-content-mu {
     display: block;
   }
+
+  .user-box{
+    width: 300px;
+    height: 300px;
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    font-size: 2rem;
+
+
+  }
+
+
+  .dropdown-content-user-customization{
+    display: none;
+    position: absolute;
+    background-color: var(--cream);
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px var(--dark-blue);
+    z-index: 1;
+  }
+  
+.dropdown-content-user-customization a {
+    color: var(--dark-blue);
+    padding: 12px 16px;
+    text-decoration: none;
+    font-size: small;
+    display: block;
+  }
+  
+.dropdown-content-user-customization a:hover {
+    background-color: var(--rose);
+  }
+
+  .dropdown:hover .dropdown-content-user-customization {
+    display: block;
+  }
+
+  .add-user-button{
+    width: 150px;
+    height: 50px;
+  }
+
+  .user-available-hours p{
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    font-size: 2rem;
+    padding: 5px;
+    width: 100px;
+    height: 100px;
+    text-align: center;
+    padding-top: 35px;
+  }
+
+  .dropbtn-time {
+    color: var(--cream);
+    padding: 5px;
+    font-size: 1rem;
+    border-radius: 10px;
+    text-align: center;
+    width: 100px;
+    height: 50px;
+    
+  }
+
+  .reward-condition{
+    background-color: var(--yelloworange);
+    width: 150px;
+    height: 50px;
+    font-size: 1rem;
+    padding: 5px;
+    text-align:center ;
+    border-radius: 5px;
+  }
+
+  .reward-line{
+    background-color: var(--yelloworange);
+    width: 150px;
+    height: 70px;
+    font-size: 1rem;
+    padding: 5px;
+    text-align:center;
+    border-radius: 5px;
+  }
+
+  .reward{
+    width: 150px;
+    height: 70px;
+  }
+
+  #Sunday{
+    background-color: var(--dark-blue);
+  }
+  
+  #Monday{
+    background-color: var(--apple);
+
+  }
+
+  #Tuesday{
+    background-color: var(--magenta);
+
+  }
+
+  #Wednesday{
+    background-color: var(--light-blue);
+
+  }
+
+  #Thursday{
+    background-color: var(--rose);
+
+  }
+
+  #Friday{
+    background-color: var(--apple);
+    
+
+  }
+
+  #Saturday{
+    background-color: var(--dark-blue);
+  }

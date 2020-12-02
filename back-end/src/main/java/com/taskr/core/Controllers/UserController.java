@@ -40,7 +40,7 @@ public class UserController {
     @PatchMapping("/api/user/{id}/remove_task")
     public User removeTaskFromUser(@PathVariable Long id, @RequestBody Task taskInput) {
         User user = userStorage.findById(id);
-        Task task = taskTemplateStorage.findById(taskInput.getId();
+        Task task = taskStorage.findById(taskInput.getId());
         user.deleteTask(task);
         userStorage.save(user);
         return user;

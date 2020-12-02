@@ -1,5 +1,7 @@
 package com.taskr.core.Resources;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 import javax.persistence.*;
 import java.util.Date;
 
@@ -8,14 +10,16 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
+    @JsonBackReference
     @ManyToOne
     private User ownedBy;
     private String title;
     private String description;
-    private long minutesExpectedToComplete;
+    private Integer minutesExpectedToComplete;
     private long templateId;
     private Date dueBy;
-    private boolean done;
+    private Boolean done;
+    private Integer actualWorkTime = 0;
 
     public Task(User owner, TaskTemplate taskTemplate) {
         this.title = taskTemplate.getName();
@@ -26,6 +30,7 @@ public class Task {
         }
         if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
+            ownedBy.updateUser();
         }
     }
 
@@ -45,12 +50,13 @@ public class Task {
         this.description = description;
     }
 
-    public long getMinutesExpectedToComplete() {
+    public Integer getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(long minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+        ownedBy.updateUser();
     }
 
     public Date getDueBy() {
@@ -79,12 +85,23 @@ public class Task {
 
     public void setOwnedBy(User newOwner) {
         this.ownedBy = newOwner;
+        this.ownedBy.updateUser();
+
     }
-    public boolean isDone() {
+    public Boolean isDone() {
         return done;
     }
 
-    public void setDone(boolean trueOrFalse) {
+    public void setDone(Boolean trueOrFalse) {
         this.done = trueOrFalse;
+        this.ownedBy.updateUser();
+    }
+
+    public Integer getActualWorkTime() {
+        return actualWorkTime;
+    }
+
+    public void setActualWorkTime(Integer actualWorkTime) {
+        this.actualWorkTime = actualWorkTime;
     }
 }

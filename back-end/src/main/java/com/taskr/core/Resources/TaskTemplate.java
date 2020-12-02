@@ -4,9 +4,6 @@ import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 import javax.persistence.OneToMany;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Set;
 
 @Entity
@@ -15,9 +12,9 @@ public class TaskTemplate {
     @GeneratedValue
     private long id;
     private String name;
-    private int minutesExpectedToComplete = 0;
+    private Integer minutesExpectedToComplete = 0;
     private String description;
-    private int actualWorkTime = 0;
+    private Integer actualWorkTime = 0;
     @OneToMany
     private Set<User> usersWhoCanDoThisTask;
 
@@ -41,19 +38,22 @@ public class TaskTemplate {
         return id;
     }
 
-    public int getMinutesExpectedToComplete() {
+    public Integer getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(int minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+        if(actualWorkTime == 0 || actualWorkTime >= minutesExpectedToComplete){
+            this.actualWorkTime = minutesExpectedToComplete;
+        }
     }
 
-    public void setActualWorkTime(int actualWorkTime) {
+    public void setActualWorkTime(Integer actualWorkTime) {
         this.actualWorkTime = actualWorkTime;
     }
 
-    public int getActualWorkTime() {
+    public Integer getActualWorkTime() {
         return actualWorkTime;
     }
 

@@ -28,12 +28,21 @@ public class UserController {
 
     //Not necessary in the final project
     //TODO remove this once auto-assign algorithm exists.
-    @PatchMapping("/api/user/{userId}/assign-task")
-    public User assignTaskToUser(@PathVariable Long userId, @RequestBody Long taskTemplateId) {
+    @PatchMapping("/api/user/{userId}/assign_task")
+    public User assignTaskToUser(@PathVariable Long userId, @RequestBody TaskTemplate taskTemplateInput) {
         User user = userStorage.findById(userId);
-        TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateId);
+        TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateInput.getId());
         Task newTask = new Task(user, taskTemplate);
         taskStorage.save(newTask);
+        return user;
+    }
+
+    @PatchMapping("/api/user/{id}/remove_task")
+    public User removeTaskFromUser(@PathVariable Long id, @RequestBody Task taskInput) {
+        User user = userStorage.findById(id);
+        Task task = taskTemplateStorage.findById(taskInput.getId();
+        user.deleteTask(task);
+        userStorage.save(user);
         return user;
     }
 

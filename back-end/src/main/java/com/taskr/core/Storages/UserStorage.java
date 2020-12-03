@@ -14,6 +14,12 @@ public class UserStorage {
         this.userRepo = userRepo;
     }
 
+    public void updateAllUsers() {
+        for (User user : userRepo.findAll()) {
+            user.updateUser();
+        }
+    }
+
     public void save(User user) {
         userRepo.save(user);
     }
@@ -38,7 +44,7 @@ public class UserStorage {
 
     public User findUserByName(String name) {
         Optional<User> retrievedUserOptional = Optional.ofNullable(userRepo.findUserByName(name));
-        if (retrievedUserOptional.isPresent()){
+        if (retrievedUserOptional.isPresent()) {
             return retrievedUserOptional.get();
         } else return null;
     }

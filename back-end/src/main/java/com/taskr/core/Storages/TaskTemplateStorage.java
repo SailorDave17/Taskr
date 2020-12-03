@@ -10,10 +10,14 @@ import java.util.List;
 public class TaskTemplateStorage {
 
     private TaskTemplateRepository taskTemplateRepo;
+    private UserRepository userRepo;
+    private UserStorage userStorage;
 
 
-    public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo) {
+    public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo, UserRepository userRepo) {
         this.taskTemplateRepo = taskTemplateRepo;
+        this.userRepo = userRepo;
+        UserStorage userStorage = new UserStorage(userRepo);
     }
 
     public void save(TaskTemplate taskTemplate) {
@@ -35,5 +39,6 @@ public class TaskTemplateStorage {
     }
 
     public void allocateTasks(List<Task> taskList) {
+        userStorage.updateAllUsers();
     }
 }

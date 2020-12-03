@@ -65,8 +65,10 @@ public class UserController {
         if(user.getUserColor() != null){
             existingUser.setUserColor(user.getUserColor());
         }
-        existingUser.updateUserTimeCommitment();
-        existingUser.updateUserNumberTasksCompleted();
+        if(user.getUserIcon() != null){
+            existingUser.setUserIcon(user.getUserIcon());
+        }
+        existingUser.updateUser();
         userStorage.save(existingUser);
         return userStorage.findAll();
     }

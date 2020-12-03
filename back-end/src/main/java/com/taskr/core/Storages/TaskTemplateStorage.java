@@ -38,6 +38,23 @@ public class TaskTemplateStorage {
         } else return null;
     }
 
-    public void allocateTasks(List<Task> taskList) {
+    public void allocateTasks(List<TaskTemplate> taskTemplateList) {
         userStorage.updateAllUsers();
+        for (TaskTemplate taskTemplate : taskTemplateList){
+            List<User> candidateUsers = taskTemplate.getUsersWhoCanDoThisTask();
+            User assignedUser = candidateUsers[0];
+            for(User user : candidateUsers) {
+                if(user.getRemainingAvailableTime()>assignedUser.getRemainingAvailableTime()){
+                    assignedUser = user
+                }else if (user.getRemainingAvailableTime()== assignedUser.getRemainingAvailableTime()){
+                    if (Math.random()*2>=1){
+                        assignedUser = user;
+                    }
+
+                }
+                assignedUser.updateUser();
+                userStorage.save(assignedUser);
+            }
+        }
     }
+}

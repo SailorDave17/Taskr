@@ -14,14 +14,16 @@ public class Task {
     @ManyToOne
     private User ownedBy;
     private String title;
-    private String description;
     private Integer minutesExpectedToComplete;
-    private long templateId;
     private Date dueBy;
     private Boolean done;
+    //populate all of the above instead of taskTemplate
     private Integer actualWorkTime = 0;
+    private String description;
+    private long templateId;
 
-    public Task(User owner, TaskTemplate taskTemplate) {
+
+    public Task(User owner, TaskTemplate taskTemplate, User ownedBy, String title, Integer minutesExpectedToComplete, Date dueBy, Boolean done) {
         this.title = taskTemplate.getName();
         this.ownedBy = owner;
         this.templateId = taskTemplate.getId();

@@ -25,7 +25,7 @@ public class Populator implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        User testUser = new User("sample user");
+        User testUser = new User("sample user", 1, 2, 3, "blue", "sample user");
         userStorage.save(testUser);
         TaskTemplate testTemplate = new TaskTemplate("Final Project Demo");
         testTemplate.setMinutesExpectedToComplete(300);
@@ -48,10 +48,10 @@ public class Populator implements CommandLineRunner {
         taskTemplateStorage.save(testTemplate2);
         taskTemplateStorage.save(testTemplate3);
         taskTemplateStorage.save(testTemplate4);
-        User testUser1 = new User("Mom");
-        User testUser2 = new User("Dad");
-        User testUser3 = new User("Bro");
-        User testUser4 = new User("Sis");
+        User testUser1 = new User("Mom", 10, 20, 30, "pink", "mom");
+        User testUser2 = new User("Dad", 20, 30, 40, "blue", "dad");
+        User testUser3 = new User("Bro", 1,2,3, "green", "bro");
+        User testUser4 = new User("Sis", 1,3,4, "purple", "sis");
         testUser.setTotalAvailableTime(600);
         testUser1.setTotalAvailableTime(300);
         testUser2.setTotalAvailableTime(600);
@@ -63,8 +63,8 @@ public class Populator implements CommandLineRunner {
         userStorage.save(testUser3);
         userStorage.save(testUser4);
 //        taskTemplateStorage.allocateAllTasks();
-        Task testTask = new Task(testUser, testTemplate);
         Date dueDate = new Date(1607576400000L);
+        Task testTask = new Task(testUser, testTemplate, testUser, "testTask", 1, dueDate, true );
         testTask.setDueBy(dueDate);
         testTask.setDescription(testTask.getDueBy().toString());
         taskStorage.save(testTask);

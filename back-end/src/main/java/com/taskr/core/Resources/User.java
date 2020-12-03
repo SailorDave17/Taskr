@@ -34,16 +34,19 @@ public class User {
     protected User() {
     }
 
-    public User(String name) {
+    public User(String name, Integer userCommittedTime, Integer userNumberTasksAssigned, Integer userNumberTasksComplete, String userColor, String userIcon) {
         this.name = name;
         taskList = new HashSet<>();
         this.totalAvailableTime = 0;
         this.remainingAvailableTime = 0;
+        //Items below add to constructor
         this.userCommittedTime = 0;
         this.userNumberTasksAssigned = 0;
         this.userNumberTasksComplete = 0;
         this.userColor = "";
+        //pink,green,blue,purple
         this.userIcon = "";
+        //same as name
     }
 
     public void addTask(Task task) {

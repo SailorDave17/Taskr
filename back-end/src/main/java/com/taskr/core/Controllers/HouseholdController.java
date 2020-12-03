@@ -70,8 +70,14 @@ public class HouseholdController {
     }
 
     @PostMapping("/api/household/assign_tasks")
-    public Iterable<Task> assignTasks(@RequestBody List<Task> taskList){
-        taskTemplateStorage.allocateTasks(taskList);
+    public Iterable<Task> assignTasks(@RequestBody Iterable<TaskTemplate> taskTemplateList){
+        taskTemplateStorage.allocateTasks(taskTemplateList);
+        return taskStorage.findAll();
+    }
+
+    @PostMapping("/api/household/assign_all_tasks")
+    public Iterable<Task> assignAllTasks(){
+        taskTemplateStorage.allocateAllTasks();
         return taskStorage.findAll();
     }
 }

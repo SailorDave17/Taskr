@@ -36,7 +36,7 @@ public class User {
 
     public User(String name) {
         this.name = name;
-        Set<Task> taskList = new HashSet<>();
+        taskList = new HashSet<>();
         this.totalAvailableTime = 0;
     }
 
@@ -76,6 +76,10 @@ public class User {
 
     public Integer getRemainingAvailableTime() {
         return remainingAvailableTime;
+    }
+
+    public Integer getUserCommittedTime() {
+        return userCommittedTime;
     }
 
     public Integer getUserNumberTasksAssigned() {

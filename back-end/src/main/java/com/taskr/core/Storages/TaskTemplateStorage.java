@@ -2,9 +2,13 @@ package com.taskr.core.Storages;
 
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
+import com.taskr.core.Resources.User;
 import org.springframework.stereotype.Service;
 
+
 import java.util.List;
+import java.util.Set;
+
 
 @Service
 public class TaskTemplateStorage {
@@ -38,15 +42,27 @@ public class TaskTemplateStorage {
         } else return null;
     }
 
-    public void allocateTasks(List<TaskTemplate> taskTemplateList) {
+    public void addAllUsersToAllTaskTemplates(){
+        for (TaskTemplate taskTemplate : taskTemplateRepo.findAll()){
+            for (User user : userStorage.findAll()){
+                taskTemplate.addUserWhoCanDoThisTask(user);
+            }
+        }
+    }
+
+    public void allocateAllTasks(){
+        allocateTasks(taskTemplateRepo.findAll());
+    }
+
+    public void allocateTasks(Iterable<TaskTemplate> taskTemplateList) {
         userStorage.updateAllUsers();
         for (TaskTemplate taskTemplate : taskTemplateList){
-            List<User> candidateUsers = taskTemplate.getUsersWhoCanDoThisTask();
-            User assignedUser = candidateUsers[0];
+            Iterable<User> candidateUsers = taskTemplate.getUsersWhoCanDoThisTask();
+            User assignedUser = candidateUsers.iterator().next();
             for(User user : candidateUsers) {
                 if(user.getRemainingAvailableTime()>assignedUser.getRemainingAvailableTime()){
-                    assignedUser = user
-                }else if (user.getRemainingAvailableTime()== assignedUser.getRemainingAvailableTime()){
+                    assignedUser = user;
+                }else if (user.getRemainingAvailableTime() == assignedUser.getRemainingAvailableTime()){
                     if (Math.random()*2>=1){
                         assignedUser = user;
                     }

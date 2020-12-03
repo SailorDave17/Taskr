@@ -38,6 +38,12 @@ public class User {
         this.name = name;
         taskList = new HashSet<>();
         this.totalAvailableTime = 0;
+        this.remainingAvailableTime = 0;
+        this.userCommittedTime = 0;
+        this.userNumberTasksAssigned = 0;
+        this.userNumberTasksComplete = 0;
+        this.userColor = "";
+        this.userIcon = "";
     }
 
     public void addTask(Task task) {

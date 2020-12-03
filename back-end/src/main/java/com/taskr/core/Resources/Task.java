@@ -27,11 +27,14 @@ public class Task {
         this.templateId = taskTemplate.getId();
         if (taskTemplate.getDescription() != null){
             this.description = taskTemplate.getDescription();
-        }
+        } else this.description = "";
         if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
             ownedBy.updateUser();
-        }
+        } else this.minutesExpectedToComplete = 0;
+        if (taskTemplate.getActualWorkTime() != 0){
+            this.actualWorkTime = taskTemplate.getActualWorkTime();
+        } else this.actualWorkTime = 0;
     }
 
     public Task() {

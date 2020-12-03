@@ -68,5 +68,7 @@ public class Populator implements CommandLineRunner {
         testTask.setDueBy(dueDate);
         testTask.setDescription(testTask.getDueBy().toString());
         taskStorage.save(testTask);
+        testUser.updateUser();
+        userStorage.save(testUser);
     }
 }

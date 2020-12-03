@@ -20,3 +20,9 @@ Content-Type: application/json
 #Content-Type: application/json
 # Check that new user was added
 GET http://localhost:8080/api/users
+
+###
+GET http://localhost:8080/api/household/tasks
+
+###
+GET http://localhost:8080/api/tasks

@@ -7,6 +7,8 @@ import com.taskr.core.Storages.TaskStorage;
 import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserStorage;
 import java.util.Date;
+import java.util.HashSet;
+
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -33,7 +35,7 @@ public class Populator implements CommandLineRunner {
         taskTemplateStorage.save(testTemplate);
         TaskTemplate testTemplate1 = new TaskTemplate("Do the dishes");
         testTemplate1.setMinutesExpectedToComplete(20);
-        testTemplate.addUserWhoCanDoThisTask(testUser);
+//        testTemplate.addUserWhoCannotDoThisTask(testUser);
          testUser.updateUser();
 //        userStorage.updateAllUsers();
 //        taskTemplateStorage.addAllUsersToAllTaskTemplates();
@@ -62,7 +64,11 @@ public class Populator implements CommandLineRunner {
         userStorage.save(testUser2);
         userStorage.save(testUser3);
         userStorage.save(testUser4);
-//        taskTemplateStorage.allocateAllTasks();
+        HashSet<TaskTemplate> taskTemplateIterable = new HashSet<>();
+        for (TaskTemplate taskTemplate : taskTemplateStorage.findAll()){
+            taskTemplateIterable.add(taskTemplate);
+        }
+//        taskTemplateStorage.allocateTasks(taskTemplateIterable);
         Date dueDate = new Date(1607576400000L);
         Task testTask = new Task(testUser, testTemplate);
         testTask.setDueBy(dueDate);

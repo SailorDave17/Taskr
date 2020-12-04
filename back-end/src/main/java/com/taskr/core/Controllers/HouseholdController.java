@@ -10,6 +10,7 @@ import com.taskr.core.Storages.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Set;
 
 @RestController
 public class HouseholdController {
@@ -61,8 +62,8 @@ public class HouseholdController {
         if(taskTemplate.getDescription() != null){
             existingTaskTemplate.setDescription(taskTemplate.getDescription());
         }
-        if(taskTemplate.getUsersWhoCanDoThisTask() != null){
-            existingTaskTemplate.setUsersWhoCanDoThisTask(taskTemplate.getUsersWhoCanDoThisTask());
+        if(taskTemplate.getUsersWhoCannotDoThisTask() != null){
+            existingTaskTemplate.setUsersWhoCannotDoThisTask(taskTemplate.getUsersWhoCannotDoThisTask());
         }
         taskTemplateStorage.save(existingTaskTemplate);
         taskStorage.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
@@ -71,7 +72,7 @@ public class HouseholdController {
 
     @PostMapping("/api/household/assign_tasks")
     public Iterable<Task> assignTasks(@RequestBody Iterable<TaskTemplate> taskTemplateList){
-        taskTemplateStorage.allocateTasks(taskTemplateList);
+        taskTemplateStorage.allocateTasks((Set<TaskTemplate>) taskTemplateList);
         return taskStorage.findAll();
     }
 

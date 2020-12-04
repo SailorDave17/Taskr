@@ -1,12 +1,10 @@
 package com.taskr.core.Storages;
 
-import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
 import org.springframework.stereotype.Service;
 
-
-import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 
 
@@ -15,13 +13,11 @@ public class TaskTemplateStorage {
 
     private TaskTemplateRepository taskTemplateRepo;
     private UserRepository userRepo;
-    private UserStorage userStorage;
 
 
     public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo, UserRepository userRepo) {
         this.taskTemplateRepo = taskTemplateRepo;
         this.userRepo = userRepo;
-        UserStorage userStorage = new UserStorage(userRepo);
     }
 
     public void save(TaskTemplate taskTemplate) {
@@ -37,27 +33,26 @@ public class TaskTemplateStorage {
     }
 
     public TaskTemplate findById(Long id) {
+        TaskTemplate dummyTaskTemplate = new TaskTemplate("TaskTemplate not found");
         if (taskTemplateRepo.findById(id).isPresent()) {
             return taskTemplateRepo.findById(id).get();
-        } else return null;
-    }
-
-    public void addAllUsersToAllTaskTemplates(){
-        for (TaskTemplate taskTemplate : taskTemplateRepo.findAll()){
-            for (User user : userStorage.findAll()){
-                taskTemplate.addUserWhoCanDoThisTask(user);
-            }
-        }
+        } else return dummyTaskTemplate ;
     }
 
     public void allocateAllTasks(){
-        allocateTasks(taskTemplateRepo.findAll());
+        allocateTasks((Set<TaskTemplate>) taskTemplateRepo.findAll());
     }
 
-    public void allocateTasks(Iterable<TaskTemplate> taskTemplateList) {
+    public void allocateTasks(Set<TaskTemplate> taskTemplateList) {
+        UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
         userStorage.updateAllUsers();
         for (TaskTemplate taskTemplate : taskTemplateList){
-            Iterable<User> candidateUsers = taskTemplate.getUsersWhoCanDoThisTask();
+            Set<User> candidateUsers = new HashSet<>();
+            for (User user : userStorage.findAll()){
+                if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user)){
+                    candidateUsers.add(user);
+                }
+            }
             User assignedUser = candidateUsers.iterator().next();
             for(User user : candidateUsers) {
                 if(user.getRemainingAvailableTime()>assignedUser.getRemainingAvailableTime()){

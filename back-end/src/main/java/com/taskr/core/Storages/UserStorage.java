@@ -1,5 +1,6 @@
 package com.taskr.core.Storages;
 
+import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
 import org.springframework.stereotype.Service;
 
@@ -9,8 +10,10 @@ import java.util.Optional;
 public class UserStorage {
 
     private UserRepository userRepo;
+    private TaskTemplateRepository taskTemplateRepo;
 
-    public UserStorage(UserRepository userRepo) {
+    public UserStorage(UserRepository userRepo, TaskTemplateRepository taskTemplateRepo) {
+        this.taskTemplateRepo = taskTemplateRepo;
         this.userRepo = userRepo;
     }
 
@@ -21,7 +24,7 @@ public class UserStorage {
     }
 
     public void save(User user) {
-        userRepo.save(user);
+        this.userRepo.save(user);
     }
 
     public void deleteById(Long id) {
@@ -37,15 +40,17 @@ public class UserStorage {
     }
 
     public User findById(Long id) {
+        User dummyUser = new User("User not found");
         if (userRepo.findById(id).isPresent()) {
             return userRepo.findById(id).get();
-        } else return null;
+        } else return dummyUser;
     }
 
     public User findUserByName(String name) {
+        User dummyUser = new User("User not found");
         Optional<User> retrievedUserOptional = Optional.ofNullable(userRepo.findUserByName(name));
         if (retrievedUserOptional.isPresent()) {
             return retrievedUserOptional.get();
-        } else return null;
+        } else return dummyUser;
     }
 }

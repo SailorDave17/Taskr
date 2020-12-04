@@ -54,7 +54,6 @@ public class User {
         this.userColor = userColor;
         this.userIcon = userIcon;
         taskList = new HashSet<>();
-        this.remainingAvailableTime = 0;
         this.userCommittedTime = 0;
         this.userNumberTasksAssigned = 0;
         this.userNumberTasksComplete = 0;

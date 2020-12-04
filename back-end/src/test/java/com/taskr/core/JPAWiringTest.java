@@ -1,6 +1,8 @@
 package com.taskr.core;
 
 import com.taskr.core.Resources.User;
+import com.taskr.core.Storages.TaskTemplateRepository;
+import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserRepository;
 import com.taskr.core.Storages.UserStorage;
 import org.junit.jupiter.api.Test;
@@ -15,11 +17,13 @@ public class JPAWiringTest {
 
     @Autowired
     private UserRepository userRepo;
+    @Autowired
+    private TaskTemplateRepository taskTemplateRepo;
 
     @Autowired
     private TestEntityManager entityManager;
 
-    private UserStorage userStorage = new UserStorage(userRepo);
+    private UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
 
     @Test
     public void userStorageShouldSaveAndRetrieveUsersAndTasks() {

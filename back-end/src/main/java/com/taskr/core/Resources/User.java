@@ -34,19 +34,29 @@ public class User {
     protected User() {
     }
 
-    public User(String name, Integer userCommittedTime, Integer userNumberTasksAssigned, Integer userNumberTasksComplete, String userColor, String userIcon) {
+    public User(String name) {
         this.name = name;
         taskList = new HashSet<>();
         this.totalAvailableTime = 0;
+        this.userNumberTasksComplete = 0;
+        this.userColor = "";
+        this.userIcon = "";
+        //These cannot be set using a constructor without violating encapsulation
+        //They are dynamically set when tasks are assigned to a user.
         this.remainingAvailableTime = 0;
-        //Items below add to constructor
+        this.userCommittedTime = 0;
+        this.userNumberTasksAssigned = 0;
+    }
+
+    public User(String name, Integer totalAvailableTime, String userColor, String userIcon){
+        this.name = name;
+        this.totalAvailableTime = totalAvailableTime;
+        this.userColor = userColor;
+        this.userIcon = userIcon;
+        taskList = new HashSet<>();
         this.userCommittedTime = 0;
         this.userNumberTasksAssigned = 0;
         this.userNumberTasksComplete = 0;
-        this.userColor = "";
-        //pink,green,blue,purple
-        this.userIcon = "";
-        //same as name
     }
 
     public void addTask(Task task) {

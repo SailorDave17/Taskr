@@ -23,7 +23,7 @@ public class Task {
     private long templateId;
 
 
-    public Task(User owner, TaskTemplate taskTemplate, User ownedBy, String title, Integer minutesExpectedToComplete, Date dueBy, Boolean done) {
+    public Task(User owner, TaskTemplate taskTemplate) {
         this.title = taskTemplate.getName();
         this.ownedBy = owner;
         this.templateId = taskTemplate.getId();
@@ -37,10 +37,20 @@ public class Task {
         if (taskTemplate.getActualWorkTime() != 0){
             this.actualWorkTime = taskTemplate.getActualWorkTime();
         } else this.actualWorkTime = 0;
+        this.done = false;
     }
 
     public Task() {
+    }
 
+    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
+    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
+       this.ownedBy = owner;
+       this.title = title;
+       this.description = description;
+       this.minutesExpectedToComplete = minutesExpectedToComplete;
+       this.actualWorkTime = actualWorkTime;
+       this.templateId = 65535;
     }
 
     public long getId() {

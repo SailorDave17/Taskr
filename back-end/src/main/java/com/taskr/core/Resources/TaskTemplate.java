@@ -1,9 +1,6 @@
 package com.taskr.core.Resources;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.OneToMany;
+import javax.persistence.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -16,15 +13,15 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
-    @OneToMany
-    private Set<User> usersWhoCanDoThisTask;
+    @ManyToMany
+    private Set<User> usersWhoCannotDoThisTask;
 
     public TaskTemplate(String name) {
         this.name = name;
         this.description = "";
         this.actualWorkTime = 0;
         this.minutesExpectedToComplete = 0;
-        this.usersWhoCanDoThisTask = new HashSet<>();
+        this.usersWhoCannotDoThisTask = new HashSet<>();
     }
 
     public TaskTemplate() {
@@ -66,17 +63,28 @@ public class TaskTemplate {
     public void setDescription(String description) {
         this.description = description;
     }
-    public Set<User> getUsersWhoCanDoThisTask(){
-        return usersWhoCanDoThisTask;
+    public Set<User> getUsersWhoCannotDoThisTask(){
+        return usersWhoCannotDoThisTask;
     }
 
-    public void addUserWhoCanDoThisTask(User user){
-        this.usersWhoCanDoThisTask.add(user);
+    public void addUserWhoCannotDoThisTask(User user){
+        this.usersWhoCannotDoThisTask.add(user);
     }
 
-    public void setUsersWhoCanDoThisTask(Iterable<User> usersWhoCanDoThisTask) {
-        for (User user : usersWhoCanDoThisTask){
-            this.usersWhoCanDoThisTask.add(user);
+    public void setUsersWhoCannotDoThisTask(Iterable<User> usersWhoCannotDoThisTask) {
+        for (User user : usersWhoCannotDoThisTask){
+            this.usersWhoCannotDoThisTask.add(user);
         }
+    }
+
+    @Override
+    public String toString() {
+        return "TaskTemplate{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", minutesExpectedToComplete=" + minutesExpectedToComplete +
+                ", description='" + description + '\'' +
+                ", actualWorkTime=" + actualWorkTime +
+                '}';
     }
 }

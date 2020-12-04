@@ -35,7 +35,7 @@ public class UserController {
         User user = userStorage.findById(userId);
         Date dueDate = new Date(1607576400000L);
         TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateInput.getId());
-        Task newTask = new Task(user, taskTemplate, user, "dishes", 1, dueDate, true);
+        Task newTask = new Task(user, taskTemplate);
         taskStorage.save(newTask);
         return user;
     }

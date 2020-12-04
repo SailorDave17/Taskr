@@ -26,3 +26,6 @@ GET http://localhost:8080/api/household/tasks
 
 ###
 GET http://localhost:8080/api/tasks
+
+###
+GET http://localhost:8080/api/household/tasks

@@ -41,6 +41,7 @@ public class HouseholdController {
 
     @GetMapping("/api/household/delete_household_task/{id}")
     public Iterable<TaskTemplate> deleteTaskFromHousehold(@PathVariable Long id){
+        taskStorage.deleteByTemplateId(id);
         taskTemplateStorage.deleteById(id);
         return taskTemplateStorage.findAll();
     }
@@ -64,12 +65,19 @@ public class HouseholdController {
             existingTaskTemplate.setUsersWhoCanDoThisTask(taskTemplate.getUsersWhoCanDoThisTask());
         }
         taskTemplateStorage.save(existingTaskTemplate);
+        taskStorage.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
         return existingTaskTemplate;
     }
 
     @PostMapping("/api/household/assign_tasks")
-    public Iterable<Task> assignTasks(@RequestBody List<Task> taskList){
-        taskTemplateStorage.allocateTasks(taskList);
+    public Iterable<Task> assignTasks(@RequestBody Iterable<TaskTemplate> taskTemplateList){
+        taskTemplateStorage.allocateTasks(taskTemplateList);
+        return taskStorage.findAll();
+    }
+
+    @PostMapping("/api/household/assign_all_tasks")
+    public Iterable<Task> assignAllTasks(){
+        taskTemplateStorage.allocateAllTasks();
         return taskStorage.findAll();
     }
 }

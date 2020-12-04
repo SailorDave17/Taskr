@@ -5,11 +5,11 @@ const createHeader = function () {
     // const displaySingleUserView = document.querySelector(".display-single-user-view");
     // displaySingleUserView.addEventListener('click', () => singleuserview(user));
 
-        // fetch("http://localhost:8080/api/user/1")
-        //     .then(response => response.json())
-        //     .then(user => displaySingleUserView(user))
-        //     .catch(error => console.log(error));
-        // ); singleuserview(user));
+    //     fetch("http://localhost:8080/api/user/1")
+    //         .then(response => response.json())
+    //         .then(user => displaySingleUserView(user))
+    //         .catch(error => console.log(error));
+    //     ); singleuserview(user));
 
     // backToAllCampuses.addEventListener('click', () => {
     //     clearChildren(mainContent);

@@ -2,11 +2,13 @@ package com.taskr.core.Controllers;
 
 import com.taskr.core.Resources.User;
 import com.taskr.core.Storages.UserStorage;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@CrossOrigin
 public class UserController {
 
     private UserStorage userStorage;

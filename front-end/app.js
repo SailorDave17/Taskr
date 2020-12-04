@@ -18,9 +18,7 @@ container.prepend(createHeader());
 // container.appendChild(userNamePageElement);
 
 
-fetch("http://localhost:8080/api/user/1" , {
-    mode: 'no-cors'
-})
+fetch("http://localhost:8080/api/users/1")
 .then(response => response.json())
 .then(json => console.log(json))
 // .then(users => displaySingleUserView(users))

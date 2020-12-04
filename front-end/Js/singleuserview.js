@@ -3,7 +3,7 @@ const displaySingleUserView = function(user) {
     clearChildren(userPageHeader);
     const userNamePageElement = document.createElement("h1");
     userNamePageElement.classList.add("username");
-    userNamePageElement.innerText = $ { user.name } + `'s Task List - ` + $ { day } //whatever day is being accessed by the user. default will be Sunday
+    userNamePageElement.innerText = `${user.name}'s Task List -${day}` //whatever day is being accessed by the user. default will be Sunday
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
     userPageHeader.appendChild(userNamePageElement);
@@ -44,7 +44,7 @@ const displaySingleUserView = function(user) {
 
     const displayProgressBar = document.createElement("progress");
     displayProgressBar.classList.add("user-progress-bar");
-    displayProgressBar.setAttribute("value", $ { user.percentDone });
+    displayProgressBar.setAttribute("value", user.percentDone);
     listOfTasks.append(displayProgressBar);
 
     const displayWeeklyCalendar = document.createElement("div");
@@ -68,4 +68,8 @@ const displaySingleUserView = function(user) {
     })
 
 
+}
+
+export{
+    displaySingleUserView
 }

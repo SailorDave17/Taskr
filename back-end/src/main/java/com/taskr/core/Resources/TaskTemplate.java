@@ -4,6 +4,7 @@ import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 import javax.persistence.OneToMany;
+import java.util.HashSet;
 import java.util.Set;
 
 @Entity
@@ -12,14 +13,18 @@ public class TaskTemplate {
     @GeneratedValue
     private long id;
     private String name;
-    private Integer minutesExpectedToComplete = 0;
+    private Integer minutesExpectedToComplete;
     private String description;
-    private Integer actualWorkTime = 0;
+    private Integer actualWorkTime;
     @OneToMany
     private Set<User> usersWhoCanDoThisTask;
 
     public TaskTemplate(String name) {
         this.name = name;
+        this.description = "";
+        this.actualWorkTime = 0;
+        this.minutesExpectedToComplete = 0;
+        this.usersWhoCanDoThisTask = new HashSet<>();
     }
 
     public TaskTemplate() {
@@ -44,9 +49,6 @@ public class TaskTemplate {
 
     public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
-        if(actualWorkTime == 0 || actualWorkTime >= minutesExpectedToComplete){
-            this.actualWorkTime = minutesExpectedToComplete;
-        }
     }
 
     public void setActualWorkTime(Integer actualWorkTime) {
@@ -68,7 +70,13 @@ public class TaskTemplate {
         return usersWhoCanDoThisTask;
     }
 
-    public void setUsersWhoCanDoThisTask(Set<User> usersWhoCanDoThisTask) {
-        this.usersWhoCanDoThisTask = usersWhoCanDoThisTask;
+    public void addUserWhoCanDoThisTask(User user){
+        this.usersWhoCanDoThisTask.add(user);
+    }
+
+    public void setUsersWhoCanDoThisTask(Iterable<User> usersWhoCanDoThisTask) {
+        for (User user : usersWhoCanDoThisTask){
+            this.usersWhoCanDoThisTask.add(user);
+        }
     }
 }

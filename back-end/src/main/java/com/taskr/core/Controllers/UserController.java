@@ -8,6 +8,8 @@ import com.taskr.core.Storages.TaskTemplateStorage;
 import com.taskr.core.Storages.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Date;
+
 @RestController
 public class UserController {
 
@@ -31,6 +33,7 @@ public class UserController {
     @PatchMapping("/api/user/{userId}/assign_task")
     public User assignTaskToUser(@PathVariable Long userId, @RequestBody TaskTemplate taskTemplateInput) {
         User user = userStorage.findById(userId);
+        Date dueDate = new Date(1607576400000L);
         TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateInput.getId());
         Task newTask = new Task(user, taskTemplate);
         taskStorage.save(newTask);

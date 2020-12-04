@@ -64,7 +64,7 @@ public class Populator implements CommandLineRunner {
         userStorage.save(testUser4);
 //        taskTemplateStorage.allocateAllTasks();
         Date dueDate = new Date(1607576400000L);
-        Task testTask = new Task(testUser, testTemplate, testUser, "testTask", 1, dueDate, true );
+        Task testTask = new Task(testUser, testTemplate);
         testTask.setDueBy(dueDate);
         testTask.setDescription(testTask.getDueBy().toString());
         taskStorage.save(testTask);

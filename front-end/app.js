@@ -18,10 +18,10 @@ container.prepend(createHeader());
 // container.appendChild(userNamePageElement);
 
 
-fetch("http://localhost:8080/api/users/1")
+fetch("http://localhost:8080/api/user/1")
 .then(response => response.json())
-.then(json => console.log(json))
-// .then(users => displaySingleUserView(users))
+// .then(json => console.log(json))
+.then(users => displaySingleUserView(users))
 .catch(error => console.log (error));
 
 container.appendChild(createFooter())

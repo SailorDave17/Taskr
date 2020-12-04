@@ -2,8 +2,8 @@ const createHeader = function () {
     const header = document.createElement("header");
     header.classList.add("title")
     header.innerText = "Taskr Single User View";
-    // const displaySingleUserView = document.querySelector(".display-single-user-view");
-    // displaySingleUserView.addEventListener('click', () => singleuserview(user));
+    const displaySingleUserView = document.querySelector(".display-single-user-view");
+    displaySingleUserView.addEventListener('click', () => singleuserview(user));
 
     //     fetch("http://localhost:8080/api/user/1")
     //         .then(response => response.json())

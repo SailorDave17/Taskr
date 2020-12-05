@@ -2,8 +2,30 @@ const createHeader = function () {
     const header = document.createElement("header");
     header.classList.add("title")
     header.innerText = "Taskr Single User View";
-    const displaySingleUserView = document.querySelector(".display-single-user-view");
-    displaySingleUserView.addEventListener('click', () => singleuserview(user));
+    const mainDropDownMenu = document.createElement("div");
+    mainDropDownMenu.classList.add("dropdown");
+    const mainDropDownMenuButton = document.createElement("button");
+    mainDropDownMenuButton.classList.add("dropbtn");
+    const mainDropDownMenuImage = document.createElement("img");
+    mainDropDownMenuImage.classList.add("hamburger");
+    mainDropDownMenuImage.setAttribute("src", "/front-end/images/menu.png");
+    mainDropDownMenuImage.setAttribute("width", "100px");
+    const mainDropDownMenuContent = document.createElement("div");
+    mainDropDownMenuContent.classList.add("dropdown-content");
+    const mainDropDownMenuFirstItem = document.createElement("a");
+    mainDropDownMenuFirstItem.classList.add("menu-item");
+    mainDropDownMenuFirstItem.setAttribute("href", "/front-end/household-taskview.html");
+    mainDropDownMenuFirstItem.innerText = "All Tasks";
+    header.prepend (mainDropDownMenu);
+    mainDropDownMenu.appendChild(mainDropDownMenuButton);
+    mainDropDownMenu.appendChild(mainDropDownMenuImage);
+    mainDropDownMenu.appendChild(mainDropDownMenuContent);
+    mainDropDownMenu.appendChild(mainDropDownMenuFirstItem);
+
+
+
+    // const displaySingleUserView = document.querySelector(".display-single-user-view");
+    // displaySingleUserView.addEventListener('click', () => displaySingleUserView(user));
 
     //     fetch("http://localhost:8080/api/user/1")
     //         .then(response => response.json())

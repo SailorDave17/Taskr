@@ -13,15 +13,19 @@ import{
 const container = document.querySelector ('.container');
 
 container.prepend(displayHeader());
-const userNamePageElement = document.createElement("h1");
-userNamePageElement.classList.add("username");
-container.appendChild(userNamePageElement);
+const mainElement = document.createElement("main");
+mainElement.classList.add("main-content");
+container.appendChild(mainElement);
+// const userNamePageElement = document.createElement("h1");
+// userNamePageElement.classList.add("username");
+// container.appendChild(userNamePageElement);
 
 
 fetch("http://localhost:8080/api/user/1")
 .then(response => response.json())
 .then(json => console.log(json))
-// .then(users => displaySingleUserView(users))
+.then(users => displaySingleUserView(users))
+.then(singleUserElement => mainElement.appendChild(singleUserElement))
 .catch(error => console.log (error));
 
 container.appendChild(createFooter())

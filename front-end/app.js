@@ -1,5 +1,5 @@
 import{
-    createHeader
+    displayHeader
 } from "./js/header.js"
 
 import{
@@ -12,15 +12,15 @@ import{
 
 const container = document.querySelector ('.container');
 
-container.prepend(createHeader());
-// const userNamePageElement = document.createElement("h1");
-// userNamePageElement.classList.add("username");
-// container.appendChild(userNamePageElement);
+container.prepend(displayHeader());
+const userNamePageElement = document.createElement("h1");
+userNamePageElement.classList.add("username");
+container.appendChild(userNamePageElement);
 
 
 fetch("http://localhost:8080/api/user/1")
 .then(response => response.json())
-// .then(json => console.log(json))
+.then(json => console.log(json))
 // .then(users => displaySingleUserView(users))
 .catch(error => console.log (error));
 

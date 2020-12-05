@@ -37,6 +37,7 @@ public class Task {
         if (taskTemplate.getActualWorkTime() != 0){
             this.actualWorkTime = taskTemplate.getActualWorkTime();
         } else this.actualWorkTime = 0;
+        this.done = false;
     }
 
     public Task() {

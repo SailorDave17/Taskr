@@ -2,6 +2,7 @@ package com.taskr.core.Storages;
 
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
+import com.taskr.core.Resources.User;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -16,6 +17,7 @@ public class TaskStorage {
     }
 
     public void save(Task task) {
+
         taskRepo.save(task);
     }
 
@@ -44,9 +46,12 @@ public class TaskStorage {
     }
 
     public Task findById(Long id) {
+        User dummyOwner = new User("Dummy user");
+        TaskTemplate dummyTaskTemplate = new TaskTemplate("Task not found");
+        Task dummyTask = new Task(dummyOwner, dummyTaskTemplate);
         if (taskRepo.findById(id).isPresent()) {
             return taskRepo.findById(id).get();
-        } else return null;
+        } else return dummyTask;
     }
 
 }

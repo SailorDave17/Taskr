@@ -114,6 +114,8 @@ header {
 .user-page-header {
     height: 375px;
     margin-top: 150px;
+    display: grid;
+    justify-items: center;
 }
 
 .user-page-icon {

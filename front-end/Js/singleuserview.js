@@ -31,7 +31,24 @@ const displaySingleUserView = function(user) {
         checkBox.setAttribute("type", "checkbox");
         checkBox.classList.add("chore-done");
         // checkBox.setAttribute("id", task.title)
-        checkBox.addEventListener('click', () => numberOfTasksDone = numberOfTasksDone++);
+        checkBox.addEventListener('click', (checkboxEvent) => {
+            checkboxEvent.preventDefault();
+            clearChildren(mainElement);
+            const taskStatusJson = {
+                "done":true
+            }
+            fetch("http://localhost:8080/api/user/1" ,{
+                method: 'PATCH', 
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(taskStatusJson)
+            })
+            .then(response => response.json())
+            .then(user => displaySingleUserView(user))
+            .then(singleUserElement => mainElement.appendChild(singleUserElement))
+            .catch(error => console.log(error));
+        });
         if (task.done === true) {
             checkBox.innerHTML = `<input type="checkbox" checked class="chore-done" id="check-chore">`
             numberOfTasksDone = numberOfTasksDone++;
@@ -58,15 +75,17 @@ const displaySingleUserView = function(user) {
         taskStickyNote.appendChild(taskDueDate);
         taskStickyNote.appendChild(taskDuration); //not sure if appending them all to the same thing is the right choice//
     });
-
+    
     //calculating percent of tasks completed for progress bar
-    const percentOfTasksDone = numberOfTasksDone / user.userNumberTasksAssigned;
-
+    user.userNumberTasksAssigned = 2
+    const percentOfTasksDone = numberOfTasksDone*100 / user.userNumberTasksAssigned;
+    console.log(percentOfTasksDone);
+    console.log(user.userNumberTasksAssigned);
 
     //set up progress bar
     const displayProgressBar = document.createElement("progress");
     displayProgressBar.classList.add("user-progress-bar");
-    displayProgressBar.setAttribute("value", user.percentOfTasksDone);
+    displayProgressBar.setAttribute("value", percentOfTasksDone);
     //displayProgressBar.setAttribute("value", "70");
     displayProgressBar.setAttribute("max", "100");
     mainElement.appendChild(displayProgressBar);
@@ -191,11 +210,11 @@ const displaySingleUserView = function(user) {
     return mainElement;
 }
 
-// const clearChildren = function (element) {
-//     while (element.firstChild) {
-//         element.removeChild(element.lastChild);
-//     }
-// }
+const clearChildren = function (element) {
+    while (element.firstChild) {
+        element.removeChild(element.lastChild);
+    }
+}
 
 export {
     displaySingleUserView

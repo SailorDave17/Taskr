@@ -10,14 +10,14 @@ public class UserTest {
     @Test
     public void userHasAvailableTimeCounter() {
         User underTest = new User("Mom");
-        assertThat(underTest.getAvailableTime()).isInstanceOf(Integer.class);
+        assertThat(underTest.getTotalAvailableTime()).isInstanceOf(Integer.class);
 
     }
     @Test
     public void userCanSetAvailableTimeCounter() {
         User underTest = new User("Paw");
-        underTest.setAvailableTime(10);
-        assertThat(underTest.getAvailableTime()).isEqualTo(10);
+        underTest.setTotalAvailableTime(10);
+        assertThat(underTest.getTotalAvailableTime()).isEqualTo(10);
     }
 
 }

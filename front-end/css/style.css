@@ -1,282 +1,276 @@
 @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@300&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap");
 :root {
-  --dark-blue: #090446;
-  --light-blue: #3e6990;
-  --rose: #fe938c;
-  --cream: #ffead0;
-  --magenta: #883955;
-  --apple: #53917e;
-  --yelloworange: #ffa630;
+    --dark-blue: #090446;
+    --light-blue: #3e6990;
+    --rose: #fe938c;
+    --cream: #ffead0;
+    --magenta: #883955;
+    --apple: #53917e;
+    --yelloworange: #ffa630;
 }
 
 html {
-  background-color: var(--cream);
-  font-family: MontSerrat;
+    background-color: var(--cream);
+    font-family: MontSerrat;
 }
 
 button {
-  color: var(--cream);
-  background-color: var(--light-blue);
-  padding: 10px;
-  border-radius: 10px;
-  font-size: x-large;
+    color: var(--cream);
+    background-color: var(--light-blue);
+    padding: 10px;
+    border-radius: 10px;
+    font-size: x-large;
 }
 
 header {
-  color: var(--dark-blue);
-  font-size: 6rem;
+    color: var(--dark-blue);
+    font-size: 6rem;
 }
 
 .dropbtn {
-  background-color: var(--cream);
-  color: white;
-  padding: 16px;
-  font-size: 16px;
-  border: none;
-  margin-bottom: 70px;
+    background-color: var(--cream);
+    color: white;
+    padding: 16px;
+    font-size: 16px;
+    border: none;
+    margin-bottom: 70px;
 }
 
 .dropdown {
-  position: relative;
-  display: grid;
+    position: relative;
+    display: grid;
 }
+
 
 /* Dropdown Content (Hidden by Default) */
 
 .dropdown-content {
-  display: none;
-  position: absolute;
-  background-color: var(--cream);
-  min-width: 160px;
-  box-shadow: 0px 8px 16px 0px var(--dark-blue);
-  z-index: 1;
+    display: none;
+    position: absolute;
+    background-color: var(--cream);
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px var(--dark-blue);
+    z-index: 1;
 }
+
 
 /* Links inside the dropdown */
 
 .dropdown-content a {
-  color: var(--dark-blue);
-  padding: 12px 16px;
-  text-decoration: none;
-  font-size: 2rem;
-  display: block;
+    color: var(--dark-blue);
+    padding: 12px 16px;
+    text-decoration: none;
+    font-size: 2rem;
+    display: block;
 }
 
 .dropdown-content a:hover {
-  background-color: var(--rose);
+    background-color: var(--rose);
 }
 
 .dropdown:hover .dropdown-content {
-  display: block;
+    display: block;
 }
 
 .dropdown:hover .dropbtn {
-  background-color: var(--dark-blue);
+    background-color: var(--dark-blue);
 }
 
 .tile {
-  display: grid;
-  grid-template-rows: 3fr repeat(5, 1fr);
-  width: 400px;
-  height: 400px;
-  color: var(--cream);
-  border: 15px;
-  padding: 10px;
-  border-radius: 10px;
-  padding: 10px;
+    display: grid;
+    grid-template-rows: 3fr repeat(5, 1fr);
+    width: 400px;
+    height: 400px;
+    color: var(--cream);
+    border: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    padding: 10px;
 }
 
 #task1 {
-  background-color: var(--rose);
+    background-color: var(--rose);
 }
 
 #task2 {
-  background-color: var(--apple);
+    background-color: var(--apple);
 }
 
 #task3 {
-  background-color: var(--magenta);
+    background-color: var(--magenta);
 }
 
 #task4 {
-  background-color: var(--light-blue);
+    background-color: var(--light-blue);
 }
 
 #task5 {
-  background-color: var(--apple);
+    background-color: var(--apple);
 }
 
 #task6 {
-  background-color: var(--rose);
+    background-color: var(--rose);
 }
 
 #task7 {
-  background-color: var(--magenta);
+    background-color: var(--magenta);
 }
 
 #task8 {
-  background-color: var(--light-blue);
+    background-color: var(--light-blue);
 }
 
 #task9 {
-  background-color: var(--apple);
+    background-color: var(--apple);
 }
 
 #task10 {
-  background-color: var(--rose);
+    background-color: var(--rose);
 }
 
 #task11 {
-  background-color: var(--light-blue);
+    background-color: var(--light-blue);
 }
 
 #task12 {
-  background-color: var(--apple);
+    background-color: var(--apple);
 }
 
 .single-user-tile {
-  display: grid;
-  grid-template-rows: 3fr repeat(5, 1fr);
-  width: 400px;
-  height: 400px;
-  color: var(--cream);
-  border: 15px;
-  padding: 10px;
-  border-radius: 10px;
-  padding: 10px;
+    display: grid;
+    grid-template-rows: 3fr repeat(5, 1fr);
+    width: 400px;
+    height: 400px;
+    color: var(--cream);
+    border: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    padding: 10px;
 }
 
 .task-name {
-  background-color: var(--dark-blue);
-  font-size: 4rem;
-  text-align: center;
+    background-color: var(--dark-blue);
+    font-size: 4rem;
+    text-align: center;
 }
 
 .user-name {
-  margin-top: 50px;
+    margin-top: 50px;
 }
 
 .task-duration {
-  margin-top: 50px;
+    margin-top: 50px;
 }
 
 .single-user-name {
-  font-size: 5rem;
+    font-size: 5rem;
 }
 
 .tasks-assigned {
-  margin-top: 50px;
+    margin-top: 50px;
 }
 
 #mom {
-  background-color: var(--rose);
+    background-color: var(--rose);
 }
 
 #bro {
-  background-color: var(--apple);
+    background-color: var(--apple);
 }
 
 #sis {
-  background-color: var(--magenta);
+    background-color: var(--magenta);
 }
 
 #dad {
-  background-color: var(--light-blue);
+    background-color: var(--light-blue);
 }
 
 .day {
-  background-color: var(--rose);
-  width: 200px;
-  height: 300px;
+    background-color: var(--rose);
+    width: 200px;
+    height: 300px;
+    font-size: 2rem;
+    padding: 10px;
+    text-align: center;
+}
+
+.day p {
+    font-size: 1rem;
+    margin-top: 50px;
 }
 
 .user-task-list {
-  font-size: 2rem;
-  text-align: center;
-  margin-top: 10%;
-  font-family: "Shadows Into Light";
+    font-size: 2rem;
+    text-align: center;
+    margin-top: 10%;
+    font-family: "Shadows Into Light";
 }
 
 .chores-list {
-  border: 10px;
-  width: 400px;
-  height: 350px;
-  background-color: var(--yelloworange);
-  list-style-position: inside;
-  text-align: left;
-  padding: 40px;
+    border: 10px;
+    width: 400px;
+    height: 350px;
+    background-color: var(--yelloworange);
+    list-style-position: inside;
+    text-align: left;
+    padding: 40px;
 }
 
 li {
-  text-decoration-line: underline;
-  padding: 10px;
+    text-decoration-line: underline;
+    padding: 10px;
 }
 
 .chore-name {
-  font-size: 2.5rem;
+    font-size: 2.5rem;
 }
 
 .chore-done {
-  width: 30px;
-  height: 30px;
+    width: 30px;
+    height: 30px;
 }
 
 .user-page-header {
-  background-color: var(--rose);
-  border-radius: 20px;
+    background-color: var(--rose);
+    border-radius: 20px;
 }
 
 .piechart {
-  width: 600px;
-  height: 600px;
-  border-radius: 50%;
-  background-image: conic-gradient(
-    var(--rose) 70deg,
-    var(--light-blue) 70deg 100deg,
-    var(--magenta) 100deg 200deg,
-    var(--apple) 0
-  );
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    background-image: conic-gradient( var(--rose) 70deg, var(--light-blue) 70deg 100deg, var(--magenta) 100deg 200deg, var(--apple) 0);
 }
 
-.list-of-default-tasks p{
-  background-color: var(--yelloworange);
-  font-size: large;
-  text-align: center;
-  justify-self: center;
-  padding: 5px;
-  border-radius: 10px;
-  width: 200px;
-  height: 50px;
+.list-of-default-tasks p {
+    background-color: var(--yelloworange);
+    font-size: large;
+    text-align: center;
+    justify-self: center;
+    padding: 5px;
+    border-radius: 10px;
+    width: 200px;
+    height: 50px;
 }
 
 .list-of-default-tasks input {
-  width: 50px;
-  height: 50px;
+    width: 50px;
+    height: 50px;
 }
 
 .dropbtn-user {
-  color: var(--cream);
-  padding: 5px;
-  font-size: xx-large;
-  border-radius: 10px;
-  text-align: center;
-  width: 150px;
-  height: 50px;
+    color: var(--cream);
+    padding: 5px;
+    font-size: xx-large;
+    border-radius: 10px;
+    text-align: center;
+    width: 150px;
+    height: 50px;
 }
 
 .add-task {
-  background-color: var(--dark-blue);
-  color: var(--cream);
-  padding: 5px;
-  font-size: large;
-  border-radius: 10px;
-  text-align: center;
-  width: 150px;
-  height: 50px;
-}
-
-.task-duration-header{
     background-color: var(--dark-blue);
     color: var(--cream);
     padding: 5px;
@@ -287,37 +281,48 @@ li {
     height: 50px;
 }
 
-.due-date{
-  background-color: var(--dark-blue);
-  color: var(--cream);
-  padding: 5px;
-  font-size: large;
-  border-radius: 10px;
-  text-align: center;
-  width: 150px;
-  height: 50px;
+.task-duration-header {
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    padding: 5px;
+    font-size: large;
+    border-radius: 10px;
+    text-align: center;
+    width: 150px;
+    height: 50px;
 }
 
-.task-frequency{
-  background-color: var(--dark-blue);
-  color: var(--cream);
-  padding: 5px;
-  font-size: large;
-  border-radius: 10px;
-  text-align: center;
-  width: 150px;
-  height: 50px;
+.due-date {
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    padding: 5px;
+    font-size: large;
+    border-radius: 10px;
+    text-align: center;
+    width: 150px;
+    height: 50px;
 }
 
-.multiple-user-option{
-  background-color: var(--dark-blue);
-  color: var(--cream);
-  padding: 5px;
-  font-size: large;
-  border-radius: 10px;
-  text-align: center;
-  width: 150px;
-  height: 50px;
+.task-frequency {
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    padding: 5px;
+    font-size: large;
+    border-radius: 10px;
+    text-align: center;
+    width: 150px;
+    height: 50px;
+}
+
+.multiple-user-option {
+    background-color: var(--dark-blue);
+    color: var(--cream);
+    padding: 5px;
+    font-size: large;
+    border-radius: 10px;
+    text-align: center;
+    width: 150px;
+    height: 50px;
 }
 
 .dropdown-content-mu {
@@ -327,66 +332,63 @@ li {
     min-width: 160px;
     box-shadow: 0px 8px 16px 0px var(--dark-blue);
     z-index: 1;
-  }
-  
+}
+
 .dropdown-content-mu a {
     color: var(--dark-blue);
     padding: 12px 16px;
     text-decoration: none;
     font-size: 1rem;
     display: block;
-  }
-  
+}
+
 .dropdown-content-mu a:hover {
     background-color: var(--rose);
-  }
+}
 
-  .dropdown:hover .dropdown-content-mu {
+.dropdown:hover .dropdown-content-mu {
     display: block;
-  }
+}
 
-  .user-box{
+.user-box {
     width: 300px;
     height: 300px;
     background-color: var(--dark-blue);
     color: var(--cream);
     font-size: 2rem;
+}
 
-
-  }
-
-
-  .dropdown-content-user-customization{
+.dropdown-content-user-customization {
     display: none;
     position: absolute;
     background-color: var(--cream);
     min-width: 160px;
     box-shadow: 0px 8px 16px 0px var(--dark-blue);
     z-index: 1;
-  }
-  
+}
+
 .dropdown-content-user-customization a {
     color: var(--dark-blue);
     padding: 12px 16px;
     text-decoration: none;
     font-size: small;
     display: block;
-  }
-  
+}
+
 .dropdown-content-user-customization a:hover {
     background-color: var(--rose);
-  }
+}
 
-  .dropdown:hover .dropdown-content-user-customization {
+.dropdown:hover .dropdown-content-user-customization {
     display: block;
-  }
+}
 
-  .add-user-button{
+.add-user-button {
     width: 150px;
     height: 50px;
-  }
+}
 
-  .user-available-hours p{
+.user-available-hours p {
     background-color: var(--dark-blue);
     color: var(--cream);
     font-size: 2rem;
@@ -395,9 +397,9 @@ li {
     height: 100px;
     text-align: center;
     padding-top: 35px;
-  }
+}
 
-  .dropbtn-time {
+.dropbtn-time {
     color: var(--cream);
     padding: 5px;
     font-size: 1rem;
@@ -405,64 +407,63 @@ li {
     text-align: center;
     width: 100px;
     height: 50px;
-    
-  }
+}
 
-  .reward-condition{
+.reward-condition {
     background-color: var(--yelloworange);
     width: 150px;
     height: 50px;
     font-size: 1rem;
     padding: 5px;
-    text-align:center ;
+    text-align: center;
     border-radius: 5px;
-  }
+}
 
-  .reward-line{
+.reward-line {
     background-color: var(--yelloworange);
     width: 150px;
     height: 70px;
     font-size: 1rem;
     padding: 5px;
-    text-align:center;
+    text-align: center;
     border-radius: 5px;
-  }
+}
 
-  .reward{
+.reward {
     width: 150px;
     height: 70px;
-  }
+}
 
-  #Sunday{
+#Sunday {
     background-color: var(--dark-blue);
-  }
-  
-  #Monday{
+    color: var(--cream);
+}
+
+#Monday {
     background-color: var(--apple);
+    color: var(--cream);
+}
 
-  }
-
-  #Tuesday{
+#Tuesday {
     background-color: var(--magenta);
+    color: var(--cream);
+}
 
-  }
-
-  #Wednesday{
+#Wednesday {
     background-color: var(--light-blue);
+    color: var(--cream);
+}
 
-  }
-
-  #Thursday{
+#Thursday {
     background-color: var(--rose);
+}
 
-  }
-
-  #Friday{
+#Friday {
     background-color: var(--apple);
-    
+    color: var(--cream);
+}
 
-  }
-
-  #Saturday{
+#Saturday {
     background-color: var(--dark-blue);
-  }
+    color: var(--cream);
+}

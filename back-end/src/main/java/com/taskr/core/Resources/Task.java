@@ -1,5 +1,7 @@
 package com.taskr.core.Resources;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 import javax.persistence.*;
 import java.util.Date;
 
@@ -8,14 +10,18 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
+    @JsonBackReference
     @ManyToOne
     private User ownedBy;
     private String title;
-    private String description;
-    private long minutesExpectedToComplete;
-    private long templateId;
+    private Integer minutesExpectedToComplete;
     private Date dueBy;
-    private boolean done;
+    private Boolean done;
+    //populate all of the above instead of taskTemplate
+    private Integer actualWorkTime = 0;
+    private String description;
+    private long templateId;
+
 
     public Task(User owner, TaskTemplate taskTemplate) {
         this.title = taskTemplate.getName();
@@ -23,14 +29,28 @@ public class Task {
         this.templateId = taskTemplate.getId();
         if (taskTemplate.getDescription() != null){
             this.description = taskTemplate.getDescription();
-        }
+        } else this.description = "";
         if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
-        }
+            ownedBy.updateUser();
+        } else this.minutesExpectedToComplete = 0;
+        if (taskTemplate.getActualWorkTime() != 0){
+            this.actualWorkTime = taskTemplate.getActualWorkTime();
+        } else this.actualWorkTime = 0;
+        this.done = false;
     }
 
     public Task() {
+    }
 
+    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
+    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
+       this.ownedBy = owner;
+       this.title = title;
+       this.description = description;
+       this.minutesExpectedToComplete = minutesExpectedToComplete;
+       this.actualWorkTime = actualWorkTime;
+       this.templateId = 65535;
     }
 
     public long getId() {
@@ -45,12 +65,13 @@ public class Task {
         this.description = description;
     }
 
-    public long getMinutesExpectedToComplete() {
+    public Integer getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(long minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+        ownedBy.updateUser();
     }
 
     public Date getDueBy() {
@@ -79,12 +100,23 @@ public class Task {
 
     public void setOwnedBy(User newOwner) {
         this.ownedBy = newOwner;
+        this.ownedBy.updateUser();
+
     }
-    public boolean isDone() {
+    public Boolean isDone() {
         return done;
     }
 
-    public void setDone(boolean trueOrFalse) {
+    public void setDone(Boolean trueOrFalse) {
         this.done = trueOrFalse;
+        this.ownedBy.updateUser();
+    }
+
+    public Integer getActualWorkTime() {
+        return actualWorkTime;
+    }
+
+    public void setActualWorkTime(Integer actualWorkTime) {
+        this.actualWorkTime = actualWorkTime;
     }
 }

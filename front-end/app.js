@@ -10,15 +10,22 @@ import {
     createFooter
 } from "./js/footer.js"
 
+import {
+    displayAllUsersView
+} from "./js/allusersview.js"
+
 const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
-const mainElement = document.createElement("main");
-mainElement.classList.add("main-content");
-container.appendChild(mainElement);
-// const userNamePageElement = document.createElement("h1");
-// userNamePageElement.classList.add("username");
-// container.appendChild(userNamePageElement);
+// This is the path to the single user view.
+// const mainElement = document.createElement("main");
+// mainElement.classList.add("main-content");
+// container.appendChild(mainElement);
+
+//This is the path to the all user view.
+const allUsersMainElement = document.createElement("main");
+allUsersMainElement.classList.add("all-users-main");
+container.appendChild(allUsersMainElement);
 
 
 fetch("http://localhost:8080/api/user/1")

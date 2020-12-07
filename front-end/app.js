@@ -1,16 +1,16 @@
-import{
+import {
     displayHeader
 } from "./js/header.js"
 
-import{
-    displaySingleUserView 
+import {
+    displaySingleUserView
 } from "./js/singleuserview.js"
 
-import{
+import {
     createFooter
 } from "./js/footer.js"
 
-const container = document.querySelector ('.container');
+const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
 const mainElement = document.createElement("main");
@@ -22,10 +22,10 @@ container.appendChild(mainElement);
 
 
 fetch("http://localhost:8080/api/user/1")
-.then(response => response.json())
-.then(json => console.log(json))
-.then(users => displaySingleUserView(users))
-.then(singleUserElement => mainElement.appendChild(singleUserElement))
-.catch(error => console.log (error));
+    .then(response => response.json())
+    //.then(json => console.log(json))
+    .then(user => displaySingleUserView(user))
+    .then(singleUserElement => mainElement.appendChild(singleUserElement))
+    .catch(error => console.log(error));
 
 container.appendChild(createFooter())

@@ -24,10 +24,11 @@ public class Populator implements CommandLineRunner {
         this.taskTemplateStorage = taskTemplateStorage;
         this.taskStorage = taskStorage;
     }
+//    this is just to make sure I can commit
 
     @Override
     public void run(String... args) throws Exception {
-        User testUser = new User("sample user");
+        User testUser = new User("Mom");
         userStorage.save(testUser);
         TaskTemplate testTemplate = new TaskTemplate("Final Project Demo", "", 300);
         taskTemplateStorage.save(testTemplate);
@@ -98,120 +99,12 @@ public class Populator implements CommandLineRunner {
         taskTemplateStorage.save(newTasktemplate21);
         taskTemplateStorage.save(newTasktemplate22);
 
-//        HashSet<TaskTemplate> taskTemplateIterable = new HashSet<>();
-//        taskTemplateIterable.add(newTasktemplate01);
-//        taskTemplateStorage.allocateSingleTask(newTasktemplate01);
-//        taskTemplateStorage.allocateTasks(taskTemplateIterable);
-        taskTemplateStorage.allocateAllTasks();
-//
-//
-//
-//
-//        Task newTask1 = new Task(testUser1, newTasktemplate01);
-//        Task newTask2 = new Task(testUser1, testTemplate2);
-//        Task newTask3 = new Task(testUser2, newTasktemplate22);
-//        Task newTask4 = new Task(testUser3, testTemplate3);
-//        Task newTask5 = new Task(testUser4, testTemplate1);
-//        Task newTask6 = new Task(testUser1, testTemplate4);
-//        Task newTask7 = new Task(testUser2, testTemplate1);
-//        Task newTask8 = new Task(testUser3, newTasktemplate20);
-//        Task newTask9 = new Task(testUser3, testTemplate1);
-//        Task newTask10 = new Task(testUser4, testTemplate1);
-//        Task newTask11 = new Task(testUser1, testTemplate1);
-//        Task newTask12 = new Task(testUser2, testTemplate1);
-//        Task newTask13 = new Task(testUser3, testTemplate1);
-//        Task newTask14 = new Task(testUser4, testTemplate1);
-//        Task newTask15 = new Task(testUser3, testTemplate1);
-//        Task aNewTask0 = new Task(testUser1, newTasktemplate01);
-//        Task aNewTask1 = new Task(testUser1, newTasktemplate02);
-//        Task aNewTask2 = new Task(testUser1, newTasktemplate03);
-//        Task aNewTask3 = new Task(testUser1, newTasktemplate04);
-//        Task aNewTask4 = new Task(testUser1, newTasktemplate05);
-//        Task aNewTask5 = new Task(testUser1, newTasktemplate06);
-//        Task aNewTask6 = new Task(testUser1, newTasktemplate07);
-//        Task aNewTask7 = new Task(testUser1, newTasktemplate08);
-//        Task aNewTask8 = new Task(testUser1, newTasktemplate09);
-//        Task aNewTask9 = new Task(testUser1, newTasktemplate10);
-//        Task aNewTask10 = new Task(testUser2, newTasktemplate01);
-//        Task aNewTask11 = new Task(testUser2, newTasktemplate02);
-//        Task aNewTask12 = new Task(testUser2, newTasktemplate03);
-//        Task aNewTask13 = new Task(testUser2, newTasktemplate04);
-//        Task aNewTask14 = new Task(testUser2, newTasktemplate05);
-//        Task aNewTask15 = new Task(testUser2, newTasktemplate06);
-//        Task aNewTask16 = new Task(testUser2, newTasktemplate07);
-//        Task aNewTask17 = new Task(testUser2, newTasktemplate08);
-//        Task aNewTask18 = new Task(testUser2, newTasktemplate09);
-//        Task aNewTask19 = new Task(testUser2, newTasktemplate10);
-//        Task aNewTask20 = new Task(testUser3 ,newTasktemplate10);
-//        Task aNewTask21 = new Task(testUser3 ,newTasktemplate11);
-//        Task aNewTask22 = new Task(testUser3 ,newTasktemplate12);
-//        Task aNewTask23 = new Task(testUser3 ,newTasktemplate13);
-//        Task aNewTask24 = new Task(testUser3 ,newTasktemplate14);
-//        Task aNewTask25 = new Task(testUser3 ,newTasktemplate15);
-//        Task aNewTask26 = new Task(testUser3 ,newTasktemplate16);
-//        Task aNewTask27 = new Task(testUser3 ,newTasktemplate17);
-//        Task aNewTask28 = new Task(testUser3 ,newTasktemplate18);
-//        Task aNewTask29 = new Task(testUser3 ,newTasktemplate19);
-//        Task aNewTask30 = new Task(testUser4, newTasktemplate10);
-//        Task aNewTask31 = new Task(testUser4, newTasktemplate11);
-//        Task aNewTask32 = new Task(testUser4, newTasktemplate12);
-//        Task aNewTask33 = new Task(testUser4, newTasktemplate13);
-//        Task aNewTask34 = new Task(testUser4, newTasktemplate14);
-//        Task aNewTask35 = new Task(testUser4, newTasktemplate15);
-//        Task aNewTask36 = new Task(testUser4, newTasktemplate16);
-//        Task aNewTask37 = new Task(testUser4, newTasktemplate17);
-//        Task aNewTask38 = new Task(testUser4, newTasktemplate18);
-//        Task aNewTask39 = new Task(testUser4, newTasktemplate19);
-//        Task aNewTask40 = new Task(testUser, newTasktemplate21);
-//
-//        taskStorage.save(aNewTask0);
-//        taskStorage.save(aNewTask1);
-//        taskStorage.save(aNewTask2);
-//        taskStorage.save(aNewTask3);
-//        taskStorage.save(aNewTask4);
-//        taskStorage.save(aNewTask5);
-//        taskStorage.save(aNewTask6);
-//        taskStorage.save(aNewTask7);
-//        taskStorage.save(aNewTask8);
-//        taskStorage.save(aNewTask9);
-//        taskStorage.save(aNewTask10);
-//        taskStorage.save(aNewTask11);
-//        taskStorage.save(aNewTask12);
-//        taskStorage.save(aNewTask13);
-//        taskStorage.save(aNewTask14);
-//        taskStorage.save(aNewTask15);
-//        taskStorage.save(aNewTask16);
-//        taskStorage.save(aNewTask17);
-//        taskStorage.save(aNewTask18);
-//        taskStorage.save(aNewTask19);
-//        taskStorage.save(aNewTask20);
-//        taskStorage.save(aNewTask21);
-//        taskStorage.save(aNewTask22);
-//        taskStorage.save(aNewTask23);
-//        taskStorage.save(aNewTask24);
-//        taskStorage.save(aNewTask25);
-//        taskStorage.save(aNewTask26);
-//        taskStorage.save(aNewTask27);
-//        taskStorage.save(aNewTask28);
-//        taskStorage.save(aNewTask29);
-//        taskStorage.save(aNewTask30);
-//        taskStorage.save(aNewTask31);
-//        taskStorage.save(aNewTask32);
-//        taskStorage.save(aNewTask33);
-//        taskStorage.save(aNewTask34);
-//        taskStorage.save(aNewTask35);
-//        taskStorage.save(aNewTask36);
-//        taskStorage.save(aNewTask37);
-//        taskStorage.save(aNewTask38);
-//        taskStorage.save(aNewTask39);
-//        taskStorage.save(aNewTask40);
 
-//        userStorage.save(testUser);
-//        userStorage.save(testUser1);
-//        userStorage.save(testUser2);
-//        userStorage.save(testUser3);
-//        userStorage.save(testUser4);
-
+        userStorage.save(testUser);
+        userStorage.save(testUser1);
+        userStorage.save(testUser2);
+        userStorage.save(testUser3);
+        userStorage.save(testUser4);
 
     }
 

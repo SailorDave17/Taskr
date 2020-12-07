@@ -1,11 +1,6 @@
 package com.taskr.core.Resources;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.OneToMany;
-import java.util.Collection;
-import java.util.HashMap;
+import javax.persistence.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -15,14 +10,18 @@ public class TaskTemplate {
     @GeneratedValue
     private long id;
     private String name;
-    private int minutesExpectedToComplete = 0;
+    private Integer minutesExpectedToComplete;
     private String description;
-    private int actualWorkTime = 0;
-    @OneToMany
-    private Set<User> usersWhoCanDoThisTask;
+    private Integer actualWorkTime;
+    @ManyToMany
+    private Set<User> usersWhoCannotDoThisTask;
 
     public TaskTemplate(String name) {
         this.name = name;
+        this.description = "";
+        this.actualWorkTime = 0;
+        this.minutesExpectedToComplete = 0;
+        this.usersWhoCannotDoThisTask = new HashSet<>();
     }
 
     public TaskTemplate() {
@@ -41,19 +40,19 @@ public class TaskTemplate {
         return id;
     }
 
-    public int getMinutesExpectedToComplete() {
+    public Integer getMinutesExpectedToComplete() {
         return minutesExpectedToComplete;
     }
 
-    public void setMinutesExpectedToComplete(int minutesExpectedToComplete) {
+    public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
-    public void setActualWorkTime(int actualWorkTime) {
+    public void setActualWorkTime(Integer actualWorkTime) {
         this.actualWorkTime = actualWorkTime;
     }
 
-    public int getActualWorkTime() {
+    public Integer getActualWorkTime() {
         return actualWorkTime;
     }
 
@@ -64,11 +63,28 @@ public class TaskTemplate {
     public void setDescription(String description) {
         this.description = description;
     }
-    public Set<User> getUsersWhoCanDoThisTask(){
-        return usersWhoCanDoThisTask;
+    public Set<User> getUsersWhoCannotDoThisTask(){
+        return usersWhoCannotDoThisTask;
     }
 
-    public void setUsersWhoCanDoThisTask(Set<User> usersWhoCanDoThisTask) {
-        this.usersWhoCanDoThisTask = usersWhoCanDoThisTask;
+    public void addUserWhoCannotDoThisTask(User user){
+        this.usersWhoCannotDoThisTask.add(user);
+    }
+
+    public void setUsersWhoCannotDoThisTask(Iterable<User> usersWhoCannotDoThisTask) {
+        for (User user : usersWhoCannotDoThisTask){
+            this.usersWhoCannotDoThisTask.add(user);
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "TaskTemplate{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", minutesExpectedToComplete=" + minutesExpectedToComplete +
+                ", description='" + description + '\'' +
+                ", actualWorkTime=" + actualWorkTime +
+                '}';
     }
 }

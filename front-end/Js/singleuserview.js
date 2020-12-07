@@ -35,9 +35,19 @@ const displaySingleUserView = function(user) {
             checkboxEvent.preventDefault();
             clearChildren(mainElement);
             const taskStatusJson = {
-                "done":true
+                "id": task.id,
+                "title": task.title,
+                "minutesExpectedToComplete": task.minutesExpectedToComplete,
+                "dueBy": task.dueBy,
+                "done": true,
+                "actualWorkTime": task.actualWorkTime,
+                "description": task.description,
+                "templateId": task.templateId  
             }
-            fetch("http://localhost:8080/api/user/1" ,{
+
+            // console.log(task.done)
+            console.log(taskStatusJson)
+            fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
                 method: 'PATCH', 
                 headers: {
                     'Content-Type': 'application/json'

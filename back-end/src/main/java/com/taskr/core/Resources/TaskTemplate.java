@@ -1,7 +1,9 @@
 package com.taskr.core.Resources;
 
 import javax.persistence.*;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 @Entity
@@ -13,8 +15,24 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
-    @ManyToMany
-    private Set<User> usersWhoCannotDoThisTask;
+    @ManyToMany(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
+    private Collection<User> usersWhoCannotDoThisTask = new LinkedHashSet<>();
+
+    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete) {
+        this.name = name;
+        this.description = description;
+        this.actualWorkTime = actualWorkTime;
+        this.minutesExpectedToComplete = minutesExpectedToComplete;
+        this.usersWhoCannotDoThisTask = new HashSet<>();
+    }
+
+    public TaskTemplate(String name, String description, Integer actualWorkTime) {
+        this.name = name;
+        this.description = description;
+        this.actualWorkTime = actualWorkTime;
+        this.minutesExpectedToComplete = actualWorkTime;
+        this.usersWhoCannotDoThisTask = new HashSet<>();
+    }
 
     public TaskTemplate(String name, int minutesExpectedToComplete, int actualWorkTime) {
         this.name = name;
@@ -29,7 +47,7 @@ public class TaskTemplate {
     }
 
     public String getName() {
-        return  name;
+        return name;
     }
 
     public void setName(String name) {
@@ -63,16 +81,17 @@ public class TaskTemplate {
     public void setDescription(String description) {
         this.description = description;
     }
-    public Set<User> getUsersWhoCannotDoThisTask(){
+
+    public Collection<User> getUsersWhoCannotDoThisTask() {
         return usersWhoCannotDoThisTask;
     }
 
-    public void addUserWhoCannotDoThisTask(User user){
+    public void addUserWhoCannotDoThisTask(User user) {
         this.usersWhoCannotDoThisTask.add(user);
     }
 
     public void setUsersWhoCannotDoThisTask(Iterable<User> usersWhoCannotDoThisTask) {
-        for (User user : usersWhoCannotDoThisTask){
+        for (User user : usersWhoCannotDoThisTask) {
             this.usersWhoCannotDoThisTask.add(user);
         }
     }

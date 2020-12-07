@@ -1,5 +1,6 @@
 package com.taskr.core.Storages;
 
+import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
 import org.springframework.stereotype.Service;
@@ -13,11 +14,13 @@ public class TaskTemplateStorage {
 
     private TaskTemplateRepository taskTemplateRepo;
     private UserRepository userRepo;
+    private TaskRepository taskRepo;
 
 
-    public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo, UserRepository userRepo) {
+    public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo, UserRepository userRepo, TaskRepository taskRepo) {
         this.taskTemplateRepo = taskTemplateRepo;
         this.userRepo = userRepo;
+        this.taskRepo = taskRepo;
     }
 
     public void save(TaskTemplate taskTemplate) {
@@ -39,33 +42,41 @@ public class TaskTemplateStorage {
         } else return dummyTaskTemplate ;
     }
 
+    public void allocateSingleTask(TaskTemplate taskTemplate){
+        Set<User> candidateUsers = new HashSet<>();
+        UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
+        TaskStorage taskStorage = new TaskStorage(taskRepo, taskTemplateRepo, userRepo);
+        for (User user : userStorage.findAll()){
+            if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user)){
+                candidateUsers.add(user);
+            }
+        }
+        User assignedUser = candidateUsers.iterator().next();
+        for(User user : candidateUsers) {
+            if(user.getRemainingAvailableTime()>assignedUser.getRemainingAvailableTime()){
+                assignedUser = user;
+            }else if (user.getRemainingAvailableTime() == assignedUser.getRemainingAvailableTime()){
+                if (Math.random()*2>=1){
+                    assignedUser = user;
+                }
+
+            }
+        }
+        Task newTask = new Task(assignedUser, taskTemplate);
+        taskStorage.save(newTask);
+        userStorage.updateUser(assignedUser);
+        userStorage.save(assignedUser);
+    }
+
     public void allocateAllTasks(){
-        allocateTasks((Set<TaskTemplate>) taskTemplateRepo.findAll());
+        for (TaskTemplate taskTemplate : taskTemplateRepo.findAll()){
+            allocateSingleTask(taskTemplate);
+        }
     }
 
     public void allocateTasks(Set<TaskTemplate> taskTemplateList) {
-        UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
-        userStorage.updateAllUsers();
         for (TaskTemplate taskTemplate : taskTemplateList){
-            Set<User> candidateUsers = new HashSet<>();
-            for (User user : userStorage.findAll()){
-                if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user)){
-                    candidateUsers.add(user);
-                }
-            }
-            User assignedUser = candidateUsers.iterator().next();
-            for(User user : candidateUsers) {
-                if(user.getRemainingAvailableTime()>assignedUser.getRemainingAvailableTime()){
-                    assignedUser = user;
-                }else if (user.getRemainingAvailableTime() == assignedUser.getRemainingAvailableTime()){
-                    if (Math.random()*2>=1){
-                        assignedUser = user;
-                    }
-
-                }
-                assignedUser.updateUser();
-                userStorage.save(assignedUser);
-            }
+            allocateSingleTask(taskTemplate);
         }
     }
 }

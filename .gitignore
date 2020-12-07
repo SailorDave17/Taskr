@@ -1,4 +1,4 @@
-
+*.mv.db
 
 # Created by https://www.toptal.com/developers/gitignore/api/intellij,gradle,vscode
 # Edit at https://www.toptal.com/developers/gitignore?templates=intellij,gradle,vscode

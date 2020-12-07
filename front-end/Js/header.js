@@ -1,26 +1,21 @@
-const createHeader = function () {
+const displayHeader = function () {
+    
     const header = document.createElement("header");
-    header.classList.add("title")
-    header.innerText = "Taskr Single User View";
-    const displaySingleUserView= document.querySelector(".display-single-user-view");     
-    displaySingleUserView.addEventListener('click', ()=> singleuserview(user));
-    
-
-    const displayAllUserView= document.querySelector(".display-all-users-view");     
-    displayAllUserView.addEventListener('click', ()=> allusersview(user));
-
-
-    const displayAllTasksView= document.querySelector(".display-all-tasks-view");     
-    displayAllTasksView.addEventListener('click', ()=> alltasksview(task));
-
-
-    const displayCustomizeTasksView= document.querySelector(".display-customize-tasks-view");     
-    displayCustomizeTasksView.addEventListener('click', ()=> customizetasksview(task));
+    header.classList.add("title");
+    header.innerHTML = `
+    <div class="dropdown">
+        <button class="dropbtn"><img class = "hamburger" src = "/front-end/images/menu.png" width = 100px></button>
+        <div id="myDropdown" class="dropdown-content">
+            <a href="/front-end/household-userview.html" class="menu-item">All Users</a>
+            <a href="/front-end/household-taskview.html" class="menu-item">All Tasks</a>
+            <a href="/front-end/user-view.html" class="menu-item">My Tasks</a>
+            <a href="/front-end/customization-page.html" class="menu-item">Customize</a>
+        </div>
+    </div>
+    Taskr User View`
 
 
-    const displayCustomizeUsersView= document.querySelector(".display-customize-users-view");     
-    displayCustomizeUsersView.addEventListener('click', ()=> customizeusersview(user));
-    
+
     return header;
 
 }
@@ -28,6 +23,6 @@ const createHeader = function () {
 
 
 export {
-    createHeader
+    displayHeader
 }
 

@@ -28,7 +28,7 @@ public class Populator implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        User testUser = new User("sample user");
+        User testUser = new User("Mom");
         userStorage.save(testUser);
         TaskTemplate testTemplate = new TaskTemplate("Final Project Demo");
         testTemplate.setMinutesExpectedToComplete(300);
@@ -127,12 +127,12 @@ public class Populator implements CommandLineRunner {
 
 
         Task newTask1 = new Task(testUser1, newTasktemplate01);
-        Task newTask2 = new Task(testUser1, testTemplate2);
+        Task newTask2 = new Task(testUser, testTemplate2);
         Task newTask3 = new Task(testUser2, newTasktemplate22);
-        Task newTask4 = new Task(testUser3, testTemplate3);
-        Task newTask5 = new Task(testUser4, testTemplate1);
-        Task newTask6 = new Task(testUser1, testTemplate4);
-        Task newTask7 = new Task(testUser2, testTemplate1);
+        Task newTask4 = new Task(testUser, testTemplate3);
+        Task newTask5 = new Task(testUser, testTemplate1);
+        Task newTask6 = new Task(testUser, testTemplate4);
+        Task newTask7 = new Task(testUser, testTemplate1);
         Task newTask8 = new Task(testUser3, newTasktemplate20);
         Task newTask9 = new Task(testUser3, testTemplate1);
         Task newTask10 = new Task(testUser4, testTemplate1);

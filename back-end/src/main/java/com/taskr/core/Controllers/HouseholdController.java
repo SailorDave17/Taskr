@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Set;
 
 @RestController
+@CrossOrigin
 public class HouseholdController {
 
     private UserStorage userStorage;

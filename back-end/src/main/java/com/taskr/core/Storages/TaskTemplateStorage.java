@@ -33,7 +33,7 @@ public class TaskTemplateStorage {
     }
 
     public TaskTemplate findById(Long id) {
-        TaskTemplate dummyTaskTemplate = new TaskTemplate("TaskTemplate not found");
+        TaskTemplate dummyTaskTemplate = new TaskTemplate("TaskTemplate not found", 300, 300);
         if (taskTemplateRepo.findById(id).isPresent()) {
             return taskTemplateRepo.findById(id).get();
         } else return dummyTaskTemplate ;

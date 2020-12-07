@@ -16,11 +16,11 @@ public class TaskTemplate {
     @ManyToMany
     private Set<User> usersWhoCannotDoThisTask;
 
-    public TaskTemplate(String name) {
+    public TaskTemplate(String name, int minutesExpectedToComplete, int actualWorkTime) {
         this.name = name;
         this.description = "";
-        this.actualWorkTime = 0;
-        this.minutesExpectedToComplete = 0;
+        this.actualWorkTime = actualWorkTime;
+        this.minutesExpectedToComplete = minutesExpectedToComplete;
         this.usersWhoCannotDoThisTask = new HashSet<>();
     }
 

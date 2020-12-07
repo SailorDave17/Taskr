@@ -47,7 +47,7 @@ public class TaskStorage {
 
     public Task findById(Long id) {
         User dummyOwner = new User("Dummy user");
-        TaskTemplate dummyTaskTemplate = new TaskTemplate("Task not found");
+        TaskTemplate dummyTaskTemplate = new TaskTemplate("Task not found", 300, 300);
         Task dummyTask = new Task(dummyOwner, dummyTaskTemplate);
         if (taskRepo.findById(id).isPresent()) {
             return taskRepo.findById(id).get();

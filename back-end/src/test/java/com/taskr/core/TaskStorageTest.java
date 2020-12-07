@@ -14,7 +14,7 @@ public class TaskStorageTest {
     @Test
     public void shouldHaveAnAddTaskMethod(){
         TaskStorage taskStorage = mock(TaskStorage.class);
-        TaskTemplate taskTemplate = new TaskTemplate("test task template");
+        TaskTemplate taskTemplate = new TaskTemplate("test task template", 300, 300);
         User testUser = new User("Aloo");
         Task testTask = new Task(testUser , taskTemplate);
         taskStorage.save(testTask);
@@ -24,7 +24,7 @@ public class TaskStorageTest {
     @Test
     public void shouldHaveADeleteTaskMethod(){
         TaskStorage taskStorage = mock(TaskStorage.class);
-        TaskTemplate taskTemplate = new TaskTemplate("test task template");
+        TaskTemplate taskTemplate = new TaskTemplate("test task template", 300, 300);
         User testUser = new User("Aloo");
         Task testTask = new Task(testUser , taskTemplate);
         taskStorage.save(testTask);

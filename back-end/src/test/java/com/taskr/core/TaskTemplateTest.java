@@ -9,26 +9,26 @@ public class TaskTemplateTest {
 
     @Test
     public void taskTemplateHasExpectedTimeToComplete() {
-        TaskTemplate underTest = new TaskTemplate("Wash the dishes!");
+        TaskTemplate underTest = new TaskTemplate("Wash the dishes!", 300, 300);
         assertThat(underTest.getMinutesExpectedToComplete()).isInstanceOf(Integer.class);
 
     }
     @Test
     public void taskTemplateCanSetExpectedTimeToComplete() {
-        TaskTemplate underTest = new TaskTemplate("Clean your room");
+        TaskTemplate underTest = new TaskTemplate("Clean your room", 300, 300);
         underTest.setMinutesExpectedToComplete(10);
         assertThat(underTest.getMinutesExpectedToComplete()).isEqualTo(10);
     }
 
     @Test
     public void taskTemplateHasActualWorkTime(){
-        TaskTemplate underTest = new TaskTemplate("Wash the dishes!");
+        TaskTemplate underTest = new TaskTemplate("Wash the dishes!", 300, 300);
         assertThat(underTest.getActualWorkTime()).isInstanceOf(Integer.class);
     }
 
     @Test
     public void taskTemplateCanHaveDifferentExpectedVersusActualWorkTime(){
-        TaskTemplate underTest = new TaskTemplate("Do the laundry");
+        TaskTemplate underTest = new TaskTemplate("Do the laundry", 300, 300);
         underTest.setMinutesExpectedToComplete(150);
         underTest.setActualWorkTime(20);
         assertThat(underTest.getMinutesExpectedToComplete()).isEqualTo(150);

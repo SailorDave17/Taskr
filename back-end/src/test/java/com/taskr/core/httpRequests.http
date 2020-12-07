@@ -1,14 +1,14 @@
 GET localhost:8080/api/household
 
 ### Get a user with the given id
-GET localhost:8080/api/user/2
+GET localhost:8080/api/user/1
 Accept: application/json
 
 ### Get all users
 GET http://localhost:8080/api/users
 
 ###
-GET http://localhost:8080/api/user/2
+GET http://localhost:8080/api/user/1
 
 ###
 #POST http://localhost:8080/api/user/new HTTP/1.1

@@ -1,10 +1,7 @@
 package com.taskr.core.Resources;
 
 import javax.persistence.*;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.*;
 
 @Entity
 public class TaskTemplate {
@@ -15,23 +12,23 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
-    @ManyToMany(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
-    private Collection<User> usersWhoCannotDoThisTask = new LinkedHashSet<>();
+    @ManyToMany//(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
+    private Collection<User> usersWhoCannotDoThisTask;
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = minutesExpectedToComplete;
-        this.usersWhoCannotDoThisTask = new HashSet<>();
+        this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = actualWorkTime;
-        this.usersWhoCannotDoThisTask = new HashSet<>();
+        this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
     public TaskTemplate(String name, int minutesExpectedToComplete, int actualWorkTime) {
@@ -87,6 +84,9 @@ public class TaskTemplate {
     }
 
     public void addUserWhoCannotDoThisTask(User user) {
+        if(usersWhoCannotDoThisTask == null){
+            usersWhoCannotDoThisTask = new HashSet<>();
+        }
         this.usersWhoCannotDoThisTask.add(user);
     }
 

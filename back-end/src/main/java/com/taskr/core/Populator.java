@@ -28,26 +28,22 @@ public class Populator implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        User testUser = new User("Mom");
+        User testUser = new User("Test User", 600, "grey", "test.ico");
         userStorage.save(testUser);
 
         TaskTemplate testTemplate = new TaskTemplate("Final Project Demo", "", 300);
         taskTemplateStorage.save(testTemplate);
 
-        User testUser1 = new User("Mom");
-        User testUser2 = new User("Dad");
-        User testUser3 = new User("Bro");
-        User testUser4 = new User("Sis");
-        testUser.setTotalAvailableTime(600);
-        testUser1.setTotalAvailableTime(300);
-        testUser2.setTotalAvailableTime(600);
-        testUser3.setTotalAvailableTime(200);
-        testUser4.setTotalAvailableTime(200);
+        User mom = new User("Mom", 300, "pink", "mom.ico");
+        User dad = new User("Dad", 600, "green", "dad.ico");
+        User bro = new User("Bro", 200, "blue", "bro.ico");
+        User sis = new User("Sis", 200, "purple", "sis.ico");
+
         userStorage.save(testUser);
-        userStorage.save(testUser1);
-        userStorage.save(testUser2);
-        userStorage.save(testUser3);
-        userStorage.save(testUser4);
+        userStorage.save(mom);
+        userStorage.save(dad);
+        userStorage.save(bro);
+        userStorage.save(sis);
 
 //        Date dueDate = new Date(1607576400000L);
 //        Task testTask = new Task(testUser, testTemplate);
@@ -56,7 +52,7 @@ public class Populator implements CommandLineRunner {
 //        taskStorage.save(testTask);
 //        userStorage.updateUser(testUser);
 //        userStorage.save(testUser);
-        TaskTemplate newTasktemplate01 = new TaskTemplate("Clean Common Area", "Clean all common areas", 30, 30);
+        TaskTemplate cleanCommonArea = new TaskTemplate("Clean Common Area", "Clean all common areas", 30, 30);
         TaskTemplate newTasktemplate02 = new TaskTemplate("Clean Garage", "Sweep and organize the Garage", 45, 45);
         TaskTemplate newTasktemplate03 = new TaskTemplate("Clean Bathrooms", "Wipe down sinks, scrub toilets, sweep and mop floors, and empty bathroom trash", 30, 30);
         TaskTemplate newTasktemplate04 = new TaskTemplate("Take Out Trash", "Take all trash to rolling bin outside and take the rolling bin to the road if today is a trash day", 15);
@@ -77,9 +73,9 @@ public class Populator implements CommandLineRunner {
         TaskTemplate newTasktemplate19 = new TaskTemplate("Dust Living Room", "Dust picture frames, end tables, coffee table, and door sills in the living room", 20);
         TaskTemplate newTasktemplate20 = new TaskTemplate("Dust Family Room", "Dust bookshelves, mantel over fireplace, stereo, and door sills in family room", 20);
         TaskTemplate newTasktemplate21 = new TaskTemplate("Vacuum Family Room", "Vacuum floors, crevases, and under furniture in the family room", 20);
-        TaskTemplate newTasktemplate22 = new TaskTemplate("Dust Ceiling Fans", "Wipe blades of ceiling fans down and ensure dust is blown out of fan motor housing", 30);
+        TaskTemplate newTasktemplate22 = new TaskTemplate("Dust Ceiling Fans", "Wipe blades of ceiling fans down and ensure dust is blown out of fan motor housing", 30, bro, sis);
 
-        taskTemplateStorage.save(newTasktemplate01);
+        taskTemplateStorage.save(cleanCommonArea);
         taskTemplateStorage.save(newTasktemplate02);
         taskTemplateStorage.save(newTasktemplate03);
         taskTemplateStorage.save(newTasktemplate04);

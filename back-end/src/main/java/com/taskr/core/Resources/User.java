@@ -17,7 +17,7 @@ public class User {
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
 //    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy", cascade = CascadeType.ALL)
     @JsonManagedReference
-    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy")
+    @OneToMany(mappedBy = "ownedBy")
     private Collection<Task> taskList = new LinkedHashSet<>();
 
     @Id
@@ -31,8 +31,8 @@ public class User {
     private Integer numberTasksAssigned;
     private Integer numberTasksComplete;
     @JsonIgnore
-    @ManyToMany
-    private Collection<TaskTemplate> tasksUserCannotDo = new LinkedHashSet<>();
+    @ManyToMany(mappedBy = "usersWhoCannotDoThisTask")
+    private Collection<TaskTemplate> tasksUserCannotDo;// = new LinkedHashSet<>();
 
     protected User() {
     }
@@ -162,4 +162,20 @@ public class User {
         return Objects.hash(name, id);
     }
 
+    @Override
+    public String toString() {
+        return "User{" +
+                "name='" + name + '\'' +
+                ", taskList=" + taskList +
+                ", id=" + id +
+                ", totalAvailableTime=" + totalAvailableTime +
+                ", remainingAvailableTime=" + remainingAvailableTime +
+                ", committedTime=" + committedTime +
+                ", userColor='" + userColor + '\'' +
+                ", userIcon='" + userIcon + '\'' +
+                ", numberTasksAssigned=" + numberTasksAssigned +
+                ", numberTasksComplete=" + numberTasksComplete +
+                ", tasksUserCannotDo=" + tasksUserCannotDo +
+                "}\n";
+    }
 }

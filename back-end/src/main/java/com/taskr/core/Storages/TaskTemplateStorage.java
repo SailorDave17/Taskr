@@ -46,7 +46,9 @@ public class TaskTemplateStorage {
         Set<User> candidateUsers = new HashSet<>();
         UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
         TaskStorage taskStorage = new TaskStorage(taskRepo, taskTemplateRepo, userRepo);
-        for (User user : userStorage.findAll()){
+        Iterable<User> allUsers = userStorage.findAll();
+        System.out.println(allUsers);
+        for (User user : allUsers){
             if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user)){
                 candidateUsers.add(user);
             }

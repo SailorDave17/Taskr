@@ -2,13 +2,12 @@ package com.taskr.core.Resources;
 
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 import javax.persistence.*;
 
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 
 @Entity
@@ -16,20 +15,24 @@ public class User {
     private String name;
     // Reminder to self that the error "OneToMany attribute type should not be(...) was caused
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
+//    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy", cascade = CascadeType.ALL)
     @JsonManagedReference
-    @OneToMany(mappedBy = "ownedBy")
-    private Set<Task> taskList;
+    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy")
+    private Collection<Task> taskList = new LinkedHashSet<>();
 
     @Id
     @GeneratedValue
     private Long id;
     private Integer totalAvailableTime;
     private Integer remainingAvailableTime;
-    private Integer userCommittedTime;
+    private Integer committedTime;
     private String userColor;
     private String userIcon;
-    private Integer userNumberTasksAssigned;
-    private Integer userNumberTasksComplete;
+    private Integer numberTasksAssigned;
+    private Integer numberTasksComplete;
+    @JsonIgnore
+    @ManyToMany
+    private Collection<TaskTemplate> tasksUserCannotDo = new LinkedHashSet<>();
 
     protected User() {
     }
@@ -38,14 +41,14 @@ public class User {
         this.name = name;
         taskList = new HashSet<>();
         this.totalAvailableTime = 0;
-        this.userNumberTasksComplete = 0;
+        this.numberTasksComplete = 0;
         this.userColor = "";
         this.userIcon = "";
         //These cannot be set using a constructor without violating encapsulation
         //They are dynamically set when tasks are assigned to a user.
         this.remainingAvailableTime = 0;
-        this.userCommittedTime = 0;
-        this.userNumberTasksAssigned = 0;
+        this.committedTime = 0;
+        this.numberTasksAssigned = 0;
     }
 
     public User(String name, Integer totalAvailableTime, String userColor, String userIcon){
@@ -54,22 +57,26 @@ public class User {
         this.userColor = userColor;
         this.userIcon = userIcon;
         taskList = new HashSet<>();
-        this.userCommittedTime = 0;
-        this.userNumberTasksAssigned = 0;
-        this.userNumberTasksComplete = 0;
+        this.committedTime = 0;
+        this.numberTasksAssigned = 0;
+        this.numberTasksComplete = 0;
     }
 
     public void addTask(Task task) {
         taskList.add(task);
-        updateUser();
+        this.numberTasksAssigned +=1;
+        this.committedTime += task.getActualWorkTime();
+        this.remainingAvailableTime -= task.getActualWorkTime();
     }
 
     public void deleteTask(Task task) {
         this.taskList.remove(task);
-        updateUser();
+        this.numberTasksAssigned -= 1;
+        this.committedTime -= task.getActualWorkTime();
+        this.remainingAvailableTime += task.getActualWorkTime();
     }
 
-    public Set<Task> getTaskList() {
+    public Collection<Task> getTaskList() {
         return taskList;
     }
 
@@ -97,38 +104,32 @@ public class User {
         return remainingAvailableTime;
     }
 
-    public Integer getUserCommittedTime() {
-        return userCommittedTime;
+    public void setRemainingAvailableTime(Integer remainingAvailableTime) {
+        this.remainingAvailableTime = remainingAvailableTime;
     }
 
-    public Integer getUserNumberTasksAssigned() {
-        return userNumberTasksAssigned;
-    }
-    public void updateUser(){
-        updateUserNumberTasksAssigned();
-        updateUserNumberTasksCompleted();
-        updateUserTimeCommitment();
+    public Integer getCommittedTime() {
+        return committedTime;
     }
 
-    public void updateUserNumberTasksAssigned() {
-        this.userNumberTasksAssigned = taskList.size();
+    public void setCommittedTime(Integer committedTime) {
+        this.committedTime = committedTime;
     }
 
-    public void updateUserNumberTasksCompleted() {
-        this.userNumberTasksComplete = userNumberTasksAssigned;
-        for (Task task : taskList) {
-            if (!task.isDone()) {
-                userNumberTasksComplete -= 1;
-            }
-        }
+    public Integer getNumberTasksAssigned() {
+        return numberTasksAssigned;
     }
 
-    public void updateUserTimeCommitment() {
-        this.userCommittedTime = 0;
-        for (Task task : taskList) {
-            this.userCommittedTime += task.getActualWorkTime();
-        }
-        this.remainingAvailableTime = this.totalAvailableTime - this.userCommittedTime;
+    public void setNumberTasksAssigned(Integer numberTasksAssigned) {
+        this.numberTasksAssigned = numberTasksAssigned;
+    }
+
+    public Integer getNumberTasksComplete() {
+        return numberTasksComplete;
+    }
+
+    public void setNumberTasksComplete(Integer numberTasksComplete) {
+        this.numberTasksComplete = numberTasksComplete;
     }
 
     public String getUserColor() {

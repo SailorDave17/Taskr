@@ -72,7 +72,7 @@ public class UserController {
         if(user.getUserIcon() != null){
             existingUser.setUserIcon(user.getUserIcon());
         }
-        existingUser.updateUser();
+        userStorage.updateUser(existingUser);
         userStorage.save(existingUser);
         return userStorage.findAll();
     }

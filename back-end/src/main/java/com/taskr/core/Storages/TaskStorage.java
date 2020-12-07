@@ -9,15 +9,18 @@ import org.springframework.stereotype.Service;
 public class TaskStorage {
 
     private TaskRepository taskRepo;
+    private TaskTemplateRepository taskTemplateRepo;
+    private UserRepository userRepo;
     private TaskTemplateStorage taskTemplateStorage;
 
-    public TaskStorage(TaskRepository taskRepo, TaskTemplateStorage taskTemplateStorage) {
+    public TaskStorage(TaskRepository taskRepo, TaskTemplateRepository taskTemplateRepo, UserRepository userRepo) {
         this.taskRepo = taskRepo;
-        this.taskTemplateStorage = taskTemplateStorage;
+        this.taskTemplateRepo = taskTemplateRepo;
+        this.userRepo = userRepo;
+        this.taskTemplateStorage = new TaskTemplateStorage(taskTemplateRepo, userRepo, taskRepo);
     }
 
     public void save(Task task) {
-
         taskRepo.save(task);
     }
 

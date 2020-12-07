@@ -32,12 +32,13 @@ public class Task {
         } else this.description = "";
         if (taskTemplate.getMinutesExpectedToComplete() != 0){
             this.minutesExpectedToComplete = taskTemplate.getMinutesExpectedToComplete();
-            ownedBy.updateUser();
         } else this.minutesExpectedToComplete = 0;
         if (taskTemplate.getActualWorkTime() != 0){
             this.actualWorkTime = taskTemplate.getActualWorkTime();
         } else this.actualWorkTime = 0;
         this.done = false;
+        owner.addTask(this);
+        System.out.println("I added the task to the owner");
     }
 
     public Task() {
@@ -71,7 +72,6 @@ public class Task {
 
     public void setMinutesExpectedToComplete(Integer minutesExpectedToComplete) {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
-        ownedBy.updateUser();
     }
 
     public Date getDueBy() {
@@ -99,9 +99,9 @@ public class Task {
     }
 
     public void setOwnedBy(User newOwner) {
+        ownedBy.deleteTask(this);
         this.ownedBy = newOwner;
-        this.ownedBy.updateUser();
-
+        newOwner.addTask(this);
     }
     public Boolean isDone() {
         return done;
@@ -109,7 +109,6 @@ public class Task {
 
     public void setDone(Boolean trueOrFalse) {
         this.done = trueOrFalse;
-        this.ownedBy.updateUser();
     }
 
     public Integer getActualWorkTime() {

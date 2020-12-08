@@ -2,7 +2,8 @@ import {
     allUsers
 } from "./sampleAllUserJson.js"
 
-const displaySingleUserView = function(user) {
+const displaySingleUserView = function(user) { 
+    console.log (user) 
     const mainElement = document.createElement("main");
     mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
@@ -37,33 +38,34 @@ const displaySingleUserView = function(user) {
         checkBox.addEventListener('click', (checkboxEvent) => {
             checkboxEvent.preventDefault();
             clearChildren(mainElement);
-            const taskStatusJson = {
-                "id": task.id,
-                "title": task.title,
-                "minutesExpectedToComplete": task.minutesExpectedToComplete,
-                "dueBy": task.dueBy,
-                "done": true,
-                "actualWorkTime": task.actualWorkTime,
-                "description": task.description,
-                "templateId": task.templateId  
-            }
-
+            // const taskStatusJson = {
+            //     "id": task.id,
+            //     "title": task.title,
+            //     "minutesExpectedToComplete": task.minutesExpectedToComplete,
+            //     "dueBy": task.dueBy,
+            //     "done": true,
+            //     "actualWorkTime": task.actualWorkTime,
+            //     "description": task.description,
+            //     "templateId": task.templateId  
+            // }
+            task.done=true 
             console.log(task.done)
-            console.log(taskStatusJson)
+            console.log(task)
             fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
                 method: 'PATCH', 
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(taskStatusJson)
+                body: JSON.stringify(task)
             })
-            .then(response => response.json())
-            .then(user => displaySingleUserView(user))
-            .then(singleUserElement => mainElement.appendChild(singleUserElement))
-            .catch(error => console.log(error));
+            .then(response => response.body)
+            .then(response => console.log(response))
+            // .then(user => displaySingleUserView(user))
+            // .then(singleUserElement => mainElement.appendChild(singleUserElement))
+            .catch(error => console.error(error.stack));
         });
         if (task.done === true) {
-            checkBox.innerHTML = `<input type="checkbox" checked class="chore-done" id="check-chore">`
+            checkBox.check();
             numberOfTasksDone = numberOfTasksDone++;
         }
         const choreName = document.createElement("label");

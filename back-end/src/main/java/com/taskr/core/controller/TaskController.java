@@ -2,6 +2,7 @@ package com.taskr.core.controller;
 
 
 import com.taskr.core.resources.Task;
+import com.taskr.core.resources.User;
 import com.taskr.core.storages.TaskStorage;
 import com.taskr.core.storages.TaskTemplateStorage;
 import com.taskr.core.storages.UserStorage;
@@ -26,30 +27,33 @@ public class TaskController {
     }
 
     @PatchMapping("/api/task/{id}/update")
-    public Iterable<Task> updateTaskInfo(@PathVariable Long id, @RequestBody Task task){
-        Task existingTask =  retrieveTaskById(id);
-        if(task.getDescription() != null){
-            existingTask.setDescription(task.getDescription());
-        }
-        if (task.getDueBy() != null){
-            existingTask.setDueBy(task.getDueBy());
-        }
-        if (task.getMinutesExpectedToComplete() != null){
-            existingTask.setMinutesExpectedToComplete(task.getMinutesExpectedToComplete());
-        }
-        if (task.isDone() != null){
-            existingTask.setDone(task.isDone());
-        }
-        if(task.getTitle() != null){
-            existingTask.setTitle(task.getTitle());
-        }
-        if (task.getActualWorkTime() != null){
-            existingTask.setActualWorkTime(task.getActualWorkTime());
-        }
-        if (task.getOwnedBy() != null){
-            existingTask.setOwnedBy(task.getOwnedBy());
-        }
-        return taskStorage.findAll();
+    public User updateTaskInfo(@PathVariable Long id, @RequestBody Task task){
+        System.out.println(task);
+//        Task existingTask =  retrieveTaskById(id);
+//        if(task.getDescription() != null){
+//            existingTask.setDescription(task.getDescription());
+//        }
+//        if (task.getDueBy() != null){
+//            existingTask.setDueBy(task.getDueBy());
+//        }
+//        if (task.getMinutesExpectedToComplete() != null){
+//            existingTask.setMinutesExpectedToComplete(task.getMinutesExpectedToComplete());
+//        }
+//        if (task.isDone() != null){
+//            existingTask.setDone(task.isDone());
+//        }
+//        if(task.getTitle() != null){
+//            existingTask.setTitle(task.getTitle());
+//        }
+//        if (task.getActualWorkTime() != null){
+//            existingTask.setActualWorkTime(task.getActualWorkTime());
+//        }
+//        if (task.getOwnedBy() != null){
+//            existingTask.setOwnedBy(task.getOwnedBy());
+//        }
+        taskStorage.save(task);
+
+        return task.getOwnedBy();
     }
 
     @GetMapping("/api/tasks")

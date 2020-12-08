@@ -21,7 +21,7 @@ container.appendChild(mainElement);
 // container.appendChild(userNamePageElement);
 
 
-fetch("http://localhost:8080/api/user/1")
+fetch("http://localhost:8080/api/user/4")
     .then(response => response.json())
     //.then(json => console.log(json))
     .then(user => displaySingleUserView(user))

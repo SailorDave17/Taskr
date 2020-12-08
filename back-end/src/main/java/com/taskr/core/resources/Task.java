@@ -1,6 +1,7 @@
 package com.taskr.core.resources;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.taskr.core.resources.TaskTemplate;
 import com.taskr.core.resources.User;
 
@@ -12,7 +13,7 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
-    @JsonBackReference
+    @JsonIgnore
     @ManyToOne
     private User ownedBy;
     private String title;

@@ -1,6 +1,8 @@
-package com.taskr.core.Resources;
+package com.taskr.core;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.resources.User;
 
 import javax.persistence.*;
 import java.util.Date;

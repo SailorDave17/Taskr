@@ -1,7 +1,4 @@
-package com.taskr.core.Resources;
-
-import org.hibernate.annotations.Fetch;
-import org.hibernate.annotations.FetchMode;
+package com.taskr.core.resources;
 
 import javax.persistence.*;
 import java.util.*;
@@ -15,8 +12,8 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
-    @Fetch(value = FetchMode.SELECT)
-    @ManyToMany//(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
+//    @Fetch(value = FetchMode.SELECT)
+    @ManyToMany(fetch = FetchType.EAGER)//, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
     private Collection<User> usersWhoCannotDoThisTask;
 
     public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete, User ... usersWhoCannotDoThisTask) {

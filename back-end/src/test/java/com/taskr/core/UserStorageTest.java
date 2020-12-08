@@ -1,6 +1,6 @@
 package com.taskr.core;
 
-import com.taskr.core.Resources.User;
+import com.taskr.core.resources.User;
 import com.taskr.core.storages.UserStorage;
 import org.junit.jupiter.api.Test;
 
@@ -22,8 +22,8 @@ public class UserStorageTest {
         UserStorage userStorage = mock(UserStorage.class);
         User testUser = new User("Aloo");
         userStorage.save(testUser);
-        userStorage.delete(testUser);
-        verify(userStorage).delete(testUser);
+        userStorage.deleteById(testUser.getId());
+        verify(userStorage).deleteById(testUser.getId());
     }
 
     @Test
@@ -34,11 +34,4 @@ public class UserStorageTest {
 
     }
 
-    @Test
-    public void shouldBeAbleToFindUserByName(){
-        UserStorage userStorage = mock(UserStorage.class);
-        userStorage.findUserByName("");
-        verify(userStorage).findUserByName("");
-
-    }
 }

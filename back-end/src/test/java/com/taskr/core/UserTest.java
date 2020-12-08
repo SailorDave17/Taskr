@@ -1,6 +1,6 @@
 package com.taskr.core;
 
-import com.taskr.core.Resources.User;
+import com.taskr.core.resources.User;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

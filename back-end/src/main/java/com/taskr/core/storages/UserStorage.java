@@ -1,13 +1,12 @@
 package com.taskr.core.storages;
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Resources.User;
+import com.taskr.core.Task;
+import com.taskr.core.resources.User;
 import org.springframework.stereotype.Service;
 
 @Service
 public class UserStorage {
-
-    UserRepository userRepo;
+    private UserRepository userRepo;
 
     public UserStorage(UserRepository userRepo) {
         this.userRepo = userRepo;
@@ -17,8 +16,8 @@ public class UserStorage {
         userRepo.save(user);
     }
 
-    public void delete(User user) {
-        userRepo.delete(user);
+    public void deleteById(Long id) {
+        userRepo.deleteById(id);
     }
 
     public void updateUserTimeCommitment(User user) {
@@ -58,7 +57,4 @@ public class UserStorage {
         } else return new User("Dummy user");
     }
 
-    public User findUserByName(String name) {
-        return userRepo.findUserByName(name);
-    }
 }

@@ -58,14 +58,14 @@ const displaySingleUserView = function(user) {
                 },
                 body: JSON.stringify(task)
             })
-            .then(response => response.body)
-            .then(response => console.log(response))
-            // .then(user => displaySingleUserView(user))
-            // .then(singleUserElement => mainElement.appendChild(singleUserElement))
+            .then(response => response.json())
+            // .then(response => console.log(response))
+            .then(user => displaySingleUserView(user))
+            .then(singleUserElement => mainElement.appendChild(singleUserElement))
             .catch(error => console.error(error.stack));
         });
         if (task.done === true) {
-            checkBox.check();
+            // checkBox.check();
             numberOfTasksDone = numberOfTasksDone++;
         }
         const choreName = document.createElement("label");

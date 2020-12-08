@@ -28,7 +28,7 @@ public class TaskController {
 
     @PatchMapping("/api/task/{id}/update")
     public User updateTaskInfo(@PathVariable Long id, @RequestBody Task task){
-        System.out.println(task);
+
 //        Task existingTask =  retrieveTaskById(id);
 //        if(task.getDescription() != null){
 //            existingTask.setDescription(task.getDescription());
@@ -52,7 +52,7 @@ public class TaskController {
 //            existingTask.setOwnedBy(task.getOwnedBy());
 //        }
         taskStorage.save(task);
-
+        System.out.println(task);
         return task.getOwnedBy();
     }
 

@@ -34,7 +34,7 @@ public class User {
     private String userIcon;
     private Integer numberTasksAssigned;
     private Integer numberTasksComplete;
-    @JsonBackReference
+    @JsonIgnore
     @Fetch(value = FetchMode.SELECT)
     @ManyToMany(fetch = FetchType.EAGER, mappedBy = "usersWhoCannotDoThisTask")
     private Collection<TaskTemplate> tasksUserCannotDo;// = new LinkedHashSet<>();

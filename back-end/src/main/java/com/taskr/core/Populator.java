@@ -99,11 +99,6 @@ public class Populator implements CommandLineRunner {
 
         resourceManager.allocateAllTasks();
 
-        userStorage.save(testUser);
-        userStorage.save(mom);
-        userStorage.save(dad);
-        userStorage.save(sis);
-        userStorage.save(bro);
     }
 
 

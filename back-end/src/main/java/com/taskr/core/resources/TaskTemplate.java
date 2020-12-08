@@ -1,5 +1,7 @@
 package com.taskr.core.resources;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
 import javax.persistence.*;
 import java.util.*;
 
@@ -13,6 +15,7 @@ public class TaskTemplate {
     private String description;
     private Integer actualWorkTime;
 //    @Fetch(value = FetchMode.SELECT)
+    @JsonManagedReference
     @ManyToMany(fetch = FetchType.EAGER)//, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
     private Collection<User> usersWhoCannotDoThisTask;
 

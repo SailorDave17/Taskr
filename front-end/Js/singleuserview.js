@@ -7,6 +7,9 @@ const displaySingleUserView = function(user) {
     mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
     userPageHeader.classList.add("user-page-header");
+    console.log(user.userColor)
+    user.userColor = "rose"
+    userPageHeader.setAttribute('id' , user.userColor)
     // clearChildren(userPageHeader);
     const userNamePageElement = document.createElement("h1");
     userNamePageElement.classList.add("username");
@@ -45,7 +48,7 @@ const displaySingleUserView = function(user) {
                 "templateId": task.templateId  
             }
 
-            // console.log(task.done)
+            console.log(task.done)
             console.log(taskStatusJson)
             fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
                 method: 'PATCH', 
@@ -87,7 +90,7 @@ const displaySingleUserView = function(user) {
     });
     
     //calculating percent of tasks completed for progress bar
-    user.userNumberTasksAssigned = 2
+    // user.userNumberTasksAssigned = 2
     const percentOfTasksDone = numberOfTasksDone*100 / user.userNumberTasksAssigned;
     console.log(percentOfTasksDone);
     console.log(user.userNumberTasksAssigned);

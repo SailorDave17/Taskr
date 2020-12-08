@@ -1,12 +1,14 @@
-package com.taskr.core.Storages;
+package com.taskr.core.storages;
 
-import com.taskr.core.Resources.TaskTemplate;
+import com.taskr.core.resources.TaskTemplate;
 import org.springframework.stereotype.Service;
+
 
 @Service
 public class TaskTemplateStorage {
 
     private TaskTemplateRepository taskTemplateRepo;
+
 
     public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo) {
         this.taskTemplateRepo = taskTemplateRepo;
@@ -25,9 +27,10 @@ public class TaskTemplateStorage {
     }
 
     public TaskTemplate findById(Long id) {
-        if(taskTemplateRepo.findById(id).isPresent()) {
+        TaskTemplate dummyTaskTemplate = new TaskTemplate("TaskTemplate not found", 300, 300);
+        if (taskTemplateRepo.findById(id).isPresent()) {
             return taskTemplateRepo.findById(id).get();
-        } else return null;
+        } else return dummyTaskTemplate ;
     }
 
 }

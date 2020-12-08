@@ -1,13 +1,11 @@
 package com.taskr.core;
 
-import com.taskr.core.Controllers.UserController;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.UserRepository;
-import com.taskr.core.Storages.UserStorage;
-import org.junit.jupiter.api.BeforeEach;
+import com.taskr.core.controller.UserController;
+import com.taskr.core.resources.User;
+import com.taskr.core.storages.TaskStorage;
+import com.taskr.core.storages.TaskTemplateStorage;
+import com.taskr.core.storages.UserStorage;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 import java.util.Collections;
 
@@ -22,7 +20,9 @@ public class UserControllerTest {
     @Test
     public void shouldHaveAMethodToRetrieveAllUsers() {
         UserStorage userStorage = mock(UserStorage.class);
-        UserController underTest = new UserController(userStorage);
+        TaskStorage taskStorage = mock(TaskStorage.class);
+        TaskTemplateStorage taskTemplateStorage = mock(TaskTemplateStorage.class);
+        UserController underTest = new UserController(userStorage, taskTemplateStorage, taskStorage);
         User testUser = new User("Aloo");
         userStorage.save(testUser);
         when(userStorage.findAll()).thenReturn(Collections.singletonList(testUser));
@@ -33,7 +33,9 @@ public class UserControllerTest {
     @Test
     public void shouldHaveAMethodToSaveUser() {
         UserStorage userStorage = mock(UserStorage.class);
-        UserController underTest = new UserController(userStorage);
+        TaskStorage taskStorage = mock(TaskStorage.class);
+        TaskTemplateStorage taskTemplateStorage = mock(TaskTemplateStorage.class);
+        UserController underTest = new UserController(userStorage, taskTemplateStorage, taskStorage);
         User testUser = new User("Aloo");
         underTest.addNewUser(testUser);
         when(userStorage.findAll()).thenReturn(Collections.singletonList(testUser));
@@ -44,7 +46,9 @@ public class UserControllerTest {
     @Test
     public void shouldHaveAMethodToRetrieveSingleUser() {
         UserStorage userStorage = mock(UserStorage.class);
-        UserController underTest = new UserController(userStorage);
+        TaskStorage taskStorage = mock(TaskStorage.class);
+        TaskTemplateStorage taskTemplateStorage = mock(TaskTemplateStorage.class);
+        UserController underTest = new UserController(userStorage, taskTemplateStorage, taskStorage);
         User testUser = new User("Aloo");
         underTest.addNewUser(testUser);
         when(userStorage.findById(1L)).thenReturn(testUser);

@@ -1,13 +1,8 @@
 package com.taskr.core;
 
-import com.taskr.core.Controllers.UserController;
 import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.storages.UserStorage;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-
-import java.util.Collection;
-import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;

@@ -1,9 +1,10 @@
 package com.taskr.core.Resources;
 
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 
 import javax.persistence.*;
 
@@ -31,6 +32,7 @@ public class User {
     private Integer numberTasksAssigned;
     private Integer numberTasksComplete;
     @JsonIgnore
+    @Fetch(value = FetchMode.SELECT)
     @ManyToMany(mappedBy = "usersWhoCannotDoThisTask")
     private Collection<TaskTemplate> tasksUserCannotDo;// = new LinkedHashSet<>();
 
@@ -49,6 +51,7 @@ public class User {
         this.remainingAvailableTime = 0;
         this.committedTime = 0;
         this.numberTasksAssigned = 0;
+        this.tasksUserCannotDo = new HashSet<>();
     }
 
     public User(String name, Integer totalAvailableTime, String userColor, String userIcon){
@@ -57,9 +60,11 @@ public class User {
         this.userColor = userColor;
         this.userIcon = userIcon;
         taskList = new HashSet<>();
+        this.remainingAvailableTime = 0;
         this.committedTime = 0;
         this.numberTasksAssigned = 0;
         this.numberTasksComplete = 0;
+        this.tasksUserCannotDo = new HashSet<>();
     }
 
     public void addTask(Task task) {
@@ -146,6 +151,21 @@ public class User {
 
     public void setUserIcon(String userIcon) {
         this.userIcon = userIcon;
+    }
+
+    public Collection<TaskTemplate> getTasksUserCannotDo() {
+        return tasksUserCannotDo;
+    }
+
+    public void addTaskUserCannotDo(TaskTemplate taskTemplate){
+        if (tasksUserCannotDo == null){
+            tasksUserCannotDo = new LinkedHashSet<>();
+        }
+        this.tasksUserCannotDo.add(taskTemplate);
+    }
+
+    public void removeTaskUserCannotDo(TaskTemplate taskTemplate){
+        this.tasksUserCannotDo.remove(taskTemplate);
     }
 
     @Override

@@ -1,4 +1,4 @@
-package com.taskr.core.Storages;
+package com.taskr.core.storages;
 
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
@@ -9,15 +9,10 @@ import org.springframework.stereotype.Service;
 public class TaskStorage {
 
     private TaskRepository taskRepo;
-    private TaskTemplateRepository taskTemplateRepo;
-    private UserRepository userRepo;
-    private TaskTemplateStorage taskTemplateStorage;
 
-    public TaskStorage(TaskRepository taskRepo, TaskTemplateRepository taskTemplateRepo, UserRepository userRepo) {
+
+    public TaskStorage(TaskRepository taskRepo) {
         this.taskRepo = taskRepo;
-        this.taskTemplateRepo = taskTemplateRepo;
-        this.userRepo = userRepo;
-        this.taskTemplateStorage = new TaskTemplateStorage(taskTemplateRepo, userRepo, taskRepo);
     }
 
     public void save(Task task) {
@@ -34,16 +29,6 @@ public class TaskStorage {
         }
     }
 
-    public void updateAllTasksBasedOnTemplate(Long taskTemplateId) {
-        TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateId);
-        for (Task task : taskRepo.findTasksByTemplateId(taskTemplateId)) {
-            task.setDescription(taskTemplate.getDescription());
-            task.setMinutesExpectedToComplete(taskTemplate.getMinutesExpectedToComplete());
-            task.setTitle(taskTemplate.getName());
-            taskRepo.save(task);
-        }
-    }
-
     public Iterable<Task> findAll() {
         return taskRepo.findAll();
     }
@@ -57,4 +42,7 @@ public class TaskStorage {
         } else return dummyTask;
     }
 
+    public Iterable<Task> findByTemplateId(Long templateId){
+        return taskRepo.findTasksByTemplateId(templateId);
+    }
 }

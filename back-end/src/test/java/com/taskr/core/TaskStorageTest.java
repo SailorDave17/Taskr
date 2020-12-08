@@ -4,7 +4,7 @@ package com.taskr.core;
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
+import com.taskr.core.storages.TaskStorage;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.*;

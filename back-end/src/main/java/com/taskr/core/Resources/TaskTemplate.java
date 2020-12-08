@@ -1,5 +1,8 @@
 package com.taskr.core.Resources;
 
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+
 import javax.persistence.*;
 import java.util.*;
 
@@ -12,6 +15,7 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
+    @Fetch(value = FetchMode.SELECT)
     @ManyToMany//(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
     private Collection<User> usersWhoCannotDoThisTask;
 
@@ -88,11 +92,19 @@ public class TaskTemplate {
             usersWhoCannotDoThisTask = new HashSet<>();
         }
         this.usersWhoCannotDoThisTask.add(user);
+        user.addTaskUserCannotDo(this);
+    }
+
+    public void removeUserWhoCannotDoThisTask(User user){
+        this.usersWhoCannotDoThisTask.remove(user);
+        user.removeTaskUserCannotDo(this);
     }
 
     public void setUsersWhoCannotDoThisTask(Iterable<User> usersWhoCannotDoThisTask) {
+        usersWhoCannotDoThisTask = new HashSet<>();
         for (User user : usersWhoCannotDoThisTask) {
             this.usersWhoCannotDoThisTask.add(user);
+            user.addTaskUserCannotDo(this);
         }
     }
 

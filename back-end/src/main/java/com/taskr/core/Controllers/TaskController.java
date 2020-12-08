@@ -2,9 +2,9 @@ package com.taskr.core.Controllers;
 
 
 import com.taskr.core.Resources.Task;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.storages.TaskStorage;
+import com.taskr.core.storages.TaskTemplateStorage;
+import com.taskr.core.storages.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 @RestController

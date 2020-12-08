@@ -1,51 +1,42 @@
-package com.taskr.core.Storages;
+package com.taskr.core;
 
 import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
+import com.taskr.core.storages.TaskStorage;
+import com.taskr.core.storages.TaskTemplateStorage;
+import com.taskr.core.storages.UserStorage;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
 import java.util.Set;
 
-
 @Service
-public class TaskTemplateStorage {
+public class ResourceManager {
 
-    private TaskTemplateRepository taskTemplateRepo;
-    private UserRepository userRepo;
-    private TaskRepository taskRepo;
+    UserStorage userStorage;
+    TaskStorage taskStorage;
+    TaskTemplateStorage taskTemplateStorage;
 
-
-    public TaskTemplateStorage(TaskTemplateRepository taskTemplateRepo, UserRepository userRepo, TaskRepository taskRepo) {
-        this.taskTemplateRepo = taskTemplateRepo;
-        this.userRepo = userRepo;
-        this.taskRepo = taskRepo;
+    public ResourceManager(UserStorage userStorage, TaskStorage taskStorage, TaskTemplateStorage taskTemplateStorage) {
+        this.userStorage = userStorage;
+        this.taskStorage = taskStorage;
+        this.taskTemplateStorage = taskTemplateStorage;
     }
 
-    public void save(TaskTemplate taskTemplate) {
-        taskTemplateRepo.save(taskTemplate);
-    }
-
-    public void deleteById(Long id) {
-        taskTemplateRepo.deleteById(id);
-    }
-
-    public Iterable<TaskTemplate> findAll() {
-        return taskTemplateRepo.findAll();
-    }
-
-    public TaskTemplate findById(Long id) {
-        TaskTemplate dummyTaskTemplate = new TaskTemplate("TaskTemplate not found", 300, 300);
-        if (taskTemplateRepo.findById(id).isPresent()) {
-            return taskTemplateRepo.findById(id).get();
-        } else return dummyTaskTemplate ;
+    public void updateAllTasksBasedOnTemplate(Long taskTemplateId) {
+        TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateId);
+        for (Task task : taskStorage.findByTemplateId(taskTemplateId)) {
+            task.setDescription(taskTemplate.getDescription());
+            task.setMinutesExpectedToComplete(taskTemplate.getMinutesExpectedToComplete());
+            task.setTitle(taskTemplate.getName());
+            taskStorage.save(task);
+        }
     }
 
     public void allocateSingleTask(TaskTemplate taskTemplate){
         Set<User> candidateUsers = new HashSet<>();
-        UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
-        TaskStorage taskStorage = new TaskStorage(taskRepo, taskTemplateRepo, userRepo);
+
         Iterable<User> allUsers = userStorage.findAll();
         System.out.println(allUsers);
         for (User user : allUsers){
@@ -71,7 +62,7 @@ public class TaskTemplateStorage {
     }
 
     public void allocateAllTasks(){
-        for (TaskTemplate taskTemplate : taskTemplateRepo.findAll()){
+        for (TaskTemplate taskTemplate : taskTemplateStorage.findAll()){
             allocateSingleTask(taskTemplate);
         }
     }

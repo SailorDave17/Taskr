@@ -1,10 +1,8 @@
 package com.taskr.core;
 
+import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskTemplateRepository;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserRepository;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.storages.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -16,27 +14,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class JPAWiringTest {
 
     @Autowired
-    private UserRepository userRepo;
-    @Autowired
-    private TaskTemplateRepository taskTemplateRepo;
-
-    @Autowired
     private TestEntityManager entityManager;
 
-    private UserStorage userStorage = new UserStorage(userRepo, taskTemplateRepo);
+    @Autowired
+    private UserStorage userStorage;// = new UserStorage(userRepo);
+
+    @Autowired
+    private TaskTemplateStorage taskTemplateStorage;// = new TaskTemplateStorage(taskTemplateRepo, userRepo, taskRepo, userStorage, taskStorage);
+
+    @Autowired
+    private ResourceManager resourceManager;
 
     @Test
     public void userStorageShouldSaveAndRetrieveUsersAndTasks() {
         User testUser = new User("user");
 
-        userRepo.save(testUser);
+        userStorage.save(testUser);
 
         entityManager.flush();
         entityManager.clear();
 
-        User retrievedUser = userRepo.findUserByName(testUser.getName());
+        User retrievedUser = userStorage.findUserByName(testUser.getName());
 
         assertThat(retrievedUser).isEqualTo(testUser);
 
+    }
+
+    @Test
+    public void taskTemplateShouldContainListOfUsersWhoCannotDoThatTask() {
+        User mom = new User("Mom", 300, "pink", "mom.ico");
+        System.out.println(mom.toString());
+        userStorage.save(mom);
+        System.out.println(mom.toString());
+        TaskTemplate cleanCommonArea = new TaskTemplate("Clean Common Area", "Clean all common areas", 30, 30);
+        cleanCommonArea.addUserWhoCannotDoThisTask(mom);
+        taskTemplateStorage.save(cleanCommonArea);
+        userStorage.save(mom);
+//        assertThat(userStorage.findById(mom.getId()).getTasksUserCannotDo()).contains(taskTemplateStorage.findById(cleanCommonArea.getId()));
     }
 }

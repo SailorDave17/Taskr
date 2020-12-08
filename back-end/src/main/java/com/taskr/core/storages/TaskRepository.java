@@ -1,4 +1,4 @@
-package com.taskr.core.Storages;
+package com.taskr.core.storages;
 
 import com.taskr.core.Resources.Task;
 import org.springframework.data.repository.CrudRepository;

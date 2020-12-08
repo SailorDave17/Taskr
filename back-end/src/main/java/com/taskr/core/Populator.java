@@ -1,14 +1,11 @@
 package com.taskr.core;
 
-import com.taskr.core.Resources.Task;
 import com.taskr.core.Resources.TaskTemplate;
 import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
-import java.util.Date;
-import java.util.HashSet;
+import com.taskr.core.storages.TaskStorage;
+import com.taskr.core.storages.TaskTemplateStorage;
 
+import com.taskr.core.storages.UserStorage;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -18,11 +15,13 @@ public class Populator implements CommandLineRunner {
     UserStorage userStorage;
     TaskTemplateStorage taskTemplateStorage;
     TaskStorage taskStorage;
+    ResourceManager resourceManager;
 
-    public Populator(UserStorage userStorage, TaskTemplateStorage taskTemplateStorage, TaskStorage taskStorage) {
+    public Populator(UserStorage userStorage, TaskTemplateStorage taskTemplateStorage, TaskStorage taskStorage, ResourceManager resourceManager) {
         this.userStorage = userStorage;
         this.taskTemplateStorage = taskTemplateStorage;
         this.taskStorage = taskStorage;
+        this.resourceManager = resourceManager;
     }
 //    this is just to make sure I can commit
 
@@ -102,7 +101,7 @@ public class Populator implements CommandLineRunner {
 //        taskTemplateIterable.add(newTasktemplate01);
 //        taskTemplateStorage.allocateSingleTask(newTasktemplate01);
 //        taskTemplateStorage.allocateTasks(taskTemplateIterable);
-        taskTemplateStorage.allocateAllTasks();
+        resourceManager.allocateAllTasks();
 //
 //
 //

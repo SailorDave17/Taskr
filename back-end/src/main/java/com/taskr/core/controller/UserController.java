@@ -1,11 +1,11 @@
-package com.taskr.core.Controllers;
+package com.taskr.core.controller;
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Resources.TaskTemplate;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.resources.Task;
+import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.resources.User;
+import com.taskr.core.storages.TaskStorage;
+import com.taskr.core.storages.TaskTemplateStorage;
+import com.taskr.core.storages.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Date;
@@ -72,7 +72,7 @@ public class UserController {
         if(user.getUserIcon() != null){
             existingUser.setUserIcon(user.getUserIcon());
         }
-        existingUser.updateUser();
+//        userStorage.updateUser(existingUser);
         userStorage.save(existingUser);
         return userStorage.findAll();
     }
@@ -81,7 +81,7 @@ public class UserController {
     public Iterable<User> deleteUser(@PathVariable Long id) {
         if (userStorage.findById(id) != null) {
             User userToDelete = userStorage.findById(id);
-            userStorage.delete(userToDelete);
+            userStorage.deleteById(id);
         }
         return userStorage.findAll();
     }

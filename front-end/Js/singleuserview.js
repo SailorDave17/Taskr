@@ -1,8 +1,8 @@
-import{
+import {
     allUsers
 } from "./sampleAllUserJson.js"
 
-const displaySingleUserView = function(users) {
+const displaySingleUserView = function(user) {
     const mainElement = document.createElement("main");
     mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
@@ -10,64 +10,106 @@ const displaySingleUserView = function(users) {
     // clearChildren(userPageHeader);
     const userNamePageElement = document.createElement("h1");
     userNamePageElement.classList.add("username");
-    userNamePageElement.innerText = "Mom's Task List-Sunday";
-    // userNamePageElement.innerText = `${user.name}'s Task List -${day}` //whatever day is being accessed by the user. default will be Sunday
+    userNamePageElement.innerText = `${user.name}'s Task List` //whatever day is being accessed by the user. default will be Sunday
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
-    userIcon.setAttribute("src","/front-end/images/woman_1f469.png")
+    userIcon.setAttribute("src", "/front-end/images/woman_1f469.png")
     mainElement.appendChild(userPageHeader);
     userPageHeader.appendChild(userNamePageElement);
     userPageHeader.appendChild(userIcon);
 
-
+    //set up sticky notes of tasks
     const listOfTasks = document.createElement("div");
     listOfTasks.classList.add("user-task-list");
     mainElement.appendChild(listOfTasks);
-    // user.taskList.forEach(task => {
+    let numberOfTasksDone = 0;
+    user.taskList.forEach(task => {
         const taskStickyNote = document.createElement("div")
         taskStickyNote.classList.add("chores-list");
 
         const checkBox = document.createElement("input");
+        checkBox.setAttribute("type", "checkbox");
         checkBox.classList.add("chore-done");
-        // if (task.done === true) {
-        //     checkBox.innerHTML = `<input type="checkbox" checked class="chore-done" id="check-chore">`
-        // }
+        // checkBox.setAttribute("id", task.title)
+        checkBox.addEventListener('click', (checkboxEvent) => {
+            checkboxEvent.preventDefault();
+            clearChildren(mainElement);
+            const taskStatusJson = {
+                "id": task.id,
+                "title": task.title,
+                "minutesExpectedToComplete": task.minutesExpectedToComplete,
+                "dueBy": task.dueBy,
+                "done": true,
+                "actualWorkTime": task.actualWorkTime,
+                "description": task.description,
+                "templateId": task.templateId  
+            }
+
+            // console.log(task.done)
+            console.log(taskStatusJson)
+            fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
+                method: 'PATCH', 
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(taskStatusJson)
+            })
+            .then(response => response.json())
+            .then(user => displaySingleUserView(user))
+            .then(singleUserElement => mainElement.appendChild(singleUserElement))
+            .catch(error => console.log(error));
+        });
+        if (task.done === true) {
+            checkBox.innerHTML = `<input type="checkbox" checked class="chore-done" id="check-chore">`
+            numberOfTasksDone = numberOfTasksDone++;
+        }
         const choreName = document.createElement("label");
         choreName.classList.add("chore-name")
-        // choreName.innerText = task.title;
-        choreName.innerText = "Vacuum Family Room";
+        choreName.innerText = task.title;
+        //choreName.innerText = "Vacuum Family Room";
         checkBox.setAttribute("id", "check-chore");
         choreName.setAttribute("for", "check-chore");
         const taskInfoList = document.createElement("ul")
         const taskDueDate = document.createElement("li");
         taskDueDate.classList.add("task-due-date");
-        // taskDueDate.innerText = taskList.dueBy;
-        taskDueDate.innerText = "Sunday";
+        taskDueDate.innerText = task.dueBy;
+        //taskDueDate.innerText = "Sunday";
         const taskDuration = document.createElement("li");
         taskDuration.classList.add("task-duration");
-        // taskDuration.innerText = taskList.minutesExpectedToComplete;
-        taskDuration.innerText = "30 minutes";
+        taskDuration.innerText = task.minutesExpectedToComplete + " minutes";
+        //taskDuration.innerText = "30 minutes";
         listOfTasks.appendChild(taskStickyNote);
         taskStickyNote.appendChild(checkBox);
         taskStickyNote.appendChild(choreName);
         taskStickyNote.appendChild(taskInfoList);
         taskStickyNote.appendChild(taskDueDate);
         taskStickyNote.appendChild(taskDuration); //not sure if appending them all to the same thing is the right choice//
+    });
+    
+    //calculating percent of tasks completed for progress bar
+    user.userNumberTasksAssigned = 2
+    const percentOfTasksDone = numberOfTasksDone*100 / user.userNumberTasksAssigned;
+    console.log(percentOfTasksDone);
+    console.log(user.userNumberTasksAssigned);
 
-    // });
-
+    //set up progress bar
     const displayProgressBar = document.createElement("progress");
     displayProgressBar.classList.add("user-progress-bar");
-    // displayProgressBar.setAttribute("value", user.percentDone);
-    displayProgressBar.setAttribute("value", "70");
+    displayProgressBar.setAttribute("value", percentOfTasksDone);
+    //displayProgressBar.setAttribute("value", "70");
     displayProgressBar.setAttribute("max", "100");
     mainElement.appendChild(displayProgressBar);
+
+
+
+
+    //calendar
 
     const displayWeeklyCalendar = document.createElement("div");
     displayWeeklyCalendar.classList.add("calendar");
     mainElement.appendChild(displayWeeklyCalendar);
 
-   
+
     const daySunday = document.createElement("div");
     daySunday.classList.add("day");
     daySunday.setAttribute("id", "Sunday");
@@ -111,7 +153,7 @@ const displaySingleUserView = function(users) {
     clickHereTuesday.innerText = "Click here to see Tuesday's tasks.";
     displayWeeklyCalendar.appendChild(dayTuesday);
     dayTuesday.appendChild(howManyTuesdayTasks);
-   dayTuesday.appendChild(clickHereTuesday);
+    dayTuesday.appendChild(clickHereTuesday);
 
     const dayWednesday = document.createElement("div");
     dayWednesday.classList.add("day");
@@ -172,19 +214,19 @@ const displaySingleUserView = function(users) {
     displayWeeklyCalendar.appendChild(dayOfTheWeek);
     dayOfTheWeek.appendChild(howManyTasks);
     dayOfTheWeek.appendChild(clickHereSaturday);
-    
 
-    
+
+
     return mainElement;
 }
 
-// const clearChildren = function (element) {
-//     while (element.firstChild) {
-//         element.removeChild(element.lastChild);
-//     }
-// }
+const clearChildren = function (element) {
+    while (element.firstChild) {
+        element.removeChild(element.lastChild);
+    }
+}
 
-export{
+export {
     displaySingleUserView
     // clearChildren
 }

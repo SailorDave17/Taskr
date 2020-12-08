@@ -1,7 +1,7 @@
 package com.taskr.core.controller;
 
 
-import com.taskr.core.Task;
+import com.taskr.core.resources.Task;
 import com.taskr.core.storages.TaskStorage;
 import com.taskr.core.storages.TaskTemplateStorage;
 import com.taskr.core.storages.UserStorage;

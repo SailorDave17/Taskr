@@ -1,5 +1,6 @@
 package com.taskr.core;
 
+import com.taskr.core.resources.Task;
 import com.taskr.core.resources.TaskTemplate;
 import com.taskr.core.resources.User;
 import com.taskr.core.storages.TaskStorage;

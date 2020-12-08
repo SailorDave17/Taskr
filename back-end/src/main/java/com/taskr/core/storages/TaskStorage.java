@@ -1,6 +1,6 @@
 package com.taskr.core.storages;
 
-import com.taskr.core.Task;
+import com.taskr.core.resources.Task;
 import com.taskr.core.resources.TaskTemplate;
 import com.taskr.core.resources.User;
 import org.springframework.stereotype.Service;

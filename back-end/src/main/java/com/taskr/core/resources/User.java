@@ -3,7 +3,6 @@ package com.taskr.core.resources;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
-import com.taskr.core.Task;
 import org.hibernate.annotations.Fetch;
 import org.hibernate.annotations.FetchMode;
 

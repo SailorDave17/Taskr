@@ -1,6 +1,8 @@
-package com.taskr.core.Resources;
+package com.taskr.core.resources;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.resources.User;
 
 import javax.persistence.*;
 import java.util.Date;
@@ -17,7 +19,6 @@ public class Task {
     private Integer minutesExpectedToComplete;
     private Date dueBy;
     private Boolean done;
-    //populate all of the above instead of taskTemplate
     private Integer actualWorkTime = 0;
     private String description;
     private long templateId;
@@ -44,15 +45,15 @@ public class Task {
     public Task() {
     }
 
-    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
-    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
-       this.ownedBy = owner;
-       this.title = title;
-       this.description = description;
-       this.minutesExpectedToComplete = minutesExpectedToComplete;
-       this.actualWorkTime = actualWorkTime;
-       this.templateId = 65535;
-    }
+//    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
+//    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
+//       this.ownedBy = owner;
+//       this.title = title;
+//       this.description = description;
+//       this.minutesExpectedToComplete = minutesExpectedToComplete;
+//       this.actualWorkTime = actualWorkTime;
+//       this.templateId = 65535;
+//    }
 
     public long getId() {
         return id;

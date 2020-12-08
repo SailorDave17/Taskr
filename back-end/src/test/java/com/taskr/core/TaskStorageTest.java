@@ -1,10 +1,10 @@
 package com.taskr.core;
 
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Resources.TaskTemplate;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
+import com.taskr.core.resources.Task;
+import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.resources.User;
+import com.taskr.core.storages.TaskStorage;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.*;
@@ -14,7 +14,7 @@ public class TaskStorageTest {
     @Test
     public void shouldHaveAnAddTaskMethod(){
         TaskStorage taskStorage = mock(TaskStorage.class);
-        TaskTemplate taskTemplate = new TaskTemplate("test task template");
+        TaskTemplate taskTemplate = new TaskTemplate("test task template", 300, 300);
         User testUser = new User("Aloo");
         Task testTask = new Task(testUser , taskTemplate);
         taskStorage.save(testTask);
@@ -24,7 +24,7 @@ public class TaskStorageTest {
     @Test
     public void shouldHaveADeleteTaskMethod(){
         TaskStorage taskStorage = mock(TaskStorage.class);
-        TaskTemplate taskTemplate = new TaskTemplate("test task template");
+        TaskTemplate taskTemplate = new TaskTemplate("test task template", 300, 300);
         User testUser = new User("Aloo");
         Task testTask = new Task(testUser , taskTemplate);
         taskStorage.save(testTask);

@@ -1,8 +1,7 @@
-package com.taskr.core.resources;
+package com.taskr.core.model;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
 import java.util.Date;
@@ -44,16 +43,6 @@ public class Task {
 
     public Task() {
     }
-
-//    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
-//    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
-//       this.ownedBy = owner;
-//       this.title = title;
-//       this.description = description;
-//       this.minutesExpectedToComplete = minutesExpectedToComplete;
-//       this.actualWorkTime = actualWorkTime;
-//       this.templateId = 65535;
-//    }
 
     public long getId() {
         return id;

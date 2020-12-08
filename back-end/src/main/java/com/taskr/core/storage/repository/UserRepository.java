@@ -1,6 +1,6 @@
-package com.taskr.core.storages;
+package com.taskr.core.storage.repository;
 
-import com.taskr.core.resources.User;
+import com.taskr.core.model.User;
 import org.springframework.data.repository.CrudRepository;
 
 public interface UserRepository extends CrudRepository<User, Long> {

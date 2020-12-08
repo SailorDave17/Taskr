@@ -2,12 +2,12 @@ package com.taskr.core.controller;
 
 
 import com.taskr.core.ResourceManager;
-import com.taskr.core.resources.Task;
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
-import com.taskr.core.storages.TaskStorage;
-import com.taskr.core.storages.TaskTemplateStorage;
-import com.taskr.core.storages.UserStorage;
+import com.taskr.core.model.Task;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Set;

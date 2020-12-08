@@ -1,6 +1,7 @@
-package com.taskr.core.resources;
+package com.taskr.core.model;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
 import java.util.*;

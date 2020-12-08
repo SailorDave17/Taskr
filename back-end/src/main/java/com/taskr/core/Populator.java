@@ -1,11 +1,11 @@
 package com.taskr.core;
 
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
-import com.taskr.core.storages.TaskStorage;
-import com.taskr.core.storages.TaskTemplateStorage;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
 
-import com.taskr.core.storages.UserStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 

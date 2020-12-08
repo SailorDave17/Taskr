@@ -27,6 +27,8 @@ public class UserStorage {
             userTaskLoad += task.getActualWorkTime();
         }
         user.setCommittedTime(userTaskLoad);
+        int userRemainingAvailableTime = userTotalAvailableTime - userTaskLoad;
+        System.out.println(user.getName() + " has " + userRemainingAvailableTime + " left.");
         user.setRemainingAvailableTime(userTotalAvailableTime - userTaskLoad);
     }
 

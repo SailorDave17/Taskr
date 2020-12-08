@@ -57,7 +57,7 @@ public class ResourceManager {
         }
         Task newTask = new Task(assignedUser, taskTemplate);
         taskStorage.save(newTask);
-//        userStorage.updateUser(assignedUser);
+        userStorage.updateUser(assignedUser);
         userStorage.save(assignedUser);
     }
 

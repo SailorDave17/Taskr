@@ -1,8 +1,7 @@
-package com.taskr.core.resources;
+package com.taskr.core.model;
 
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import org.hibernate.annotations.Fetch;
 import org.hibernate.annotations.FetchMode;
@@ -23,8 +22,8 @@ public class User {
     // Reminder to self that the error "OneToMany attribute type should not be(...) was caused
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
 //    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy", cascade = CascadeType.ALL)
-    @JsonManagedReference
 //    @Fetch(value = FetchMode.SELECT)
+    @JsonManagedReference
     @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy")
     private Collection<Task> taskList;
     private Integer totalAvailableTime;
@@ -34,7 +33,7 @@ public class User {
     private String userIcon;
     private Integer numberTasksAssigned;
     private Integer numberTasksComplete;
-    @JsonIgnore
+    @JsonBackReference
     @Fetch(value = FetchMode.SELECT)
     @ManyToMany(fetch = FetchType.EAGER, mappedBy = "usersWhoCannotDoThisTask")
     private Collection<TaskTemplate> tasksUserCannotDo;// = new LinkedHashSet<>();
@@ -86,6 +85,10 @@ public class User {
 
     public Collection<Task> getTaskList() {
         return taskList;
+    }
+
+    public void setTaskList(Collection<Task> taskList) {
+        this.taskList = taskList;
     }
 
     public String getName() {
@@ -158,6 +161,10 @@ public class User {
 
     public Collection<TaskTemplate> getTasksUserCannotDo() {
         return tasksUserCannotDo;
+    }
+
+    public void setTasksUserCannotDo(Collection<TaskTemplate> tasksUserCannotDo) {
+        this.tasksUserCannotDo = tasksUserCannotDo;
     }
 
     public void addTaskUserCannotDo(TaskTemplate taskTemplate) {

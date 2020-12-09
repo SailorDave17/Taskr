@@ -15,9 +15,11 @@ const displaySingleUserView = function(user) {
     const userNamePageElement = document.createElement("h1");
     userNamePageElement.classList.add("username");
     userNamePageElement.innerText = `${user.name}'s Task List` //whatever day is being accessed by the user. default will be Sunday
+    console.log(user.userIcon) 
+    user.userIcon = "/front-end/images/Dad.png"
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
-    userIcon.setAttribute("src", "/front-end/images/woman_1f469.png")
+    userIcon.setAttribute("src", user.userIcon); 
     mainElement.appendChild(userPageHeader);
     userPageHeader.appendChild(userNamePageElement);
     userPageHeader.appendChild(userIcon);

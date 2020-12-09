@@ -33,17 +33,17 @@ const displaySingleUserView = function(user) {
     
     //calculating percent of tasks completed for progress bar
     // user.userNumberTasksAssigned = 2
-    // const percentOfTasksDone = numberOfTasksDone*100 / user.userNumberTasksAssigned;
-    // console.log(percentOfTasksDone);
+    const percentOfTasksDone = user.numberTasksComplete*100 / user.numberTasksAssigned;
+    console.log(percentOfTasksDone);
     // console.log(user.userNumberTasksAssigned);
 
     // //set up progress bar
-    // const displayProgressBar = document.createElement("progress");
-    // displayProgressBar.classList.add("user-progress-bar");
-    // displayProgressBar.setAttribute("value", percentOfTasksDone);
-    // //displayProgressBar.setAttribute("value", "70");
-    // displayProgressBar.setAttribute("max", "100");
-    // mainElement.appendChild(displayProgressBar);
+    const displayProgressBar = document.createElement("progress");
+    displayProgressBar.classList.add("user-progress-bar");
+    displayProgressBar.setAttribute("value", percentOfTasksDone);
+    //displayProgressBar.setAttribute("value", "70");
+    displayProgressBar.setAttribute("max", "100");
+    mainElement.appendChild(displayProgressBar);
     
 
     return mainElement;

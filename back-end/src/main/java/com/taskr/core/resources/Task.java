@@ -17,7 +17,7 @@ public class Task {
     private User ownedBy;
     private String title;
     private Integer minutesExpectedToComplete;
-    private Date dueBy;
+    private String dueBy;
     private Boolean done;
     private Integer actualWorkTime = 0;
     private String description;
@@ -45,16 +45,6 @@ public class Task {
     public Task() {
     }
 
-//    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
-//    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
-//       this.ownedBy = owner;
-//       this.title = title;
-//       this.description = description;
-//       this.minutesExpectedToComplete = minutesExpectedToComplete;
-//       this.actualWorkTime = actualWorkTime;
-//       this.templateId = 65535;
-//    }
-
     public long getId() {
         return id;
     }
@@ -75,11 +65,11 @@ public class Task {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
-    public Date getDueBy() {
+    public String getDueBy() {
         return dueBy;
     }
 
-    public void setDueBy(Date dueBy) {
+    public void setDueBy(String dueBy) {
         this.dueBy = dueBy;
     }
 

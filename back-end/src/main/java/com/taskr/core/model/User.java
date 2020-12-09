@@ -134,8 +134,8 @@ public class User {
         this.numberTasksAssigned = numberTasksAssigned;
     }
 
-    public Integer getNumberTasksComplete() {
-        return numberTasksComplete;
+    public Long  getNumberTasksComplete() {
+        return taskList.stream().filter(task -> task.isDone()).count();
     }
 
     public void setNumberTasksComplete(Integer numberTasksComplete) {

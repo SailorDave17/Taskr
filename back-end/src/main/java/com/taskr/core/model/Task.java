@@ -16,7 +16,7 @@ public class Task {
     private User ownedBy;
     private String title;
     private Integer minutesExpectedToComplete;
-    private Date dueBy;
+    private String dueBy;
     private Boolean done;
     private Integer actualWorkTime = 0;
     private String description;
@@ -64,11 +64,11 @@ public class Task {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
-    public Date getDueBy() {
+    public String getDueBy() {
         return dueBy;
     }
 
-    public void setDueBy(Date dueBy) {
+    public void setDueBy(String dueBy) {
         this.dueBy = dueBy;
     }
 

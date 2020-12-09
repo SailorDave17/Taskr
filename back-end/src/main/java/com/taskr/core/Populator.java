@@ -32,10 +32,10 @@ public class Populator implements CommandLineRunner {
         TaskTemplate finalProjectDemo = new TaskTemplate("Final Project Demo", "", 300);
         taskTemplateStorage.save(finalProjectDemo);
 
-        User mom = new User("Mom", 300, "pink", "mom.ico");
-        User dad = new User("Dad", 600, "green", "dad.ico");
-        User bro = new User("Bro", 200, "blue", "bro.ico");
-        User sis = new User("Sis", 200, "purple", "sis.ico");
+        User mom = new User("Mom", 300, "rose", "mom.ico");
+        User dad = new User("Dad", 600, "apple", "dad.ico");
+        User bro = new User("Bro", 200, "light-blue", "bro.ico");
+        User sis = new User("Sis", 200, "magenta", "sis.ico");
 
 //        userStorage.save(testUser);
         userStorage.save(mom);

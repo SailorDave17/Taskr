@@ -72,7 +72,7 @@ public class UserController {
         if(user.getUserIcon() != null){
             existingUser.setUserIcon(user.getUserIcon());
         }
-//        userStorage.updateUser(existingUser);
+        userStorage.updateUser(existingUser);
         userStorage.save(existingUser);
         return userStorage.findAll();
     }
@@ -80,7 +80,6 @@ public class UserController {
     @GetMapping("/api/user/{id}/delete")
     public Iterable<User> deleteUser(@PathVariable Long id) {
         if (userStorage.findById(id) != null) {
-            User userToDelete = userStorage.findById(id);
             userStorage.deleteById(id);
         }
         return userStorage.findAll();

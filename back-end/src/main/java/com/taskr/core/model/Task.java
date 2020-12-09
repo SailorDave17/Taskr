@@ -11,7 +11,7 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
-    @JsonIgnore
+    @JsonBackReference
     @ManyToOne
     private User ownedBy;
     private String title;

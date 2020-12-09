@@ -30,39 +30,30 @@ const displaySingleUserView = function(user) {
     user.taskList.forEach(task => {
         const taskStickyNote = document.createElement("div")
         taskStickyNote.classList.add("chores-list");
-
         const checkBox = document.createElement("input");
         checkBox.setAttribute("type", "checkbox");
         checkBox.classList.add("chore-done");
         // checkBox.setAttribute("id", task.title)
         checkBox.addEventListener('click', (checkboxEvent) => {
             checkboxEvent.preventDefault();
-            clearChildren(mainElement);
-            // const taskStatusJson = {
-            //     "id": task.id,
-            //     "title": task.title,
-            //     "minutesExpectedToComplete": task.minutesExpectedToComplete,
-            //     "dueBy": task.dueBy,
-            //     "done": true,
-            //     "actualWorkTime": task.actualWorkTime,
-            //     "description": task.description,
-            //     "templateId": task.templateId  
-            // }
+            checkboxEvent.stopPropagation();
+            // clearChildren(mainElement);
+            checkBox.checked = true;
             task.done=true 
             console.log(task.done)
             console.log(task)
-            fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
-                method: 'PATCH', 
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(task)
-            })
-            .then(response => response.json())
-            // .then(response => console.log(response))
-            .then(user => displaySingleUserView(user))
-            .then(singleUserElement => mainElement.appendChild(singleUserElement))
-            .catch(error => console.error(error.stack));
+            // fetch("http://localhost:8080/api/task/" + task.id +"/update" ,{
+            //     method: 'PATCH', 
+            //     headers: {
+            //         'Content-Type': 'application/json'
+            //     },
+            //     body: JSON.stringify(task)
+            // })
+            // .then(response => response.json())
+            // // .then(response => console.log(response))
+            // .then(user => displaySingleUserView(user))
+            // .then(singleUserElement => mainElement.appendChild(singleUserElement))
+            // .catch(error => console.error(error.stack));
         });
         if (task.done === true) {
             // checkBox.check();

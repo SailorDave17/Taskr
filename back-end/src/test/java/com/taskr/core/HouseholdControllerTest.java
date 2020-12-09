@@ -1,10 +1,10 @@
 package com.taskr.core;
 
 import com.taskr.core.controller.HouseholdController;
-import com.taskr.core.resources.User;
-import com.taskr.core.storages.TaskStorage;
-import com.taskr.core.storages.TaskTemplateStorage;
-import com.taskr.core.storages.UserStorage;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;

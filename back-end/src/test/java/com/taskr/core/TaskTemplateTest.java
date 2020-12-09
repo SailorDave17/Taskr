@@ -1,6 +1,6 @@
 package com.taskr.core;
 
-import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.model.TaskTemplate;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

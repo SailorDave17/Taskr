@@ -1,7 +1,9 @@
-package com.taskr.core.storages;
+package com.taskr.core.storage;
 
-import com.taskr.core.resources.TaskTemplate;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.storage.repository.TaskTemplateRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 
 @Service

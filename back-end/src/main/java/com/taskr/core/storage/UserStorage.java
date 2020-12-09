@@ -1,8 +1,10 @@
-package com.taskr.core.storages;
+package com.taskr.core.storage;
 
-import com.taskr.core.resources.Task;
-import com.taskr.core.resources.User;
+import com.taskr.core.model.Task;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.repository.UserRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UserStorage {
@@ -27,7 +29,8 @@ public class UserStorage {
             userTaskLoad += task.getActualWorkTime();
         }
         user.setCommittedTime(userTaskLoad);
-        user.setRemainingAvailableTime(userTotalAvailableTime - userTaskLoad);
+        int userRemainingAvailableTime = userTotalAvailableTime - userTaskLoad;
+        user.setRemainingAvailableTime(userRemainingAvailableTime);
     }
 
     public void updateUserTaskCount(User user) {

@@ -1,11 +1,11 @@
 package com.taskr.core;
 
-import com.taskr.core.resources.Task;
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
-import com.taskr.core.storages.TaskStorage;
-import com.taskr.core.storages.TaskTemplateStorage;
-import com.taskr.core.storages.UserStorage;
+import com.taskr.core.model.Task;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
@@ -36,12 +36,10 @@ public class ResourceManager {
 
     public void allocateSingleTask(TaskTemplate taskTemplate){
         Set<User> candidateUsers = new HashSet<>();
-
         Iterable<User> allUsers = userStorage.findAll();
-        System.out.println(allUsers);
         for (User user : allUsers){
             if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user)){
-                candidateUsers.add(user);
+                candidateUsers.add(userStorage.findById(user.getId()));
             }
         }
         User assignedUser = candidateUsers.iterator().next();
@@ -57,8 +55,15 @@ public class ResourceManager {
         }
         Task newTask = new Task(assignedUser, taskTemplate);
         taskStorage.save(newTask);
-//        userStorage.updateUser(assignedUser);
-        userStorage.save(assignedUser);
+        System.out.println("Assigned user: " + assignedUser.getNumberTasksAssigned());
+        User userInDb = userStorage.findById(assignedUser.getId());
+        System.out.println("User from storage: " + userInDb.getNumberTasksAssigned());
+        userInDb.setTaskList(assignedUser.getTaskList());
+        System.out.println("User from storage after updating task list: " + userInDb.getNumberTasksAssigned());
+        userStorage.updateUser(userInDb);
+        System.out.println("User from DB after running updateUser(): " + userInDb.getNumberTasksAssigned());
+        userStorage.save(userInDb);
+        System.out.println("User from DB after saving: " + userInDb.getNumberTasksAssigned());
     }
 
     public void allocateAllTasks(){

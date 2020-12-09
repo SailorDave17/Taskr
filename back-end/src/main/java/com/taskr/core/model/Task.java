@@ -1,8 +1,7 @@
-package com.taskr.core.resources;
+package com.taskr.core.model;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
 import java.util.Date;
@@ -17,7 +16,7 @@ public class Task {
     private User ownedBy;
     private String title;
     private Integer minutesExpectedToComplete;
-    private Date dueBy;
+    private String dueBy;
     private Boolean done;
     private Integer actualWorkTime = 0;
     private String description;
@@ -37,6 +36,10 @@ public class Task {
         if (taskTemplate.getActualWorkTime() != 0){
             this.actualWorkTime = taskTemplate.getActualWorkTime();
         } else this.actualWorkTime = 0;
+        if(taskTemplate.getDueDate() != null){
+            this.dueBy = taskTemplate.getDueDate();
+        }else this.dueBy = "daily";
+
         this.done = false;
         owner.addTask(this);
         System.out.println("I added the task to the owner");
@@ -44,16 +47,6 @@ public class Task {
 
     public Task() {
     }
-
-//    //TODO Remove overloaded constructor for Task class to stop tasks being created without a master taskTemplate
-//    public Task(User owner, String title, String description, Integer minutesExpectedToComplete, Integer actualWorkTime){
-//       this.ownedBy = owner;
-//       this.title = title;
-//       this.description = description;
-//       this.minutesExpectedToComplete = minutesExpectedToComplete;
-//       this.actualWorkTime = actualWorkTime;
-//       this.templateId = 65535;
-//    }
 
     public long getId() {
         return id;
@@ -75,11 +68,11 @@ public class Task {
         this.minutesExpectedToComplete = minutesExpectedToComplete;
     }
 
-    public Date getDueBy() {
+    public String getDueBy() {
         return dueBy;
     }
 
-    public void setDueBy(Date dueBy) {
+    public void setDueBy(String dueBy) {
         this.dueBy = dueBy;
     }
 

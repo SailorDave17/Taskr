@@ -1,7 +1,7 @@
 GET localhost:8080/api/household
 
 ### Get a user with the given id
-GET localhost:8080/api/user/1
+GET localhost:8080/api/user/3
 Accept: application/json
 
 ### Get all users

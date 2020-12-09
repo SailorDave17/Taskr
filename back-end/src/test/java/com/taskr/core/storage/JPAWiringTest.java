@@ -1,8 +1,10 @@
-package com.taskr.core.storages;
+package com.taskr.core.storage;
 
-import com.taskr.core.ResourceManager;
-import com.taskr.core.resources.TaskTemplate;
-import com.taskr.core.resources.User;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.repository.TaskRepository;
+import com.taskr.core.storage.repository.TaskTemplateRepository;
+import com.taskr.core.storage.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;

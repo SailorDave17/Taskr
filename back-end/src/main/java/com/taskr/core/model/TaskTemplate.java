@@ -1,4 +1,7 @@
-package com.taskr.core.resources;
+package com.taskr.core.model;
+
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
 import java.util.*;
@@ -12,23 +15,27 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
+    private String dueDate;
 //    @Fetch(value = FetchMode.SELECT)
+    @JsonManagedReference
     @ManyToMany(fetch = FetchType.EAGER)//, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
     private Collection<User> usersWhoCannotDoThisTask;
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete, User ... usersWhoCannotDoThisTask) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete, String dueDate, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = minutesExpectedToComplete;
+        this.dueDate = dueDate;
         this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime, User ... usersWhoCannotDoThisTask) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, String dueDate, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = actualWorkTime;
+        this.dueDate = dueDate;
         this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
@@ -114,5 +121,14 @@ public class TaskTemplate {
                 ", description='" + description + '\'' +
                 ", actualWorkTime=" + actualWorkTime +
                 '}';
+    }
+
+    public String getDueDate() {
+        return this.dueDate;
+
+    }
+
+    public void setDueDate(String dueDate) {
+        this.dueDate = dueDate;
     }
 }

@@ -36,6 +36,10 @@ public class Task {
         if (taskTemplate.getActualWorkTime() != 0){
             this.actualWorkTime = taskTemplate.getActualWorkTime();
         } else this.actualWorkTime = 0;
+        if(taskTemplate.getDueDate() != null){
+            this.dueBy = taskTemplate.getDueDate();
+        }else this.dueBy = "daily";
+
         this.done = false;
         owner.addTask(this);
         System.out.println("I added the task to the owner");

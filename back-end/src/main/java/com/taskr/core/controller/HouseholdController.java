@@ -69,6 +69,9 @@ public class HouseholdController {
         if(taskTemplate.getUsersWhoCannotDoThisTask() != null){
             existingTaskTemplate.setUsersWhoCannotDoThisTask(taskTemplate.getUsersWhoCannotDoThisTask());
         }
+        if(taskTemplate.getDueDate() != null){
+            existingTaskTemplate.setDueDate(taskTemplate.getDueDate());
+        }
         taskTemplateStorage.save(existingTaskTemplate);
         resourceManager.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
         return existingTaskTemplate;

@@ -17,28 +17,23 @@ import {
 const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
-<<<<<<< HEAD
 // This is the path to the single user view.
-// const mainElement = document.createElement("main");
-// mainElement.classList.add("main-content");
-// container.appendChild(mainElement);
+const mainElement = document.createElement("main");
+mainElement.classList.add("main-content");
+container.appendChild(mainElement);
 
 //This is the path to the all user view.
-const allUsersMainElement = document.createElement("main");
-allUsersMainElement.classList.add("all-users-main");
-container.appendChild(allUsersMainElement);
+// const allUsersMainElement = document.createElement("main");
+// allUsersMainElement.classList.add("all-users-main");
+// container.appendChild(allUsersMainElement);
 
-=======
 const mainElement = document.createElement("main");
 mainElement.classList.add("main-content");
 container.appendChild(mainElement);
 const userNamePageElement = document.createElement("h1");
 userNamePageElement.classList.add("username");
 container.appendChild(userNamePageElement);
-<<<<<<< HEAD
->>>>>>> 2cf3b92... Testing changes to single user view rendering
-=======
->>>>>>> 2cf3b925d3be882ee257ded72bd9ee99b96e8f98
+
 
 // fetch("http://localhost:8080/api/user/1")
 //     .then(response => response.json())
@@ -46,7 +41,7 @@ container.appendChild(userNamePageElement);
 //     .then(user => displaySingleUserView(user))
 //     .then(singleUserElement => mainElement.appendChild(singleUserElement))
 //     .catch(error => console.log(error));
-//     )
+//     
 
 fetch("http://localhost:8080/api/user/2")
     .then(response => response.json())
@@ -54,17 +49,6 @@ fetch("http://localhost:8080/api/user/2")
     .then(users => displayAllUsersView(users))
     .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
     .catch(error => console.log(error));
-    
 
 
-<<<<<<< HEAD
 container.appendChild(createFooter())
-
-
-<<<<<<< HEAD
-=======
-container.appendChild(createFooter())
->>>>>>> 2cf3b92... Testing changes to single user view rendering
-=======
-container.appendChild(createFooter())
->>>>>>> 2cf3b925d3be882ee257ded72bd9ee99b96e8f98

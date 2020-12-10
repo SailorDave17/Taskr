@@ -35,3 +35,5 @@ fetch("http://localhost:8080/api/users")
 
 
 container.appendChild(createFooter());
+
+export { allUsersMainElement }

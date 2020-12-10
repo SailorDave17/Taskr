@@ -1,3 +1,5 @@
+import { createFooter } from "./footer.js";
+
 const progressBar = document.createElement("progress");
 
 
@@ -15,7 +17,7 @@ const displaySingleUserView = function(user) {
     userNamePageElement.classList.add("username");
     userNamePageElement.innerText = `${user.name}'s Task List` //whatever day is being accessed by the user. default will be Sunday
     console.log(user.userIcon)
-    user.userIcon = "/front-end/images/" + user.userIcon;
+        // user.userIcon = "/front-end/images/" + user.userIcon;
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
     userIcon.setAttribute("src", user.userIcon);
@@ -32,6 +34,10 @@ const displaySingleUserView = function(user) {
     progressBar.setAttribute("max", "100");
     updateProgressBar(progressBar, user.taskList);
     mainElement.appendChild(progressBar);
+    // const footer = document.createElement("footer");
+    // footer.classList.add("footer")
+    // footer.innerHTML = '&copy 2020 - Team Taskr - We Can {Code} IT'
+    mainElement.append(createFooter());
 
     return mainElement;
 }

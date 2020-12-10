@@ -1,9 +1,13 @@
-import{
+import {
     displayAllUsersView
-}from "./allusersview.js"
+} from "./allusersview.js"
 
-const displayHeader = function () {
-    
+import {
+    allUsersMainElement
+} from "../app.js"
+
+const displayHeader = function() {
+
     const header = document.createElement("header");
     header.classList.add("title");
     const dropDown = document.createElement("div");
@@ -14,24 +18,21 @@ const displayHeader = function () {
     hamburgerMenuElement.classList.add("hamburger");
     hamburgerMenuElement.setAttribute("src", "/front-end/images/menu.png");
     hamburgerMenuElement.setAttribute("width", "100px");
-    
+
     const myDropdownbtn = document.createElement("div");
     myDropdownbtn.setAttribute("id", "myDropdown");
     myDropdownbtn.classList.add("dropdown-content");
     const goToAllUsersDisplay = document.createElement("a");
     goToAllUsersDisplay.classList.add("menu-item");
     goToAllUsersDisplay.innerText = "All Users";
-    goToAllUsersDisplay.addEventListener('click', () => {
-        
-        
-        
-        
+    goToAllUsersDisplay.addEventListener('click', (clickEvent) => {
+        clickEvent.preventDefault();
         fetch("http://localhost:8080/api/users")
-        .then(response => response.json())
-        .then(users => displayAllUsersView(users))
-        .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
-        .catch(error => console.log(error));
-        
+            .then(response => response.json())
+            .then(users => displayAllUsersView(users))
+            .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
+            .catch(error => console.log(error));
+
     });
     header.appendChild(goToAllUsersDisplay);
 
@@ -42,8 +43,8 @@ const displayHeader = function () {
     dropbtnElement.append(hamburgerMenuElement);
     dropDown.appendChild(myDropdownbtn);
     myDropdownbtn.appendChild(goToAllUsersDisplay);
-    
-   
+
+
     return header;
 
 }
@@ -51,5 +52,3 @@ const displayHeader = function () {
 export {
     displayHeader
 }
-
-

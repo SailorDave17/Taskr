@@ -40,7 +40,7 @@ const displaySingleUserView = function(user) {
     // //set up progress bar
     const displayProgressBar = document.createElement("progress");
     displayProgressBar.classList.add("user-progress-bar");
-    displayProgressBar.setAttribute("value", percentOfTasksDone);
+    displayProgressBar.setAttribute("value", (user.numberTasksComplete / user.numberTasksAssigned) * 100);
     //displayProgressBar.setAttribute("value", "70");
     displayProgressBar.setAttribute("max", "100");
     mainElement.appendChild(displayProgressBar);
@@ -87,6 +87,7 @@ function populateTaskList(taskList, taskListElement) {
                 // .then(response => console.log(response))
                 .then(userTasks => populateTaskList(userTasks, taskListElement))
                 .catch(error => console.error(error.stack));
+            displayProgressBar.setAttribute("value", (user.numberTasksComplete / user.numberTasksAssigned) * 100);
         });
 
 

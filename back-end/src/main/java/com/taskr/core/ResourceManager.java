@@ -55,15 +55,10 @@ public class ResourceManager {
         }
         Task newTask = new Task(assignedUser, taskTemplate);
         taskStorage.save(newTask);
-        System.out.println("Assigned user: " + assignedUser.getNumberTasksAssigned());
         User userInDb = userStorage.findById(assignedUser.getId());
-        System.out.println("User from storage: " + userInDb.getNumberTasksAssigned());
         userInDb.setTaskList(assignedUser.getTaskList());
-        System.out.println("User from storage after updating task list: " + userInDb.getNumberTasksAssigned());
         userStorage.updateUser(userInDb);
-        System.out.println("User from DB after running updateUser(): " + userInDb.getNumberTasksAssigned());
         userStorage.save(userInDb);
-        System.out.println("User from DB after saving: " + userInDb.getNumberTasksAssigned());
     }
 
     public void allocateAllTasks(){

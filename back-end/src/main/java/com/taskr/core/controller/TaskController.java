@@ -49,6 +49,9 @@ public class TaskController {
         if (task.getOwnedBy() != null){
             existingTask.setOwnedBy(task.getOwnedBy());
         }
+        taskStorage.save(existingTask);
+        userStorage.updateUser(task.getOwnedBy());
+        userStorage.save(task.getOwnedBy());
         return taskStorage.findAll();
     }
 

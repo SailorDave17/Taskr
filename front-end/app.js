@@ -29,11 +29,11 @@ fetch("http://localhost:8080/api/users")
     .then(response => response.json())
     // .then(json => console.log(json))
     .then(users => displayAllUsersView(users))
-    .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
+    .then(allUsersView => allUsersMainElement.replaceWith(allUsersView))
     .catch(error => console.log(error));
 
 
 
-container.appendChild(createFooter());
+container.append(createFooter());
 
 export { allUsersMainElement }

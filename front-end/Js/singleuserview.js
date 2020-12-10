@@ -1,12 +1,14 @@
 import { createFooter } from "./footer.js";
+import { displayHeader } from "./header.js";
 
 const progressBar = document.createElement("progress");
 
 
 const displaySingleUserView = function(user) {
     console.log(user)
-    const mainElement = document.createElement("main");
-    mainElement.classList.add("main-content");
+    const mainElement = document.querySelector(".main-content")
+        // const mainElement = document.createElement("main");
+        // mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
     userPageHeader.classList.add("user-page-header");
     console.log(user.userColor);
@@ -38,6 +40,7 @@ const displaySingleUserView = function(user) {
     // footer.classList.add("footer")
     // footer.innerHTML = '&copy 2020 - Team Taskr - We Can {Code} IT'
     mainElement.append(createFooter());
+
 
     return mainElement;
 }

@@ -1,7 +1,4 @@
 import {
-    allUsers
-} from "./sampleAllUserJson.js"
-import {
     displaySingleUserView
 } from "./singleuserview.js"
 
@@ -10,13 +7,15 @@ import {
 } from "./header.js"
 
 import { createFooter } from "./footer.js";
+// const allUsersMainElement = document.querySelector(".all-users-main");
 
 const displayAllUsersView = function(users) {
     const allUsersMainElement = document.createElement("main");
-    allUsersMainElement.classList.add("all-users-main");
+    allUsersMainElement.classList.add("all-users-main", "main-content");
     const userTiles = document.createElement("section");
     userTiles.classList.add("user-tiles");
     users.forEach(user => {
+        console.log(user.name)
         const singleUserTile = document.createElement("div");
         singleUserTile.classList.add("single-user-tile");
         singleUserTile.setAttribute("id", user.userColor);
@@ -37,7 +36,7 @@ const displayAllUsersView = function(users) {
             fetch("http://localhost:8080/api/user/" + user.id)
                 .then(response => response.json())
                 .then(user => displaySingleUserView(user))
-                .then(singleUserElement => mainElement.appendChild(singleUserElement))
+                .then(singleUserElement => mainElement.replaceWith(singleUserElement))
                 .catch(error => console.log(error));
         })
         const singleUserName = document.createElement("h1");

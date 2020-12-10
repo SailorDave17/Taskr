@@ -132,6 +132,7 @@ header {
 .footer {
     padding: 50px;
     justify-self: center;
+    text-align: center;
 }
 
 .list-of-default-tasks {

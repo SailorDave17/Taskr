@@ -32,7 +32,11 @@ userNamePageElement.classList.add("username");
 container.appendChild(userNamePageElement);
 
 
+<<<<<<< HEAD
 fetch("http://localhost:8080/api/user/3")
+=======
+fetch("http://localhost:8080/api/users")
+>>>>>>> dev
     .then(response => response.json())
     //.then(json => console.log(json))
     .then(user => displaySingleUserView(user))

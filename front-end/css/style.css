@@ -202,6 +202,9 @@ header {
 #light-blue {
     background-color: var(--light-blue);
 }
+img #mom.ico {
+    content: url("/front-end/images/mom.png");
+}
 
 .day {
     background-color: var(--rose);

@@ -16,9 +16,9 @@ container.prepend(displayHeader());
 const mainElement = document.createElement("main");
 mainElement.classList.add("main-content");
 container.appendChild(mainElement);
-// const userNamePageElement = document.createElement("h1"); 
-// userNamePageElement.classList.add("username");
-// container.appendChild(userNamePageElement);
+const userNamePageElement = document.createElement("h1");
+userNamePageElement.classList.add("username");
+container.appendChild(userNamePageElement);
 
 
 fetch("http://localhost:8080/api/user/2")

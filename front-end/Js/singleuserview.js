@@ -79,7 +79,7 @@ function populateTaskList(taskList, taskListElement) {
         if (task.done) {
             checkBox.checked = true;
         }
-        checkBox.setAttribute("id", task.title)
+        checkBox.setAttribute("id", `checkbox${task.id}`)
         checkBox.addEventListener('click', (checkboxEvent) => {
             checkboxEvent.preventDefault();
             checkboxEvent.stopPropagation();
@@ -94,17 +94,14 @@ function populateTaskList(taskList, taskListElement) {
                 .then(response => response.json())
                 .then(userTasks => {
                     updateProgressBar(progressBar, userTasks)
-                    document.querySelector(`.checkbox${task.id}`).checked = task.done;
+                    document.querySelector(`#checkbox${task.id}`).checked = task.done;
                 })
                 .catch(error => console.error(error.stack));
         });
 
-
-
         const choreName = document.createElement("label");
         choreName.classList.add("chore-name");
         choreName.innerText = task.title;
-        checkBox.setAttribute("id", "check-chore");
         choreName.setAttribute("for", "check-chore");
         const taskInfoList = document.createElement("ul");
         const taskDueDate = document.createElement("li");

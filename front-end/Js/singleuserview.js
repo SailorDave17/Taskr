@@ -2,24 +2,24 @@ import {
     allUsers
 } from "./sampleAllUserJson.js"
 
-const displaySingleUserView = function(user) { 
-    console.log (user) 
+const displaySingleUserView = function(user) {
+    console.log(user)
     const mainElement = document.createElement("main");
     mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
     userPageHeader.classList.add("user-page-header");
-    console.log(user.userColor)
-    user.userColor = "rose"
-    userPageHeader.setAttribute('id' , user.userColor)
-    // clearChildren(userPageHeader);
+    console.log(user.userColor);
+    user.userColor = user.userColor;
+    userPageHeader.setAttribute('id', user.userColor)
+        // clearChildren(userPageHeader);
     const userNamePageElement = document.createElement("h1");
     userNamePageElement.classList.add("username");
     userNamePageElement.innerText = `${user.name}'s Task List` //whatever day is being accessed by the user. default will be Sunday
-    console.log(user.userIcon) 
-    user.userIcon = "/front-end/images/Dad.png"
+    console.log(user.userIcon)
+    user.userIcon = "/front-end/images/" + user.userIcon;
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
-    userIcon.setAttribute("src", user.userIcon); 
+    userIcon.setAttribute("src", user.userIcon);
     mainElement.appendChild(userPageHeader);
     userPageHeader.appendChild(userNamePageElement);
     userPageHeader.appendChild(userIcon);
@@ -28,12 +28,12 @@ const displaySingleUserView = function(user) {
     const listOfTasks = document.createElement("div");
     listOfTasks.classList.add("user-task-list");
     mainElement.appendChild(listOfTasks);
-    populateTaskList(user.taskList , listOfTasks)
-    
-    
+    populateTaskList(user.taskList, listOfTasks)
+
+
     //calculating percent of tasks completed for progress bar
     // user.userNumberTasksAssigned = 2
-    const percentOfTasksDone = user.numberTasksComplete*100 / user.numberTasksAssigned;
+    const percentOfTasksDone = user.numberTasksComplete * 100 / user.numberTasksAssigned;
     console.log(percentOfTasksDone);
     // console.log(user.userNumberTasksAssigned);
 
@@ -44,12 +44,12 @@ const displaySingleUserView = function(user) {
     //displayProgressBar.setAttribute("value", "70");
     displayProgressBar.setAttribute("max", "100");
     mainElement.appendChild(displayProgressBar);
-    
+
 
     return mainElement;
 }
 
-const clearChildren = function (element) {
+const clearChildren = function(element) {
     while (element.firstChild) {
         element.removeChild(element.lastChild);
     }
@@ -75,17 +75,17 @@ function populateTaskList(taskList, taskListElement) {
             checkboxEvent.preventDefault();
             checkboxEvent.stopPropagation();
             clearChildren(taskListElement);
-            task.done = true;
+            task.done = checkBox.checked;
             fetch("http://localhost:8080/api/task/" + task.id + "/update", {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(task)
-            })
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(task)
+                })
                 .then(response => response.json())
                 // .then(response => console.log(response))
-                .then(userTasks => populateTaskList(userTasks , taskListElement))
+                .then(userTasks => populateTaskList(userTasks, taskListElement))
                 .catch(error => console.error(error.stack));
         });
 

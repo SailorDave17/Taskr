@@ -32,7 +32,7 @@ userNamePageElement.classList.add("username");
 container.appendChild(userNamePageElement);
 
 
-fetch("http://localhost:8080/api/user/2")
+fetch("http://localhost:8080/api/user/3")
     .then(response => response.json())
     //.then(json => console.log(json))
     .then(user => displaySingleUserView(user))
@@ -40,7 +40,7 @@ fetch("http://localhost:8080/api/user/2")
     .catch(error => console.log(error));
 
 
-// fetch("http://localhost:8080/api/user/2")
+// fetch("http://localhost:8080/api/users")
 //     .then(response => response.json())
 //     //.then(json => console.log(json))
 //     .then(users => displayAllUsersView(users))

@@ -1,10 +1,10 @@
-package com.taskr.core.Controllers;
+package com.taskr.core.controller;
 
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.model.Task;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -49,7 +49,8 @@ public class TaskController {
         if (task.getOwnedBy() != null){
             existingTask.setOwnedBy(task.getOwnedBy());
         }
-        return taskStorage.findAll();
+        taskStorage.save(existingTask);
+        return existingTask.getOwnedBy().getTaskList();
     }
 
     @GetMapping("/api/tasks")

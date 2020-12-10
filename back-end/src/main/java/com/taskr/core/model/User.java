@@ -1,28 +1,30 @@
-package com.taskr.core.Resources;
+package com.taskr.core.model;
 
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 
 import javax.persistence.*;
-
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Objects;
 
 
 @Entity
 public class User {
+    @Id
+    @GeneratedValue
+    private long id;
     private String name;
     // Reminder to self that the error "OneToMany attribute type should not be(...) was caused
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
 //    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy", cascade = CascadeType.ALL)
-    @JsonManagedReference
+//    @Fetch(value = FetchMode.SELECT)
     @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy")
-    private Collection<Task> taskList = new LinkedHashSet<>();
-
-    @Id
-    @GeneratedValue
-    private Long id;
+    private Collection<Task> taskList;
     private Integer totalAvailableTime;
     private Integer remainingAvailableTime;
     private Integer committedTime;
@@ -30,9 +32,10 @@ public class User {
     private String userIcon;
     private Integer numberTasksAssigned;
     private Integer numberTasksComplete;
-    @JsonIgnore
-    @ManyToMany
-    private Collection<TaskTemplate> tasksUserCannotDo = new LinkedHashSet<>();
+    @JsonBackReference
+    @Fetch(value = FetchMode.SELECT)
+    @ManyToMany(fetch = FetchType.EAGER, mappedBy = "usersWhoCannotDoThisTask")
+    private Collection<TaskTemplate> tasksUserCannotDo;// = new LinkedHashSet<>();
 
     protected User() {
     }
@@ -49,22 +52,25 @@ public class User {
         this.remainingAvailableTime = 0;
         this.committedTime = 0;
         this.numberTasksAssigned = 0;
+        this.tasksUserCannotDo = new HashSet<>();
     }
 
-    public User(String name, Integer totalAvailableTime, String userColor, String userIcon){
+    public User(String name, Integer totalAvailableTime, String userColor, String userIcon) {
         this.name = name;
         this.totalAvailableTime = totalAvailableTime;
         this.userColor = userColor;
         this.userIcon = userIcon;
         taskList = new HashSet<>();
+        this.remainingAvailableTime = 0;
         this.committedTime = 0;
         this.numberTasksAssigned = 0;
         this.numberTasksComplete = 0;
+        this.tasksUserCannotDo = new HashSet<>();
     }
 
     public void addTask(Task task) {
         taskList.add(task);
-        this.numberTasksAssigned +=1;
+        this.numberTasksAssigned += 1;
         this.committedTime += task.getActualWorkTime();
         this.remainingAvailableTime -= task.getActualWorkTime();
     }
@@ -78,6 +84,10 @@ public class User {
 
     public Collection<Task> getTaskList() {
         return taskList;
+    }
+
+    public void setTaskList(Collection<Task> taskList) {
+        this.taskList = taskList;
     }
 
     public String getName() {
@@ -124,8 +134,8 @@ public class User {
         this.numberTasksAssigned = numberTasksAssigned;
     }
 
-    public Integer getNumberTasksComplete() {
-        return numberTasksComplete;
+    public Long  getNumberTasksComplete() {
+        return taskList.stream().filter(task -> task.isDone()).count();
     }
 
     public void setNumberTasksComplete(Integer numberTasksComplete) {
@@ -148,13 +158,39 @@ public class User {
         this.userIcon = userIcon;
     }
 
+    public Collection<TaskTemplate> getTasksUserCannotDo() {
+        return tasksUserCannotDo;
+    }
+
+    public void setTasksUserCannotDo(Collection<TaskTemplate> tasksUserCannotDo) {
+        this.tasksUserCannotDo = tasksUserCannotDo;
+    }
+
+    public void addTaskUserCannotDo(TaskTemplate taskTemplate) {
+        if (tasksUserCannotDo == null) {
+            tasksUserCannotDo = new LinkedHashSet<>();
+        }
+        this.tasksUserCannotDo.add(taskTemplate);
+    }
+
+    public void removeTaskUserCannotDo(TaskTemplate taskTemplate) {
+        this.tasksUserCannotDo.remove(taskTemplate);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         User user = (User) o;
-        return name.equals(user.name) &&
-                id.equals(user.id);
+        return id == user.id &&
+                name.equals(user.name) &&
+                Objects.equals(totalAvailableTime, user.totalAvailableTime) &&
+                Objects.equals(remainingAvailableTime, user.remainingAvailableTime) &&
+                Objects.equals(committedTime, user.committedTime) &&
+                Objects.equals(userColor, user.userColor) &&
+                Objects.equals(userIcon, user.userIcon) &&
+                Objects.equals(numberTasksAssigned, user.numberTasksAssigned) &&
+                Objects.equals(numberTasksComplete, user.numberTasksComplete);
     }
 
     @Override
@@ -162,4 +198,20 @@ public class User {
         return Objects.hash(name, id);
     }
 
+    @Override
+    public String toString() {
+        return "User{" +
+                "name='" + name + '\'' +
+                ", taskList=" + taskList +
+                ", id=" + id +
+                ", totalAvailableTime=" + totalAvailableTime +
+                ", remainingAvailableTime=" + remainingAvailableTime +
+                ", committedTime=" + committedTime +
+                ", userColor='" + userColor + '\'' +
+                ", userIcon='" + userIcon + '\'' +
+                ", numberTasksAssigned=" + numberTasksAssigned +
+                ", numberTasksComplete=" + numberTasksComplete +
+                ", tasksUserCannotDo=" + tasksUserCannotDo +
+                "}\n";
+    }
 }

@@ -1,10 +1,10 @@
-package com.taskr.core.Resources;
+package com.taskr.core.model;
+
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.*;
 
 @Entity
 public class TaskTemplate {
@@ -15,30 +15,35 @@ public class TaskTemplate {
     private Integer minutesExpectedToComplete;
     private String description;
     private Integer actualWorkTime;
-    @ManyToMany(fetch = FetchType.EAGER, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
-    private Collection<User> usersWhoCannotDoThisTask = new LinkedHashSet<>();
+    private String dueDate;
+//    @Fetch(value = FetchMode.SELECT)
+    @JsonManagedReference
+    @ManyToMany(fetch = FetchType.EAGER)//, mappedBy = "tasksUserCannotDo", cascade = CascadeType.ALL)
+    private Collection<User> usersWhoCannotDoThisTask;
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, Integer minutesExpectedToComplete, String dueDate, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = minutesExpectedToComplete;
-        this.usersWhoCannotDoThisTask = new HashSet<>();
+        this.dueDate = dueDate;
+        this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
-    public TaskTemplate(String name, String description, Integer actualWorkTime) {
+    public TaskTemplate(String name, String description, Integer actualWorkTime, String dueDate, User ... usersWhoCannotDoThisTask) {
         this.name = name;
         this.description = description;
         this.actualWorkTime = actualWorkTime;
         this.minutesExpectedToComplete = actualWorkTime;
-        this.usersWhoCannotDoThisTask = new HashSet<>();
+        this.dueDate = dueDate;
+        this.usersWhoCannotDoThisTask = new HashSet<>(Arrays.asList(usersWhoCannotDoThisTask));
     }
 
-    public TaskTemplate(String name) {
+    public TaskTemplate(String name, int minutesExpectedToComplete, int actualWorkTime) {
         this.name = name;
         this.description = "";
-        this.actualWorkTime = 0;
-        this.minutesExpectedToComplete = 0;
+        this.actualWorkTime = actualWorkTime;
+        this.minutesExpectedToComplete = minutesExpectedToComplete;
         this.usersWhoCannotDoThisTask = new HashSet<>();
     }
 
@@ -87,12 +92,23 @@ public class TaskTemplate {
     }
 
     public void addUserWhoCannotDoThisTask(User user) {
+        if(usersWhoCannotDoThisTask == null){
+            usersWhoCannotDoThisTask = new HashSet<>();
+        }
         this.usersWhoCannotDoThisTask.add(user);
+        user.addTaskUserCannotDo(this);
+    }
+
+    public void removeUserWhoCannotDoThisTask(User user){
+        this.usersWhoCannotDoThisTask.remove(user);
+        user.removeTaskUserCannotDo(this);
     }
 
     public void setUsersWhoCannotDoThisTask(Iterable<User> usersWhoCannotDoThisTask) {
+        usersWhoCannotDoThisTask = new HashSet<>();
         for (User user : usersWhoCannotDoThisTask) {
             this.usersWhoCannotDoThisTask.add(user);
+            user.addTaskUserCannotDo(this);
         }
     }
 
@@ -105,5 +121,14 @@ public class TaskTemplate {
                 ", description='" + description + '\'' +
                 ", actualWorkTime=" + actualWorkTime +
                 '}';
+    }
+
+    public String getDueDate() {
+        return this.dueDate;
+
+    }
+
+    public void setDueDate(String dueDate) {
+        this.dueDate = dueDate;
     }
 }

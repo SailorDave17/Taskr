@@ -1,15 +1,11 @@
 package com.taskr.core;
 
-import com.taskr.core.Controllers.UserController;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserRepository;
-import com.taskr.core.Storages.UserStorage;
-import org.junit.jupiter.api.BeforeEach;
+import com.taskr.core.controller.UserController;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 import java.util.Collections;
 

@@ -1,15 +1,15 @@
-package com.taskr.core.Controllers;
+package com.taskr.core.controller;
 
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Resources.TaskTemplate;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.ResourceManager;
+import com.taskr.core.model.Task;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Set;
 
 @RestController
@@ -19,10 +19,13 @@ public class HouseholdController {
     private UserStorage userStorage;
     private TaskTemplateStorage taskTemplateStorage;
     private TaskStorage taskStorage;
-    public HouseholdController(TaskStorage taskStorage, UserStorage userStorage, TaskTemplateStorage taskTemplateStorage) {
+    private ResourceManager resourceManager;
+
+    public HouseholdController(TaskStorage taskStorage, UserStorage userStorage, TaskTemplateStorage taskTemplateStorage, ResourceManager resourceManager) {
         this.userStorage = userStorage;
         this.taskTemplateStorage = taskTemplateStorage;
         this.taskStorage = taskStorage;
+        this.resourceManager = resourceManager;
     }
 
     @GetMapping("/api/household")
@@ -66,20 +69,23 @@ public class HouseholdController {
         if(taskTemplate.getUsersWhoCannotDoThisTask() != null){
             existingTaskTemplate.setUsersWhoCannotDoThisTask(taskTemplate.getUsersWhoCannotDoThisTask());
         }
+        if(taskTemplate.getDueDate() != null){
+            existingTaskTemplate.setDueDate(taskTemplate.getDueDate());
+        }
         taskTemplateStorage.save(existingTaskTemplate);
-        taskStorage.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
+        resourceManager.updateAllTasksBasedOnTemplate(existingTaskTemplate.getId());
         return existingTaskTemplate;
     }
 
     @PostMapping("/api/household/assign_tasks")
     public Iterable<Task> assignTasks(@RequestBody Iterable<TaskTemplate> taskTemplateList){
-        taskTemplateStorage.allocateTasks((Set<TaskTemplate>) taskTemplateList);
+        resourceManager.allocateTasks((Set<TaskTemplate>) taskTemplateList);
         return taskStorage.findAll();
     }
 
     @PostMapping("/api/household/assign_all_tasks")
     public Iterable<Task> assignAllTasks(){
-        taskTemplateStorage.allocateAllTasks();
+        resourceManager.allocateAllTasks();
         return taskStorage.findAll();
     }
 }

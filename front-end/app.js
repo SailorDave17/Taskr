@@ -36,7 +36,7 @@ container.appendChild(allUsersMainElement);
 //     .catch(error => console.log(error));
 //     )
 
-    fetch("http://localhost:8080/api/users")
+fetch("http://localhost:8080/api/user/2")
     .then(response => response.json())
     //.then(json => console.log(json))
     .then(users => displayAllUsersView(users))

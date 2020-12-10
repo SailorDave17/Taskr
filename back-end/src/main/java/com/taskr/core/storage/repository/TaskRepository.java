@@ -1,6 +1,6 @@
-package com.taskr.core.Storages;
+package com.taskr.core.storage.repository;
 
-import com.taskr.core.Resources.Task;
+import com.taskr.core.model.Task;
 import org.springframework.data.repository.CrudRepository;
 
 public interface TaskRepository extends CrudRepository<Task, Long> {

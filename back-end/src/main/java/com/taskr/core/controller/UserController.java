@@ -1,11 +1,11 @@
-package com.taskr.core.Controllers;
+package com.taskr.core.controller;
 
-import com.taskr.core.Resources.Task;
-import com.taskr.core.Resources.TaskTemplate;
-import com.taskr.core.Resources.User;
-import com.taskr.core.Storages.TaskStorage;
-import com.taskr.core.Storages.TaskTemplateStorage;
-import com.taskr.core.Storages.UserStorage;
+import com.taskr.core.model.Task;
+import com.taskr.core.model.TaskTemplate;
+import com.taskr.core.model.User;
+import com.taskr.core.storage.TaskStorage;
+import com.taskr.core.storage.TaskTemplateStorage;
+import com.taskr.core.storage.UserStorage;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Date;
@@ -27,18 +27,6 @@ public class UserController {
     @GetMapping("/api/user/{id}")
     public User retrieveUserById(@PathVariable Long id) {
         return userStorage.findById(id);
-    }
-
-    //Not necessary in the final project
-    //TODO remove this once auto-assign algorithm exists.
-    @PatchMapping("/api/user/{userId}/assign_task")
-    public User assignTaskToUser(@PathVariable Long userId, @RequestBody TaskTemplate taskTemplateInput) {
-        User user = userStorage.findById(userId);
-        Date dueDate = new Date(1607576400000L);
-        TaskTemplate taskTemplate = taskTemplateStorage.findById(taskTemplateInput.getId());
-        Task newTask = new Task(user, taskTemplate);
-        taskStorage.save(newTask);
-        return user;
     }
 
     @PatchMapping("/api/user/{id}/remove_task")
@@ -80,8 +68,7 @@ public class UserController {
     @GetMapping("/api/user/{id}/delete")
     public Iterable<User> deleteUser(@PathVariable Long id) {
         if (userStorage.findById(id) != null) {
-            User userToDelete = userStorage.findById(id);
-            userStorage.delete(userToDelete);
+            userStorage.deleteById(id);
         }
         return userStorage.findAll();
     }

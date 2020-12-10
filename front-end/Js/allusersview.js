@@ -17,20 +17,19 @@ const displayAllUsersView = function(users) {
     const singleUserTile = document.createElement("div");
     singleUserTile.classList.add("single-user-tile");
     singleUserTile.setAttribute("id" , user.userColor);
-    singleUserTile.innerText = "Electric Boogaloo";
     const singleUserName = document.createElement("h1");
     singleUserName.classList.add("single-user-name");
     singleUserName.innerText = user.name;
     const singleUserIcon = document.createElement("img");
     singleUserIcon.classList.add("user-icon");
-    const userIcon = "/front-end/images/mom.png";
-    if(user.userIcon === "sis.ico") {
-        userIcon = "front-end/images/sis.png";
-    }
-    if(user.userIcon === "dad.ico") {
-        userIcon = "front-end\images\Dad.png";
-    }
-    singleUserIcon.setAttribute("src" , userIcon);
+    // const userIcon = "/front-end/images/mom.png";
+    // if(user.userIcon === "sis.ico") {
+    //     userIcon = "front-end/images/sis.png";
+    // }
+    // if(user.userIcon === "dad.ico") {
+    //     userIcon = "front-end\images\Dad.png";
+    // }
+    singleUserIcon.setAttribute("src" , user.userIcon);
     // const tasksAssigned = document.createElement("p");
     // tasksAssigned.classList.add("tasks-assigned");
     // tasksAssigned.innerText = "number of tasks";

@@ -34,17 +34,17 @@ container.appendChild(allUsersMainElement);
 //     .then(user => displaySingleUserView(user))
 //     .then(singleUserElement => mainElement.appendChild(singleUserElement))
 //     .catch(error => console.log(error));
-//     )
+    
 
-fetch("http://localhost:8080/api/user/2")
+fetch("http://localhost:8080/api/users")
     .then(response => response.json())
-    //.then(json => console.log(json))
+    // .then(json => console.log(json))
     .then(users => displayAllUsersView(users))
     .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
     .catch(error => console.log(error));
     
 
 
-container.appendChild(createFooter())
+container.appendChild(createFooter());
 
 

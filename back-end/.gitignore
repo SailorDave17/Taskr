@@ -36,5 +36,5 @@ out/
 ### VS Code ###
 .vscode/
 
-### H2 Database ###
-**/persist.mv.db
+    ### H2 Database ###
+    **/persist.mv.db

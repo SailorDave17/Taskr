@@ -27,11 +27,12 @@ const displayHeader = function() {
     goToAllUsersDisplay.innerText = "All Users";
     goToAllUsersDisplay.addEventListener('click', (clickEvent) => {
         clickEvent.preventDefault();
-        document.querySelector(".main-content").remove();
+        const mainContent = document.querySelector(".main-content"); //.remove();
         fetch("http://localhost:8080/api/users")
             .then(response => response.json())
             .then(users => displayAllUsersView(users))
-            .then(allUsersView => document.querySelector(".container").append(allUsersView))
+            .then(allUsersView => mainContent.replaceWith(allUsersView))
+            // .then(allUsersView => document.querySelector(".container").append(allUsersView))
             .catch(error => console.log(error));
 
     });

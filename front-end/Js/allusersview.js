@@ -13,9 +13,7 @@ const displayAllUsersView = function (users) {
         const singleUserName = document.createElement("h1")
         singleUserName.classList.add("single-user-name")
         singleUserName.innerText = user.name;
-        singleUserTile.append(singleUserName);
         const singleUserIcon = document.createElement("img")
-        singleUserIcon.append(singleUserIcon)
         singleUserIcon.classList.add("user-icon")
         singleUserIcon.setAttribute("src", user.userIcon)
         const tasksAssigned = document.createElement("p")
@@ -28,7 +26,6 @@ const displayAllUsersView = function (users) {
         progressBarElement.setAttribute("value", userPercentTaskDone)
         progressBarElement.setAttribute("max", "100")
 
-        allUsersMainElement.append(singleUserTile);
         
 
 

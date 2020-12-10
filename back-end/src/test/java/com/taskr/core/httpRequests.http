@@ -31,3 +31,19 @@ GET http://localhost:8080/api/tasks
 
 ###
 GET http://localhost:8080/api/household/tasks
+
+###
+PATCH http://localhost:8080/api/task/50/update
+Content-Type: text/json
+
+{
+  "id": 50,
+  "title": "Dust Ceiling Fans",
+  "minutesExpectedToComplete": 30,
+  "dueBy": null,
+  "done": true,
+  "actualWorkTime": 30,
+  "description": "Wipe blades of ceiling fans down and ensure dust is blown out of fan motor housing",
+  "templateId": 27
+}
+###

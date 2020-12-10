@@ -50,8 +50,7 @@ const displayAllUsersView = function(users) {
         tasksAssigned.innerText = "Number of Tasks: " + user.numberTasksAssigned;
         const progressBarElement = document.createElement("progress");
         progressBarElement.classList.add("progress-bar");
-        const userPercentTaskDone = user.numberTasksCompleted * 100 / user.numberTasksAssigned;
-        progressBarElement.setAttribute("value", userPercentTaskDone);
+        progressBarElement.setAttribute("value", (user.numberTasksComplete / user.numberTasksAssigned) * 100);
         progressBarElement.setAttribute("max", "100");
         allUsersMainElement.appendChild(userTiles);
         userTiles.appendChild(singleUserTile);

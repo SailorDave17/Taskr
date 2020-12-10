@@ -35,7 +35,10 @@ container.appendChild(mainElement);
 const userNamePageElement = document.createElement("h1");
 userNamePageElement.classList.add("username");
 container.appendChild(userNamePageElement);
+<<<<<<< HEAD
 >>>>>>> 2cf3b92... Testing changes to single user view rendering
+=======
+>>>>>>> 2cf3b925d3be882ee257ded72bd9ee99b96e8f98
 
 // fetch("http://localhost:8080/api/user/1")
 //     .then(response => response.json())
@@ -58,6 +61,10 @@ fetch("http://localhost:8080/api/user/2")
 container.appendChild(createFooter())
 
 
+<<<<<<< HEAD
 =======
 container.appendChild(createFooter())
 >>>>>>> 2cf3b92... Testing changes to single user view rendering
+=======
+container.appendChild(createFooter())
+>>>>>>> 2cf3b925d3be882ee257ded72bd9ee99b96e8f98

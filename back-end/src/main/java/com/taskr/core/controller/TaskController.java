@@ -50,6 +50,8 @@ public class TaskController {
             existingTask.setOwnedBy(task.getOwnedBy());
         }
         taskStorage.save(existingTask);
+        userStorage.updateUser(task.getOwnedBy());
+        userStorage.save(task.getOwnedBy());
         return existingTask.getOwnedBy().getTaskList();
     }
 

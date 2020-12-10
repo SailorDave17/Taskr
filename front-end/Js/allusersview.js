@@ -2,11 +2,7 @@ import {
     allUsers
 } from "./sampleAllUserJson.js"
 
-// import {
-//     clearChildren
-// } from "./singleuserview.js"
-
-const displayAllUsersView = function(users) {
+const displayAllUsersView = function (users) {
     const allUsersMainElement = document.createElement("main");
     allUsersMainElement.classList.add("all-users-main");
     const userTiles = document.createElement("section");
@@ -46,12 +42,19 @@ const displayAllUsersView = function(users) {
     singleUserTile.appendChild(progressBarElement);
 
         
-    }); 
+
+
+
+    });
 
     // const pieChartElement = document.createElement("div")
     // pieChartElement.classList.add("piechart")
 
     return allUsersMainElement;
+
+    return {
+        allUsersMainElement
+    }
 
 }
 const clearChildren = function (element) {
@@ -61,6 +64,6 @@ const clearChildren = function (element) {
 }
 
 
-export{
+export {
     displayAllUsersView
 }

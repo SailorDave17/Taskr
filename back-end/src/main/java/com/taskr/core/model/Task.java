@@ -43,7 +43,6 @@ public class Task {
 
         this.done = false;
         owner.addTask(this);
-        System.out.println("I added the task to the owner");
     }
 
     public Task() {

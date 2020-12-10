@@ -1,6 +1,7 @@
 package com.taskr.core.model;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.persistence.*;
@@ -11,7 +12,7 @@ public class Task {
     @Id
     @GeneratedValue
     private long id;
-    @JsonBackReference
+    @JsonIgnore
     @ManyToOne
     private User ownedBy;
     private String title;

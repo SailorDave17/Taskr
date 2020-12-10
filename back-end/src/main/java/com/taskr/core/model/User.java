@@ -23,7 +23,6 @@ public class User {
     // by the target not being an @Entity and the Set not being generic enough (was HashSet)
 //    @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy", cascade = CascadeType.ALL)
 //    @Fetch(value = FetchMode.SELECT)
-    @JsonManagedReference
     @OneToMany(fetch = FetchType.EAGER, mappedBy = "ownedBy")
     private Collection<Task> taskList;
     private Integer totalAvailableTime;
@@ -135,8 +134,8 @@ public class User {
         this.numberTasksAssigned = numberTasksAssigned;
     }
 
-    public Integer getNumberTasksComplete() {
-        return numberTasksComplete;
+    public Long  getNumberTasksComplete() {
+        return taskList.stream().filter(task -> task.isDone()).count();
     }
 
     public void setNumberTasksComplete(Integer numberTasksComplete) {

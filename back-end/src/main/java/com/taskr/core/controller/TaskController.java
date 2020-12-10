@@ -49,7 +49,8 @@ public class TaskController {
         if (task.getOwnedBy() != null){
             existingTask.setOwnedBy(task.getOwnedBy());
         }
-        return taskStorage.findAll();
+        taskStorage.save(existingTask);
+        return existingTask.getOwnedBy().getTaskList();
     }
 
     @GetMapping("/api/tasks")

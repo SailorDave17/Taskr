@@ -37,6 +37,7 @@ public class Populator implements CommandLineRunner {
         User bro = new User("Bro", 200, "light-blue", "/front-end/images/Bro.png");
         User sis = new User("Sis", 200, "magenta", "/front-end/images/sis.png");
 
+
 //        userStorage.save(testUser);
         userStorage.save(mom);
         userStorage.save(dad);

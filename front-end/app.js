@@ -17,23 +17,52 @@ import {
 const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
+<<<<<<< HEAD
+=======
+// This is the path to the single user view.
+const mainElement = document.createElement("main");
+mainElement.classList.add("main-content");
+container.appendChild(mainElement);
+>>>>>>> dev
 
 //This is the path to the all user view.
-const allUsersMainElement = document.createElement("main");
-allUsersMainElement.classList.add("all-users-main");
-container.appendChild(allUsersMainElement);
+// const allUsersMainElement = document.createElement("main");
+// allUsersMainElement.classList.add("all-users-main");
+// container.appendChild(allUsersMainElement);
+
+const userNamePageElement = document.createElement("h1");
+userNamePageElement.classList.add("username");
+container.appendChild(userNamePageElement);
 
 
-
+<<<<<<< HEAD
+fetch("http://localhost:8080/api/user/3")
+=======
 fetch("http://localhost:8080/api/users")
+>>>>>>> dev
     .then(response => response.json())
+<<<<<<< HEAD
     // .then(json => console.log(json))
     .then(users => displayAllUsersView(users))
     .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
+=======
+    //.then(json => console.log(json))
+    .then(user => displaySingleUserView(user))
+    .then(singleUserElement => mainElement.appendChild(singleUserElement))
+>>>>>>> dev
     .catch(error => console.log(error));
-    
 
 
+<<<<<<< HEAD
 container.appendChild(createFooter());
+=======
+// fetch("http://localhost:8080/api/users")
+//     .then(response => response.json())
+//     //.then(json => console.log(json))
+//     .then(users => displayAllUsersView(users))
+//     .then(allUsersView => allUsersMainElement.appendChild(allUsersView))
+//     .catch(error => console.log(error));
+>>>>>>> dev
 
 
+container.appendChild(createFooter())

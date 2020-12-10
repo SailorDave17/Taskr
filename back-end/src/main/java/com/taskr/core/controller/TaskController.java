@@ -52,7 +52,7 @@ public class TaskController {
         taskStorage.save(existingTask);
         userStorage.updateUser(task.getOwnedBy());
         userStorage.save(task.getOwnedBy());
-        return taskStorage.findAll();
+        return existingTask.getOwnedBy().getTaskList();
     }
 
     @GetMapping("/api/tasks")

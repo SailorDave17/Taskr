@@ -17,6 +17,7 @@ import {
 const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
+<<<<<<< HEAD
 // This is the path to the single user view.
 // const mainElement = document.createElement("main");
 // mainElement.classList.add("main-content");
@@ -27,6 +28,14 @@ const allUsersMainElement = document.createElement("main");
 allUsersMainElement.classList.add("all-users-main");
 container.appendChild(allUsersMainElement);
 
+=======
+const mainElement = document.createElement("main");
+mainElement.classList.add("main-content");
+container.appendChild(mainElement);
+const userNamePageElement = document.createElement("h1");
+userNamePageElement.classList.add("username");
+container.appendChild(userNamePageElement);
+>>>>>>> 2cf3b92... Testing changes to single user view rendering
 
 // fetch("http://localhost:8080/api/user/1")
 //     .then(response => response.json())
@@ -45,6 +54,10 @@ fetch("http://localhost:8080/api/user/2")
     
 
 
+<<<<<<< HEAD
 container.appendChild(createFooter())
 
 
+=======
+container.appendChild(createFooter())
+>>>>>>> 2cf3b92... Testing changes to single user view rendering

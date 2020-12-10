@@ -17,10 +17,6 @@ import {
 const container = document.querySelector('.container');
 
 container.prepend(displayHeader());
-// This is the path to the single user view.
-// const mainElement = document.createElement("main");
-// mainElement.classList.add("main-content");
-// container.appendChild(mainElement);
 
 //This is the path to the all user view.
 const allUsersMainElement = document.createElement("main");
@@ -28,13 +24,6 @@ allUsersMainElement.classList.add("all-users-main");
 container.appendChild(allUsersMainElement);
 
 
-// fetch("http://localhost:8080/api/user/1")
-//     .then(response => response.json())
-//     //.then(json => console.log(json))
-//     .then(user => displaySingleUserView(user))
-//     .then(singleUserElement => mainElement.appendChild(singleUserElement))
-//     .catch(error => console.log(error));
-    
 
 fetch("http://localhost:8080/api/users")
     .then(response => response.json())

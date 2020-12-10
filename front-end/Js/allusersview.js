@@ -1,6 +1,13 @@
 import {
     allUsers
 } from "./sampleAllUserJson.js"
+import{
+    displaySingleUserView
+} from "./singleuserview.js"
+
+import{
+    displayHeader
+} from "./header.js"
 
 const displayAllUsersView = function (users) {
     const allUsersMainElement = document.createElement("main");
@@ -12,13 +19,25 @@ const displayAllUsersView = function (users) {
     singleUserTile.classList.add("single-user-tile");
     singleUserTile.setAttribute("id" , user.userColor);
     singleUserTile.addEventListener("click", ()=>{
+        // container.prepend(displayHeader());
         clearChildren(allUsersMainElement);
+
+        
+        const container = document.querySelector('.container');
+        container.prepend(displayHeader());
+
+        const mainElement = document.createElement("main");
+        mainElement.classList.add("main-content");
+        container.appendChild(mainElement);
+        
+
         fetch("http://localhost:8080/api/user/" + user.id)
-    .then(response => response.json())
-    .then(json => console.log(json))
-    .then(user => displaySingleUserView(user))
-    .then(singleUserElement => mainElement.appendChild(singleUserElement))
-    .catch(error => console.log(error));
+        .then(response => response.json())
+         .then(user => displaySingleUserView(user))
+         .then(singleUserElement => mainElement.appendChild(singleUserElement))
+         .catch(error => console.log(error));
+      
+        //  container.appendChild(createFooter());
     })
     const singleUserName = document.createElement("h1");
     singleUserName.classList.add("single-user-name");
@@ -49,6 +68,11 @@ const displayAllUsersView = function (users) {
 
     // const pieChartElement = document.createElement("div")
     // pieChartElement.classList.add("piechart")
+
+
+   
+
+
 
     return allUsersMainElement;
 

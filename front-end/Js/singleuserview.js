@@ -1,8 +1,12 @@
+import { createFooter } from "./footer.js";
+import { displayHeader } from "./header.js";
+
 const progressBar = document.createElement("progress");
 
 
 const displaySingleUserView = function(user) {
     console.log(user)
+        // const mainElement = document.querySelector(".main-content")
     const mainElement = document.createElement("main");
     mainElement.classList.add("main-content");
     const userPageHeader = document.createElement("div");
@@ -15,7 +19,7 @@ const displaySingleUserView = function(user) {
     userNamePageElement.classList.add("username");
     userNamePageElement.innerText = `${user.name}'s Task List` //whatever day is being accessed by the user. default will be Sunday
     console.log(user.userIcon)
-    user.userIcon = "/front-end/images/" + user.userIcon;
+        // user.userIcon = "/front-end/images/" + user.userIcon;
     const userIcon = document.createElement("img");
     userIcon.classList.add("user-page-icon");
     userIcon.setAttribute("src", user.userIcon);
@@ -32,6 +36,7 @@ const displaySingleUserView = function(user) {
     progressBar.setAttribute("max", "100");
     updateProgressBar(progressBar, user.taskList);
     mainElement.appendChild(progressBar);
+    mainElement.append(createFooter());
 
     return mainElement;
 }
@@ -67,20 +72,18 @@ function populateTaskList(taskList, taskListElement) {
     taskList.forEach(task => {
         const taskStickyNote = document.createElement("div");
         taskStickyNote.classList.add("chores-list");
-        taskStickyNote.id = `${task.id}`;
+
         const checkBox = document.createElement("input");
         checkBox.setAttribute("type", "checkbox");
-        checkBox.classList.add("chore-done");
+        checkBox.classList.add("chore-done", `checkbox${task.id}`);
         if (task.done) {
             checkBox.checked = true;
         }
-        checkBox.setAttribute("id", task.title)
+        checkBox.setAttribute("id", `checkbox${task.id}`)
         checkBox.addEventListener('click', (checkboxEvent) => {
             checkboxEvent.preventDefault();
             checkboxEvent.stopPropagation();
-            clearChildren(taskListElement);
             task.done = checkBox.checked;
-            let numTasksComplete;
             fetch("http://localhost:8080/api/task/" + task.id + "/update", {
                     method: 'PATCH',
                     headers: {
@@ -89,21 +92,16 @@ function populateTaskList(taskList, taskListElement) {
                     body: JSON.stringify(task)
                 })
                 .then(response => response.json())
-                // .then(response => console.log(response))
                 .then(userTasks => {
-                    populateTaskList(userTasks, taskListElement)
                     updateProgressBar(progressBar, userTasks)
-
+                    document.querySelector(`#checkbox${task.id}`).checked = task.done;
                 })
                 .catch(error => console.error(error.stack));
         });
 
-
-
         const choreName = document.createElement("label");
         choreName.classList.add("chore-name");
         choreName.innerText = task.title;
-        checkBox.setAttribute("id", "check-chore");
         choreName.setAttribute("for", "check-chore");
         const taskInfoList = document.createElement("ul");
         const taskDueDate = document.createElement("li");

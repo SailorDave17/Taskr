@@ -48,7 +48,7 @@ public class JPAWiringTest {
         System.out.println(mom.toString());
         userRepo.save(mom);
         System.out.println(mom.toString());
-        TaskTemplate cleanCommonArea = new TaskTemplate("Clean Common Area", "Clean all common areas", 30, 30);
+        TaskTemplate cleanCommonArea = new TaskTemplate("Clean Common Area", "Clean all common areas", 30, "Tuesday");
         cleanCommonArea.addUserWhoCannotDoThisTask(mom);
         taskTemplateRepo.save(cleanCommonArea);
         userRepo.save(mom);

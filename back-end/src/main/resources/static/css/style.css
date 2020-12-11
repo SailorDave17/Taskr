@@ -73,7 +73,6 @@ header {
     display: block;
 }
 
-
 /* .dropdown:hover .dropbtn {
     background-color: var(--dark-blue);
 } */
@@ -203,7 +202,6 @@ header {
 #light-blue {
     background-color: var(--light-blue);
 }
-
 img #mom.ico {
     content: url("/front-end/images/mom.png");
 }
@@ -241,6 +239,7 @@ img #mom.ico {
 
 li {
     text-decoration-line: underline;
+    padding: 10px;
 }
 
 .chore-name {
@@ -248,7 +247,6 @@ li {
 }
 
 .chore-done {
-    margin-right: 5px;
     width: 30px;
     height: 30px;
 }

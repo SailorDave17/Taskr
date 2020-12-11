@@ -114,7 +114,7 @@ function populateTaskList(taskList, taskListElement) {
         taskStickyNote.appendChild(checkBox);
         taskStickyNote.appendChild(choreName);
         taskStickyNote.appendChild(taskInfoList);
-        taskInfoList.appendChild(taskDueDate);
-        taskInfoList.appendChild(taskDuration);
+        taskStickyNote.appendChild(taskDueDate);
+        taskStickyNote.appendChild(taskDuration);
     });
 }

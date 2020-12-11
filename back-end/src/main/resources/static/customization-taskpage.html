@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./css/layout.css">
+    <link rel="stylesheet" href="./css/style.css">
+
+
+    <title>Document</title>
+</head>
+
+<body class="container">
+    <header class="title">
+        <div class="dropdown">
+            <button class="dropbtn"><img class = "hamburger" src = "/front-end/images/menu.png" width = 100px></button>
+            <div class="dropdown-content">
+                <a href="/front-end/household-userview.html">All Users</a>
+                <a href="/front-end/household-taskview.html">All Tasks</a>
+                <a href="/front-end/user-view.html">My Tasks</a>
+                <a href="/front-end/customization-taskpage.html">Customize tasks</a>
+                <a href="/front-end/customization-userspage.html">Customize users</a> </div>
+
+        </div>
+
+        Taskr Task Customization View </header>
+
+
+    <main class="main-task-customize-element">
+        <div class="list-of-default-tasks">
+            <button class="add-task">Add Task</button>
+            <button class="task-duration-header">Task Duration</button>
+            <button class="due-date"> Task Due Date </button>
+            <button class="task-frequency"> Task Frequency</button>
+            <button class="multiple-user-option"> Multiple User Option </button>
+
+
+
+
+            <button class="dropbtn-user" id="mom">Mom</button>
+            <button class="dropbtn-user" id="dad">Dad</button>
+            <button class="dropbtn-user" id="bro">Bro</button>
+            <button class="dropbtn-user" id="sis">Sis</button>
+
+            <p>Clean Common Area</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Clean Garage</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Clean Bathrooms</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Take Out Trash</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Wash Dishes</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Wash/Dry Laundry</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Fold/Put Away Laundry</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Rake Leaves</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Mow Lawn</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Clean Bedroom</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Deep Clean Kitchen</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Tidy Kitchen</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Vacuum Living Room</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Mop/Sweep Kitchen</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Change Litter Box</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Walk Dog</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Clean Up Yard</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Get Mail</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Dust Living Room</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Dust Family Room</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Vacuum Family Room</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <p>Dust Ceiling Fans</p>
+            <div class="dropdown">
+                <input type="text" id="task-time" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> 10 min</a>
+                    <a href="#"> 20 min</a>
+                    <a href="#"> 30 min</a>
+                    <a href="#"> 40 min</a>
+                    <a href="#"> 50 min</a>
+                    <a href="#"> 60 min</a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="due-date" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Sunday </a>
+                    <a href="#"> Monday </a>
+                    <a href="#"> Tuesday </a>
+                    <a href="#"> Wednesday </a>
+                    <a href="#"> Thursday </a>
+                    <a href="#"> Friday </a>
+                    <a href="#"> Saturday </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="task-frequency" class="dropbtn-user">
+                <div class="dropdown-content">
+                    <a href="#"> Daily</a>
+                    <a href="#"> Weekly </a>
+                    <a href="#"> Monthly </a>
+                </div>
+            </div>
+            <div class="dropdown">
+                <input type="text" id="multiple-user-option" class="dropbtn-user">
+                <div class="dropdown-content-mu">
+                    <a href="#"> Single User Only</a>
+                    <a href="#"> All Users </a>
+                </div>
+            </div>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked>
+            <input type="checkbox" checked> = </div>
+
+
+    </main>
+
+</body>
+<footer class=" footer ">&copy 2020 - Team Taskr - We Can {Code} IT</footer>
+
+</html>

@@ -5,7 +5,18 @@ import { VitePWA } from 'vite-plugin-pwa'
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent
 // rather than added speculatively; see docs/hosting-decision.md.
+// Which commit is live. Vercel sets VERCEL_GIT_COMMIT_SHA at build time; it is
+// not VITE_-prefixed, so it does not reach the client on its own. Mapping it in
+// is what makes #4's "the deployed URL updates" observable at all — without it
+// a docs-only change produces a byte-identical bundle and a deploy is
+// indistinguishable from no deploy. Empty locally, which is the point: 'local'
+// tells you that you are not looking at a hosted build.
+const commitSha = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7)
+
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_BUILD_SHA': JSON.stringify(commitSha),
+  },
   plugins: [
     react(),
     VitePWA({

@@ -2,9 +2,13 @@
 
 - Date: 2026-08-04, **executed 2026-08-05**
 - Story: #4
-- Status: **executed.** Production URL: <https://taskr-mad-cow1.vercel.app>. Vercel and Supabase
-  accounts exist and are owner-controlled; environment variables are set. AC 1 and AC 2 verified on
-  a real phone 2026-08-05 (see §3).
+- Status: **executed.** Vercel and Supabase accounts exist and are owner-controlled; environment
+  variables are set. AC 1 and AC 2 verified on a real phone 2026-08-05 (see §3).
+- Production URL: <https://taskr-khaki.vercel.app> — this is the domain Vercel lists under
+  **Settings → Environments → Production → Domains**, and it is the one to publish.
+  <https://taskr-mad-cow1.vercel.app> also resolves and served the same build during setup, but it
+  is the `<project>-<account>` alias rather than the assigned production domain; do not assume the
+  two stay pointed at the same deployment. Confirm with the footer's `build <sha>` stamp.
 
 The one prerequisite code cannot discharge: hosting and backend accounts must exist and be
 owner-controlled. Free tiers suffice. **Credentials never enter git.**
@@ -23,12 +27,20 @@ wrong.
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Output directory: `dist`
-4. **Set the production branch to `rebuild/v1`** — not `main`. Project Settings → Git → Production
-   Branch. *Correction, 2026-08-05*: this step was written when the repo default branch was
-   `develop`, and warned that Vercel would default to the wrong branch. The default has since been
-   changed to `rebuild/v1`, so Vercel picked it correctly with no intervention — **confirm it rather
-   than change it**. Verified by the first deployment building `f7bd3c31`, the exact tip of
-   `rebuild/v1`.
+4. **Set the production branch to `rebuild/v1`** — not `main`. It is **Settings → Environments →
+   Production → Branch Tracking**, *not* Settings → Git, where older instructions put it. Read the
+   sentence it prints back: *"Every commit pushed to the `<branch>` branch will create a Production
+   Deployment."*
+
+   **This step is real and it was missed.** *Measured 2026-08-05*: Vercel had it set to **`main`**,
+   so pushes to `rebuild/v1` produced **Preview** deployments and the production URL kept serving
+   the import-time build. The original warning here was right, and a correction written earlier the
+   same day — claiming Vercel "picked `rebuild/v1` correctly, verified by the first deployment
+   building the exact tip of `rebuild/v1`" — was **wrong**, and talked a reader out of the check.
+   The inference does not hold: Vercel marks the **import** deployment Production whatever branch it
+   builds, so building the right SHA is equally consistent with the production branch being set to
+   something else. One observation, two explanations, and the convenient one got written down as
+   verified. **Read the setting; do not infer it from a deployment.**
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
 6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
    **This step was missing from the original runbook and it blocks AC 1 completely.**
@@ -54,12 +66,23 @@ wrong.
 After this, every push to `rebuild/v1` deploys automatically. That is AC 8's "documented, repeatable
 pipeline" and it needs no further wiring.
 
-*Status of that claim, 2026-08-05*: **configured but, until this change, never exercised.** The
-project had exactly one deployment, created by the import at 14:30Z, while the last commit to
-`rebuild/v1` landed at 03:39Z — an eleven-hour gap, so nothing had ever proved that a *push*
-triggers a deploy. Merging this runbook correction is itself a commit landing on `rebuild/v1`, so it
-is the first real test of the pipeline: confirm a second deployment appears, built from the merge
-commit, and that the live URL serves it.
+*Status of that claim, 2026-08-05*: **it was false, and the first test caught it.** The project had
+exactly one deployment, created by the import at 14:30Z, while the last commit to `rebuild/v1` had
+landed at 03:39Z — an eleven-hour gap, so nothing had ever proved that a *push* triggers a deploy,
+only that an import does. Those are different mechanisms and only one is the criterion.
+
+PR #15 was merged as that test and **came back negative**: merge commit `ec531b76` landed on
+`rebuild/v1`, a deployment fired twelve seconds later, and it was a **Preview** — the latest
+Production deployment was still `f7bd3c31` from the import. Root cause was step 4 above. Fixed by
+setting Branch Tracking to `rebuild/v1`.
+
+**Verifying it for real needs the build to be observable**, which it was not: a docs-only commit
+produces a byte-identical bundle, so a deploy and no deploy look the same from outside. Hence the
+build stamp — `VERCEL_GIT_COMMIT_SHA` is mapped into the client bundle by `vite.config.js` and
+rendered in the footer as `build <sha>`. Two consequences: the running commit is readable from the
+page, and each build gets a distinct `assets/index-*.js` filename, so `curl` alone distinguishes
+builds. **Check a deploy landed by reading the stamp, not by trusting the dashboard** — a deployment
+record answers about the deployment you asked about, not about what the URL currently resolves to.
 
 ## 2. Supabase — the backend
 

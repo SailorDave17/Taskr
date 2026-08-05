@@ -78,6 +78,24 @@ The anon key is inlined into the client bundle at build time and is readable by 
 source. **It is publishable only because these policies exist.** The `service_role` key bypasses RLS
 entirely and must never appear in the front end, in git, or behind any `VITE_` variable.
 
+> **This rule was broken, 2026-08-05, and the build now enforces it.** `VITE_SUPABASE_ANON_KEY` in
+> Vercel was set to a `sb_secret_…` key — the current-generation equivalent of `service_role` — and it
+> shipped into a world-readable preview bundle. Nothing failed, because *nothing can*: a secret key
+> bypasses RLS, so the app works perfectly and every policy above is silently void.
+>
+> The variable lives in a hosting dashboard, outside this repository, so no test, review or grep of
+> the codebase could have caught it. `src/lib/keyShape.js` is therefore checked at **build** time from
+> `vite.config.js`: a secret key fails the build on the provider's own builder, which is the last
+> point at which it can still be stopped. `src/lib/supabase.js` repeats the check at runtime for a dev
+> server, where no build happens.
+>
+> *Proven by making it refuse*: a `sb_secret_…` key and a legacy `service_role` JWT both exit `1`,
+> while a `sb_publishable_…` key and an unconfigured build both exit `0` — the last two matter most,
+> since a guard that always failed would be indistinguishable from one that works.
+>
+> **If a secret key has ever been built, rotate it.** Fixing the variable and redeploying does not
+> invalidate what was already published.
+
 ## The test that bypasses the client — AC 6
 
 `src/test/rls.integration.test.js` talks to Supabase over the wire with the anon key, exactly as a

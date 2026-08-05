@@ -49,10 +49,15 @@ describe('which keys are safe to publish', () => {
     expect(isSecretKey(key)).toBe(expected)
   })
 
-  // The real incident's key, by shape. Named separately because a regression
-  // here has no symptom: the app keeps working.
+  // The 2026-08-05 incident's key by SHAPE ONLY — same prefix, same length, and
+  // a body that is not anybody's key. Named separately because a regression here
+  // has no symptom: the app keeps working.
+  //
+  // Reconstructing the real value here would put a live credential in git, which
+  // is the thing this guard exists to prevent. A fixture does not need to be the
+  // secret to test the detector.
   it('catches the shape that actually shipped', () => {
-    expect(isSecretKey('sb_secret_VrKt7agJDpT3XSJ7NV7IyA_MTbRxqB8')).toBe(true)
+    expect(isSecretKey('sb_secret_0000000000000000000_0000000')).toBe(true)
   })
 
   it('treats an absent key as not-secret, so an unconfigured build is not a security error', () => {

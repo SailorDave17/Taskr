@@ -19,6 +19,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isSecretKey } from '../lib/keyShape.js'
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
@@ -32,6 +33,23 @@ if (!url || !anonKey) {
       'and run `npm run test:rls`.\n' +
       'This test is excluded from `npm test` on purpose: CI has no credentials, and ' +
       'a security test that skips itself is worse than no security test.',
+  )
+}
+
+// A secret key bypasses RLS, so running this file with one exercises no policy
+// at all. It would still go red — device B would see everything — but it would
+// go red in the shape of "your policies are broken", sending someone to rewrite
+// a migration that is fine. Added 2026-08-05, when exactly this key was found in
+// the project's own hosting configuration.
+if (isSecretKey(anonKey)) {
+  throw new Error(
+    'rls.integration.test.js was given a SECRET key, so it can prove nothing.\n' +
+      'A secret key bypasses row-level security: every assertion below would be ' +
+      'testing a client that is exempt from the rules under test.\n' +
+      'Use the PUBLISHABLE key (sb_publishable_… , or a legacy JWT whose role is ' +
+      '"anon"). See .env.example and docs/access-model.md.\n' +
+      'If a secret key has been used in a build, rotate it — fixing the variable ' +
+      'does not invalidate what was already published.',
   )
 }
 

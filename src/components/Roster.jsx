@@ -148,6 +148,60 @@ MemberRow.propTypes = {
   onClaim: PropTypes.func.isRequired,
 }
 
+/**
+ * AC 1 asks for a credential the organizer can "read out **or send**".
+ *
+ * Reading it out is the paper case and needs no affordance. Sending it does:
+ * on a phone, selecting eight monospace characters by long-press is exactly the
+ * interaction that produces a typo, and a typo here is indistinguishable from a
+ * wrong code because the server deliberately refuses both identically.
+ *
+ * Web Share is offered where it exists, since it reaches the messaging app the
+ * family actually uses; clipboard is the fallback, and where neither exists the
+ * code is still on screen and selectable, so nothing is lost.
+ */
+function ShareCode({ household }) {
+  const [said, setSaid] = useState(null)
+
+  const message = `Join our Taskr household "${household.name}" with code ${household.join_code}`
+
+  async function share() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ text: message })
+        return
+      }
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(household.join_code)
+        setSaid('Code copied.')
+        return
+      }
+      setSaid('Select the code above to copy it.')
+    } catch {
+      // A cancelled share rejects, and so does a clipboard blocked by
+      // permissions. Neither is an error worth a red banner — the code is on
+      // screen either way.
+      setSaid('Select the code above to copy it.')
+    }
+  }
+
+  return (
+    <>
+      <button className="button button--quiet" type="button" onClick={share}>
+        Copy or send code
+      </button>
+      {/* Polite, so it is announced without interrupting whatever is being read. */}
+      <span className="card__note" role="status">
+        {said}
+      </span>
+    </>
+  )
+}
+
+ShareCode.propTypes = {
+  household: PropTypes.object.isRequired,
+}
+
 export default function Roster({
   household,
   members,
@@ -177,6 +231,7 @@ export default function Roster({
         <p className="joincode" data-testid="join-code">
           {household.join_code}
         </p>
+        <ShareCode household={household} />
         <p className="card__note">
           Anyone with this code can see and change the household. It is deterrence, not
           a lock.

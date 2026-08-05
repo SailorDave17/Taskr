@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import Roster from './Roster.jsx'
 
 // ACs 2 and 4 (people with budgets, edited and removed) and the "pick yourself"
@@ -44,6 +44,57 @@ describe('the join credential', () => {
   it('states plainly that the code is deterrence, not a lock', () => {
     setup()
     expect(screen.getByText(/deterrence, not\s+a lock/i)).toBeInTheDocument()
+  })
+})
+
+describe('sending the code — AC 1’s "or send"', () => {
+  const shareButton = () => screen.getByRole('button', { name: /copy or send code/i })
+
+  afterEach(() => {
+    delete navigator.share
+    delete navigator.clipboard
+  })
+
+  it('shares through the OS share sheet where one exists', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    navigator.share = share
+    setup()
+
+    await clickAndSettle(shareButton())
+
+    // The message must carry the code itself, not just a link: the receiving
+    // phone types it into the join box.
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('ABCD2345') }))
+  })
+
+  it('falls back to the clipboard, copying the bare code and nothing else', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    navigator.clipboard = { writeText }
+    setup()
+
+    await clickAndSettle(shareButton())
+
+    // The bare code, because it is pasted into a field that expects exactly it.
+    expect(writeText).toHaveBeenCalledWith('ABCD2345')
+    expect(await screen.findByText(/code copied/i)).toBeInTheDocument()
+  })
+
+  it('says what to do instead when neither is available, rather than failing silently', async () => {
+    setup()
+    await clickAndSettle(shareButton())
+    expect(await screen.findByText(/select the code above/i)).toBeInTheDocument()
+  })
+
+  it('treats a cancelled share as a non-event, not an error', async () => {
+    navigator.share = vi.fn().mockRejectedValue(new Error('AbortError'))
+    setup()
+
+    await clickAndSettle(shareButton())
+
+    // Cancelling a share sheet is the commonest outcome of opening one by
+    // accident. It must not read as a failure.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByTestId('join-code')).toHaveTextContent('ABCD2345')
   })
 })
 

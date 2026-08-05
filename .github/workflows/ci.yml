@@ -1,0 +1,50 @@
+name: CI
+
+# The gate for the rebuild. Before this file, `.github/` contained only `.keep` —
+# there was no CI at all, so this pipeline is created from nothing rather than
+# extended. Every step here must be able to fail; see docs/ci-gate.md for the
+# recorded run that proves it.
+on:
+  push:
+    branches: ['rebuild/**', 'feature/**']
+  pull_request:
+    branches: ['rebuild/**']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `vitest run` exits non-zero when it finds no test files, and
+      # passWithNoTests is pinned to false in vite.config.js so that stays true
+      # if the default ever changes. src/test/gate.test.js asserts the pin.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # A build that emits nothing is a build that passed vacuously. This is the
+      # cheapest possible check that the previous step produced a real artefact.
+      - name: Assert the build produced an artefact
+        run: |
+          test -f dist/index.html || { echo "::error::dist/index.html missing - build emitted nothing"; exit 1; }
+          test -f dist/manifest.webmanifest || { echo "::error::manifest missing - PWA would not install"; exit 1; }
+          test -f dist/sw.js || { echo "::error::service worker missing - PWA would not install"; exit 1; }
+          echo "dist/ contains index.html, manifest.webmanifest and sw.js"

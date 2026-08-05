@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -47,5 +48,13 @@ export default defineConfig({
     // Vitest's default, but it is set explicitly because a default can change
     // under us and a check that cannot fail is worse than none.
     passWithNoTests: false,
+    // The RLS test (#5 AC 6) talks to a live Supabase project and CI has no
+    // credentials for one. It is excluded here, and run by `npm run test:rls`
+    // against vitest.integration.config.js — never made to skip itself, because
+    // a security test that quietly passes when unconfigured is the same defect
+    // as a gate with zero tests in it. The exclusion is stated in-band, in
+    // src/test/rls.integration.test.js and docs/access-model.md, so a reader
+    // counting the checks does not mistake four for five.
+    exclude: [...configDefaults.exclude, '**/*.integration.test.js'],
   },
 })

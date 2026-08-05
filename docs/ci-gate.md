@@ -54,9 +54,37 @@ the tests stand on — and code-only mutation says nothing about it.
 
 ## Recorded failing CI run — AC 3
 
-*Pending.* AC 3 wants a real pipeline run that goes red and is then reverted, which needs a push to a
-branch CI watches. The four proofs above are local. This section gets the run URL once the branch is
-pushed, and AC 3 stays unticked until then.
+Done, on the real pipeline rather than locally.
+
+| | |
+|---|---|
+| Failing run | [30972347351](https://github.com/SailorDave17/Taskr/actions/runs/30972347351) — **failure** |
+| Commit | `7fde78f` — "test: DELIBERATELY BROKEN - prove the CI gate can fail (AC 3 of #4)" |
+| Reverted by | `eb5f51c` |
+| First green run | [30972263900](https://github.com/SailorDave17/Taskr/actions/runs/30972263900) — commit `1d7ebc1`, all 8 steps `success` |
+
+**Which step failed matters more than that one did.** The cascade was:
+
+```
+5. Lint                              => success
+6. Test                              => failure     <- the deliberate break
+7. Build                             => skipped
+8. Assert the build produced artefact => skipped
+```
+
+So the pipeline refused for the intended reason, at the intended step, and correctly declined to
+build or ship afterwards. A run that went red at `Install` would have been a red run proving nothing.
+
+The failure text names the injected test by name:
+
+```
+FAIL src/App.test.jsx > App shell > PROOF OF FAILURE: this assertion is false on purpose
+Tests  1 failed | 6 passed (7)
+```
+
+**The green run was checked step-by-step too**, not just by its conclusion — all 8 steps report
+`success`, none skipped. A build tool's own summary is not evidence that the thing you care about
+actually executed; the failure mode there is a *pass*, so nothing draws attention to it.
 
 ## Branch protection — AC 5, and the honest answer
 

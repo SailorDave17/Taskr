@@ -3,13 +3,6 @@ import { describe, it, expect } from 'vitest'
 import App from './App.jsx'
 
 describe('App shell', () => {
-  // DELIBERATELY BROKEN - proving the CI gate can fail (AC 3 of #4).
-  // Reverted in the commit immediately after this one.
-  it('PROOF OF FAILURE: this assertion is false on purpose', () => {
-    render(<App />)
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('This is not the heading')
-  })
-
   it('renders the product name as the page heading', () => {
     render(<App />)
     expect(screen.getByRole('heading', { level: 1, name: 'Taskr' })).toBeInTheDocument()

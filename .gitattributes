@@ -1,0 +1,23 @@
+# This machine has core.autocrlf=true and the repo had no .gitattributes, which
+# is a combination that has already cost this workspace a real incident: files
+# correct in the repo, CRLF on disk, and reported as unmodified by every git
+# command you would think to run. `.gitattributes` governs checkout, so it is
+# the fix; hand-normalising is not, because a fresh clone brings it back.
+#
+# Scoped deliberately rather than applied as a blanket rule.
+
+# Source and config: LF in the repo and on disk, everywhere.
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.svg   text eol=lf
+
+# Binary: never touched, never diffed as text.
+*.png   binary
+*.jpg   binary
+*.ico   binary

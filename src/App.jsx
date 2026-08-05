@@ -26,6 +26,8 @@ export default function App() {
         <span>{buildInfo.name}</span>
         <span aria-hidden="true"> · </span>
         <span>{buildInfo.env}</span>
+        <span aria-hidden="true"> · </span>
+        <span data-testid="build-commit">build {buildInfo.commit}</span>
       </footer>
     </main>
   )

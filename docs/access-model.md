@@ -136,5 +136,29 @@ delete from public.households where name like 'TEST %';
   reason this PR ticks no acceptance criteria.
 - ACs 1–5 are PRs 2 and 3 of this story: the roster UI, persistence across restarts, and the join flow
   verified on two real phones.
+
+### Updated 2026-08-05 — PR 2 (the roster UI) has landed
+
+The client half of ACs 1–5 is now built: `src/lib/household.js` plus `src/components/Onboarding.jsx`
+and `src/components/Roster.jsx`, with 100 unit and component tests (was 30) and five mutations each
+reddening exactly the predicted test.
+
+**No acceptance criterion is ticked by that PR either, and the reason has not changed.** Both prerequisites
+above are still outstanding, so nothing in this story has run against a real database:
+
+- the migration is still unapplied, so the policies remain unparsed;
+- anonymous sign-ins are still off, so no device can obtain a session at all.
+
+Until both are done, every ACs 1–6 check fails at the first round trip. What the tests above *do*
+establish is narrower and worth stating precisely: the app asks the right questions, refuses the
+obviously wrong ones before spending a round trip, and reads the roster from the server rather than
+from device storage. **None of that is evidence about the access rules** — a fake client returns
+whatever the test told it to. AC 6 is `src/test/rls.integration.test.js` and nothing else.
+
+One client-side design note that belongs here rather than in a commit message: the app holds the
+Supabase **auth session** locally and nothing else. That session is the credential, which is what
+makes AC 5's "stays joined days later without re-entering the code" true; the household and roster are
+re-read from the server on every load, so a device that merely *remembered* would be indistinguishable
+from one that is genuinely still joined — and AC 3 is precisely the check that would be fooled.
 - **Preview deployments are world-readable** (Vercel Authentication is off project-wide), so once real
   data exists this file's assumptions interact with #19. Nothing here decides that; #19 does.

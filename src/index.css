@@ -71,3 +71,196 @@ body {
   font-size: 0.8125rem;
   color: var(--ink-dim);
 }
+
+/* ---------------------------------------------------------------------------
+   Household roster — story #5.
+
+   Sized for a phone held one-handed: every control is at least 44px tall, which
+   is the smallest reliable touch target, and nothing depends on hover. The
+   charter's bar is "phone-usable for a real household", so a layout that only
+   works with a mouse fails the story rather than looking unpolished.
+   --------------------------------------------------------------------------- */
+
+.onboarding,
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.card__heading {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.card__body {
+  margin: 0 0 0.75rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+
+.card__note {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.row--between {
+  justify-content: space-between;
+}
+
+.row--end {
+  justify-content: flex-end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.field__label {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+.field__input {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 1rem; /* 16px: anything smaller makes iOS/Android zoom on focus. */
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+}
+
+.field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field__input--code {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+
+.button {
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #f2fbf8;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button--quiet {
+  color: var(--ink);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.18);
+  font-weight: 500;
+}
+
+.button--danger {
+  background: #7f2b2b;
+  color: #ffeaea;
+}
+
+.joincode {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  font-size: clamp(1.75rem, 11vw, 2.5rem);
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  /* Selectable on purpose: reading it aloud is the common path, but sending it
+     in a message is the other one, and a code you cannot copy invites a typo. */
+  user-select: all;
+  word-break: break-all;
+}
+
+.member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.member {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.member__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.member__name {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.member__badge {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.member__budget {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+}
+
+.member__budget-human {
+  opacity: 0.75;
+}
+
+.error {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  line-height: 1.5;
+  color: #ffdada;
+  background: rgba(127, 43, 43, 0.35);
+  border: 1px solid #7f2b2b;
+  border-radius: 0.5rem;
+}

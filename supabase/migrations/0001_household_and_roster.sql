@@ -70,14 +70,24 @@ alter table public.households        enable row level security;
 alter table public.household_devices enable row level security;
 alter table public.members           enable row level security;
 
+-- Every policy below is preceded by `drop policy if exists`, because Postgres
+-- has no `create policy if not exists` and this file is applied by pasting it
+-- into a SQL editor. Tables and indexes here already use `if not exists` and the
+-- functions use `create or replace`, so without these drops the policies would
+-- be the *only* part that cannot be re-run — and a half-applied paste followed
+-- by a re-paste is the normal way this file gets used, not an edge case.
+-- Measured: before this change, a second run failed on the very first policy.
+
 -- A session can see its own membership row and nothing else. Every policy below
 -- reads through this one, so it is the root of the whole scheme.
+drop policy if exists household_devices_select_own on public.household_devices;
 create policy household_devices_select_own
   on public.household_devices for select
   to authenticated
   using (auth_user_id = (select auth.uid()));
 
 -- Households: visible only to a session that has joined them.
+drop policy if exists households_select_joined on public.households;
 create policy households_select_joined
   on public.households for select
   to authenticated
@@ -90,6 +100,7 @@ create policy households_select_joined
 
 -- Members: readable and writable by any joined session in the same household.
 -- A household is a trust boundary; inside it, everyone can maintain the roster.
+drop policy if exists members_select_same_household on public.members;
 create policy members_select_same_household
   on public.members for select
   to authenticated
@@ -100,6 +111,7 @@ create policy members_select_same_household
     )
   );
 
+drop policy if exists members_insert_same_household on public.members;
 create policy members_insert_same_household
   on public.members for insert
   to authenticated
@@ -110,6 +122,7 @@ create policy members_insert_same_household
     )
   );
 
+drop policy if exists members_update_same_household on public.members;
 create policy members_update_same_household
   on public.members for update
   to authenticated
@@ -126,6 +139,7 @@ create policy members_update_same_household
     )
   );
 
+drop policy if exists members_delete_same_household on public.members;
 create policy members_delete_same_household
   on public.members for delete
   to authenticated

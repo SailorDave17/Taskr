@@ -78,6 +78,24 @@ The anon key is inlined into the client bundle at build time and is readable by 
 source. **It is publishable only because these policies exist.** The `service_role` key bypasses RLS
 entirely and must never appear in the front end, in git, or behind any `VITE_` variable.
 
+> **This rule was broken, 2026-08-05, and the build now enforces it.** `VITE_SUPABASE_ANON_KEY` in
+> Vercel was set to a `sb_secret_…` key — the current-generation equivalent of `service_role` — and it
+> shipped into a world-readable preview bundle. Nothing failed, because *nothing can*: a secret key
+> bypasses RLS, so the app works perfectly and every policy above is silently void.
+>
+> The variable lives in a hosting dashboard, outside this repository, so no test, review or grep of
+> the codebase could have caught it. `src/lib/keyShape.js` is therefore checked at **build** time from
+> `vite.config.js`: a secret key fails the build on the provider's own builder, which is the last
+> point at which it can still be stopped. `src/lib/supabase.js` repeats the check at runtime for a dev
+> server, where no build happens.
+>
+> *Proven by making it refuse*: a `sb_secret_…` key and a legacy `service_role` JWT both exit `1`,
+> while a `sb_publishable_…` key and an unconfigured build both exit `0` — the last two matter most,
+> since a guard that always failed would be indistinguishable from one that works.
+>
+> **If a secret key has ever been built, rotate it.** Fixing the variable and redeploying does not
+> invalidate what was already published.
+
 ## The test that bypasses the client — AC 6
 
 `src/test/rls.integration.test.js` talks to Supabase over the wire with the anon key, exactly as a
@@ -136,5 +154,29 @@ delete from public.households where name like 'TEST %';
   reason this PR ticks no acceptance criteria.
 - ACs 1–5 are PRs 2 and 3 of this story: the roster UI, persistence across restarts, and the join flow
   verified on two real phones.
+
+### Updated 2026-08-05 — PR 2 (the roster UI) has landed
+
+The client half of ACs 1–5 is now built: `src/lib/household.js` plus `src/components/Onboarding.jsx`
+and `src/components/Roster.jsx`, with 100 unit and component tests (was 30) and five mutations each
+reddening exactly the predicted test.
+
+**No acceptance criterion is ticked by that PR either, and the reason has not changed.** Both prerequisites
+above are still outstanding, so nothing in this story has run against a real database:
+
+- the migration is still unapplied, so the policies remain unparsed;
+- anonymous sign-ins are still off, so no device can obtain a session at all.
+
+Until both are done, every ACs 1–6 check fails at the first round trip. What the tests above *do*
+establish is narrower and worth stating precisely: the app asks the right questions, refuses the
+obviously wrong ones before spending a round trip, and reads the roster from the server rather than
+from device storage. **None of that is evidence about the access rules** — a fake client returns
+whatever the test told it to. AC 6 is `src/test/rls.integration.test.js` and nothing else.
+
+One client-side design note that belongs here rather than in a commit message: the app holds the
+Supabase **auth session** locally and nothing else. That session is the credential, which is what
+makes AC 5's "stays joined days later without re-entering the code" true; the household and roster are
+re-read from the server on every load, so a device that merely *remembered* would be indistinguishable
+from one that is genuinely still joined — and AC 3 is precisely the check that would be fooled.
 - **Preview deployments are world-readable** (Vercel Authentication is off project-wide), so once real
   data exists this file's assumptions interact with #19. Nothing here decides that; #19 does.

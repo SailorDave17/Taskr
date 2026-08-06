@@ -1,9 +1,113 @@
+import { useCallback, useEffect, useState } from 'react'
 import { buildInfo } from './buildInfo.js'
+import { hasSupabaseConfig } from './lib/supabase.js'
+import {
+  addMember,
+  claimMember,
+  createHousehold,
+  currentDeviceId,
+  currentHousehold,
+  ensureSession,
+  findClaimedMember,
+  joinHousehold,
+  listMembers,
+  removeMember,
+  updateMember,
+} from './lib/household.js'
+import Onboarding from './components/Onboarding.jsx'
+import Roster from './components/Roster.jsx'
 
-// The shell, and deliberately only the shell. Story #4 ships "the app exists at a
-// real URL and installs on a phone"; the household load view is #7, the roster is
-// #5. Anything more here would be feature work smuggled into a deploy story.
+// Story #5: the household roster, joinable from family phones.
+//
+// The screen is a function of one question — has this device joined a household?
+// — and that question is answered by the SERVER on every load, never by
+// localStorage. AC 3 asks that the roster survive a force-close, a reinstall and
+// a backend restart, and a locally cached roster would make a passing check
+// indistinguishable from a device that merely remembered. What IS held locally
+// is the Supabase auth session, which is the credential, not the data; that is
+// what makes AC 5's "stays joined days later" true without re-entering the code.
+
 export default function App() {
+  const [status, setStatus] = useState('loading')
+  const [household, setHousehold] = useState(null)
+  const [members, setMembers] = useState([])
+  const [deviceId, setDeviceId] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  /** Re-read everything this device is allowed to see. */
+  const refresh = useCallback(async () => {
+    const found = await currentHousehold()
+    setHousehold(found)
+    setMembers(found ? await listMembers() : [])
+    setDeviceId(await currentDeviceId())
+    return found
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function boot() {
+      // Not an error, and deliberately not treated as one: a local checkout with
+      // no .env.local is a normal state. Saying so beats a network error that
+      // reads like the database being down.
+      if (!hasSupabaseConfig) {
+        if (!cancelled) setStatus('unconfigured')
+        return
+      }
+      try {
+        await ensureSession()
+        const found = await refresh()
+        if (!cancelled) setStatus(found ? 'joined' : 'onboarding')
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message)
+          setStatus('failed')
+        }
+      }
+    }
+
+    boot()
+    return () => {
+      cancelled = true
+    }
+  }, [refresh])
+
+  /**
+   * Run a mutation, then re-read from the server rather than patching local
+   * state from the response. Slower by one round trip and correct by
+   * construction: what the next device to load will see is exactly what this
+   * device now shows.
+   */
+  const mutate = useCallback(
+    async (action) => {
+      setBusy(true)
+      setError(null)
+      try {
+        const result = await action()
+        const found = await refresh()
+        setStatus(found ? 'joined' : 'onboarding')
+        return result
+      } catch (err) {
+        setError(err.message)
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refresh],
+  )
+
+  const handleCreate = useCallback((name) => mutate(() => createHousehold(name)), [mutate])
+  const handleJoin = useCallback((code) => mutate(() => joinHousehold(code)), [mutate])
+  const handleAdd = useCallback((person) => mutate(() => addMember(person)), [mutate])
+  const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
+  const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
+  const handleClaim = useCallback((id) => mutate(() => claimMember(id)), [mutate])
+  const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+
+  const me = findClaimedMember(members, deviceId)
+
   return (
     <main className="shell">
       <h1 className="shell__title">Taskr</h1>
@@ -12,15 +116,55 @@ export default function App() {
         proportional to what each person actually has.
       </p>
 
-      <section className="shell__status" aria-labelledby="status-heading">
-        <h2 id="status-heading" className="shell__status-heading">
-          Shell deployed
-        </h2>
-        <p className="shell__status-body">
-          The household view arrives in a later story. This page exists so
-          everything after it ships onto something live.
+      {status === 'loading' ? (
+        <p className="card__body" role="status">
+          Loading your household&hellip;
         </p>
-      </section>
+      ) : null}
+
+      {status === 'unconfigured' ? (
+        <section className="card" aria-labelledby="unconfigured-heading">
+          <h2 id="unconfigured-heading" className="card__heading">
+            No backend configured
+          </h2>
+          <p className="card__body">
+            This build has no Supabase credentials, so there is nowhere to keep a
+            household. Locally that means no <code>.env.local</code>; on a deployment it
+            means the environment variables are not set. See{' '}
+            <code>docs/deploy-runbook.md</code>.
+          </p>
+        </section>
+      ) : null}
+
+      {status === 'failed' ? (
+        <section className="card" aria-labelledby="failed-heading">
+          <h2 id="failed-heading" className="card__heading">
+            Could not reach the household
+          </h2>
+          <p className="error" role="alert">
+            {error}
+          </p>
+        </section>
+      ) : null}
+
+      {status === 'onboarding' ? (
+        <Onboarding onCreate={handleCreate} onJoin={handleJoin} busy={busy} />
+      ) : null}
+
+      {status === 'joined' && household ? (
+        <Roster
+          household={household}
+          members={members}
+          me={me}
+          busy={busy}
+          error={error}
+          onAdd={handleAdd}
+          onSave={handleSave}
+          onRemove={handleRemove}
+          onClaim={handleClaim}
+          onRefresh={handleRefresh}
+        />
+      ) : null}
 
       <footer className="shell__footer">
         <span>{buildInfo.name}</span>

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { assertPublishableKey } from './keyShape.js'
 
 // The two values Vercel holds. They are `VITE_`-prefixed, so they are inlined
 // into the client bundle at build time and are readable by anyone who views
@@ -34,6 +35,11 @@ export function getSupabase() {
         'dev server or an existing deployment will not pick up a new value.',
     )
   }
+  // Belt to vite.config.js's braces. The build-time check is the one that stops
+  // a secret key ever reaching a bundle; this one catches a dev server started
+  // against a bad .env.local, where no build runs at all.
+  assertPublishableKey(anonKey, 'the browser client')
+
   if (!client) {
     client = createClient(url, anonKey, {
       auth: {

@@ -2,6 +2,18 @@ import { defineConfig } from 'vite'
 import { configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { assertPublishableKey } from './src/lib/keyShape.js'
+
+// Refuse to build at all if the key destined for the client bundle is a SECRET
+// key. This runs on the hosting provider's builder, which is the only place the
+// real value exists — the variable lives in a dashboard, outside this repo, so
+// no test or review could catch it.
+//
+// Measured 2026-08-05: VITE_SUPABASE_ANON_KEY was set to a `sb_secret_…` key
+// and shipped into a world-readable preview bundle. A secret key bypasses
+// row-level security, so the app worked perfectly and nothing failed. Failing
+// the build is the only signal available at the point it can still be stopped.
+assertPublishableKey(process.env.VITE_SUPABASE_ANON_KEY, 'the production build')
 
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent

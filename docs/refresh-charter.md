@@ -1,9 +1,17 @@
 # Taskr refresh charter
 
-- Date: 2026-08-04
+- Date: 2026-08-04; **ambition retrofit 2026-08-06**
 - Ratified by: owner (SailorDave17), at the charter and verdict gates of cairn's `refresh-project` SOP
-- Verdict: **rebuild from charter** — this document is the contract the rebuild is built from,
-  written so the rebuild needs nothing else from the legacy code
+- Verdict, code axis: **rebuild from charter** — this document is the contract the rebuild is built
+  from, written so the rebuild needs nothing else from the legacy code
+- Verdict, ambition axis: **reimagine** (owner, 2026-08-06) — the problem is re-framed for how the
+  world works now, and **the 2020 feature set below is input, not spec**
+
+> **Read this first if you are picking Taskr up.** Everything from "The problem" to "Salvage
+> inventory" was written on 2026-08-04 under a one-axis procedure and is still accurate as *history
+> and preservation*. The sections from **"The ambition retrofit"** onward were added 2026-08-06 and
+> are what the remaining work is built against. Where they disagree, the retrofit wins — that is what
+> the reimagine verdict means.
 
 ## The problem (the spirit — this survives whatever happens to the code)
 
@@ -90,3 +98,194 @@ decision at the end of execution, not a step in this document.
 - Whether allocation ever worked end-to-end in the legacy app is unknown; the rebuild treats the
   legacy behavior as intent, not as an oracle.
 - License for the new code — choose one at rebuild start, before outside code arrives.
+
+---
+
+# The ambition retrofit — 2026-08-06
+
+## Why this section exists
+
+The 2026-08-04 charter was rigorous and still aimed at reproducing a 2020 app on a 2026 stack,
+because **every criterion it could generate was derived from the old code**. The collapse is
+traceable in this document's own text:
+
+| Where | What it said |
+|---|---|
+| The problem, above | *"makes everyone's load visible so the fairness is **seen**, not asserted"* |
+| "What must survive" #3 | *"Visibility. …the legacy all-users view with **progress bars**"* |
+| Story #7, after grooming | *"One-screen household load view, **time-based**"* |
+
+A felt experience became a 2020 screen reference became a data-display story, and no gate asked
+whether the thing worth building had survived. All fifteen stories came out as mechanisms.
+`groom-backlog` was not at fault — it faithfully decomposed the charter it was given. The general
+form is in cairn as `derived-criteria-cannot-exceed-their-source-2026-08-06`.
+
+## The bar to beat (field scan, 2026-08-06)
+
+The field moved a long way after 2020. An entire **mental-load** category now exists that did not.
+
+| App | What it does well — this is what Taskr gets no credit for |
+|---|---|
+| **Tody** | Color-coded urgency: you clean what actually *needs* it, not what a calendar says |
+| **OurHome** | Genuinely free; points, leaderboards and rewards, well executed |
+| **Sweepy** | Points + leaderboard, explicitly strong on splitting work across a household |
+| **FairShare** | **Noticing Score** — separates *who noticed a job needed doing* from *who did it*; the gap is the mental load, made visible |
+| **fiftyfifty** | Explicitly rejects 50/50 in favour of "fair and transparent" |
+
+**What they are all bad at — the opening:**
+
+1. **Setup burden is the universal killer.** Every one requires you to build the system before it
+   helps — rooms, task lists, frequencies. A 2024 JMIR meta-analysis puts abandonment at **70%
+   within 100 days**, and the burden falls hardest on exactly the people who most need the app.
+2. **Leaderboards measure output, not fairness.** Points and rank *punish the member with less
+   capacity* — structurally the opposite of this project's thesis. Every gamified competitor has
+   this backwards.
+3. **Nobody does unequal capacity across a family.** Tody's multi-person support reads as "a
+   single-user app with sharing bolted on"; the mental-load apps are couples-focused. *A kid's 60
+   minutes against a parent's 300* is still an unoccupied position.
+
+**The uncomfortable finding:** Taskr's model needs **more** setup than its competitors — per-member
+time budgets and capability sets — and setup is the measured thing that kills these apps. That
+tension is the reason for the deliberate bet below.
+
+*Scope of this scan: two searches on 2026-08-06. A fast read, not exhaustive. Treat the named
+alternatives as real and the absence of others as unproven.*
+
+## What must become true (the ambition — this cannot be read out of the old code)
+
+1. **The split stays fair as life changes**, not only at the moment it is set. Capacity is a moving
+   quantity; every competitor treats it as a constant.
+2. **Being set up is not a project.** A household reaches useful in one sitting, without an evening
+   of data entry — the bet below exists for this.
+3. **Fairness is legible to the person who thinks it is unfair.** The test is not that a number is
+   displayed; it is that the argument ends.
+4. **The invisible half is at least acknowledged.** The reimagine verdict admits the noticing
+   dimension the field discovered after 2020 — whether it is modelled or only surfaced is an open
+   decision below, but it is not to be silently dropped.
+
+## The signature moment (owner-chosen, 2026-08-06)
+
+> **When someone's week gets busy, the household load visibly re-balances without anyone having to
+> negotiate it.**
+
+Stated so it can fail: the negotiation either happens or it does not. This is the one thing no
+competitor can do, because it requires capacity to be a live input rather than a setup step.
+
+**It must not become a screen.** "A load view", "a dashboard", "progress bars" are mechanisms that
+may or may not serve it. If a proposal could be satisfied by a screenshot of the 2020 all-users view,
+it has collapsed and is wrong. The 2020 progress-bar screen is *evidence of intent*, not the target.
+
+## The deliberate bet (one, owner-chosen)
+
+**AI-assisted setup and capacity capture.** Describe your week in plain language instead of filling
+in per-member minute budgets and capability matrices.
+
+- **Where:** the setup and capacity-update path only. Nowhere else.
+- **Why it creates the moment:** re-balancing requires *current* capacity. If updating capacity is a
+  form, nobody updates it, capacity goes stale, and the moment never fires in real life. The bet is
+  really about making capacity cheap enough to stay true.
+- **What kills it:** latency, cost, or an LLM failure in the one flow that must never break; or
+  extraction that is wrong often enough to erode trust in the numbers the fairness claim rests on.
+- **Fallback:** manual entry — which is what every competitor ships, so the floor is parity, not
+  failure. **The manual path must exist and work on day one; the bet is an accelerator on top of it,
+  never the only road in.**
+
+Everything outside that path is deliberately boring, proven technology (owner directive: selectively
+bleeding-edge, one bet).
+
+## Design direction
+
+- **Glanceable over comprehensive.** The moment is judged at arm's length in a hallway, not studied.
+- **Never a leaderboard.** Ranking members by output is the exact inversion of the thesis; whatever
+  is shown must make a *smaller* fair share look correct rather than losing.
+- **The re-balance must be perceptible as an event**, not a silently different number on next look —
+  something changed, here is what and why. Legibility is the product.
+- **No shame mechanics.** No streaks to break, no red for a person. Red is for work, never for people.
+- **It must never feel like it is nagging** — that is the thing the original problem statement names
+  as the enemy.
+
+## The prototype gate — passed 2026-08-06
+
+The signature moment was built as a disposable prototype and judged by the owner *running*, before
+any story was written. **Outcome: passed — "this is the thing."**
+
+Reference (throwaway, never merged, no backend, fixed data):
+`https://claude.ai/code/artifact/0e3b4cb8-2b6e-48aa-992a-7d00f2f7407e`
+
+The design idea that made the thesis visible, and which should survive into the product: **show each
+person's load as a share of *their own* capacity, so fair means every bar is level** regardless of how
+different the people are. It is structurally anti-leaderboard — level is the goal, not rank — and it
+satisfies "fairness is seen" without a number having to be read.
+
+### Three findings, and they are constraints on #9 rather than notes
+
+1. **The granularity floor is real and irreducible.** When a member's capacity approaches the size of
+   a single chore, level is arithmetically impossible: at 25 minutes' capacity Ava's fair share is
+   ~17 minutes and the smallest job is 10. *Measured*: greedy allocation was ragged in **3 of 5**
+   scenarios (spread to 15%); a local-search pass fixed two and **could not fix this one**. The
+   product must therefore have a designed answer for "level is unreachable", and the one that worked
+   is to **say so plainly and name the reason** — which reads as the fairness claim being honest
+   rather than as a failure. An allocator that silently reports "level" over a visibly ragged set is
+   the fastest way to destroy trust in the number the whole product rests on.
+2. **Re-balancing churns 8–10 of 14 jobs.** This is the kill condition named for derived allocation,
+   observed on the first run and currently unmitigated. Net *counts* barely move while *minutes* move
+   a lot, so the churn is mostly invisible in a count and very visible on a person's list. #9 needs a
+   stability rule — pinned assignments, a change budget, or preferring the incumbent on ties.
+3. **Minutes, not chore counts, is the unit.** The first narration read "10 chores moved" beside
+   "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
+   is in minutes, because that is the unit the fairness claim is made in.
+
+### Open caveat, carried rather than closed
+
+The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
+no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
+prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
+**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
+it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.**
+
+## Consequences for the backlog
+
+The reimagine lands **before the layer it changes exists**, which is lucky and will not last.
+
+- **Unaffected — proceed as written:** #23, #24, #25, #26 and PR #31. Household identity, join flow,
+  members with `weekly_minutes`, and per-member credentials are foundation a capacity model needs
+  regardless. The merged migration `0001_household_and_roster.sql` encodes no task or allocation
+  semantics and survives intact.
+- **Must be re-derived from this section before they are started:** **#7, #9, #10, #11, #12** — load
+  view, allocation, templates, instantiation, expected-vs-actual. All open, none started. They were
+  decomposed from the one-axis charter and encode the 2020 feature set as spec.
+- **#9 is the point of no return.** After allocation is built to the old model, the reimagine gets
+  materially more expensive. Re-derivation happens before it, not after.
+
+## Decisions taken at grooming, 2026-08-06
+
+Settled by the owner after the `groom-backlog` run raised them as escalations. Recorded here rather
+than only in the pipeline output, because a decision that lives in a pipeline's report stops existing
+at filing.
+
+- **Allocation is STORED, with an automatic re-derive on capacity change.** Not derived-at-read and
+  not an explicit re-balance button — the latter was ruled out against the charter, since *a button
+  someone presses is the negotiation moved rather than removed*. Reasoning: the change budget and the
+  announcement both need a **before-state**, #6 already stores manual assignments, and the
+  re-read-after-mutation pattern in `App.jsx` absorbs it. Costs a transactional RPC. This closes the
+  charter's "decide before #9" item.
+- **The LLM extraction call runs in a Supabase Edge Function.** The secret sits next to the data, the
+  auth context already exists, and one platform holds credentials. Rejected: a Vercel function (a
+  second platform holding a provider secret) and any client-side key, which is the `VITE_` secret-key
+  defect wearing a different hat. It is a **new deployment surface with no CI coverage**, so it is its
+  own story rather than a line in another one.
+- **The load surface opens by default**, with the roster reachable from it — it is the product's
+  thesis and the thing judged at arm's length.
+- **#6 and #8 are re-derived too** (owner, overruling the recommendation to re-derive only #8). Both
+  were decomposed from the one-axis charter and sit upstream of everything with a UI. #8 in
+  particular risks shipping a capability matrix — a form — in the same window the bet exists to
+  delete forms.
+
+## Open decisions (still owed)
+
+- **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.
+  Adding capture adds input burden, which is the failure mode the bet exists to fight.
+- **What "busy week" means as an input** — declared by the person, inferred from completions, or
+  read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
+  It bears on whether #12's actuals ever become an input to capacity.

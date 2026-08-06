@@ -258,13 +258,34 @@ The reimagine lands **before the layer it changes exists**, which is lucky and w
 - **#9 is the point of no return.** After allocation is built to the old model, the reimagine gets
   materially more expensive. Re-derivation happens before it, not after.
 
-## Open decisions (owed, not blockers)
+## Decisions taken at grooming, 2026-08-06
 
-- **Derived vs stored allocation.** Choosing the AI bet leaves this an *ordinary design decision that
-  is still owed* — the moment needs an architectural answer either way. Recomputing the split from
-  capacity and open work makes re-balancing fall out of the design; storing assignments makes it an
-  explicit action. Decide before #9.
+Settled by the owner after the `groom-backlog` run raised them as escalations. Recorded here rather
+than only in the pipeline output, because a decision that lives in a pipeline's report stops existing
+at filing.
+
+- **Allocation is STORED, with an automatic re-derive on capacity change.** Not derived-at-read and
+  not an explicit re-balance button — the latter was ruled out against the charter, since *a button
+  someone presses is the negotiation moved rather than removed*. Reasoning: the change budget and the
+  announcement both need a **before-state**, #6 already stores manual assignments, and the
+  re-read-after-mutation pattern in `App.jsx` absorbs it. Costs a transactional RPC. This closes the
+  charter's "decide before #9" item.
+- **The LLM extraction call runs in a Supabase Edge Function.** The secret sits next to the data, the
+  auth context already exists, and one platform holds credentials. Rejected: a Vercel function (a
+  second platform holding a provider secret) and any client-side key, which is the `VITE_` secret-key
+  defect wearing a different hat. It is a **new deployment surface with no CI coverage**, so it is its
+  own story rather than a line in another one.
+- **The load surface opens by default**, with the roster reachable from it — it is the product's
+  thesis and the thing judged at arm's length.
+- **#6 and #8 are re-derived too** (owner, overruling the recommendation to re-derive only #8). Both
+  were decomposed from the one-axis charter and sit upstream of everything with a UI. #8 in
+  particular risks shipping a capability matrix — a form — in the same window the bet exists to
+  delete forms.
+
+## Open decisions (still owed)
+
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.
   Adding capture adds input burden, which is the failure mode the bet exists to fight.
 - **What "busy week" means as an input** — declared by the person, inferred from completions, or
   read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
+  It bears on whether #12's actuals ever become an input to capacity.

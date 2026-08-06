@@ -1,0 +1,9 @@
+# Branches in this repo that are entered only by a pull request the owner merges,
+# in addition to the driver default (develop main master).
+#
+# Taskr has three branch roles, which is why this file exists at all: `develop`
+# is the 2020 legacy tip, `main` is the cutover target tagged `legacy-final`, and
+# `rebuild/v1` is where rebuild work actually merges - so the integration branch
+# is NOT one of the three default names and would otherwise fall through as if it
+# were a feature branch.
+rebuild/v1

@@ -1,0 +1,10 @@
+# One shell command per line, run from the repo root. Non-zero exit refuses the
+# push. Lines starting with # mean nothing runs for them.
+#
+# Mirrors .github/workflows/ci.yml, added in #4 - the first CI this repo ever
+# had. Only reached for a branch listed in githooks/direct-push-ok, and Taskr
+# has no such file, so today this list is a placeholder that documents the gate
+# rather than one that runs. Kept because an absent checks file makes the driver
+# print "an empty gate is not a passing gate", which is the honest message.
+npm run lint
+npm test

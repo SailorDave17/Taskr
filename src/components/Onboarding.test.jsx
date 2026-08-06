@@ -29,8 +29,15 @@ describe('starting a household', () => {
     fireEvent.change(screen.getByLabelText(/household name/i), {
       target: { value: 'Placeholder Household' },
     })
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: 'Placeholder Organizer' },
+    })
+    fireEvent.change(screen.getByLabelText(/your pin/i), { target: { value: '4821' } })
     await clickAndSettle(screen.getByRole('button', { name: /create household/i }))
-    expect(onCreate).toHaveBeenCalledWith('Placeholder Household')
+    expect(onCreate).toHaveBeenCalledWith('Placeholder Household', {
+      organizerName: 'Placeholder Organizer',
+      organizerPin: '4821',
+    })
   })
 
   it('shows the reason when the backend refuses, instead of failing silently', async () => {
@@ -40,6 +47,10 @@ describe('starting a household', () => {
     fireEvent.change(screen.getByLabelText(/household name/i), {
       target: { value: 'Placeholder Household' },
     })
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: 'Placeholder Organizer' },
+    })
+    fireEvent.change(screen.getByLabelText(/your pin/i), { target: { value: '4821' } })
     fireEvent.click(screen.getByRole('button', { name: /create household/i }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/anonymous sign-ins are disabled/i)

@@ -1,11 +1,132 @@
 # Access model — how a household joins, and what that actually protects
 
-- Date: 2026-08-05
-- Decided by: owner (SailorDave17), at pickup of story #5
-- Story: #5 (PR 1 of 3 — schema, policies, and the test that bypasses the client)
-- Status: **decided and implemented; not yet applied to the live project.** See *What is not done*.
+- Date: 2026-08-05, **substantially revised 2026-08-06**
+- Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
+- Story: #5 (schema, policies, the bypass test) and #23 (per-member credentials, column grants)
+- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002` is
+  not yet — see *What is not done*.
 
-## The decision
+## Read this first — the decision below changed
+
+The original decision on this page was **a household join code plus anonymous auth, pick yourself
+from the roster**. The owner overrode it on 2026-08-05 in favour of **per-member credentials**. That
+older decision is kept further down, under *Superseded: the original decision*, because knowing what
+was believed and abandoned is worth having — but it is no longer what the app does.
+
+The join code still exists. What changed is what it means: it is now only how a **device** gets into
+the household. It is no longer how a **person** is identified.
+
+## The decision — 2026-08-06
+
+**An organizer-set PIN, carried on the member row, checked by the database.**
+
+A device still signs in anonymously and still joins with the household code. On top of that, claiming
+a person — saying "this is me" — requires that person's PIN.
+
+### Why not real per-member auth users, which is what "credentials" sounds like
+
+Because an organizer cannot create another person's Supabase auth user from a browser, and this app
+has no server:
+
+- `supabase.auth.signUp()` signs the caller in **as the new user**. An organizer creating accounts
+  for three children would be signed out of their own after the first.
+- `auth.admin.createUser()`, and resetting somebody else's password, both need the **service_role**
+  key. That key bypasses row-level security entirely and must never reach a client bundle — this repo
+  already fails the build if it does.
+
+So the literal reading of "the organizer creates each member's credential" requires a privileged
+server-side component: a Supabase Edge Function holding the service key. That is a real option and it
+was rejected **for now**, not on principle — the Supabase CLI is not installed, Docker is not
+running, and deploying one is an owner-only step. It is the upgrade path, and it is cheap; see *What
+it costs to change later*.
+
+The two alternatives that avoid a server were weighed:
+
+- *Member self-signup with a synthetic email, gated by the join code.* Gives each person a genuine
+  Supabase identity with no admin API. Rejected because **password reset still needs admin** — so it
+  defers precisely the half of the problem the owner asked to settle, and a forgotten password ends
+  in an Edge Function anyway.
+- *One shared account.* Loses attribution, which #7 and #12 both depend on. Rejected in the original
+  decision and still rejected.
+
+## The honest security level — AC 4
+
+**A PIN is a credential for telling household members apart. It is not a defence against an
+attacker.** Stated plainly, because the whole point of writing this down is that nobody later mistakes
+it for one:
+
+- **The PIN separates people inside a household. The join code is what keeps strangers out.** Neither
+  is strong. A child who reads the join code out on a school bus has given away household access, and
+  no PIN changes that.
+- **There is no rate limit on `claim_member_with_pin`.** A four-digit PIN is 10,000 possibilities and
+  a determined sibling with a script would get through. What makes this tolerable is the threat model
+  — the attacker is a nine-year-old who wants to mark someone else's chores done — and what makes it
+  *fixable* is that the check is server-side, so a rate limit is a change to one function.
+- **What it does buy, and it is not nothing:** the PIN hash is bcrypt and is **never readable by any
+  client**, so it cannot be attacked offline; a member cannot set their own PIN, so a child cannot
+  lock a parent out; and taking someone's identity now requires their PIN rather than one line of
+  JavaScript.
+
+That last clause is not hypothetical. Before migration 0002, `claim_member()` refused a second device
+correctly **and a direct `update members set claimed_by` succeeded anyway** — measured against the
+live project on 2026-08-06. The guard was real and optional, which is the same as absent.
+
+### The part that is doing the work: column grants
+
+Row-level security decides **which rows**. It has nothing to say about **which columns**, and
+Supabase grants `authenticated` every column by default. So every rule expressed as "call this
+function" was advisory until 0002 revoked the columns:
+
+- `claimed_by` and `pin_hash` are no longer writable by any client, through any path.
+- `pin_hash` is not **readable** either. `select('*')` on `members` now fails outright rather than
+  quietly omitting it — which is why the app selects an explicit column list.
+- `has_pin` is a generated boolean, granted, because the UI has to know which sign-in to offer
+  without being told the secret.
+
+## Credentials for a person with no email, and who resets them — AC 5
+
+- **The identifier is the member row**, not an email address and not a username. Nothing anywhere
+  asks a child for an email, because the app never creates an auth user for them — `auth.uid()`
+  identifies the *device*, and the PIN proves which *person* that device is acting as. This is the
+  main reason the PIN approach was chosen over synthetic-email signup: the honest answer to "what is
+  a nine-year-old's identifier?" is *"their name on the roster"*.
+- **The organizer sets the PIN**, at household creation for themselves and per person afterwards.
+  Enforced by `is_household_organizer()` in the database, not by hiding a button.
+- **The organizer resets a forgotten PIN.** There is deliberately **no self-service reset**: there is
+  no inbox to send a link to, and a "security question" for a child is theatre. A reset also
+  **releases whichever phone is currently acting as that person**, so a forgotten PIN and a phone
+  handed on to a sibling are the same operation.
+- **The organizer is a person, not a session.** `households.organizer_member_id` points at a member
+  row, and a device is the organizer exactly while it is claiming that row. Keying it to `auth.uid()`
+  would have quietly disenfranchised the organizer after 30 idle days, when the anonymous session
+  expires and returns with a new id — the same trap `members.claimed_by` exists to avoid.
+- **The organizer's own PIN cannot be recovered.** They are the root of this scheme; there is nobody
+  above them to authorise a reset. The onboarding screen says so at the moment the PIN is chosen.
+  Recovering from a lost organizer PIN means a statement run in the Supabase SQL editor by whoever
+  owns the project — which is the owner, which is the same person. That is an acceptable answer for a
+  household app and would not be for anything else.
+
+## What it costs to change later
+
+Deliberately little, and the schema is why:
+
+- **Upgrading to real per-member auth users** is an Edge Function plus a sign-in change. No data
+  migration: `members.id` is still the durable person and every later story references *that*.
+  `pin_hash` becomes dead and is dropped.
+- **Adding a rate limit** to `claim_member_with_pin` is a change to one function, because the check
+  already happens in the database rather than in the client.
+- **Adding a second organizer** is a column change, not a redesign — `organizer_member_id` would
+  become a role on the member row.
+
+The thing that would have made all of this expensive is attribution keyed to the auth id, and the
+schema deliberately does not do that.
+
+## Superseded: the original decision — 2026-08-05
+
+**Kept for the record. This is no longer what the app does — see *The decision* above.** It is left
+here in full because the reasoning still explains the shape of the schema, and because a decision that
+was made, acted on and then reversed is worth being able to read.
+
 
 **A household join code, plus device-level anonymous authentication, plus pick-yourself from the
 roster.**
@@ -146,6 +267,32 @@ delete from public.households where name like 'TEST %';
 ```
 
 ## What is not done
+
+### Updated 2026-08-06 — story #23, and what is left
+
+`0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
+not been applied" is about 0001 and is now historical. What is outstanding is narrower:
+
+- **`0002_member_pins_and_column_grants.sql` has not been applied.** Paste it into the Supabase SQL
+  editor. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure
+  is the normal way this file gets used.
+- **It changes `create_household`'s signature** from one argument to three, and drops the old form
+  deliberately — a household created without an organizer cannot be administered at all. So the
+  deployed bundle and the database must move together: applying 0002 breaks the currently-deployed
+  app until this PR's build is live, and vice versa. On a household app with no users yet that is a
+  non-event; it will not be later.
+- **The existing test households are unusable under 0002.** They have no `organizer_member_id`, so
+  `is_household_organizer()` returns false for them and no PIN can ever be set. They are `TEST …` rows
+  and the cleanup statement in *Running it* removes them.
+- **Nothing here has been verified on two real phones.** That is #26, deliberately.
+
+Unlike the previous rounds, the SQL in this story **has** been executed before being handed over —
+`src/test/migrations.pglite.test.js` runs both migrations against Postgres 18 in WASM, with 22
+assertions and a mutation record. That proves it is correct Postgres and that the rules hold; it does
+not prove Supabase will accept it, and the stub it runs against is listed in
+`src/test/support/pgliteSupabase.js` so the gap is inspectable.
+
+### Historical — written at PR 1 of story #5
 
 - **The migration has not been applied to the live project**, so none of the policies above have been
   exercised against a real Postgres. The SQL is unvalidated in the strict sense: there is no local

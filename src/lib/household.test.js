@@ -82,6 +82,7 @@ vi.mock('./supabase.js', () => ({
 const {
   addMember,
   claimMember,
+  claimMemberWithPin,
   currentHousehold,
   createHousehold,
   ensureSession,
@@ -90,6 +91,7 @@ const {
   joinHousehold,
   listMembers,
   normalizeMinutes,
+  setMemberPin,
   updateMember,
 } = await import('./household.js')
 
@@ -267,13 +269,23 @@ describe('maintaining the roster', () => {
 describe('the two ways into a household', () => {
   it('creates a household through the server function, never a direct insert', async () => {
     results.create_household = { data: { id: 'h1', join_code: 'ABCD2345' }, error: null }
-    const household = await createHousehold('  Placeholder Household  ')
+    const household = await createHousehold('  Placeholder Household  ', {
+      organizerName: '  Placeholder Organizer  ',
+      organizerPin: '4821',
+    })
 
     expect(household.join_code).toBe('ABCD2345')
+    // The organizer and their PIN go in the SAME call. A household that exists
+    // for even one round trip without an organizer is one nobody can administer,
+    // and is_household_organizer() fails closed on it.
     expect(calls).toContainEqual({
       op: 'rpc',
       name: 'create_household',
-      args: { household_name: 'Placeholder Household' },
+      args: {
+        household_name: 'Placeholder Household',
+        organizer_name: 'Placeholder Organizer',
+        organizer_pin: '4821',
+      },
     })
     expect(calls.filter((c) => c.op === 'insert' && c.table === 'households')).toHaveLength(0)
   })
@@ -302,5 +314,62 @@ describe('the two ways into a household', () => {
 
     expect(calls).toContainEqual({ op: 'rpc', name: 'claim_member', args: { member_id: 'm9' } })
     expect(calls.filter((c) => c.op === 'update' && c.table === 'members')).toHaveLength(0)
+  })
+})
+
+describe('per-member credentials', () => {
+  it('sets a PIN through the server function — there is no column a client could write', async () => {
+    // members.pin_hash is not in the grant list in migration 0002, so a direct
+    // update is refused by Postgres. This asserts the app does not even try,
+    // which is manners; the database is what makes it a rule.
+    results.set_member_pin = { data: { id: 'm1', has_pin: true }, error: null }
+    await setMemberPin('m1', '4821')
+    expect(calls).toContainEqual({
+      op: 'rpc',
+      name: 'set_member_pin',
+      args: { member_id: 'm1', new_pin: '4821' },
+    })
+    expect(calls.filter((c) => c.op === 'update' && c.table === 'members')).toHaveLength(0)
+  })
+
+  it('refuses a PIN too short to be one before spending a round trip', async () => {
+    await expect(setMemberPin('m1', '12')).rejects.toThrow(/between 4 and 12/i)
+    expect(calls.filter((c) => c.op === 'rpc')).toHaveLength(0)
+  })
+
+  it('claims a person by proving you are them, via the PIN route', async () => {
+    results.claim_member_with_pin = { data: { id: 'm1' }, error: null }
+    await claimMemberWithPin('m1', '4821')
+    expect(calls).toContainEqual({
+      op: 'rpc',
+      name: 'claim_member_with_pin',
+      args: { member_id: 'm1', pin: '4821' },
+    })
+  })
+
+  it('never asks for pin_hash, because the grants would refuse the whole select', async () => {
+    // `select('*')` on members now fails outright rather than quietly omitting
+    // the column, so this is a working/not-working distinction, not tidiness.
+    results.members = { data: [], error: null }
+    await listMembers()
+    const selects = calls.filter((c) => c.op === 'select' && c.table === 'members')
+    expect(selects.length).toBeGreaterThan(0)
+    for (const call of selects) {
+      expect(call.cols).not.toBe('*')
+      expect(call.cols).not.toMatch(/pin_hash/)
+      expect(call.cols).toMatch(/has_pin/)
+    }
+  })
+
+  it('creating a household needs an organizer name, not just a household name', async () => {
+    await expect(createHousehold('A Household', { organizerPin: '4821' })).rejects.toThrow(
+      /organizer needs a name/i,
+    )
+  })
+
+  it('creating a household needs a usable organizer PIN', async () => {
+    await expect(
+      createHousehold('A Household', { organizerName: 'Placeholder Organizer', organizerPin: '1' }),
+    ).rejects.toThrow(/between 4 and 12/i)
   })
 })

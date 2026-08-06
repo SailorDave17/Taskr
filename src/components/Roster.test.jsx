@@ -19,6 +19,7 @@ function setup(overrides = {}) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onClaim: vi.fn().mockResolvedValue(undefined),
     onRefresh: vi.fn(),
+    onSetPin: vi.fn().mockResolvedValue(undefined),
   }
   render(<Roster household={household} members={roster} me={null} {...handlers} {...overrides} />)
   return handlers
@@ -288,5 +289,63 @@ describe('seeing another phone’s changes — AC 2', () => {
     const { onRefresh } = setup()
     fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
     expect(onRefresh).toHaveBeenCalled()
+  })
+})
+
+describe('per-member credentials — story #23', () => {
+  const organizerId = 'm1'
+  const withPins = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 0, claimed_by: 'device-a', has_pin: true },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: null, has_pin: false },
+    { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null, has_pin: true },
+  ]
+  const asOrganizer = {
+    members: withPins,
+    me: withPins[0],
+    isOrganizer: true,
+    household: { ...household, organizer_member_id: organizerId },
+  }
+
+  it('offers the organizer a control on every person', () => {
+    setup(asOrganizer)
+    expect(screen.getByLabelText(/set pin for Placeholder Two/i)).toBeInTheDocument()
+    // Already has one, so it is a reset — the wording has to say which, because
+    // a parent needs to know they are about to invalidate a child's PIN.
+    expect(screen.getByLabelText(/reset pin for Placeholder Three/i)).toBeInTheDocument()
+  })
+
+  it('offers it to nobody else, because the database would refuse them anyway', () => {
+    setup({ ...asOrganizer, isOrganizer: false, me: withPins[1] })
+    expect(screen.queryByLabelText(/set pin for/i)).toBeNull()
+    expect(screen.queryByLabelText(/reset pin for/i)).toBeNull()
+  })
+
+  it('sends the PIN for the person whose row it was typed in', async () => {
+    const { onSetPin } = setup(asOrganizer)
+    fireEvent.click(screen.getByLabelText(/set pin for Placeholder Two/i))
+    fireEvent.change(screen.getByLabelText(/^PIN for Placeholder Two$/i), {
+      target: { value: '4821' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /save pin/i }))
+    expect(onSetPin).toHaveBeenCalledWith('m2', '4821')
+  })
+
+  it('will not send one too short to be a credential', () => {
+    const { onSetPin } = setup(asOrganizer)
+    fireEvent.click(screen.getByLabelText(/set pin for Placeholder Two/i))
+    fireEvent.change(screen.getByLabelText(/^PIN for Placeholder Two$/i), { target: { value: '12' } })
+    expect(screen.getByRole('button', { name: /save pin/i })).toBeDisabled()
+    expect(onSetPin).not.toHaveBeenCalled()
+  })
+
+  it('does not offer "this is me" for a person with a PIN — that is the sign-in flow', () => {
+    // claim_member() refuses a PIN-protected member outright, so the button's
+    // only possible outcome would be an error message.
+    setup({ members: withPins, me: null, isOrganizer: false })
+    const three = rowFor('Placeholder Three')
+    expect(within(three).queryByRole('button', { name: /this is me/i })).toBeNull()
+
+    const two = rowFor('Placeholder Two')
+    expect(within(two).getByRole('button', { name: /this is me/i })).toBeInTheDocument()
   })
 })

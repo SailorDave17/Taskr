@@ -53,6 +53,8 @@ if (isSecretKey(anonKey)) {
   )
 }
 
+const ORGANIZER_PIN = '4821'
+
 /** A fresh client per device, so the two never share a session. */
 function newDevice() {
   return createClient(url, anonKey, {
@@ -85,6 +87,11 @@ describe('row-level security, exercised over the wire', () => {
 
     const { data, error } = await deviceA.rpc('create_household', {
       household_name: `TEST ${new Date().toISOString()}`,
+      // Migration 0002 creates the organizer in the same statement: a household
+      // that exists for even one round trip without one cannot be administered,
+      // because is_household_organizer() fails closed on a null.
+      organizer_name: 'Placeholder Organizer',
+      organizer_pin: ORGANIZER_PIN,
     })
     expect(error, `create_household failed: ${error?.message}`).toBeNull()
     household = data
@@ -187,6 +194,22 @@ describe('row-level security, exercised over the wire', () => {
     it('still cannot see any OTHER household', async () => {
       const { data } = await deviceB.from('households').select('*')
       expect(data.map((h) => h.id)).toEqual([household.id])
+    })
+
+    it('cannot take an identity by writing claimed_by directly, going around the RPC', async () => {
+      // Measured on 2026-08-06, BEFORE migration 0002: the RPC below refused
+      // device B correctly and this direct update succeeded anyway, 1 row
+      // changed. The guard was real and optional, which is the same as absent.
+      // What refuses it now is a column grant, not a policy — RLS is row-level
+      // and has nothing to say about which columns a client may write.
+      const uidB = (await deviceB.auth.getUser()).data.user.id
+      const { error } = await deviceB.from('members').update({ claimed_by: uidB }).eq('id', memberId)
+      expect(error, 'a client could still write claimed_by directly').not.toBeNull()
+    })
+
+    it('cannot read a PIN hash, so a four-digit PIN cannot be attacked offline', async () => {
+      const { error } = await deviceB.from('members').select('pin_hash').eq('id', memberId)
+      expect(error, 'pin_hash was readable by a household member').not.toBeNull()
     })
 
     it('will not let two devices claim the same person', async () => {

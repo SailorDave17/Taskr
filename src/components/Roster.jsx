@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, isValidPin } from '../lib/pin.js'
 import PropTypes from 'prop-types'
 import { formatMinutes } from '../lib/household.js'
 
@@ -11,10 +12,12 @@ import { formatMinutes } from '../lib/household.js'
 // Showing "2h 0m" beside the field is a reading aid; the stored value is the
 // number that was typed.
 
-function MemberRow({ member, isMe, canClaim, busy, onSave, onRemove, onClaim }) {
+function MemberRow({ member, isMe, canClaim, canSetPin, busy, onSave, onRemove, onClaim, onSetPin }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
   const [minutes, setMinutes] = useState(String(member.weekly_minutes))
+  const [pin, setPin] = useState('')
+  const [settingPin, setSettingPin] = useState(false)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
   function cancel() {
@@ -103,6 +106,17 @@ function MemberRow({ member, isMe, canClaim, busy, onSave, onRemove, onClaim }) 
         >
           Edit
         </button>
+        {canSetPin ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => setSettingPin((open) => !open)}
+            disabled={busy}
+            aria-label={`${member.has_pin ? 'Reset' : 'Set'} PIN for ${member.display_name}`}
+          >
+            {member.has_pin ? 'Reset PIN' : 'Set PIN'}
+          </button>
+        ) : null}
         {confirmingRemove ? (
           <>
             <button
@@ -134,6 +148,43 @@ function MemberRow({ member, isMe, canClaim, busy, onSave, onRemove, onClaim }) 
           </button>
         )}
       </div>
+
+      {settingPin ? (
+        <form
+          className="row row--end"
+          onSubmit={(e) => {
+            e.preventDefault()
+            onSetPin(member.id, pin).then(
+              () => {
+                setPin('')
+                setSettingPin(false)
+              },
+              () => {},
+            )
+          }}
+        >
+          <label className="field">
+            <span className="field__label">
+              {member.has_pin ? 'New PIN' : 'PIN'} for {member.display_name}
+            </span>
+            <input
+              className="field__input field__input--code"
+              type="password"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              placeholder="4 digits or more"
+              inputMode="numeric"
+              autoComplete="new-password"
+              minLength={PIN_MIN_LENGTH}
+              maxLength={PIN_MAX_LENGTH}
+              aria-label={`PIN for ${member.display_name}`}
+            />
+          </label>
+          <button className="button" type="submit" disabled={busy || !isValidPin(pin)}>
+            Save PIN
+          </button>
+        </form>
+      ) : null}
     </li>
   )
 }
@@ -142,6 +193,8 @@ MemberRow.propTypes = {
   member: PropTypes.object.isRequired,
   isMe: PropTypes.bool,
   canClaim: PropTypes.bool,
+  canSetPin: PropTypes.bool,
+  onSetPin: PropTypes.func,
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
@@ -206,6 +259,8 @@ export default function Roster({
   household,
   members,
   me,
+  isOrganizer,
+  onSetPin,
   busy,
   error,
   onAdd,
@@ -264,7 +319,12 @@ export default function Roster({
                 // someone, and the person is unclaimed. The server refuses a
                 // double claim regardless; this just avoids offering a button
                 // whose only outcome is an error.
-                canClaim={!me && !member.claimed_by}
+                // A person with a PIN is claimed by proving you are them, which
+                // is the sign-in flow — claim_member refuses them outright, so
+                // offering the button here would only produce an error.
+                canClaim={!me && !member.claimed_by && !member.has_pin}
+                canSetPin={Boolean(isOrganizer && onSetPin)}
+                onSetPin={onSetPin}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
@@ -340,6 +400,8 @@ Roster.propTypes = {
   household: PropTypes.object.isRequired,
   members: PropTypes.array.isRequired,
   me: PropTypes.object,
+  isOrganizer: PropTypes.bool,
+  onSetPin: PropTypes.func,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
 import { JOIN_CODE_LENGTH, isPlausibleJoinCode, normalizeJoinCode } from '../lib/joinCode.js'
+import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../lib/pin.js'
 
 // The two ways into a household — AC 1 (create, and learn the credential) and
 // AC 5 (join with it, from a phone with no email account).
@@ -11,6 +12,8 @@ import { JOIN_CODE_LENGTH, isPlausibleJoinCode, normalizeJoinCode } from '../lib
 
 export default function Onboarding({ onCreate, onJoin, busy }) {
   const [name, setName] = useState('')
+  const [organizerName, setOrganizerName] = useState('')
+  const [organizerPin, setOrganizerPin] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState(null)
 
@@ -24,6 +27,9 @@ export default function Onboarding({ onCreate, onJoin, busy }) {
   }
 
   const codeReady = isPlausibleJoinCode(code)
+  const pinReady =
+    organizerPin.trim().length >= PIN_MIN_LENGTH && organizerPin.trim().length <= PIN_MAX_LENGTH
+  const createReady = Boolean(name.trim()) && Boolean(organizerName.trim()) && pinReady
 
   return (
     <div className="onboarding">
@@ -32,13 +38,15 @@ export default function Onboarding({ onCreate, onJoin, busy }) {
           Start a household
         </h2>
         <p className="card__body">
-          You will get a join code to read out to everyone else&rsquo;s phone.
+          You will get a join code to read out to everyone else&rsquo;s phone. Your
+          PIN is how you prove it is you &mdash; it is also the only way to reset
+          anyone else&rsquo;s, so it cannot be recovered if you forget it.
         </p>
         <form
           className="stack"
           onSubmit={(e) => {
             e.preventDefault()
-            run(() => onCreate(name))
+            run(() => onCreate(name, { organizerName, organizerPin }))
           }}
         >
           <label className="field">
@@ -52,7 +60,32 @@ export default function Onboarding({ onCreate, onJoin, busy }) {
               autoComplete="off"
             />
           </label>
-          <button className="button" type="submit" disabled={busy || !name.trim()}>
+          <label className="field">
+            <span className="field__label">Your name</span>
+            <input
+              className="field__input"
+              value={organizerName}
+              onChange={(e) => setOrganizerName(e.target.value)}
+              placeholder="Alex"
+              maxLength={40}
+              autoComplete="off"
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Your PIN</span>
+            <input
+              className="field__input field__input--code"
+              type="password"
+              value={organizerPin}
+              onChange={(e) => setOrganizerPin(e.target.value)}
+              placeholder="4 digits or more"
+              inputMode="numeric"
+              autoComplete="new-password"
+              minLength={PIN_MIN_LENGTH}
+              maxLength={PIN_MAX_LENGTH}
+            />
+          </label>
+          <button className="button" type="submit" disabled={busy || !createReady}>
             Create household
           </button>
         </form>

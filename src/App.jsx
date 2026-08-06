@@ -12,6 +12,7 @@ import {
   joinHousehold,
   listMembers,
   removeMember,
+  setMemberPin,
   updateMember,
 } from './lib/household.js'
 import Onboarding from './components/Onboarding.jsx'
@@ -98,15 +99,26 @@ export default function App() {
     [refresh],
   )
 
-  const handleCreate = useCallback((name) => mutate(() => createHousehold(name)), [mutate])
+  const handleCreate = useCallback(
+    (name, organizer) => mutate(() => createHousehold(name, organizer)),
+    [mutate],
+  )
   const handleJoin = useCallback((code) => mutate(() => joinHousehold(code)), [mutate])
   const handleAdd = useCallback((person) => mutate(() => addMember(person)), [mutate])
   const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
   const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
   const handleClaim = useCallback((id) => mutate(() => claimMember(id)), [mutate])
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+  const handleSetPin = useCallback((id, pin) => mutate(() => setMemberPin(id, pin)), [mutate])
 
   const me = findClaimedMember(members, deviceId)
+
+  // The organizer is a PERSON, not a session — an anonymous session expires
+  // after 30 days idle and returns with a new auth id, so a device is the
+  // organizer exactly while it is acting as the organizer's member row. The
+  // server decides this independently in is_household_organizer(); this only
+  // governs whether the control is offered.
+  const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
   return (
     <main className="shell">
@@ -156,12 +168,14 @@ export default function App() {
           household={household}
           members={members}
           me={me}
+          isOrganizer={isOrganizer}
           busy={busy}
           error={error}
           onAdd={handleAdd}
           onSave={handleSave}
           onRemove={handleRemove}
           onClaim={handleClaim}
+          onSetPin={handleSetPin}
           onRefresh={handleRefresh}
         />
       ) : null}

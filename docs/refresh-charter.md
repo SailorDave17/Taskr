@@ -204,6 +204,46 @@ bleeding-edge, one bet).
 - **It must never feel like it is nagging** — that is the thing the original problem statement names
   as the enemy.
 
+## The prototype gate — passed 2026-08-06
+
+The signature moment was built as a disposable prototype and judged by the owner *running*, before
+any story was written. **Outcome: passed — "this is the thing."**
+
+Reference (throwaway, never merged, no backend, fixed data):
+`https://claude.ai/code/artifact/0e3b4cb8-2b6e-48aa-992a-7d00f2f7407e`
+
+The design idea that made the thesis visible, and which should survive into the product: **show each
+person's load as a share of *their own* capacity, so fair means every bar is level** regardless of how
+different the people are. It is structurally anti-leaderboard — level is the goal, not rank — and it
+satisfies "fairness is seen" without a number having to be read.
+
+### Three findings, and they are constraints on #9 rather than notes
+
+1. **The granularity floor is real and irreducible.** When a member's capacity approaches the size of
+   a single chore, level is arithmetically impossible: at 25 minutes' capacity Ava's fair share is
+   ~17 minutes and the smallest job is 10. *Measured*: greedy allocation was ragged in **3 of 5**
+   scenarios (spread to 15%); a local-search pass fixed two and **could not fix this one**. The
+   product must therefore have a designed answer for "level is unreachable", and the one that worked
+   is to **say so plainly and name the reason** — which reads as the fairness claim being honest
+   rather than as a failure. An allocator that silently reports "level" over a visibly ragged set is
+   the fastest way to destroy trust in the number the whole product rests on.
+2. **Re-balancing churns 8–10 of 14 jobs.** This is the kill condition named for derived allocation,
+   observed on the first run and currently unmitigated. Net *counts* barely move while *minutes* move
+   a lot, so the churn is mostly invisible in a count and very visible on a person's list. #9 needs a
+   stability rule — pinned assignments, a change budget, or preferring the incumbent on ties.
+3. **Minutes, not chore counts, is the unit.** The first narration read "10 chores moved" beside
+   "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
+   is in minutes, because that is the unit the fairness claim is made in.
+
+### Open caveat, carried rather than closed
+
+The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
+no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
+prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
+**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
+it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.**
+
 ## Consequences for the backlog
 
 The reimagine lands **before the layer it changes exists**, which is lucky and will not last.

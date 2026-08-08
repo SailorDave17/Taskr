@@ -117,16 +117,39 @@ export async function createHousehold(name, { organizerName, organizerPin } = {}
   // the household. A PIN set afterwards would leave a window in which the
   // organizer cannot move to a new phone, and a household briefly without an
   // organizer is a household nobody can administer.
+  //
+  // The timezone goes in the SAME statement for the same class of reason (#44).
+  // A week boundary is a local-time fact and the household's zone is what
+  // decides it; a second round trip to set it afterwards can fail on its own and
+  // would leave the household filing capacity under UTC weeks nobody lives in.
+  // 0005 defaults the argument to 'UTC', so an older client still works — this
+  // is what makes "defaulted from the creating device" true rather than
+  // available.
   return unwrap(
     await getSupabase().rpc('create_household', {
       household_name: trimmed,
       organizer_name: organizer,
       organizer_pin: String(organizerPin),
+      household_tz: deviceTimezone(),
     }),
     'creating the household',
   )
 }
 
+/**
+ * The IANA zone this device is in, for a household that has not stated one.
+ *
+ * Falls back to UTC rather than throwing: a browser with no resolved zone is
+ * rare and is not a reason to refuse to create a household, and 0005 makes the
+ * value correctable by any member afterwards.
+ */
+export function deviceTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
 
 
 /**

@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CHORE_COLUMNS,
+  isOutstanding,
+  outstandingMinutes,
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   normalizeDueDate,
@@ -135,10 +137,14 @@ describe('the title', () => {
 })
 
 describe('the readable column list', () => {
-  it('matches 0003 select grant exactly, so select(*) is never needed', () => {
+  it('matches the select grant exactly, so select(*) is never needed', () => {
     // A column grant makes `select('*')` fail outright rather than quietly
     // returning a narrower row, so this list is load-bearing rather than tidy.
+    // 0004 added the two completion columns as readable; if this list and the
+    // grant ever disagree, every read fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
+      'completed_at',
+      'completed_by_member_id',
       'created_at',
       'due_on',
       'expected_minutes',
@@ -155,5 +161,33 @@ describe('the readable column list', () => {
 
   it('does not contain a wildcard', () => {
     expect(CHORE_COLUMNS).not.toContain('*')
+  })
+})
+
+describe('outstanding — #35 AC 5', () => {
+  const out = (id, minutes) => ({ id, expected_minutes: minutes, completed_at: null })
+  const done = (id, minutes) => ({ id, expected_minutes: minutes, completed_at: '2026-08-08T10:00:00Z' })
+
+  it('counts only work that is not finished', () => {
+    // The two totals DIFFER on this fixture — 30 outstanding against 130 for
+    // every row — so a sum over all rows fails. That difference is the test.
+    const chores = [out('a', 20), done('b', 100), out('c', 10)]
+    expect(outstandingMinutes(chores)).toBe(30)
+    expect(outstandingMinutes(chores)).not.toBe(130)
+  })
+
+  it('is zero when everything is done, rather than the all-rows total', () => {
+    expect(outstandingMinutes([done('a', 20), done('b', 100)])).toBe(0)
+  })
+
+  it('is zero for an empty household', () => {
+    expect(outstandingMinutes([])).toBe(0)
+  })
+
+  it('treats a missing completed_at as outstanding, not as a crash', () => {
+    // A row read before 0004 shipped, or a fixture that omits the column.
+    expect(isOutstanding({ id: 'a' })).toBe(true)
+    expect(isOutstanding({ id: 'a', completed_at: null })).toBe(true)
+    expect(isOutstanding({ id: 'a', completed_at: '2026-08-08T10:00:00Z' })).toBe(false)
   })
 })

@@ -342,3 +342,30 @@ body {
 .chore__due {
   opacity: 0.85;
 }
+
+/* Completed work — story #35.
+
+   Same card grammar as an outstanding chore, dimmed rather than restyled. It
+   stays VISIBLE so a household can see the week's work was actually done, and
+   it carries no streak, no rank, no score and no per-person total: red is for
+   work, never for people. Nothing here uses the .error palette, deliberately —
+   a completed chore is a good outcome and must not read as a warning. */
+
+.card__subheading {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.chore-done {
+  margin-top: 0.25rem;
+}
+
+.chore-list--done .chore {
+  opacity: 0.6;
+}
+
+.chore-list--done .chore__title {
+  text-decoration: line-through;
+}

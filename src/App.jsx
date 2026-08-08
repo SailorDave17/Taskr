@@ -16,7 +16,14 @@ import {
   setMemberPin,
   updateMember,
 } from './lib/household.js'
-import { addChore, listChores, removeChore, updateChore } from './lib/chores.js'
+import {
+  addChore,
+  completeChore,
+  listChores,
+  removeChore,
+  uncompleteChore,
+  updateChore,
+} from './lib/chores.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -123,6 +130,11 @@ export default function App() {
   const handleAddChore = useCallback((chore) => mutate(() => addChore(chore)), [mutate])
   const handleSaveChore = useCallback((id, patch) => mutate(() => updateChore(id, patch)), [mutate])
   const handleRemoveChore = useCallback((id) => mutate(() => removeChore(id)), [mutate])
+  // #35 — completion goes through an RPC because the SERVER sets the clock, not
+  // because of access control. A phone with the wrong date would otherwise move
+  // work between weeks.
+  const handleCompleteChore = useCallback((id) => mutate(() => completeChore(id)), [mutate])
+  const handleUncompleteChore = useCallback((id) => mutate(() => uncompleteChore(id)), [mutate])
   // The other half of the credential (#63). `claimMember` refuses anyone holding
   // a PIN outright, so without this a member the organizer had given a PIN to
   // could not get onto their own phone at all — and `set_member_pin` releases
@@ -210,6 +222,8 @@ export default function App() {
           onAdd={handleAddChore}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
+          onComplete={handleCompleteChore}
+          onUncomplete={handleUncompleteChore}
         />
       ) : null}
 

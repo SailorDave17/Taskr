@@ -4,9 +4,11 @@ import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   formatMinutes,
+  isOutstanding,
   normalizeDueDate,
   normalizeExpectedMinutes,
   normalizeTitle,
+  outstandingMinutes,
 } from '../lib/chores.js'
 
 // The chore list — story #34.
@@ -52,7 +54,7 @@ function validate({ title, expectedMinutes, dueOn }) {
   }
 }
 
-function ChoreRow({ chore, busy, onSave, onRemove }) {
+function ChoreRow({ chore, busy, onSave, onRemove, onComplete, onUncomplete }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(chore.title)
   const [minutes, setMinutes] = useState(String(chore.expected_minutes))
@@ -170,6 +172,27 @@ function ChoreRow({ chore, busy, onSave, onRemove }) {
       </div>
 
       <div className="row row--end">
+        {isOutstanding(chore) ? (
+          <button
+            className="button"
+            type="button"
+            onClick={() => onComplete(chore.id).then(() => {}, () => {})}
+            disabled={busy}
+            aria-label={`Mark ${chore.title} done`}
+          >
+            Done
+          </button>
+        ) : (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => onUncomplete(chore.id).then(() => {}, () => {})}
+            disabled={busy}
+            aria-label={`Put ${chore.title} back on the list`}
+          >
+            Not done after all
+          </button>
+        )}
         <button
           className="button button--quiet"
           type="button"
@@ -223,13 +246,18 @@ ChoreRow.propTypes = {
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
+  onComplete: PropTypes.func.isRequired,
+  onUncomplete: PropTypes.func.isRequired,
 }
 
-export default function Chores({ chores, busy, error, onAdd, onSave, onRemove }) {
+export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, onComplete, onUncomplete }) {
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
   const [dueOn, setDueOn] = useState('')
   const [complaint, setComplaint] = useState(null)
+
+  const outstanding = chores.filter(isOutstanding)
+  const done = chores.filter((c) => !isOutstanding(c))
 
   return (
     <section className="card" aria-labelledby="chores-heading">
@@ -243,19 +271,59 @@ export default function Chores({ chores, busy, error, onAdd, onSave, onRemove })
           takes — the split is proportional to those minutes, so they are worth being honest
           about.
         </p>
-      ) : (
-        <ul className="chore-list">
-          {chores.map((chore) => (
-            <ChoreRow
-              key={chore.id}
-              chore={chore}
-              busy={busy}
-              onSave={onSave}
-              onRemove={onRemove}
-            />
-          ))}
-        </ul>
-      )}
+      ) : null}
+
+      {outstanding.length > 0 ? (
+        <>
+          <ul className="chore-list">
+            {outstanding.map((chore) => (
+              <ChoreRow
+                key={chore.id}
+                chore={chore}
+                busy={busy}
+                onSave={onSave}
+                onRemove={onRemove}
+                onComplete={onComplete}
+                onUncomplete={onUncomplete}
+              />
+            ))}
+          </ul>
+          {/* A household figure, not a per-person one. #34's fence forbade an
+              aggregate because there was nothing to aggregate — completion is
+              what makes "still to do" a real quantity, and it is the number the
+              allocation in #40 will divide. Nothing here ranks anybody. */}
+          <p className="card__note" data-testid="outstanding-total">
+            {outstanding.length} still to do · {outstandingMinutes(chores)} min
+            <span className="chore__cost-human"> ({formatMinutes(outstandingMinutes(chores))})</span>
+          </p>
+        </>
+      ) : null}
+
+      {done.length > 0 ? (
+        <section className="chore-done" aria-labelledby="done-heading">
+          {/* Completed work stays VISIBLE in its own group rather than
+              vanishing, so the household can see the week's work was actually
+              done. Deliberately carries no streak, no rank, no score, no
+              per-person total, and no error or alert styling: red is for work,
+              never for people. A component test fails if any appears. */}
+          <h3 id="done-heading" className="card__subheading">
+            Done this week
+          </h3>
+          <ul className="chore-list chore-list--done">
+            {done.map((chore) => (
+              <ChoreRow
+                key={chore.id}
+                chore={chore}
+                busy={busy}
+                onSave={onSave}
+                onRemove={onRemove}
+                onComplete={onComplete}
+                onUncomplete={onUncomplete}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <form
         className="stack"
@@ -346,4 +414,6 @@ Chores.propTypes = {
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
+  onComplete: PropTypes.func.isRequired,
+  onUncomplete: PropTypes.func.isRequired,
 }

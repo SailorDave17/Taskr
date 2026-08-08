@@ -4,8 +4,8 @@
 - Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
 - Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants) and
   #34 (chores, which inherits the column-grant convention)
-- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002` and
-  `0003` are not yet — see *What is not done*.
+- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002`,
+  `0003` and `0004` are not yet — see *What is not done*.
 
 ## Read this first — the decision below changed
 
@@ -268,6 +268,27 @@ delete from public.households where name like 'TEST %';
 ```
 
 ## What is not done
+
+### Updated 2026-08-08 — story #35 added a fourth migration
+
+**`0004_chore_completion.sql` has not been applied.** Paste it at the merge of #35, for the same
+reason 0003 must be — the merge deploys client code that reads `completed_at`, and the chore read
+shares `refresh()` with the roster, so the whole shell fails rather than just the chore list.
+
+What it adds, and the one non-obvious decision:
+
+- **`completed_at` and `completed_by_member_id` are readable and NOT writable.** They move only
+  through `complete_chore()` / `uncomplete_chore()`, and the withholding is in place from the first
+  moment the columns exist rather than revoked from a shipped write path later.
+- **The definer function is about the CLOCK, not access control.** A household is already a trust
+  boundary, so the function buys no authorization it did not have. What it buys is `now()` being the
+  *database's*: `completed_at` decides which week work falls in, and a phone with a wrong date would
+  move work between weeks silently. That is a foreign input to the fairness arithmetic.
+- **Attribution is to `members.id`, never `auth.uid()`** — the invariant 0001 sets. An idle
+  anonymous session returns after 30 days with a new auth id.
+- **Completing an unassigned chore is allowed and attributed** (owner decision, 2026-08-08). It is
+  the noticing dimension's first contact with data; nothing surfaces it, and whether it ever becomes
+  a product feature stays open.
 
 ### Updated 2026-08-08 — story #34 added a third migration
 

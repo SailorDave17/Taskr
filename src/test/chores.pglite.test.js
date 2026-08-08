@@ -412,7 +412,12 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
+      // Widened by 0004, which made completion READABLE and neither column
+      // writable. The update set below is unchanged, which is the convention
+      // working: additive by column, and no later story revokes a shipped grant.
       expect(await granted('SELECT')).toEqual([
+        'completed_at',
+        'completed_by_member_id',
         'created_at',
         'due_on',
         'expected_minutes',
@@ -424,17 +429,17 @@ describe('chores, run against a real Postgres', () => {
     })
 
     it('the columns later stories add are absent, so their write guards land with them', async () => {
-      // #35 introduces completed_at and #36 assigned_member_id. Declaring them
-      // here and withholding the grants would look more complete and be worse:
-      // the test proving a client cannot write them would sit in a story with no
-      // reason yet to try.
+      // #35 arrived and brought completed_at with its own write guard, which is
+      // the convention working rather than an exception to it. #36's
+      // assigned_member_id is still absent, and declaring it here would put the
+      // test proving a client cannot write it in a story with no reason to try.
       const { rows } = await db.query(
         `select column_name from information_schema.columns
           where table_schema = 'public' and table_name = 'chores'
           order by column_name`,
       )
       const columns = rows.map((r) => r.column_name)
-      expect(columns).not.toContain('completed_at')
+      expect(columns).toContain('completed_at')
       expect(columns).not.toContain('assigned_member_id')
     })
   })

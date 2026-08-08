@@ -142,6 +142,9 @@ Every push to `rebuild/v1` deploys to production automatically.
 - [`allocation-corpus.md`](docs/allocation-corpus.md) — the scenario corpus the allocator is
   judged against, the recorded proportion of household shapes that reach level, and the ones
   that arithmetically cannot.
+- [`capacity-model.md`](docs/capacity-model.md) — baseline versus this week’s override, why the week
+  begins on Monday, and the access rules on `member_capacity`. **Read before touching capacity or
+  the week boundary.**
 - [`license-scope.md`](docs/license-scope.md) — what the MIT license in `LICENSE` does and does not
   cover, given the legacy code's five classroom contributors.
 

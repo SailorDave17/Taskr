@@ -85,6 +85,7 @@ const {
   claimMemberWithPin,
   currentHousehold,
   createHousehold,
+  deviceTimezone,
   ensureSession,
   findClaimedMember,
   formatMinutes,
@@ -285,9 +286,29 @@ describe('the two ways into a household', () => {
         household_name: 'Placeholder Household',
         organizer_name: 'Placeholder Organizer',
         organizer_pin: '4821',
+        // #44: the household's timezone goes in the same statement too, and for
+        // a related reason — a week boundary is a local-time fact, and a second
+        // round trip to set it can fail on its own, leaving the household filing
+        // capacity under UTC weeks nobody lives in.
+        household_tz: deviceTimezone(),
       },
     })
     expect(calls.filter((c) => c.op === 'insert' && c.table === 'households')).toHaveLength(0)
+  })
+
+  it('sends a REAL zone from this device, not a placeholder — #44 AC 6', async () => {
+    // Asserting `household_tz: deviceTimezone()` above compares the code to
+    // itself: it passes whatever both say, including both wrong together. This
+    // is the half that says the value is an actual IANA zone the device
+    // resolved, so a 4th parameter nobody meaningfully fills would fail here.
+    results.create_household = { data: { id: 'h1', join_code: 'ABCD2345' }, error: null }
+    await createHousehold('A Household', {
+      organizerName: 'Organizer',
+      organizerPin: '4821',
+    })
+    const call = calls.find((c) => c.op === 'rpc' && c.name === 'create_household')
+    expect(call.args.household_tz).toMatch(/^[A-Za-z]+\/[A-Za-z_+-]+$|^UTC$/)
+    expect(Intl.DateTimeFormat(undefined, { timeZone: call.args.household_tz })).toBeTruthy()
   })
 
   it('refuses a household with no name', async () => {

@@ -338,6 +338,80 @@ describe('per-member credentials — story #23', () => {
     expect(onSetPin).not.toHaveBeenCalled()
   })
 
+  // #63 — the other half of that sentence. Until this existed, "that is the
+  // sign-in flow" pointed at nothing: `claimMemberWithPin` was exported, unit
+  // tested, and called by no component, so it was tree-shaken out of the
+  // deployed bundle. Setting someone's PIN released their phone and left them
+  // no way back in.
+  //
+  // Every test below that asserts the control is ABSENT passed before the fix
+  // too. Only the ones asserting it is PRESENT could have caught the bug, which
+  // is the lesson rather than the coverage.
+  it('offers a sign-in control to a person who has a PIN and is claimed by nobody', () => {
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
+    expect(screen.getByLabelText(/sign in as Placeholder Three/i)).toBeInTheDocument()
+  })
+
+  it('does not offer it to a person with no PIN — for them it is "this is me"', () => {
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
+    expect(screen.queryByLabelText(/sign in as Placeholder Two/i)).not.toBeInTheDocument()
+  })
+
+  it('does not offer it for someone already claimed on another device', () => {
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
+    expect(screen.queryByLabelText(/sign in as Placeholder One/i)).not.toBeInTheDocument()
+  })
+
+  it('does not offer it once this device is already someone', () => {
+    setup({ members: withPins, me: withPins[0], isOrganizer: false, onSignIn: vi.fn() })
+    expect(screen.queryByLabelText(/sign in as Placeholder Three/i)).not.toBeInTheDocument()
+  })
+
+  it('sends the PIN for the person whose row it was typed in', async () => {
+    const onSignIn = vi.fn().mockResolvedValue(undefined)
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
+    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
+    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
+      target: { value: '4821' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
+    expect(onSignIn).toHaveBeenCalledWith('m3', '4821')
+  })
+
+  it('will not send one too short to be a credential', async () => {
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
+    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
+    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
+      target: { value: '12' },
+    })
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
+  })
+
+  it('keeps the digits and the form open when the PIN is refused, so nothing is retyped', async () => {
+    const onSignIn = vi.fn().mockRejectedValue(new Error('that was not the right PIN'))
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
+    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
+    const field = screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i)
+    fireEvent.change(field, { target: { value: '9999' } })
+    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
+    expect(onSignIn).toHaveBeenCalled()
+    expect(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i)).toHaveValue('9999')
+  })
+
+  it('invents no message of its own about WHY a PIN was refused', async () => {
+    // The database deliberately will not say whether the person or the PIN was
+    // wrong. A helpful-looking component message would undo that at the only
+    // layer the attacker can see.
+    const onSignIn = vi.fn().mockRejectedValue(new Error('that was not the right PIN'))
+    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
+    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
+    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
+      target: { value: '9999' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
+    expect(screen.queryByText(/wrong PIN|no such person|incorrect PIN|not a member/i)).not.toBeInTheDocument()
+  })
+
   it('does not offer "this is me" for a person with a PIN — that is the sign-in flow', () => {
     // claim_member() refuses a PIN-protected member outright, so the button's
     // only possible outcome would be an error message.

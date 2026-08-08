@@ -4,6 +4,7 @@ import { hasSupabaseConfig } from './lib/supabase.js'
 import {
   addMember,
   claimMember,
+  claimMemberWithPin,
   createHousehold,
   currentDeviceId,
   currentHousehold,
@@ -110,6 +111,14 @@ export default function App() {
   const handleClaim = useCallback((id) => mutate(() => claimMember(id)), [mutate])
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
   const handleSetPin = useCallback((id, pin) => mutate(() => setMemberPin(id, pin)), [mutate])
+  // The other half of the credential (#63). `claimMember` refuses anyone holding
+  // a PIN outright, so without this a member the organizer had given a PIN to
+  // could not get onto their own phone at all — and `set_member_pin` releases
+  // whatever phone they were on, so setting one locked them out.
+  const handleSignIn = useCallback(
+    (id, pin) => mutate(() => claimMemberWithPin(id, pin)),
+    [mutate],
+  )
 
   const me = findClaimedMember(members, deviceId)
 
@@ -176,6 +185,7 @@ export default function App() {
           onRemove={handleRemove}
           onClaim={handleClaim}
           onSetPin={handleSetPin}
+          onSignIn={handleSignIn}
           onRefresh={handleRefresh}
         />
       ) : null}

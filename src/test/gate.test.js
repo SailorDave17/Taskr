@@ -27,3 +27,30 @@ describe('the CI gate can actually fail', () => {
     expect(pkg.scripts.lint).toBeTruthy()
   })
 })
+
+// #63 — a data-layer function with no caller is not a feature, and every signal
+// short of this one said it was.
+//
+// `claimMemberWithPin` was exported from src/lib/household.js and covered by
+// household.test.js ("claims a person by proving you are them, via the PIN
+// route"). No component called it, so the bundler dropped it: the deployed
+// bundle contained `claim_member` and not `claim_member_with_pin`. Meanwhile
+// Roster.jsx correctly hid "this is me" from anyone holding a PIN, deferring to
+// a flow that did not exist — and set_member_pin releases that person's phone,
+// so setting a PIN locked them out.
+//
+// This reads source rather than behaviour, which is the same shape as the
+// passWithNoTests guard above and for the same reason: the property is about
+// the ground the other tests stand on, and no behavioural test can see it,
+// because a unit test calls the function directly and is happy.
+describe('the credential flow is reachable from the app, not just exported', () => {
+  const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+
+  it('imports the PIN claim from the data layer', () => {
+    expect(app).toMatch(/claimMemberWithPin/)
+  })
+
+  it('hands it to the roster, which is the only place a person can reach it', () => {
+    expect(app).toMatch(/onSignIn=\{/)
+  })
+})

@@ -264,3 +264,81 @@ body {
   border: 1px solid #7f2b2b;
   border-radius: 0.5rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Chores — story #34.
+
+   Deliberately the same visual grammar as .member above rather than a new one:
+   a chore and a person are the two things a household edits, they sit in
+   adjacent cards on one screen, and two different card idioms would read as two
+   different apps. Same 44px touch targets, same one-handed sizing.
+
+   The minutes figure is the emphasised part, not the title. That is the whole
+   thesis on screen — a chore IS a quantity of time — and it is why the number
+   carries the accent colour while "due" stays dim.
+
+   No total, no per-member figure, no assignee: #34's scope fence, and there is
+   nothing to aggregate until completion (#35) and assignment (#36) exist.
+   --------------------------------------------------------------------------- */
+
+.chore-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chore {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.chore--editing {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* PRE-EXISTING GAP, not introduced by #34. Roster.jsx has emitted
+   `member--editing` since #23 with no rule anywhere; the stylesheet-coverage
+   guard added in this story is what surfaced it. Given the same treatment as
+   .chore--editing rather than exempted, so the two cards keep one grammar. */
+.member--editing {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.chore__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.chore__title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.chore__cost {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+}
+
+/* The minutes are the point of the row, so they hold the accent rather than
+   the title — a chore is a quantity of work before it is a name. */
+.chore__cost > :first-child,
+.chore__cost {
+  font-variant-numeric: tabular-nums;
+}
+
+.chore__cost-human {
+  opacity: 0.75;
+}
+
+.chore__due {
+  opacity: 0.85;
+}

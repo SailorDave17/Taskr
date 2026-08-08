@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 
@@ -140,5 +140,78 @@ describe('every class name a component emits has a rule in the stylesheet', () =
   it('has a rule for each one', () => {
     const missing = [...emitted].filter((name) => !css.includes(`.${name}`)).sort()
     expect(missing, `no CSS rule for: ${missing.join(', ')}`).toEqual([])
+  })
+})
+
+// #69 — the README carries two hand-maintained lists beside things that change:
+// the scripts table beside package.json, and the docs list beside docs/. Both
+// had already fallen behind (`npm run test:rls` and `docs/access-model.md` were
+// missing) and nothing said so.
+//
+// Same shape as #34 AC 8, which guards supabase/migrations against the
+// MIGRATIONS array, and the same reason: a hand-maintained list that nothing
+// compares against its source drifts silently, and prose asking a human to keep
+// two lists in step is how it recurs.
+describe('the README lists nothing has fallen behind', () => {
+  const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8')
+
+  /**
+   * The body of one `##` section, so a check means "listed HERE" rather than
+   * "mentioned somewhere in the file".
+   *
+   * MEASURED while proving these tests: without this, deleting
+   * `docs/access-model.md` from the docs list reddened NOTHING, because the
+   * Status section also links it and a whole-file `includes` was satisfied by
+   * that. The assertion was wider than the property it was named for — a
+   * document can be cited in passing and still be missing from the list a
+   * reader scans to find it.
+   */
+  function section(heading) {
+    const start = readme.indexOf(heading)
+    expect(start, `no section titled ${heading}`).toBeGreaterThan(-1)
+    const after = readme.indexOf('\n## ', start + heading.length)
+    return readme.slice(start, after === -1 ? undefined : after)
+  }
+
+  it('names every script in package.json, in the scripts table', () => {
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    const running = section('## Running it locally')
+    const missing = Object.keys(pkg.scripts).filter(
+      (name) => !running.includes(`npm run ${name}`) && !running.includes(`npm ${name}`),
+    )
+    expect(missing, `the scripts table omits: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: there are scripts to check, so an empty pass is impossible', () => {
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    expect(Object.keys(pkg.scripts).length).toBeGreaterThan(4)
+  })
+
+  it('links every document in docs/ from one of the two sections that list them', () => {
+    // The README splits the docs deliberately: ci-gate.md and deploy-runbook.md
+    // are linked from "CI and deployment", which is why the other section is
+    // called "The REST of docs/". Checking only the second one fails on a
+    // correct README; checking the whole file is too loose — MEASURED, deleting
+    // access-model.md from the list reddened nothing, because the Status
+    // section also links it in passing. The union of the two listing sections
+    // is the property: every document is reachable from somewhere a reader
+    // scans to find one.
+    const docs = readdirSync(resolve(process.cwd(), 'docs')).filter((f) => f.endsWith('.md'))
+    const listed = section('## CI and deployment') + section('## The rest of `docs/`')
+    const missing = docs.filter((name) => !listed.includes(name))
+    expect(missing, `no docs section links: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: there are docs to check', () => {
+    const docs = readdirSync(resolve(process.cwd(), 'docs')).filter((f) => f.endsWith('.md'))
+    expect(docs.length).toBeGreaterThan(3)
+    expect(docs).toContain('access-model.md')
+  })
+
+  it('does not still claim the app persists nothing', () => {
+    // The specific sentence that was wrong for four stories. Narrow on purpose:
+    // a general "is the README current?" test cannot exist, but this one claim
+    // was load-bearing enough to mislead a reader about the whole repo.
+    expect(readme).not.toMatch(/persists nothing|no database wired up/i)
   })
 })

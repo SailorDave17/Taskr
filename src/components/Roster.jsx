@@ -12,12 +12,26 @@ import { formatMinutes } from '../lib/household.js'
 // Showing "2h 0m" beside the field is a reading aid; the stored value is the
 // number that was typed.
 
-function MemberRow({ member, isMe, canClaim, canSetPin, busy, onSave, onRemove, onClaim, onSetPin }) {
+function MemberRow({
+  member,
+  isMe,
+  canClaim,
+  canSignIn,
+  canSetPin,
+  busy,
+  onSave,
+  onRemove,
+  onClaim,
+  onSetPin,
+  onSignIn,
+}) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
   const [minutes, setMinutes] = useState(String(member.weekly_minutes))
   const [pin, setPin] = useState('')
   const [settingPin, setSettingPin] = useState(false)
+  const [signInPin, setSignInPin] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
   function cancel() {
@@ -98,6 +112,17 @@ function MemberRow({ member, isMe, canClaim, canSetPin, busy, onSave, onRemove, 
             This is me
           </button>
         ) : null}
+        {canSignIn ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => setSigningIn((open) => !open)}
+            disabled={busy}
+            aria-label={`Sign in as ${member.display_name}`}
+          >
+            This is me — I have a PIN
+          </button>
+        ) : null}
         <button
           className="button button--quiet"
           type="button"
@@ -149,6 +174,45 @@ function MemberRow({ member, isMe, canClaim, canSetPin, busy, onSave, onRemove, 
         )}
       </div>
 
+      {signingIn ? (
+        <form
+          className="row row--end"
+          onSubmit={(e) => {
+            e.preventDefault()
+            onSignIn(member.id, signInPin).then(
+              () => {
+                setSignInPin('')
+                setSigningIn(false)
+              },
+              // Leave the form open and the digits in place on a refusal. The
+              // database deliberately will not say whether the person or the PIN
+              // was wrong, so the only useful thing this can do is let them try
+              // again without retyping from scratch.
+              () => {},
+            )
+          }}
+        >
+          <label className="field">
+            <span className="field__label">PIN for {member.display_name}</span>
+            <input
+              className="field__input field__input--code"
+              type="password"
+              value={signInPin}
+              onChange={(e) => setSignInPin(e.target.value)}
+              placeholder="4 digits or more"
+              inputMode="numeric"
+              autoComplete="current-password"
+              minLength={PIN_MIN_LENGTH}
+              maxLength={PIN_MAX_LENGTH}
+              aria-label={`Enter PIN to sign in as ${member.display_name}`}
+            />
+          </label>
+          <button className="button" type="submit" disabled={busy || !isValidPin(signInPin)}>
+            Sign in
+          </button>
+        </form>
+      ) : null}
+
       {settingPin ? (
         <form
           className="row row--end"
@@ -193,6 +257,8 @@ MemberRow.propTypes = {
   member: PropTypes.object.isRequired,
   isMe: PropTypes.bool,
   canClaim: PropTypes.bool,
+  canSignIn: PropTypes.bool,
+  onSignIn: PropTypes.func,
   canSetPin: PropTypes.bool,
   onSetPin: PropTypes.func,
   busy: PropTypes.bool,
@@ -261,6 +327,7 @@ export default function Roster({
   me,
   isOrganizer,
   onSetPin,
+  onSignIn,
   busy,
   error,
   onAdd,
@@ -323,6 +390,12 @@ export default function Roster({
                 // is the sign-in flow — claim_member refuses them outright, so
                 // offering the button here would only produce an error.
                 canClaim={!me && !member.claimed_by && !member.has_pin}
+                // The other side of that coin, and its absence was the bug
+                // (#63): a person WITH a PIN is claimed by proving you are
+                // them. Without this the two conditions between them offered
+                // nothing at all to anyone holding a credential.
+                canSignIn={!me && !member.claimed_by && Boolean(member.has_pin) && Boolean(onSignIn)}
+                onSignIn={onSignIn}
                 canSetPin={Boolean(isOrganizer && onSetPin)}
                 onSetPin={onSetPin}
                 busy={busy}
@@ -402,6 +475,7 @@ Roster.propTypes = {
   me: PropTypes.object,
   isOrganizer: PropTypes.bool,
   onSetPin: PropTypes.func,
+  onSignIn: PropTypes.func,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,

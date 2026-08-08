@@ -4,8 +4,9 @@
 - Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
 - Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants) and
   #34 (chores, which inherits the column-grant convention)
-- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002`,
-  `0003` and `0004` are not yet — see *What is not done*.
+- Status: **decided and implemented.** Migrations `0001` and `0002` are applied to the live
+  project — `0002` verified over the wire by the live RLS suite (PR #65, 13/13 against the real
+  project). `0003` and `0004`: see *What is not done*.
 
 ## Read this first — the decision below changed
 
@@ -318,8 +319,8 @@ client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
 `0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
 not been applied" is about 0001 and is now historical. What is outstanding is narrower:
 
-- **`0002_member_pins_and_column_grants.sql` has not been applied.** Paste it into the Supabase SQL
-  editor. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure
+- **`0002_member_pins_and_column_grants.sql` — now applied**, verified live by PR #65's suite; the
+  rest of this bullet is historical. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure
   is the normal way this file gets used.
 - **It changes `create_household`'s signature** from one argument to three, and drops the old form
   deliberately — a household created without an organizer cannot be administered at all. So the

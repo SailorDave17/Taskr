@@ -68,5 +68,17 @@ export default defineConfig({
     // src/test/rls.integration.test.js and docs/access-model.md, so a reader
     // counting the checks does not mistake four for five.
     exclude: [...configDefaults.exclude, '**/*.integration.test.js'],
+    // Pin a NON-UTC zone. Dates here are calendar dates (`chores.due_on`), and
+    // the classic fault is a Date round-trip that parses YYYY-MM-DD as UTC
+    // midnight and formats it back with local getters — returning the previous
+    // day everywhere behind UTC, and INVISIBLE in UTC itself.
+    //
+    // Measured 2026-08-08 (#34): mutating normalizeDueDate to do exactly that
+    // reddened 3 tests on a GMT-0400 machine and ZERO under TZ=UTC. CI runs
+    // UTC, so without this pin the guard exists and cannot fire on the runner
+    // that actually gates the branch — the same defect shape as a suite with
+    // zero tests in it, which is why the pin sits beside passWithNoTests and is
+    // asserted by src/test/gate.test.js rather than left to trust.
+    env: { TZ: 'America/New_York' },
   },
 })

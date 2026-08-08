@@ -20,9 +20,10 @@ This is a **rebuild in progress**, tracked by epic
 from this file.
 
 **What is live today**: an installable page where a household is created, people are added with
-their weekly available minutes, and each person signs in on their own phone with an organizer-set
-PIN. It persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in
-a hosted database rather than on the device.
+their weekly available minutes, each person signs in on their own phone with an organizer-set PIN,
+and the household's chores are recorded as titled units of expected minutes with a due date. It
+persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in a
+hosted database rather than on the device.
 
 **What protects it is server-side.** Row-level security policies and column-level grants, in
 `supabase/migrations/`, asserted by tests that bypass the client. A client-side guard is not a guard,
@@ -36,8 +37,9 @@ the story that adds it. `docs/access-model.md` tracks which ones are live. They 
 test proves it, because a re-paste after a partial failure is the normal path.
 
 Still to come, and deliberately absent rather than missing: assigning chores to people, marking them
-done, and the load view that makes the split visible. The 2020 classroom original is preserved at tag
-`legacy-final` and is not the code in this branch.
+done, and the load view that makes the split visible — so there is **no allocation yet**, which is
+the thing the app is ultimately for. The 2020 classroom original is preserved at tag `legacy-final`
+and is not the code in this branch.
 
 ## Where it runs
 

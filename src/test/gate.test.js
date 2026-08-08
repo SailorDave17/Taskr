@@ -55,6 +55,94 @@ describe('the credential flow is reachable from the app, not just exported', () 
   })
 })
 
+// #34 — the same shape as the #63 guard above, applied to the chore flow while
+// it is being built rather than after it ships broken.
+//
+// cairn's `exported-is-not-reachable` records the general form: a unit test
+// calls a function directly and is happy, so no behavioural test can answer
+// "is there a path from a person to this code?". The chore data layer could be
+// fully exported, fully unit-tested, and dropped by the bundler for want of a
+// caller — which is exactly what happened to claimMemberWithPin.
+describe('the chore flow is reachable from the app, not just exported', () => {
+  const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+
+  it('imports the chore data layer', () => {
+    expect(app).toMatch(/from '\.\/lib\/chores\.js'/)
+  })
+
+  it('renders the chore screen, which is the only place a person can reach it', () => {
+    expect(app).toMatch(/<Chores\b/)
+  })
+
+  it('wires all three writes ON THE CHORE ELEMENT, not merely somewhere in the file', () => {
+    // Scoped to the <Chores> element on purpose. Measured 2026-08-08: the
+    // unscoped version stayed GREEN when the whole <Chores /> render was
+    // deleted, because <Roster> carries onAdd, onSave and onRemove too — the
+    // test passed on a neighbour and pinned nothing about chores.
+    const element = app.match(/<Chores[\s\S]*?\/>/)
+    expect(element, 'no <Chores .../> element in App.jsx').not.toBeNull()
+    expect(element[0]).toMatch(/onAdd=\{/)
+    expect(element[0]).toMatch(/onSave=\{/)
+    expect(element[0]).toMatch(/onRemove=\{/)
+  })
+})
+
+// The date guards in src/lib/chores.test.js are meaningless in UTC — measured,
+// the local-getter bug they exist for reddens 3 of them at GMT-0400 and none at
+// UTC. Same shape as the passWithNoTests guard at the top of this file: the
+// property is about the ground the other tests stand on.
+describe('the suite runs in a zone where a date bug can show', () => {
+  const config = readFileSync(resolve(process.cwd(), 'vite.config.js'), 'utf8')
+
+  it('pins a timezone rather than inheriting the runner', () => {
+    expect(config).toMatch(/env:\s*\{\s*TZ:/)
+  })
+
+  it('and the pinned zone is not UTC, which is the zone that hides the bug', () => {
+    const pinned = config.match(/TZ:\s*'([^']+)'/)
+    expect(pinned, 'no TZ value found in vite.config.js').not.toBeNull()
+    expect(pinned[1]).not.toMatch(/^(UTC|Etc\/UTC|GMT)$/i)
+  })
+
+  it('POSITIVE CONTROL: the pin actually reaches the running process', () => {
+    // Asserting the config text alone would pass if vitest ignored the setting.
+    expect(new Date('2026-08-10').getTimezoneOffset()).not.toBe(0)
+  })
+})
+
+// #34, added after review-fanout found that NONE of the eight chore* class
+// names had a rule anywhere — the feature would have shipped as an unstyled
+// bulleted list beside a fully styled roster, and nothing failed.
+//
+// This is the third guard in this file with the same shape: the property is
+// about the ground the other tests stand on, and no behavioural test can see
+// it. jsdom applies no stylesheet, so every component test passes identically
+// whether or not a single rule exists.
+describe('every class name a component emits has a rule in the stylesheet', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+  const components = ['src/App.jsx', 'src/components/Chores.jsx', 'src/components/Roster.jsx', 'src/components/Onboarding.jsx']
+
+  const emitted = new Set()
+  for (const file of components) {
+    const source = readFileSync(resolve(process.cwd(), file), 'utf8')
+    for (const [, value] of source.matchAll(/className="([^"{]+)"/g)) {
+      for (const name of value.split(/\s+/).filter(Boolean)) emitted.add(name)
+    }
+  }
+
+  it('finds class names to check, so an empty pass is impossible', () => {
+    // Without this the whole describe passes vacuously the moment the regex
+    // stops matching — a switch to clsx, or to template-literal classNames.
+    expect(emitted.size).toBeGreaterThan(15)
+    expect(emitted).toContain('chore')
+  })
+
+  it('has a rule for each one', () => {
+    const missing = [...emitted].filter((name) => !css.includes(`.${name}`)).sort()
+    expect(missing, `no CSS rule for: ${missing.join(', ')}`).toEqual([])
+  })
+})
+
 // #69 — the README carries two hand-maintained lists beside things that change:
 // the scripts table beside package.json, and the docs list beside docs/. Both
 // had already fallen behind (`npm run test:rls` and `docs/access-model.md` were

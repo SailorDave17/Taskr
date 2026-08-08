@@ -2,9 +2,10 @@
 
 - Date: 2026-08-05, **substantially revised 2026-08-06**
 - Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
-- Story: #5 (schema, policies, the bypass test) and #23 (per-member credentials, column grants)
-- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002` is
-  not yet — see *What is not done*.
+- Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants) and
+  #34 (chores, which inherits the column-grant convention)
+- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002` and
+  `0003` are not yet — see *What is not done*.
 
 ## Read this first — the decision below changed
 
@@ -268,6 +269,29 @@ delete from public.households where name like 'TEST %';
 
 ## What is not done
 
+### Updated 2026-08-08 — story #34 added a third migration
+
+**`0003_chores.sql` has not been applied either.** It creates `chores`, the fourth RLS-protected
+table, and it must be pasted into the Supabase SQL editor **at the merge of #34, not afterwards** —
+the merge deploys client code that queries a table the live project does not have, and the failure
+is total rather than confined to the chore list, because the chore read sits in the same `refresh()`
+chain as the roster. Nothing in the repo enforces this; that is why it is written here, on the page
+that lists what is outstanding, rather than only in the issue.
+
+It follows 0002's revoke-then-grant-per-column shape and adds two things worth knowing:
+
+- **`household_id` is withheld from the select grant**, which is what makes `select('*')` fail on
+  this table. *Measured*: with every column granted the wildcard succeeds, so a table whose every
+  column is readable has the ceremony and none of the effect. A withheld column is also absent from
+  `WHERE` and `ORDER BY`, not just the projection — fine here, because RLS is the filter.
+- **`anon` is revoked wholesale** (`revoke all`), not column by column. An earlier draft revoked only
+  select/insert/update and left DELETE, TRUNCATE and TRIGGER granted by Supabase's defaults; neither
+  was reachable through the publishable key, but the DELETE grant would have gone live the moment a
+  later story added a `to anon` policy. `authenticated` keeps DELETE, which its policy needs.
+
+The convention #35, #36 and #37 inherit: each migration grants UPDATE only on the columns it makes
+client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
+
 ### Updated 2026-08-06 — story #23, and what is left
 
 `0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
@@ -287,8 +311,8 @@ not been applied" is about 0001 and is now historical. What is outstanding is na
 - **Nothing here has been verified on two real phones.** That is #26, deliberately.
 
 Unlike the previous rounds, the SQL in this story **has** been executed before being handed over —
-`src/test/migrations.pglite.test.js` runs both migrations against Postgres 18 in WASM, with 22
-assertions and a mutation record. That proves it is correct Postgres and that the rules hold; it does
+`src/test/migrations.pglite.test.js` runs 0001 and 0002 against Postgres 18 in WASM, with 22
+assertions and a mutation record, and `src/test/chores.pglite.test.js` does the same for 0003. That proves it is correct Postgres and that the rules hold; it does
 not prove Supabase will accept it, and the stub it runs against is listed in
 `src/test/support/pgliteSupabase.js` so the gap is inspectable.
 

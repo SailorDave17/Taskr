@@ -23,6 +23,16 @@ const api = {
   claimMember: vi.fn(),
 }
 
+// #34. Mocked separately from household.js because it is a separate module, and
+// the pure validators are kept real (importActual below) so a test cannot pass
+// against a stub that disagrees with the rules the form actually enforces.
+const choresApi = {
+  listChores: vi.fn(),
+  addChore: vi.fn(),
+  updateChore: vi.fn(),
+  removeChore: vi.fn(),
+}
+
 vi.mock('./lib/supabase.js', () => ({
   get hasSupabaseConfig() {
     return backend.hasSupabaseConfig
@@ -31,6 +41,11 @@ vi.mock('./lib/supabase.js', () => ({
     throw new Error('App must not reach the client directly; it goes through lib/household.js')
   },
 }))
+
+vi.mock('./lib/chores.js', async () => {
+  const actual = await vi.importActual('./lib/chores.js')
+  return { ...actual, ...choresApi }
+})
 
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
@@ -53,6 +68,11 @@ const renderApp = () => act(async () => void render(<App />))
 beforeEach(() => {
   backend.hasSupabaseConfig = true
   Object.values(api).forEach((fn) => fn.mockReset())
+  Object.values(choresApi).forEach((fn) => fn.mockReset())
+  choresApi.listChores.mockResolvedValue([])
+  choresApi.addChore.mockResolvedValue(undefined)
+  choresApi.updateChore.mockResolvedValue(undefined)
+  choresApi.removeChore.mockResolvedValue(undefined)
   api.ensureSession.mockResolvedValue({ user: { id: 'device-a' } })
   api.currentHousehold.mockResolvedValue(null)
   api.listMembers.mockResolvedValue([])
@@ -166,5 +186,127 @@ describe('when the backend cannot be reached', () => {
     // Critically, not the join screen: offering "create a household" against a
     // backend that is refusing would send the organizer round a loop.
     expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #34 AC 6 — the screen re-reads from the server rather than patching state
+//
+// These live at the App level rather than in Chores.test.jsx on purpose: the
+// re-read is App's `mutate()`, and a component test of Chores.jsx cannot see
+// it. Deleting the `setChores(found ? await listChores() : [])` line from
+// refresh() must turn something red, and this is that something.
+// ---------------------------------------------------------------------------
+
+describe('chores — the write path and the re-read', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+  const chore = {
+    id: 'c1',
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([chore])
+  })
+
+  const addChoreThroughTheForm = async () => {
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+  }
+
+  it('reads the chores from the server on load', async () => {
+    await renderApp()
+    expect(await screen.findByText('Placeholder Chore')).toBeInTheDocument()
+    expect(choresApi.listChores).toHaveBeenCalled()
+  })
+
+  it('AC 6: re-reads the chores from the server after an add, rather than patching local state', async () => {
+    await renderApp()
+    await screen.findByText('Placeholder Chore')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await addChoreThroughTheForm()
+
+    expect(choresApi.addChore).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+    })
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Order matters: a re-read issued BEFORE the write would return the old list
+    // and look identical in a call count.
+    expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('AC 6: re-reads after an edit', async () => {
+    await renderApp()
+    await screen.findByText('Placeholder Chore')
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /edit placeholder chore/i })))
+    fireEvent.change(screen.getByLabelText(/name for placeholder chore/i), {
+      target: { value: 'Dishes and counters' },
+    })
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+    expect(choresApi.updateChore).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 6: re-reads after a delete', async () => {
+    await renderApp()
+    await screen.findByText('Placeholder Chore')
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /remove placeholder chore/i })))
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /remove placeholder chore\?/i })))
+
+    expect(choresApi.removeChore).toHaveBeenCalledWith('c1')
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 6: the write goes through lib/chores.js, never the Supabase client directly', async () => {
+    // The supabase.js mock at the top of this file throws if App reaches it, so
+    // a component calling the client directly fails here rather than silently
+    // working. This asserts the positive half: the data layer WAS used.
+    await renderApp()
+    await screen.findByText('Placeholder Chore')
+    await addChoreThroughTheForm()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not go to the server at all when the form value is one the database would refuse', async () => {
+    await renderApp()
+    await screen.findByText('Placeholder Chore')
+
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    // Assert OUR sentence, not merely the absence of a call. Measured
+    // 2026-08-08: with noValidate removed this test stayed green, because the
+    // browser's own constraint validation also blocks the submit — so the
+    // absence was produced by a neighbour and the test did not discriminate.
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least a minute/i)
   })
 })

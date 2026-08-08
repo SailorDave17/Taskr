@@ -19,17 +19,36 @@
 
 import { PGlite } from '@electric-sql/pglite'
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(here, '..', '..', '..', 'supabase', 'migrations')
 
-export const MIGRATIONS = ['0001_household_and_roster.sql', '0002_member_pins_and_column_grants.sql']
+export const MIGRATIONS = [
+  '0001_household_and_roster.sql',
+  '0002_member_pins_and_column_grants.sql',
+  '0003_chores.sql',
+]
 
 export function migrationSql(name) {
   return readFileSync(join(migrationsDir, name), 'utf8')
+}
+
+/**
+ * Every `.sql` file actually sitting in supabase/migrations, sorted.
+ *
+ * The array above is hand-maintained and applied in order, which is correct —
+ * order matters and a directory listing does not carry intent. The hazard is
+ * that adding a migration file and forgetting the one-line edit here leaves it
+ * silently untested while the whole suite stays green, which is a pass that
+ * means nothing. #34 AC 8 turns that into a failing test; this is what it reads.
+ */
+export function migrationFilesOnDisk() {
+  return readdirSync(migrationsDir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
 }
 
 // The parts of Supabase the migrations depend on. Each line here is a claim

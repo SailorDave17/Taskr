@@ -16,6 +16,8 @@ import {
   setMemberPin,
   updateMember,
 } from './lib/household.js'
+import { addChore, listChores, removeChore, updateChore } from './lib/chores.js'
+import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 
@@ -33,6 +35,7 @@ export default function App() {
   const [status, setStatus] = useState('loading')
   const [household, setHousehold] = useState(null)
   const [members, setMembers] = useState([])
+  const [chores, setChores] = useState([])
   const [deviceId, setDeviceId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -42,6 +45,9 @@ export default function App() {
     const found = await currentHousehold()
     setHousehold(found)
     setMembers(found ? await listMembers() : [])
+    // #34: chores re-read through the same path as members, so the
+    // mutate-then-refresh guarantee covers them without a second mechanism.
+    setChores(found ? await listChores() : [])
     setDeviceId(await currentDeviceId())
     return found
   }, [])
@@ -111,6 +117,12 @@ export default function App() {
   const handleClaim = useCallback((id) => mutate(() => claimMember(id)), [mutate])
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
   const handleSetPin = useCallback((id, pin) => mutate(() => setMemberPin(id, pin)), [mutate])
+  // #34 — chores. Each goes through mutate(), which re-reads from the server
+  // rather than patching local state from the response: what the next device to
+  // load will see is exactly what this device now shows.
+  const handleAddChore = useCallback((chore) => mutate(() => addChore(chore)), [mutate])
+  const handleSaveChore = useCallback((id, patch) => mutate(() => updateChore(id, patch)), [mutate])
+  const handleRemoveChore = useCallback((id) => mutate(() => removeChore(id)), [mutate])
   // The other half of the credential (#63). `claimMember` refuses anyone holding
   // a PIN outright, so without this a member the organizer had given a PIN to
   // could not get onto their own phone at all — and `set_member_pin` releases
@@ -187,6 +199,17 @@ export default function App() {
           onSetPin={handleSetPin}
           onSignIn={handleSignIn}
           onRefresh={handleRefresh}
+        />
+      ) : null}
+
+      {status === 'joined' && household ? (
+        <Chores
+          chores={chores}
+          busy={busy}
+          error={error}
+          onAdd={handleAddChore}
+          onSave={handleSaveChore}
+          onRemove={handleRemoveChore}
         />
       ) : null}
 

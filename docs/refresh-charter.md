@@ -190,6 +190,27 @@ in per-member minute budgets and capability matrices.
   failure. **The manual path must exist and work on day one; the bet is an accelerator on top of it,
   never the only road in.**
 
+### Widened 2026-08-08 — the bet covers CHORE capture too (owner decision)
+
+The scope sentence above named "per-member minute budgets and capability matrices" and nothing else,
+which left a household still typing an unbounded chore list by hand — **the exact burden the field
+scan above measures as the universal killer**, at 70% abandonment within 100 days. `groom-backlog`
+raised this as an open question on #34 rather than deciding it, and the owner took the wider scope.
+
+- **Where, now:** the setup path, the capacity-update path, **and chore capture**. Still nowhere
+  else — allocation, assignment and completion stay boring by construction.
+- **What does NOT change, and it is why the widening is safe:** the fallback rule. *The manual path
+  must exist and work on day one.* #34 shipped exactly that for chores — typed title, typed minutes,
+  typed due date, with the refusal sentences tested — **before** any extraction exists. The
+  accelerator is still an accelerator.
+- **What it costs:** #42's corpus was scoped to capacity descriptions only. A bet that covers chore
+  capture needs chore descriptions in the same corpus, scored by the same grader, or the measurement
+  that decides whether the bet survives is silent about half of what it now claims.
+- **Why it was not built into #34:** there is no server-side compute in this repo, and an LLM
+  credential cannot reach a phone — `src/lib/keyShape.js` exists because a secret key reached a
+  published bundle once already. The route runs through #56, whose own AC 1 records that its platform
+  decision has not been taken.
+
 Everything outside that path is deliberately boring, proven technology (owner directive: selectively
 bleeding-edge, one bet).
 

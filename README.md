@@ -74,6 +74,7 @@ Other scripts:
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
+| `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
 
 ### The two variables you need
@@ -138,6 +139,9 @@ Every push to `rebuild/v1` deploys to production automatically.
   was rebuild rather than refactor.
 - [`hosting-decision.md`](docs/hosting-decision.md) — the hosting and backend choice, the
   alternatives, and the free-tier limits later stories must be designed against.
+- [`allocation-corpus.md`](docs/allocation-corpus.md) — the scenario corpus the allocator is
+  judged against, the recorded proportion of household shapes that reach level, and the ones
+  that arithmetically cannot.
 - [`license-scope.md`](docs/license-scope.md) — what the MIT license in `LICENSE` does and does not
   cover, given the legacy code's five classroom contributors.
 

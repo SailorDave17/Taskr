@@ -17,6 +17,8 @@ const chores = [
     title: 'Placeholder Chore',
     expected_minutes: 20,
     due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
   },
   {
     id: 'c2',
@@ -24,14 +26,21 @@ const chores = [
     title: 'Placeholder Other Chore',
     expected_minutes: 90,
     due_on: '2026-08-11',
+    completed_at: null,
+    completed_by_member_id: null,
   },
 ]
+
+/** The same two chores with the second one finished — #35's mixed fixture. */
+const mixed = [chores[0], { ...chores[1], completed_at: '2026-08-08T10:00:00Z', completed_by_member_id: 'm1' }]
 
 function setup(overrides = {}) {
   const handlers = {
     onAdd: vi.fn().mockResolvedValue(undefined),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
+    onComplete: vi.fn().mockResolvedValue(undefined),
+    onUncomplete: vi.fn().mockResolvedValue(undefined),
   }
   render(<Chores chores={chores} {...handlers} {...overrides} />)
   return handlers
@@ -45,6 +54,8 @@ function setupRerenderable() {
     onAdd: vi.fn().mockResolvedValue(undefined),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
+    onComplete: vi.fn().mockResolvedValue(undefined),
+    onUncomplete: vi.fn().mockResolvedValue(undefined),
   }
   const view = render(<Chores chores={chores} {...handlers} />)
   return {
@@ -85,17 +96,17 @@ describe('the list — AC 1, a chore is a titled unit of minutes', () => {
     expect(screen.getByText(/no chores yet/i)).toBeInTheDocument()
   })
 
-  it('SCOPE FENCE: shows no total, no per-member figure and no assignee', () => {
-    // #34 deliberately builds no aggregate — completion is #35 and assignment
-    // is #36, so there is genuinely nothing to aggregate yet, and the charter
-    // forbids a second dashboard. If this goes red, the fence moved.
+  it('SCOPE FENCE: a household figure is allowed, a per-person one is not', () => {
+    // #34's fence said "no aggregate" and its stated reason was that there was
+    // nothing to aggregate — completion was #35 and assignment #36. #35 shipped
+    // completion, so "still to do" is now a real quantity and the number #40's
+    // allocation divides. The fence that survives is the one that was actually
+    // about the thesis: nothing ranks a PERSON.
     setup()
     const section = screen.getByRole('region', { name: /what needs doing/i })
-    expect(section).not.toHaveTextContent(/total/i)
-    expect(section).not.toHaveTextContent(/between them/i)
+    expect(section).toHaveTextContent(/still to do/i)
     expect(section).not.toHaveTextContent(/assigned/i)
-    // 110 is 20 + 90 — the sum that must not appear anywhere on screen.
-    expect(section).not.toHaveTextContent(/110/)
+    expect(section).not.toHaveTextContent(/streak|rank|score|points|leaderboard/i)
   })
 })
 
@@ -334,5 +345,69 @@ describe('while a write is in flight', () => {
     setup({ busy: true })
     expect(screen.getByRole('button', { name: /add chore/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /edit placeholder chore/i })).toBeDisabled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #35 — completion. ACs 5, 8 and 9.
+// ---------------------------------------------------------------------------
+
+describe('completion — #35', () => {
+  const outstandingRow = () => screen.getByText('Placeholder Chore').closest('li')
+
+  it('offers Done on an outstanding chore and calls the handler', async () => {
+    const { onComplete } = setup()
+    await clickAndSettle(within(outstandingRow()).getByRole('button', { name: /mark placeholder chore done/i }))
+    expect(onComplete).toHaveBeenCalledWith('c1')
+  })
+
+  it('offers the undo on a completed one instead', async () => {
+    const { onUncomplete, onComplete } = setup({ chores: mixed })
+    const doneRow = screen.getByText('Placeholder Other Chore').closest('li')
+    expect(within(doneRow).queryByRole('button', { name: /mark .* done/i })).not.toBeInTheDocument()
+
+    await clickAndSettle(within(doneRow).getByRole('button', { name: /put placeholder other chore back/i }))
+    expect(onUncomplete).toHaveBeenCalledWith('c2')
+    expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it('AC 5: the outstanding total counts only unfinished work', () => {
+    // The fixture is mixed ON PURPOSE and the two totals differ: outstanding is
+    // 20, all-rows is 110. A sum over every row fails this test, which is the
+    // whole point — committed minutes that can only grow make the load figure
+    // drift upward all week.
+    setup({ chores: mixed })
+    const total = screen.getByTestId('outstanding-total')
+    expect(total).toHaveTextContent('20 min')
+    expect(total).not.toHaveTextContent('110')
+    expect(total).toHaveTextContent(/1 still to do/i)
+  })
+
+  it('AC 8: completed chores stay visible, in their own group', () => {
+    setup({ chores: mixed })
+    const done = screen.getByRole('region', { name: /done this week/i })
+    expect(within(done).getByText('Placeholder Other Chore')).toBeInTheDocument()
+    // And the outstanding one is NOT in that group.
+    expect(within(done).queryByText('Placeholder Chore')).not.toBeInTheDocument()
+  })
+
+  it('AC 9: the completed group carries no streak, rank, score or per-person total', () => {
+    setup({ chores: mixed })
+    const done = screen.getByRole('region', { name: /done this week/i })
+    expect(done).not.toHaveTextContent(/streak|rank|score|points|leaderboard|best|winner/i)
+    // No per-person figure: the member id in the fixture must not surface.
+    expect(done).not.toHaveTextContent(/m1/)
+  })
+
+  it('AC 9: and nothing in it is styled as an error or an alert — red is for work, never people', () => {
+    setup({ chores: mixed })
+    const done = screen.getByRole('region', { name: /done this week/i })
+    expect(within(done).queryByRole('alert')).not.toBeInTheDocument()
+    expect(done.querySelector('.error')).toBeNull()
+  })
+
+  it('shows no completed group at all when nothing is done', () => {
+    setup()
+    expect(screen.queryByRole('region', { name: /done this week/i })).not.toBeInTheDocument()
   })
 })

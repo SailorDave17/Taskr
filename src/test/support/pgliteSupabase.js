@@ -30,6 +30,7 @@ export const MIGRATIONS = [
   '0001_household_and_roster.sql',
   '0002_member_pins_and_column_grants.sql',
   '0003_chores.sql',
+  '0004_chore_completion.sql',
 ]
 
 export function migrationSql(name) {

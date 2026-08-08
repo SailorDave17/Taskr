@@ -42,7 +42,8 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // back: row-level security already guarantees every chore this device can see
 // belongs to its household, so the value would be a constant the client can
 // already name. 0003 carries the full reasoning.
-export const CHORE_COLUMNS = 'id, title, expected_minutes, due_on, created_at'
+export const CHORE_COLUMNS =
+  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -174,6 +175,44 @@ export async function updateChore(id, { title, expectedMinutes, dueOn }) {
     await getSupabase().from('chores').update(patch).eq('id', id).select(CHORE_COLUMNS).single(),
     'saving the change',
   )
+}
+
+/**
+ * Mark a chore done — #35.
+ *
+ * Through an RPC rather than an update, and the reason is the CLOCK rather than
+ * access control: `completed_at` is set by `now()` inside the function, so a
+ * phone with the wrong date cannot move work between weeks. The column is not
+ * in the update grant at all, so this is not merely the preferred path — it is
+ * the only one.
+ */
+export async function completeChore(id) {
+  return unwrap(await getSupabase().rpc('complete_chore', { chore_id: id }), 'marking it done')
+}
+
+/** Undo a completion — the chore returns to the outstanding list. */
+export async function uncompleteChore(id) {
+  return unwrap(
+    await getSupabase().rpc('uncomplete_chore', { chore_id: id }),
+    'putting it back on the list',
+  )
+}
+
+/** Is this chore still to do? The whole definition of outstanding, in one place. */
+export function isOutstanding(chore) {
+  return chore.completed_at === null || chore.completed_at === undefined
+}
+
+/**
+ * Minutes of work still to do — #35 AC 5.
+ *
+ * Sums ONLY outstanding chores. A sum over every row is the defect this exists
+ * to prevent: committed minutes that can only grow, so the load figure drifts
+ * upward all week and any re-balance derived from it is computed over work
+ * already finished.
+ */
+export function outstandingMinutes(chores) {
+  return chores.filter(isOutstanding).reduce((sum, c) => sum + (c.expected_minutes || 0), 0)
 }
 
 /** Remove a chore — AC 6. */

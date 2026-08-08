@@ -60,7 +60,13 @@ function makeQuery(table) {
 
 vi.mock('./supabase.js', () => ({
   hasSupabaseConfig: true,
-  getSupabase: () => ({ from: (table) => makeQuery(table) }),
+  getSupabase: () => ({
+    from: (table) => makeQuery(table),
+    rpc: (name, args) => {
+      calls.push({ op: 'rpc', name, args })
+      return Promise.resolve(results[name] ?? { data: null, error: null })
+    },
+  }),
 }))
 
 // currentHousehold is household.js's, and addChore depends on it. Mocked here
@@ -72,7 +78,8 @@ vi.mock('./household.js', async () => {
   return { ...actual, currentHousehold: (...a) => currentHousehold(...a) }
 })
 
-const { CHORE_COLUMNS, addChore, listChores, removeChore, updateChore } = await import('./chores.js')
+const { CHORE_COLUMNS, addChore, completeChore, listChores, removeChore, uncompleteChore, updateChore } =
+  await import('./chores.js')
 
 const HOUSEHOLD = { id: 'h1', name: 'Placeholder Household' }
 const ROW = {
@@ -245,5 +252,39 @@ describe('unwrap, through its callers', () => {
         expect(err.message).toContain('loading the chores')
       },
     )
+  })
+})
+
+describe('completion goes through the RPC, never an update — #35', () => {
+  const rpcs = () => calls.filter((c) => c.op === 'rpc')
+
+  it('completeChore calls the function and sends NO timestamp', async () => {
+    results.complete_chore = { data: { ...ROW, completed_at: '2026-08-08T10:00:00Z' }, error: null }
+    await completeChore('c1')
+
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'complete_chore', args: { chore_id: 'c1' } }])
+    // The clock is the server's. If a timestamp ever appears in these args, a
+    // phone with the wrong date can move work between weeks.
+    expect(JSON.stringify(rpcs()[0].args)).not.toMatch(/completed_at|202\d-/)
+    // And it must not go near the table directly — the column grant refuses it,
+    // so an update here would be a runtime error rather than a silent bug.
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('uncompleteChore calls its own function', async () => {
+    results.uncomplete_chore = { data: { ...ROW, completed_at: null }, error: null }
+    await uncompleteChore('c1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'uncomplete_chore', args: { chore_id: 'c1' } }])
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('reports a refusal with what we were doing', async () => {
+    results.complete_chore = { data: null, error: { message: 'no such chore in your household' } }
+    await expect(completeChore('c1')).rejects.toThrow(/marking it done: no such chore/i)
+  })
+
+  it('and the undo does too', async () => {
+    results.uncomplete_chore = { data: null, error: { message: 'no such chore in your household' } }
+    await expect(uncompleteChore('c1')).rejects.toThrow(/putting it back on the list: no such chore/i)
   })
 })

@@ -38,10 +38,16 @@ file in `supabase/migrations/` is pasted into the Supabase SQL editor by a perso
 the story that adds it. `docs/access-model.md` tracks which ones are live. They are re-runnable and a
 test proves it, because a re-paste after a partial failure is the normal path.
 
-Still to come, and deliberately absent rather than missing: assigning chores to people and the load
-view that makes the split visible — so there is **no allocation yet**, which is
-the thing the app is ultimately for. The 2020 classroom original is preserved at tag `legacy-final`
-and is not the code in this branch.
+**The engine exists; nothing on screen reaches it yet.** The allocator (#40) divides work by capacity
+and says plainly when level is unreachable, judged against a 13-shape corpus; per-week capacity (#44)
+makes a person's minutes a fact about *this* week rather than a standing number. Both are pure,
+tested modules with **no caller** — so from a phone there is still **no allocation**, which is the
+thing the app is ultimately for. That gap is deliberate and it is where the next work goes: applying
+migration `0005` to the live project is #45, setting a week's capacity by hand is #46, and the load
+view that makes the split visible is #47.
+
+Still to come and genuinely absent: assigning a chore to a person (#36). The 2020 classroom original
+is preserved at tag `legacy-final` and is not the code in this branch.
 
 ## Where it runs
 

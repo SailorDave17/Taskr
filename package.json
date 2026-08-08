@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:rls": "vitest run --config vitest.integration.config.js",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "allocation:corpus": "node scripts/allocation-corpus-report.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.1",

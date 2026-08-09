@@ -1,11 +1,15 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import Roster from './Roster.jsx'
 
 // ACs 2 and 4 (people with budgets, edited and removed) and the "pick yourself"
 // half of AC 5. Names are synthetic — see #19.
 
 const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+
+const PERIOD = '2026-08-10'
 
 const roster = [
   { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: null },
@@ -20,8 +24,19 @@ function setup(overrides = {}) {
     onClaim: vi.fn().mockResolvedValue(undefined),
     onRefresh: vi.fn(),
     onSetPin: vi.fn().mockResolvedValue(undefined),
+    // #46. The parameter this function already calls `overrides` is the PROP
+    // BAG; the Roster prop of the same name is the capacity override list, and
+    // `setup({ overrides: [...] })` sets exactly that. Confusing on first read
+    // and left alone rather than renamed, because renaming the parameter would
+    // touch every existing call in this file for no behavioural gain.
+    onSetCapacity: vi.fn().mockResolvedValue(undefined),
+    onClearCapacity: vi.fn().mockResolvedValue(undefined),
   }
-  render(<Roster household={household} members={roster} me={null} {...handlers} {...overrides} />)
+  // The week the fixture override belongs to. Passed explicitly rather than
+  // defaulted, because an override is only an override OF a period — matching on
+  // the person alone was a real bug this file's fixture caught.
+  const props = { periodStart: PERIOD, ...handlers }
+  render(<Roster household={household} members={roster} me={null} {...props} {...overrides} />)
   return handlers
 }
 
@@ -421,5 +436,249 @@ describe('per-member credentials — story #23', () => {
 
     const two = rowFor('Placeholder Two')
     expect(within(two).getByRole('button', { name: /this is me/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #46 — this week's capacity, on the roster row.
+//
+// The row is where it belongs: capacity is a fact about a PERSON, and the
+// baseline is already here. capacity.test.js's allowlist comment said so before
+// this story existed — "Roster.jsx renders the BASELINE ... #46 is where that
+// screen starts showing this week's number, and it will come through
+// effectiveCapacity."
+// ---------------------------------------------------------------------------
+
+describe('this week’s capacity — #46', () => {
+  const override = {
+    id: 'c1',
+    member_id: roster[0].id,
+    period_start: PERIOD,
+    // Deliberately NOT roster[0]'s 120-minute baseline. An override equal to the
+    // baseline is a fixture on which "shows the override" and "ignores the
+    // override entirely" give the same answer, so the test would pass with the
+    // whole feature deleted. Same shape prove-tests records as: the constraint
+    // and the unconstrained rule agreeing on the chosen fixture.
+    minutes: 200,
+    source: 'manual',
+  }
+
+  const openFor = (name) =>
+    clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+
+  it('shows the usual number when nobody has said anything about this week', () => {
+    setup()
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+    expect(row).toHaveTextContent(/· usual/)
+  })
+
+  it('shows the override when there is one, and marks it as set', () => {
+    setup({ overrides: [override] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent('This week: 200 min')
+    expect(row).toHaveTextContent(/set for this week/)
+  })
+
+  it('keeps the BASELINE visible beside it, so the override can be checked', () => {
+    // An override that hid what it was overriding would make the figure
+    // impossible to sanity-check, and the product's whole claim is a fairness
+    // number anybody can check.
+    setup({ overrides: [override] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`${roster[0].weekly_minutes} min/week`)
+    expect(row).toHaveTextContent('This week: 200 min')
+  })
+
+  it('an override of ZERO shows as zero, not as the baseline', () => {
+    // The case the feature most exists for, and the one a truthiness check
+    // silently breaks — `override?.minutes || baseline` returns the baseline for
+    // somebody who has just said they have no time at all this week.
+    setup({ overrides: [{ ...override, minutes: 0 }] })
+    expect(rowFor(roster[0].display_name)).toHaveTextContent('This week: 0 min')
+  })
+
+
+  it('AC 2: an override for ANOTHER week does not show — it expires with its period', async () => {
+    // The assertion that makes the period check load-bearing. Every other test
+    // in this describe uses an override whose period MATCHES, so matching on the
+    // person alone gives the same answer on all of them — the constraint and the
+    // unconstrained rule agreeing on the fixture, which is a test that cannot
+    // fail on the property it names.
+    //
+    // Measured: without the period comparison this row reads "This week: 200
+    // min" from a week nobody said anything about, while the chore screen's load
+    // figures read the baseline, because capacitiesFor filters again. Two
+    // answers to one question on one screen, both plausible.
+    setup({ overrides: [{ ...override, period_start: '2026-08-03' }] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+    expect(row).toHaveTextContent(/· usual/)
+    expect(row).not.toHaveTextContent('This week: 200 min')
+
+    // And nothing is offered to clear, because from this week's point of view
+    // there is nothing set.
+    await openFor(roster[0].display_name)
+    expect(
+      screen.queryByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not apply one person's override to anybody else", () => {
+    setup({ overrides: [override] })
+    expect(rowFor(roster[1].display_name)).toHaveTextContent(
+      `This week: ${roster[1].weekly_minutes} min`,
+    )
+    expect(rowFor(roster[1].display_name)).toHaveTextContent(/· usual/)
+  })
+
+  it('saves what was typed, through the handler', async () => {
+    const { onSetCapacity } = setup()
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '120' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120')
+  })
+
+  it('seeds the editor from the CURRENT value every time it opens', async () => {
+    // The row never unmounts while the household is on screen, so a useState
+    // initialiser would keep offering what this device saw at first render —
+    // and saving would write that stale number back over another phone's edit.
+    // Same fault and same fix as the chore editor.
+    setup({ overrides: [override] })
+    await openFor(roster[0].display_name)
+    expect(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+    ).toHaveValue(200)
+  })
+
+  it('refuses a value the database would refuse, with a sentence, before calling the handler', async () => {
+    const { onSetCapacity } = setup()
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '-5' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/cannot be negative/i)
+    expect(onSetCapacity, 'a refused value must never become a request').not.toHaveBeenCalled()
+  })
+
+  it('offers "use my usual" only when there is something to clear', async () => {
+    setup()
+    await openFor(roster[0].display_name)
+    expect(
+      screen.queryByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+      'nothing is overridden, so there is nothing to undo',
+    ).not.toBeInTheDocument()
+  })
+
+  it('and clears through the handler when there is', async () => {
+    const { onClearCapacity } = setup({ overrides: [override] })
+    await openFor(roster[0].display_name)
+    await clickAndSettle(
+      screen.getByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+    )
+    expect(onClearCapacity).toHaveBeenCalledWith(roster[0].id)
+  })
+
+  it('disables the controls while a write is in flight', async () => {
+    setup({ overrides: [override], busy: true })
+    expect(
+      screen.getByRole('button', {
+        name: new RegExp(`set this week for ${roster[0].display_name}`, 'i'),
+      }),
+    ).toBeDisabled()
+  })
+
+  it('a rejected save does not escape as an unhandled rejection', async () => {
+    let handlerAttached = false
+    const rejecting = () => {
+      const p = Promise.reject(new Error('refused'))
+      const then = p.then.bind(p)
+      p.then = (...a) => {
+        if (a[1]) handlerAttached = true
+        return then(...a)
+      }
+      return p
+    }
+    setup({ onSetCapacity: rejecting })
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '120' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+    expect(handlerAttached, 'the save ignored the promise it was given').toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 5 — a 360px phone.
+  //
+  // Stated as what this instrument CAN and CANNOT see, because the difference
+  // matters. jsdom applies no stylesheet and computes no layout, so "no
+  // horizontal overflow at 360px" is not measurable here and no assertion in
+  // this file should pretend otherwise — a green run would be evidence about
+  // jsdom, not about a phone.
+  //
+  // What is checkable here: the control is REACHABLE and OPERABLE — it exists,
+  // it has an accessible name, it is a real button and a real labelled input —
+  // and the stylesheet carries the rules that make wrapping rather than
+  // overflowing true. The visual confirmation belongs to #48, which looks at
+  // this surface on a real phone.
+  // -------------------------------------------------------------------------
+
+  describe('AC 5 — reachable and operable, with the overflow rules in place', () => {
+    it('the control is reachable by name and operable as a button', () => {
+      setup()
+      const trigger = screen.getByRole('button', {
+        name: new RegExp(`set this week for ${roster[0].display_name}`, 'i'),
+      })
+      expect(trigger).toBeInTheDocument()
+      expect(trigger).toBeEnabled()
+      expect(trigger.tagName).toBe('BUTTON')
+    })
+
+    it('the editor is a labelled numeric field, not a bare box', async () => {
+      setup()
+      await openFor(roster[0].display_name)
+      const field = screen.getByLabelText(
+        new RegExp(`minutes this week for ${roster[0].display_name}`, 'i'),
+      )
+      expect(field).toHaveAttribute('type', 'number')
+      // The bounds are on the element for assistive tech and the spinner; the
+      // REFUSAL is ours, in the submit handler, so the sentence is one wording
+      // on every browser. Chores.jsx records the measurement behind that.
+      expect(field).toHaveAttribute('min', '0')
+      expect(field).toHaveAttribute('max', '10080')
+    })
+
+    it('the stylesheet wraps the row rather than letting it overflow sideways', () => {
+      // A property of the CSS, not of the render — jsdom would pass this
+      // identically with no rules at all, which is exactly why it is asserted
+      // against the stylesheet text instead.
+      const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+      const block = css.slice(css.indexOf('.member__week {'), css.indexOf('.member__week-form'))
+      expect(block, 'the .member__week rules are no longer where this test looks').toContain(
+        'flex-wrap: wrap',
+      )
+      expect(block).toContain('min-width: 0')
+    })
+
+    it('POSITIVE CONTROL: the stylesheet slice is real, so the assertion above is not vacuous', () => {
+      const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+      expect(css).toContain('.member__week {')
+      expect(css.indexOf('.member__week {')).toBeLessThan(css.indexOf('.member__week-form'))
+    })
   })
 })

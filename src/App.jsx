@@ -26,7 +26,13 @@ import {
   uncompleteChore,
   updateChore,
 } from './lib/chores.js'
-import { capacitiesFor, periodStartFor } from './lib/capacity.js'
+import {
+  capacitiesFor,
+  clearCapacity,
+  listCapacity,
+  periodStartFor,
+  setCapacity,
+} from './lib/capacity.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -46,6 +52,12 @@ export default function App() {
   const [household, setHousehold] = useState(null)
   const [members, setMembers] = useState([])
   const [chores, setChores] = useState([])
+  // #46 — this week's capacity overrides, and the period they belong to. Both
+  // come from refresh() rather than being derived in render: the period depends
+  // on the household's timezone, which is only known once the household is read,
+  // and the overrides are a server read like every other.
+  const [overrides, setOverrides] = useState([])
+  const [periodStart, setPeriodStart] = useState(null)
   const [deviceId, setDeviceId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -58,6 +70,18 @@ export default function App() {
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
     setChores(found ? await listChores() : [])
+    // #46 — read this week's overrides from the SERVER on every refresh, through
+    // the same path as everything else. AC 4 asks that nothing be served from a
+    // local cache, and the way to be sure of that is to have no cache: a device
+    // that merely remembered would show the same numbers as one that re-read.
+    //
+    // The period is computed HERE, from the household just read, because
+    // periodStartFor needs the household's zone and refuses to guess one. That
+    // also makes the ordering explicit — a period from a stale household would
+    // file this week's capacity under last week's key.
+    const period = found ? periodStartFor(new Date(), found.timezone) : null
+    setPeriodStart(period)
+    setOverrides(period ? await listCapacity(period) : [])
     setDeviceId(await currentDeviceId())
     return found
   }, [])
@@ -156,22 +180,40 @@ export default function App() {
     (id, pin) => mutate(() => claimMemberWithPin(id, pin)),
     [mutate],
   )
+  // #46 — set or clear THIS period's capacity. Both take the period from state
+  // rather than recomputing it, so the write lands in the same week the screen
+  // is showing even if midnight passes mid-session.
+  //
+  // Nothing here touches a model, a network service or a credential beyond the
+  // database (AC 6): the manual road in is the floor the charter requires on day
+  // one, and the extraction bet (#57) is an accelerator on top of it, never the
+  // only way in. A test asserts that this path imports nothing else.
+  const handleSetCapacity = useCallback(
+    (memberId, minutes) => {
+      if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
+      return mutate(() => setCapacity({ memberId, periodStart, minutes }))
+    },
+    [mutate, periodStart],
+  )
+  const handleClearCapacity = useCallback(
+    (memberId) => {
+      if (!periodStart) return Promise.reject(new Error('No week to clear capacity for yet.'))
+      return mutate(() => clearCapacity(memberId, periodStart))
+    },
+    [mutate, periodStart],
+  )
 
   const me = findClaimedMember(members, deviceId)
 
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
-  // makes that a rule and capacity.test.js enforces it with an allowlist; the
-  // alternative would have baked capacity-as-constant into the first screen that
-  // shows a fairness number.
+  // makes that a rule and capacity.test.js enforces it with an allowlist.
   //
-  // The override list is EMPTY and that is currently true rather than a stub:
-  // nothing in the app writes a `member_capacity` row yet, so every member
-  // resolves to their baseline. #46 is the story that sets one by hand, and it
-  // replaces `[]` with `await listCapacity(periodStart)` — one line, here, and
-  // nothing downstream changes.
-  const periodStart = household ? periodStartFor(new Date(), household.timezone) : null
-  const capacities = periodStart ? capacitiesFor(members, [], periodStart) : []
+  // #46 filled in the second argument. It was `[]` when #36 shipped, and that was
+  // true rather than a stub — nothing wrote a `member_capacity` row yet. Now the
+  // overrides are real and the load figures on the chore screen follow this
+  // week automatically, because they always went through `capacitiesFor`.
+  const capacities = periodStart ? capacitiesFor(members, overrides, periodStart) : []
 
   // The organizer is a PERSON, not a session — an anonymous session expires
   // after 30 days idle and returns with a new auth id, so a device is the
@@ -238,6 +280,10 @@ export default function App() {
           onSetPin={handleSetPin}
           onSignIn={handleSignIn}
           onRefresh={handleRefresh}
+          overrides={overrides}
+          periodStart={periodStart}
+          onSetCapacity={handleSetCapacity}
+          onClearCapacity={handleClearCapacity}
         />
       ) : null}
 

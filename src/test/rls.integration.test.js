@@ -57,6 +57,24 @@ if (isSecretKey(anonKey)) {
 
 const ORGANIZER_PIN = '4821'
 
+// #45. The zone the creating device claims, deliberately NOT the runner's own —
+// a value that happens to match the machine proves nothing about whether the
+// argument arrived. Chosen for the same reason `period_start` below is a real
+// Monday: a fixture that would be right by accident cannot fail.
+const HOUSEHOLD_TZ = 'Pacific/Auckland'
+
+/** A Monday. 0005's check constraint refuses any other weekday outright. */
+const CAPACITY_PERIOD = '2026-08-10'
+
+// Every read of `member_capacity` names its columns, for the reason recorded
+// above MEMBER_COLUMNS and one more: 0005 withholds `household_id` from the
+// select grant, so `select('*')` fails with 42501 for EVERY caller — including a
+// device legitimately in the household. An assertion written against `data ?? []`
+// would then hold whether or not the row-level policy did anything, which is the
+// exact defect #61 found in this file. Kept identical to CAPACITY_COLUMNS in
+// src/lib/capacity.js.
+const CAPACITY_COLUMNS = 'id, member_id, period_start, minutes, note, source, created_at'
+
 // Every read of `members` names its columns, and this is load-bearing rather
 // than tidy. Migration 0002 revokes select on the table and re-grants it per
 // column so `pin_hash` can never be read, which means `select('*')` fails with
@@ -99,6 +117,7 @@ describe('row-level security, exercised over the wire', () => {
   const deviceB = newDevice()
   let household
   let memberId
+  let capacityId
 
   beforeAll(async () => {
     await signInAnonymously(deviceA, 'device A')
@@ -111,8 +130,22 @@ describe('row-level security, exercised over the wire', () => {
       // because is_household_organizer() fails closed on a null.
       organizer_name: 'Placeholder Organizer',
       organizer_pin: ORGANIZER_PIN,
+      // #45. Migration 0005 takes this signature from three arguments to four,
+      // with a default, and src/lib/household.js now sends it. Passing it here
+      // is what makes this suite exercise the call the app actually makes.
+      //
+      // If 0005 has NOT been applied, PostgREST cannot find a four-argument
+      // create_household and this fails at setup — loudly, and with the right
+      // diagnosis, which is the whole point of #45 AC 1 being an owner action.
+      household_tz: HOUSEHOLD_TZ,
     })
-    expect(error, `create_household failed: ${error?.message}`).toBeNull()
+    expect(
+      error,
+      `create_household failed: ${error?.message}` +
+        (/function|schema cache|not find/i.test(error?.message ?? '')
+          ? ' — this is the signature 0005 introduces; it looks like migration 0005 has not been pasted into the live project yet (#45 AC 1)'
+          : ''),
+    ).toBeNull()
     household = data
 
     const { data: member, error: memberError } = await deviceA
@@ -122,6 +155,30 @@ describe('row-level security, exercised over the wire', () => {
       .single()
     expect(memberError, `seeding a member failed: ${memberError?.message}`).toBeNull()
     memberId = member.id
+
+    // #45. One capacity override, so the not-joined device below has something
+    // real to fail to see. Seeding it here rather than inside a test keeps the
+    // "device B sees nothing" assertions honest — an empty read against an empty
+    // table is satisfied by a database that never stored anything.
+    const { data: seeded, error: capacityError } = await deviceA
+      .from('member_capacity')
+      .insert({
+        household_id: household.id,
+        member_id: memberId,
+        period_start: CAPACITY_PERIOD,
+        minutes: 90,
+        note: 'seeded by the live suite',
+      })
+      .select(CAPACITY_COLUMNS)
+      .single()
+    expect(
+      capacityError,
+      `seeding a capacity override failed: ${capacityError?.message}` +
+        (/does not exist|schema cache/i.test(capacityError?.message ?? '')
+          ? ' — member_capacity is created by migration 0005, which looks unapplied (#45 AC 1)'
+          : ''),
+    ).toBeNull()
+    capacityId = seeded.id
   }, 30_000)
 
   afterAll(async () => {
@@ -221,6 +278,78 @@ describe('row-level security, exercised over the wire', () => {
       expect(still.weekly_minutes).toBe(120)
     })
 
+    // #45 AC 2 — capacity overrides, measured against Supabase rather than
+    // pglite. These sit INSIDE the not-joined block deliberately: device B joins
+    // in the next describe, so anything appended to the end of this file would
+    // be asking a member of the household whether it can see the household.
+    it('sees no capacity overrides, though one exists', async () => {
+      const { data, error } = await deviceB.from('member_capacity').select(CAPACITY_COLUMNS)
+      // `error` must be null for the empty set to mean anything — a grant
+      // refusal would also produce no rows and would prove nothing about RLS.
+      expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
+      expect(data).toEqual([])
+    })
+
+    it('cannot read one even knowing the household id', async () => {
+      const { data, error } = await deviceB
+        .from('member_capacity')
+        .select(CAPACITY_COLUMNS)
+        .eq('member_id', memberId)
+      expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
+      expect(data).toEqual([])
+    })
+
+    it('cannot file a capacity override into a household it knows the id of', async () => {
+      const { error } = await deviceB.from('member_capacity').insert({
+        household_id: household.id,
+        member_id: memberId,
+        period_start: CAPACITY_PERIOD,
+        minutes: 5,
+      })
+      expect(error, 'RLS should have refused the insert').not.toBeNull()
+      // The mechanism, not merely a failure. Every refusal in this file is
+      // 42501, so the code alone cannot tell a row-level policy from a missing
+      // column grant — and `minutes` IS inside 0005's insert grant, so the grant
+      // permits this write and only the policy can refuse it. If this ever
+      // became a grant refusal, the rule under test would have quietly stopped
+      // being exercised.
+      expect(error.message).toMatch(/row-level security/i)
+    })
+
+    it('cannot change or delete somebody else’s week', async () => {
+      // `minutes` and `note` are both inside 0005's update grant, so the grant
+      // permits the write and the row-level policy is what must refuse it. Same
+      // shape as the members test above, and same reason for naming columns on
+      // the returning read.
+      const { data: updated, error: updateError } = await deviceB
+        .from('member_capacity')
+        .update({ minutes: 1 })
+        .eq('id', capacityId)
+        .select(CAPACITY_COLUMNS)
+      expect(updateError, `expected a permitted read of a refused write, got ${updateError?.code}`)
+        .toBeNull()
+      expect(updated).toEqual([])
+
+      const { data: deleted, error: deleteError } = await deviceB
+        .from('member_capacity')
+        .delete()
+        .eq('id', capacityId)
+        .select(CAPACITY_COLUMNS)
+      expect(deleteError, `expected a permitted read of a refused delete, got ${deleteError?.code}`)
+        .toBeNull()
+      expect(deleted).toEqual([])
+
+      // The independent check a grant cannot fake: read it back as a device that
+      // may, and confirm nothing moved.
+      const { data: still, error: stillError } = await deviceA
+        .from('member_capacity')
+        .select(CAPACITY_COLUMNS)
+        .eq('id', capacityId)
+        .single()
+      expect(stillError, `reading the override back failed: ${stillError?.message}`).toBeNull()
+      expect(still.minutes).toBe(90)
+    })
+
     it('cannot join with a wrong code, and is not told which part was wrong', async () => {
       const { error } = await deviceB.rpc('join_household', { code: 'ZZZZZZZZ' })
       expect(error).not.toBeNull()
@@ -304,6 +433,142 @@ describe('row-level security, exercised over the wire', () => {
       expect(secondClaim.message).toMatch(/already claimed/i)
 
       await deviceC.auth.signOut()
+    })
+  })
+
+  // #45 AC 3 — the column grants, measured where they can be measured wrong.
+  //
+  // These use device A, which is legitimately in the household, so row-level
+  // security permits every row touched below. What refuses is the GRANT, and
+  // that distinction is the entire point: 0002 exists because a correct RPC
+  // guard was bypassed by a direct UPDATE against the live project, and that
+  // was found by measuring Supabase rather than a harness. The pglite suite
+  // asserts the same properties, and its own header says the stub is the weak
+  // point — so these are not a duplicate, they are the run against the thing
+  // the stub stands in for.
+  describe('the column grants hold against Supabase itself', () => {
+    /** A grant refusal, not a policy one. 42501 alone cannot tell them apart. */
+    function expectGrantRefusal(error, what) {
+      expect(error, `${what} should have been refused`).not.toBeNull()
+      expect(error.message).toMatch(/permission denied|column/i)
+      // The discriminating half. Without it this passes on a row-level refusal,
+      // which would mean the column grant was never exercised at all.
+      expect(
+        error.message,
+        `${what} was refused by RLS, not by the grant — the grant is what this test is named for`,
+      ).not.toMatch(/row-level security/i)
+    }
+
+    it('POSITIVE CONTROL: a household device CAN correct the minutes and the note', async () => {
+      // Without this every refusal below is satisfied by a table nobody can
+      // write at all, and the suite would read as proof the grants are right.
+      const { data, error } = await deviceA
+        .from('member_capacity')
+        .update({ minutes: 45, note: 'corrected by the live suite' })
+        .eq('id', capacityId)
+        .select(CAPACITY_COLUMNS)
+        .single()
+      expect(error, `the permitted update was refused: ${error?.message}`).toBeNull()
+      expect(data.minutes).toBe(45)
+    })
+
+    it('cannot backdate a row by writing created_at at insert time', async () => {
+      const { error } = await deviceA.from('member_capacity').insert({
+        household_id: household.id,
+        member_id: memberId,
+        period_start: '2026-08-17',
+        minutes: 10,
+        created_at: '2020-01-01T00:00:00Z',
+      })
+      expectGrantRefusal(error, 'writing created_at')
+    })
+
+    it('cannot move an override to another person', async () => {
+      const { error } = await deviceA
+        .from('member_capacity')
+        .update({ member_id: household.organizer_member_id })
+        .eq('id', capacityId)
+      expectGrantRefusal(error, 'writing member_id')
+    })
+
+    it('cannot move an override to another week', async () => {
+      const { error } = await deviceA
+        .from('member_capacity')
+        .update({ period_start: '2026-08-03' })
+        .eq('id', capacityId)
+      expectGrantRefusal(error, 'writing period_start')
+    })
+
+    it('select(*) fails outright rather than quietly omitting household_id', async () => {
+      // The behaviour every CAPACITY_COLUMNS read in this file depends on. If
+      // this ever started succeeding, the column list would have stopped being
+      // load-bearing and the empty-read assertions above would go vacuous
+      // without anything failing.
+      const { error } = await deviceA.from('member_capacity').select('*')
+      expect(error, 'select(*) should be refused by the column grant').not.toBeNull()
+      expect(error.message).toMatch(/permission denied|column/i)
+    })
+
+    it('refuses a period that is not a Monday', async () => {
+      const { error } = await deviceA.from('member_capacity').insert({
+        household_id: household.id,
+        member_id: memberId,
+        period_start: '2026-08-11',
+        minutes: 30,
+      })
+      expect(error, 'a Tuesday period should have been refused').not.toBeNull()
+      expect(error.message).toMatch(/period_is_monday|check constraint/i)
+    })
+
+    it('carries the timezone the creating device sent, not the default', async () => {
+      // Proves the fourth argument 0005 adds actually arrived. Asserting against
+      // HOUSEHOLD_TZ rather than "is not null" is the point: the column defaults
+      // to 'UTC', so a call whose argument was silently dropped would still
+      // produce a non-null value and read as success.
+      const { data, error } = await deviceA
+        .from('households')
+        .select('id, timezone')
+        .eq('id', household.id)
+        .single()
+      expect(error, `reading the household back failed: ${error?.message}`).toBeNull()
+      expect(data.timezone).toBe(HOUSEHOLD_TZ)
+    })
+
+    it('cannot rewrite the join code or reassign the organizer', async () => {
+      // 0005 gives households its first UPDATE policy. Without the matching
+      // column grant that policy would let any member invite strangers or make
+      // themselves organizer — 0002's measured hole, reopened.
+      const { error: code } = await deviceA
+        .from('households')
+        .update({ join_code: 'AAAAAAAA' })
+        .eq('id', household.id)
+      expectGrantRefusal(code, 'writing join_code')
+
+      const { error: boss } = await deviceA
+        .from('households')
+        .update({ organizer_member_id: memberId })
+        .eq('id', household.id)
+      expectGrantRefusal(boss, 'writing organizer_member_id')
+    })
+
+    it('but the household timezone IS correctable by a member', async () => {
+      const { data, error } = await deviceA
+        .from('households')
+        .update({ timezone: 'Europe/London' })
+        .eq('id', household.id)
+        .select('id, timezone')
+        .single()
+      expect(error, `the permitted update was refused: ${error?.message}`).toBeNull()
+      expect(data.timezone).toBe('Europe/London')
+    })
+
+    it('and a zone Postgres does not know is refused at write time', async () => {
+      const { error } = await deviceA
+        .from('households')
+        .update({ timezone: 'Mars/Olympus' })
+        .eq('id', household.id)
+      expect(error, 'an unknown zone should have been refused').not.toBeNull()
+      expect(error.message).toMatch(/not a known timezone/i)
     })
   })
 })

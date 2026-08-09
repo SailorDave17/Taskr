@@ -103,6 +103,45 @@ describe('the chore flow is reachable from the app, not just exported', () => {
   })
 })
 
+// #46 — the capacity flow, same shape and the same reason.
+//
+// This one had already happened here and is not hypothetical: `listCapacity`,
+// `setCapacity` and `clearCapacity` shipped with #44 and sat exported, tested at
+// no level, with NO CALLER for five days. The allocator (#40) is still in that
+// state. A unit test cannot see it, because a unit test supplies its own caller.
+describe('the capacity flow is reachable from the app, not just exported', () => {
+  const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+
+  it('imports the capacity data layer', () => {
+    expect(app).toMatch(/from '\.\/lib\/capacity\.js'/)
+  })
+
+  it('reads this week from the server, rather than resolving overrides it never fetched', () => {
+    // capacitiesFor with a hard-coded [] is exactly what #36 shipped, and it was
+    // correct then because nothing could write a row. Once #46 makes them
+    // writable, an empty literal here means every override is silently ignored
+    // while every number on screen stays plausible.
+    // A CALL, not the identifier. Measured while mutating this: deleting the
+    // call left the import line in place, which satisfies a bare name grep — so
+    // the check proved the import existed and said nothing about anything using
+    // it. That is exported-is-not-reachable, arriving inside the guard written
+    // to catch exported-is-not-reachable.
+    expect(app).toMatch(/listCapacity\(/)
+    expect(app).not.toMatch(/capacitiesFor\(\s*members\s*,\s*\[\s*\]/)
+  })
+
+  it('wires both writes ON THE ROSTER ELEMENT, not merely somewhere in the file', () => {
+    // Scoped for the reason the chore version records: an unscoped grep passes
+    // on a neighbour. <Chores> carries neither of these, so the scoping is what
+    // makes the assertion about the roster.
+    const element = app.match(/<Roster[\s\S]*?\/>/)
+    expect(element, 'no <Roster .../> element in App.jsx').not.toBeNull()
+    expect(element[0]).toMatch(/onSetCapacity=\{/)
+    expect(element[0]).toMatch(/onClearCapacity=\{/)
+    expect(element[0]).toMatch(/overrides=\{/)
+  })
+})
+
 // The date guards in src/lib/chores.test.js are meaningless in UTC — measured,
 // the local-getter bug they exist for reddens 3 of them at GMT-0400 and none at
 // UTC. Same shape as the passWithNoTests guard at the top of this file: the

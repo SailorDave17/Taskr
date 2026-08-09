@@ -2,6 +2,12 @@ import { useState } from 'react'
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, isValidPin } from '../lib/pin.js'
 import PropTypes from 'prop-types'
 import { formatMinutes } from '../lib/household.js'
+import {
+  MAX_CAPACITY_MINUTES,
+  MIN_CAPACITY_MINUTES,
+  effectiveCapacity,
+  normalizeCapacityMinutes,
+} from '../lib/capacity.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
 // change is what every other device shows on next load) and the "pick yourself"
@@ -12,8 +18,154 @@ import { formatMinutes } from '../lib/household.js'
 // Showing "2h 0m" beside the field is a reading aid; the stored value is the
 // number that was typed.
 
+/**
+ * This week's capacity for one person — story #46.
+ *
+ * The charter's complaint about every competitor is that they treat capacity as
+ * a constant. `members.weekly_minutes` is the BASELINE — what a person usually
+ * has — and this is where a household says "not this week". The baseline stays
+ * visible beside it on purpose: an override that hid what it was overriding
+ * would make the number impossible to sanity-check, and the whole product claim
+ * is that the fairness figure is one anybody can check.
+ *
+ * Two things it deliberately is not:
+ *
+ * - **Not a form that has to be submitted to see the effect.** The effective
+ *   number is what the row shows, so setting 120 against a 300 baseline changes
+ *   the line the person is already reading.
+ * - **Not dependent on anything but the database.** No model, no network
+ *   service, no credential beyond the one the app already holds. #46 AC 6 makes
+ *   that a test rather than a promise, because the manual road in is the floor
+ *   the charter requires on day one and the extraction bet (#57) is an
+ *   accelerator on top of it, never the only way in.
+ *
+ * `effectiveCapacity` is called rather than reimplemented — #44 AC 7's rule, and
+ * `capacity.test.js` asserts there is exactly one implementation across all of
+ * `src/`. The same call is what makes the chore screen's load figures follow
+ * this week without any change there.
+ */
+function CapacityControl({ member, override, busy, onSet, onClear }) {
+  const [editing, setEditing] = useState(false)
+  const [minutes, setMinutes] = useState('')
+  const [complaint, setComplaint] = useState(null)
+
+  const effective = effectiveCapacity(member, override)
+  const isOverridden = Boolean(override)
+
+  /**
+   * Seed from the CURRENT effective value every time the editor opens, not from
+   * a `useState` initialiser. The row never unmounts while the household is on
+   * screen, so an initialiser would keep offering the value this device saw at
+   * first render — and after another phone changed it, saving would write the
+   * stale number back over their edit. Same fault, same fix, as the chore
+   * editor in Chores.jsx.
+   */
+  function open() {
+    setMinutes(String(effective))
+    setComplaint(null)
+    setEditing(true)
+  }
+
+  function close() {
+    setComplaint(null)
+    setEditing(false)
+  }
+
+  if (!editing) {
+    return (
+      <div className="member__week">
+        <span className="member__week-figure" data-testid={`week-${member.id}`}>
+          This week: {effective} min
+          <span className="member__budget-human"> ({formatMinutes(effective)})</span>
+          {isOverridden ? (
+            <span className="member__week-mark"> · set for this week</span>
+          ) : (
+            <span className="member__week-mark"> · usual</span>
+          )}
+        </span>
+        <button
+          className="button button--quiet"
+          type="button"
+          onClick={open}
+          disabled={busy}
+          aria-label={`Set this week for ${member.display_name}`}
+        >
+          This week
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      className="stack member__week-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        // Validate with the data layer's own normalizer rather than restating
+        // its bounds, so the sentence a person reads is the one the module
+        // owns and cannot drift from the check constraint 0005 enforces.
+        try {
+          normalizeCapacityMinutes(minutes)
+        } catch (err) {
+          setComplaint(err.message)
+          return
+        }
+        setComplaint(null)
+        onSet(member.id, minutes).then(close, () => {})
+      }}
+    >
+      <label className="field">
+        <span className="field__label">Minutes this week</span>
+        <input
+          className="field__input"
+          type="number"
+          min={MIN_CAPACITY_MINUTES}
+          max={MAX_CAPACITY_MINUTES}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          aria-label={`Minutes this week for ${member.display_name}`}
+        />
+      </label>
+      {complaint ? (
+        <p className="error" role="alert">
+          {complaint}
+        </p>
+      ) : null}
+      <div className="row">
+        <button className="button" type="submit" disabled={busy}>
+          Save
+        </button>
+        {isOverridden ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => onClear(member.id).then(close, () => {})}
+            disabled={busy}
+            aria-label={`Use the usual weekly minutes for ${member.display_name}`}
+          >
+            Use my usual
+          </button>
+        ) : null}
+        <button className="button button--quiet" type="button" onClick={close} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  )
+}
+
+CapacityControl.propTypes = {
+  member: PropTypes.object.isRequired,
+  override: PropTypes.object,
+  busy: PropTypes.bool,
+  onSet: PropTypes.func.isRequired,
+  onClear: PropTypes.func.isRequired,
+}
+
 function MemberRow({
   member,
+  override,
   isMe,
   canClaim,
   canSignIn,
@@ -24,6 +176,8 @@ function MemberRow({
   onClaim,
   onSetPin,
   onSignIn,
+  onSetCapacity,
+  onClearCapacity,
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
@@ -99,6 +253,17 @@ function MemberRow({
           {member.weekly_minutes} min/week
           <span className="member__budget-human"> ({formatMinutes(member.weekly_minutes)})</span>
         </span>
+        {/* The baseline above stays visible beside this week's number on
+            purpose: an override that hid what it was overriding would make the
+            figure impossible to sanity-check, and the product's claim is that
+            the fairness number is one anybody can check. */}
+        <CapacityControl
+          member={member}
+          override={override}
+          busy={busy}
+          onSet={onSetCapacity}
+          onClear={onClearCapacity}
+        />
       </div>
 
       <div className="row row--end">
@@ -255,6 +420,7 @@ function MemberRow({
 
 MemberRow.propTypes = {
   member: PropTypes.object.isRequired,
+  override: PropTypes.object,
   isMe: PropTypes.bool,
   canClaim: PropTypes.bool,
   canSignIn: PropTypes.bool,
@@ -265,6 +431,8 @@ MemberRow.propTypes = {
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
   onClaim: PropTypes.func.isRequired,
+  onSetCapacity: PropTypes.func.isRequired,
+  onClearCapacity: PropTypes.func.isRequired,
 }
 
 /**
@@ -335,11 +503,33 @@ export default function Roster({
   onRemove,
   onClaim,
   onRefresh,
+  overrides = [],
+  periodStart = null,
+  onSetCapacity,
+  onClearCapacity,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
 
+  // The BASELINE total, deliberately unchanged by #46. It answers "how much time
+  // does this household usually have", which is a different question from what
+  // it has this week — and the week's figure belongs beside each person, where
+  // the override was set, rather than aggregated into a headline nobody set.
   const totalMinutes = members.reduce((sum, m) => sum + (m.weekly_minutes || 0), 0)
+
+  // At most one override per person per period — the unique constraint in 0005
+  // guarantees it, so `find` is exact rather than a first-match approximation.
+  //
+  // Matched on the PERIOD as well as the person, and that is not belt-and-braces.
+  // `listCapacity` queries by period so every row here should already belong to
+  // this week — but `capacitiesFor` filters again for exactly this reason, and a
+  // first version of this line did not, which meant the roster showed an
+  // override the load figures on the chore screen correctly ignored. Two answers
+  // to one question on one screen, both plausible. That is the fault
+  // capacity.js's own docstring calls invisible, and it was caught here by a
+  // test whose fixture happened to name a different week.
+  const overrideFor = (memberId) =>
+    overrides.find((o) => o.member_id === memberId && o.period_start === periodStart)
 
   return (
     <div className="roster">
@@ -402,6 +592,9 @@ export default function Roster({
                 onSave={onSave}
                 onRemove={onRemove}
                 onClaim={onClaim}
+                override={overrideFor(member.id)}
+                onSetCapacity={onSetCapacity}
+                onClearCapacity={onClearCapacity}
               />
             ))}
           </ul>
@@ -483,4 +676,8 @@ Roster.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onClaim: PropTypes.func.isRequired,
   onRefresh: PropTypes.func.isRequired,
+  overrides: PropTypes.array,
+  periodStart: PropTypes.string,
+  onSetCapacity: PropTypes.func.isRequired,
+  onClearCapacity: PropTypes.func.isRequired,
 }

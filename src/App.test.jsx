@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // The shell's own assertions (heading, fairness rule, build stamp) survive from
 // #4 unchanged — they are what makes a deploy observable. What changed in #5 is
@@ -33,6 +35,17 @@ const choresApi = {
   removeChore: vi.fn(),
 }
 
+// #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
+// effectiveCapacity and capacitiesFor stay real, because they are pure, have
+// their own tests, and a stub of them could disagree with the single
+// implementation capacity.test.js asserts exists. Same reasoning the household
+// mock gives for leaving findClaimedMember alone.
+const capacityApi = {
+  listCapacity: vi.fn(),
+  setCapacity: vi.fn(),
+  clearCapacity: vi.fn(),
+}
+
 vi.mock('./lib/supabase.js', () => ({
   get hasSupabaseConfig() {
     return backend.hasSupabaseConfig
@@ -45,6 +58,11 @@ vi.mock('./lib/supabase.js', () => ({
 vi.mock('./lib/chores.js', async () => {
   const actual = await vi.importActual('./lib/chores.js')
   return { ...actual, ...choresApi }
+})
+
+vi.mock('./lib/capacity.js', async () => {
+  const actual = await vi.importActual('./lib/capacity.js')
+  return { ...actual, ...capacityApi }
 })
 
 vi.mock('./lib/household.js', async () => {
@@ -69,6 +87,10 @@ beforeEach(() => {
   backend.hasSupabaseConfig = true
   Object.values(api).forEach((fn) => fn.mockReset())
   Object.values(choresApi).forEach((fn) => fn.mockReset())
+  Object.values(capacityApi).forEach((fn) => fn.mockReset())
+  capacityApi.listCapacity.mockResolvedValue([])
+  capacityApi.setCapacity.mockResolvedValue(undefined)
+  capacityApi.clearCapacity.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
   choresApi.addChore.mockResolvedValue(undefined)
   choresApi.updateChore.mockResolvedValue(undefined)
@@ -337,5 +359,200 @@ describe('chores — the write path and the re-read', () => {
     // browser's own constraint validation also blocks the submit — so the
     // absence was produced by a neighbour and the test did not discriminate.
     expect(screen.getByRole('alert')).toHaveTextContent(/at least a minute/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #46 — setting this week's capacity by hand.
+//
+// The write path and the re-read, from App's side. What the CONTROL looks like
+// is Roster.test.jsx's; what the data layer sends is capacity.io.test.js's.
+// ---------------------------------------------------------------------------
+
+describe('capacity — this week, set by hand (#46)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+    ])
+  })
+
+  /**
+   * An override for WHATEVER week the app asks about.
+   *
+   * Deliberately not a hard-coded date. The period is computed from today and
+   * the household's zone, so a literal is right for a few days and then silently
+   * stops matching — the row comes back, `capacitiesFor` filters it out, and the
+   * test fails for a reason that has nothing to do with the code. Measured:
+   * the first version of this file pinned 2026-08-10 while the app computed
+   * 2026-08-03, and the mismatch is what exposed the roster matching on
+   * member_id alone.
+   */
+  const overrideThisWeek = (minutes) =>
+    capacityApi.listCapacity.mockImplementation((period) =>
+      Promise.resolve([
+        { id: 'c1', member_id: 'm1', period_start: period, minutes, source: 'manual' },
+      ]),
+    )
+
+  const openTheWeekEditor = async () => {
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set this week for placeholder one/i })),
+    )
+  }
+
+  const saveMinutes = async (value) => {
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+  }
+
+  it('reads this week’s overrides from the server on load', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(capacityApi.listCapacity).toHaveBeenCalled()
+    // The period is a MONDAY, derived from the household's own zone. A period
+    // key computed from the phone's zone would file two members of one household
+    // under different weeks.
+    const period = capacityApi.listCapacity.mock.calls[0][0]
+    expect(period).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(new Date(`${period}T00:00:00Z`).getUTCDay(), 'the period must start on a Monday').toBe(1)
+  })
+
+  it('AC 4: re-reads from the SERVER after the write, rather than patching local state', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await saveMinutes('120')
+
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 'm1', minutes: '120' }),
+    )
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Order matters: a re-read issued BEFORE the write returns the old list and
+    // is indistinguishable from a correct one in a call count alone.
+    expect(capacityApi.setCapacity.mock.invocationCallOrder[0]).toBeLessThan(
+      capacityApi.listCapacity.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('AC 4: the write names the same period the screen was showing', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    const readPeriod = capacityApi.listCapacity.mock.calls[0][0]
+
+    await openTheWeekEditor()
+    await saveMinutes('120')
+
+    // If these could differ, capacity would be filed into a week the household
+    // is not looking at — every number stays plausible and the split responds to
+    // the wrong week, which is the failure #44 AC 7 already calls invisible.
+    expect(capacityApi.setCapacity.mock.calls[0][0].periodStart).toBe(readPeriod)
+  })
+
+  it('clearing an override goes through the data layer and re-reads too', async () => {
+    overrideThisWeek(120)
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await act(async () =>
+      void fireEvent.click(
+        screen.getByRole('button', { name: /use the usual weekly minutes for placeholder one/i }),
+      ),
+    )
+
+    expect(capacityApi.clearCapacity).toHaveBeenCalledWith('m1', expect.any(String))
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 6: the write goes through lib/capacity.js, never the Supabase client directly', async () => {
+    // getSupabase throws in this file's mock, so reaching for it is a failure
+    // rather than a silent bypass. The flow completing is the assertion.
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await openTheWeekEditor()
+    await saveMinutes('120')
+    expect(capacityApi.setCapacity).toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 6: the manual path depends on nothing but the data layer', () => {
+    // The charter's fallback principle, as a check rather than a promise: manual
+    // entry must work on day one and the extraction bet (#57) is an accelerator
+    // on top of it, never the only road in. If capacity.js ever grows a model
+    // client, an HTTP call or a second credential, the floor has quietly become
+    // the ceiling — and by then the story that would notice is the one that
+    // added it.
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
+    const imports = [...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1])
+    expect(imports.sort()).toEqual(['./household.js', './supabase.js'])
+
+    // Named separately from the import list, because these arrive without an
+    // import statement and the list above would not see them.
+    expect(source).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|WebSocket|import\s*\(/)
+    expect(source).not.toMatch(/openai|anthropic|api[_-]?key|Bearer /i)
+  })
+
+
+  // -------------------------------------------------------------------------
+  // The integration this story actually delivers, and it was protected by a
+  // regex alone until this test existed.
+  //
+  // *Measured while mutating*: changing App to `capacitiesFor(members, [], …)` —
+  // the exact line #36 shipped and #46 replaced — reddened ONE assertion, and it
+  // was the static grep in gate.test.js. Nothing behavioural noticed that the
+  // load figures had stopped following this week, because every number on screen
+  // stayed plausible. That is the failure mode #44 already calls invisible, and
+  // a grep is a poor last line against it: it fails the moment the code is
+  // written a different way rather than a wrong way.
+  // -------------------------------------------------------------------------
+
+  it('the chore screen’s load figures follow THIS WEEK, not the baseline', async () => {
+    overrideThisWeek(120)
+    await renderApp()
+    await screen.findByRole('region', { name: /who is carrying what/i })
+
+    // Baseline 300, this week 120, nothing assigned. "180 min left" would mean
+    // the override reached the roster and not the allocator's input — which is
+    // precisely the half-wired state this story exists to end.
+    const row = screen.getByTestId('load-m1')
+    expect(row).toHaveTextContent('0 min committed')
+    expect(row).toHaveTextContent('120 min left')
+    expect(row, 'the baseline must not be what the load surface divides').not.toHaveTextContent(
+      '300 min left',
+    )
+  })
+
+  it('POSITIVE CONTROL: with no override the same screen shows the baseline', async () => {
+    // Without this, the assertion above passes identically if the load figures
+    // were broken in some other way that happened to yield 120 — and it pins
+    // that the difference is the OVERRIDE rather than anything else on screen.
+    capacityApi.listCapacity.mockResolvedValue([])
+    await renderApp()
+    await screen.findByRole('region', { name: /who is carrying what/i })
+    expect(screen.getByTestId('load-m1')).toHaveTextContent('300 min left')
+  })
+
+  it('AC 6: POSITIVE CONTROL — the import scan sees the imports that are there', () => {
+    // Without this the assertion above passes identically if the regex stops
+    // matching, which is how an empty result reads as a clean bill of health.
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
+    expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(1)
   })
 })

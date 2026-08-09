@@ -23,6 +23,11 @@ import {
   newDevice,
   MIGRATIONS,
 } from './support/pgliteSupabase.js'
+// The pure resolvers, imported rather than reimplemented: #44 AC 7 asserts there
+// is exactly one implementation of effective capacity across all of src/, and a
+// second one written here to avoid an import would break that and be wrong in a
+// different way from the first.
+import { capacitiesFor, effectiveCapacity } from '../lib/capacity.js'
 
 /** The columns a client may read, matching 0005's select grant. */
 const READABLE = 'id, member_id, period_start, minutes, note, source, created_at'
@@ -507,6 +512,170 @@ describe('weekly capacity, run against a real Postgres', () => {
         missing,
         `not applied by any pglite suite, so untested while everything stays green: ${missing.join(', ')}`,
       ).toEqual([])
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #46 AC 3 — "a client-side check is not a check"
+  //
+  // src/lib/capacity.js refuses a bad value with a sentence before any request
+  // is sent, and capacity.io.test.js proves that. This is the other half, and
+  // the AC insists on it by name: the DATABASE must refuse the same values, so
+  // a client that skips the normalizer — a future caller, the extraction path in
+  // #57, a curl — cannot file minutes the fairness arithmetic could not survive.
+  // ---------------------------------------------------------------------------
+
+  describe('#46 AC 3 — the database refuses what the normalizer refuses', () => {
+    const MONDAY = '2026-08-10'
+
+    const fileMinutes = (minutes) =>
+      attempt(() =>
+        asDevice(db, organizerDevice, () =>
+          db.query(
+            `insert into public.member_capacity (household_id, member_id, period_start, minutes)
+             values ($1, $2, $3, $4)`,
+            [household.id, child.id, MONDAY, minutes],
+          ),
+        ),
+      )
+
+    it('refuses a negative value, naming the constraint rather than a message', async () => {
+      const refused = await fileMinutes(-1)
+      expect(refused.ok).toBe(false)
+      // Asserted against the constraint NAME, not against Postgres's prose. The
+      // message text is a Postgres version detail and is not a contract; the
+      // name is ours. Same rule 0003 states for chores_expected_minutes_range.
+      expect(refused.error).toMatch(/member_capacity_minutes_range/)
+    })
+
+    it('refuses more minutes than a week contains', async () => {
+      const refused = await fileMinutes(10081)
+      expect(refused.error).toMatch(/member_capacity_minutes_range/)
+    })
+
+    it('POSITIVE CONTROL: both ends of the legal range are accepted', async () => {
+      // Without this the two refusals above are equally consistent with the
+      // insert being broken for every value, which would make the guard look
+      // perfect while the feature did not work at all.
+      const zero = await fileMinutes(0)
+      expect(zero.ok, 'zero means "no time this week" and must be storable').toBe(true)
+
+      await asDevice(db, organizerDevice, () =>
+        db.query(`delete from public.member_capacity where member_id = $1`, [child.id]),
+      )
+      const full = await fileMinutes(10080)
+      expect(full.ok, 'a full week is the documented upper bound').toBe(true)
+    })
+
+    it('and the bounds the module states are the bounds the migration enforces', async () => {
+      // The two numbers live in two languages and would drift silently. Read out
+      // of the migration text rather than retyped, so this fails if either side
+      // moves. capacity.test.js asserts the JS constants against the same text;
+      // this asserts the running database agrees with both.
+      const sql = migrationSql('0005_weekly_capacity.sql')
+      const bound = sql.match(/minutes >= (\d+) and minutes <= (\d+)/)
+      expect(bound, 'the range constraint is no longer where this test looks').not.toBeNull()
+      expect(Number(bound[1])).toBe(0)
+      expect(Number(bound[2])).toBe(10080)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #46 AC 1 — "a second client constructed against the same backend reads 120
+  // as effective capacity".
+  //
+  // capacity.io.test.js asserts the same round trip against a fake client, which
+  // proves the module sends and unpacks the right things. It does not prove a
+  // SECOND reader sees it, because a fake returns whatever the test told it to.
+  // This does: one device writes, a different device reads, and the number is
+  // resolved through the one implementation of effectiveCapacity rather than by
+  // inspecting the row.
+  // ---------------------------------------------------------------------------
+
+  describe('#46 AC 1 — a second device reads back the effective capacity', () => {
+    const MONDAY = '2026-08-10'
+
+    it('one device sets 120 against a 300 baseline; another reads 120, and the baseline is intact', async () => {
+      // `child` is seeded with weekly_minutes 300 in this file's beforeEach.
+      // Joined through `join_household`, which is the only path a real phone
+      // has — a direct insert into household_devices is refused by RLS, which is
+      // the policy working and was worth hitting once.
+      const secondDevice = await newDevice(db)
+      await asDevice(db, secondDevice, () =>
+        db.query('select public.join_household($1)', [household.join_code]),
+      )
+
+      await asDevice(db, organizerDevice, () =>
+        db.query(
+          `insert into public.member_capacity (household_id, member_id, period_start, minutes)
+           values ($1, $2, $3, 120)`,
+          [household.id, child.id, MONDAY],
+        ),
+      )
+
+      // PGlite returns a `date` column as a JS **Date**; PostgREST returns it as
+      // the string "2026-08-10", and `capacitiesFor` compares period keys with
+      // `===`. So a row handed straight from this harness into client code is
+      // not the shape the client ever receives, and the comparison silently
+      // misses — measured here, where effectiveCapacity passed and capacitiesFor
+      // returned the baseline.
+      //
+      // Normalised rather than loosened: the production path really does deal in
+      // strings, and widening the comparison in capacity.js would be changing
+      // shipped code to accommodate a harness artefact. Worth knowing before
+      // writing any other pglite test that feeds rows into the JS layer.
+      const asClientRow = (r) => ({
+        ...r,
+        period_start:
+          r.period_start instanceof Date
+            ? r.period_start.toISOString().slice(0, 10)
+            : r.period_start,
+      })
+
+      // The second device reads through the same column list the client uses.
+      const seen = await asDevice(db, secondDevice, async () => {
+        const { rows } = await db.query(
+          `select id, member_id, period_start, minutes, note, source, created_at
+             from public.member_capacity where period_start = $1`,
+          [MONDAY],
+        )
+        return rows.map(asClientRow)
+      })
+      expect(seen, 'the second device must see the override at all').toHaveLength(1)
+      expect(typeof seen[0].period_start, 'normalised to the shape PostgREST sends').toBe('string')
+
+      const member = { id: child.id, weekly_minutes: 300 }
+      expect(effectiveCapacity(member, seen.find((o) => o.member_id === child.id))).toBe(120)
+      expect(capacitiesFor([member], seen, MONDAY)).toEqual([
+        { id: child.id, capacityMinutes: 120 },
+      ])
+
+      // And the baseline row is untouched — the override is a delta, not a
+      // rewrite. Read from the database rather than from the object above, which
+      // this test constructed and could not have changed.
+      const { rows: baseline } = await db.query(
+        `select weekly_minutes from public.members where id = $1`,
+        [child.id],
+      )
+      expect(baseline[0].weekly_minutes).toBe(300)
+    })
+
+    it('POSITIVE CONTROL: with no override the same read resolves the baseline', async () => {
+      // Without this, the assertion above is equally consistent with
+      // effectiveCapacity returning 120 for reasons unrelated to the row.
+      const member = { id: child.id, weekly_minutes: 300 }
+      const seen = await asDevice(db, organizerDevice, async () => {
+        const { rows } = await db.query(
+          `select member_id, period_start, minutes from public.member_capacity
+             where period_start = $1`,
+          [MONDAY],
+        )
+        return rows
+      })
+      expect(seen).toHaveLength(0)
+      expect(capacitiesFor([member], seen, MONDAY)).toEqual([
+        { id: child.id, capacityMinutes: 300 },
+      ])
     })
   })
 })

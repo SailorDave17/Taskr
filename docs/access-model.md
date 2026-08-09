@@ -2,11 +2,17 @@
 
 - Date: 2026-08-05, **substantially revised 2026-08-06**
 - Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
-- Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants) and
-  #34 (chores, which inherits the column-grant convention)
+- Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants),
+  #34 (chores, which inherits the column-grant convention) and #36 (assignment, which is the first
+  to make the convention's rule structural as well as procedural)
 - Status: **decided and implemented.** Migrations `0001` and `0002` are applied to the live
   project — `0002` verified over the wire by the live RLS suite (PR #65, 13/13 against the real
-  project). `0003`, `0004` and `0005`: see *What is not done*.
+  project). `0003`, `0004` and `0006`: see *What is not done*.
+- **`0005` is recorded below as unapplied and that entry is stale.** #45 closed on 2026-08-09 with
+  its paste criterion ticked, so it is live. Left uncorrected here deliberately: the entry states a
+  fact about the live project, and the honest source for that is the dashboard or the live RLS
+  suite, not a checkbox on a closed issue. #38 owns the equivalent paste for `0003`/`0004`/`0006`
+  and is the story that should reconcile this whole section against what the project actually has.
 
 ## Read this first — the decision below changed
 
@@ -269,6 +275,40 @@ delete from public.households where name like 'TEST %';
 ```
 
 ## What is not done
+
+### Updated 2026-08-09 — story #36 added a sixth migration
+
+**`0006_chore_assignment.sql` has not been applied.** Paste it at the merge of #36, for the same
+reason 0003 and 0004 must be: the merge deploys client code that reads `assigned_member_id`, the
+chore read shares `refresh()` with the roster, and a column a `select` list names but the project
+does not have fails the whole shell rather than just the chore list.
+
+What it adds, and the two decisions worth knowing before pasting:
+
+- **`assigned_member_id` is readable and NOT writable**, arriving withheld rather than revoked from a
+  shipped write path. It moves only through `assign_chore()` / `unassign_chore()`. This is the third
+  application of 0003's additive-by-column convention and the reasoning has not changed: a
+  client-writable assignment column makes the eligibility rule (#37), the churn bound (#41) and every
+  allocator invariant (#40, #49) advisory rather than enforceable.
+- **The same-household rule is a CONSTRAINT, not only a function check** — and this is the first
+  migration here to do that. The foreign key is composite,
+  `(assigned_member_id, household_id) → members (id, household_id)`, so a chore in one household
+  cannot name a member of another even for a caller who bypasses the function entirely. That is this
+  page's own central lesson applied to itself: *a rule enforced only inside a function you provide is
+  enforced only for clients that choose to call it.* `assign_chore` still refuses first, because AC 1
+  wants a sentence rather than a constraint violation; the constraint is what keeps the rule true if
+  the function is later edited wrongly.
+- **`on delete set null (assigned_member_id)` names its column, and the clause is load-bearing.** A
+  bare `on delete set null` on a composite key nulls *every* referencing column, and `household_id`
+  is `not null` — so removing a member would fail with a constraint violation instead of releasing
+  their chores, which is the exact inverse of what #36 AC 7 asks for. *Measured* by mutation:
+  dropping the column list reddens AC 7 and nothing else. Postgres 15+, which both PGlite 18 and
+  Supabase satisfy.
+- **Nothing is stored.** Committed and remaining minutes are summed at read time in
+  `src/lib/chores.js`; the migration adds one column holding the allocation and no counter. A
+  `members.committed_minutes` would be two sources for one quantity and they would disagree the first
+  time a chore was completed on another phone — so the suite asserts the *absence* of any such column
+  across the whole `public` schema, not merely the presence of the sum.
 
 ### Updated 2026-08-08 — story #35 added a fourth migration
 

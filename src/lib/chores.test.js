@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CHORE_COLUMNS,
+  commitmentByMember,
+  committedMinutes,
   isOutstanding,
   outstandingMinutes,
   MAX_EXPECTED_MINUTES,
@@ -140,9 +142,11 @@ describe('the readable column list', () => {
   it('matches the select grant exactly, so select(*) is never needed', () => {
     // A column grant makes `select('*')` fail outright rather than quietly
     // returning a narrower row, so this list is load-bearing rather than tidy.
-    // 0004 added the two completion columns as readable; if this list and the
-    // grant ever disagree, every read fails with a permission error.
+    // 0004 added the two completion columns as readable and 0006 added
+    // assigned_member_id; if this list and the grant ever disagree, every read
+    // fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
+      'assigned_member_id',
       'completed_at',
       'completed_by_member_id',
       'created_at',
@@ -189,5 +193,124 @@ describe('outstanding — #35 AC 5', () => {
     expect(isOutstanding({ id: 'a' })).toBe(true)
     expect(isOutstanding({ id: 'a', completed_at: null })).toBe(true)
     expect(isOutstanding({ id: 'a', completed_at: '2026-08-08T10:00:00Z' })).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #36 — the derivation. What each person is carrying, computed at read time.
+//
+// Nothing here touches a database or a client. The access rules that make the
+// underlying column trustworthy are in src/test/assignment.pglite.test.js; what
+// is tested here is the arithmetic and, more importantly, the two shapes it
+// would be natural to get wrong: counting finished work, and clamping an
+// over-commitment to zero.
+// ---------------------------------------------------------------------------
+
+describe('committedMinutes — #36 AC 5, 8', () => {
+  const held = (id, minutes, member) => ({
+    id,
+    expected_minutes: minutes,
+    completed_at: null,
+    assigned_member_id: member,
+  })
+  const finished = (id, minutes, member) => ({
+    id,
+    expected_minutes: minutes,
+    completed_at: '2026-08-08T10:00:00Z',
+    assigned_member_id: member,
+  })
+
+  it("sums the expected minutes of that person's OUTSTANDING chores only", () => {
+    // AC 8 exactly: differing minutes and some completions, in one fixture, so
+    // a sum over every row and a sum over the right rows give different answers.
+    const chores = [held('a', 20, 'm1'), finished('b', 100, 'm1'), held('c', 15, 'm1')]
+    expect(committedMinutes(chores, 'm1')).toBe(35)
+    expect(committedMinutes(chores, 'm1')).not.toBe(135)
+  })
+
+  it('counts nothing belonging to somebody else', () => {
+    const chores = [held('a', 20, 'm1'), held('b', 45, 'm2')]
+    expect(committedMinutes(chores, 'm1')).toBe(20)
+    expect(committedMinutes(chores, 'm2')).toBe(45)
+  })
+
+  it("counts nothing that is unassigned — a chore nobody holds is nobody's load", () => {
+    const chores = [held('a', 20, null), held('b', 30, 'm1')]
+    expect(committedMinutes(chores, 'm1')).toBe(30)
+    // And the reverse: asking for the null "member" must not scoop up the
+    // unassigned pile, which a bare equality would do.
+    expect(committedMinutes(chores, null)).toBe(0)
+  })
+
+  it('is zero for a person holding nothing, rather than undefined or NaN', () => {
+    expect(committedMinutes([held('a', 20, 'm1')], 'm2')).toBe(0)
+    expect(committedMinutes([], 'm1')).toBe(0)
+  })
+})
+
+describe('commitmentByMember — #36 AC 5, 6, 9', () => {
+  const members = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120 },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60 },
+  ]
+  const capacities = [
+    { id: 'm1', capacityMinutes: 120 },
+    { id: 'm2', capacityMinutes: 60 },
+  ]
+  const held = (id, minutes, member) => ({
+    id,
+    expected_minutes: minutes,
+    completed_at: null,
+    assigned_member_id: member,
+  })
+
+  it('reports committed and remaining for each person', () => {
+    const rows = commitmentByMember(members, [held('a', 45, 'm1')], capacities)
+    expect(rows[0]).toMatchObject({ committedMinutes: 45, remainingMinutes: 75 })
+    expect(rows[1]).toMatchObject({ committedMinutes: 0, remainingMinutes: 60 })
+  })
+
+  it('AC 6: reports an over-commitment in minutes rather than clamping at zero', () => {
+    // The kid with 60 minutes holding 100. A clamp would print "0 min left" and
+    // the household would read the fairness claim as satisfied at the exact
+    // moment it is failing — which is the one thing this screen exists to show.
+    const rows = commitmentByMember(members, [held('a', 100, 'm2')], capacities)
+    expect(rows[1].remainingMinutes).toBe(-40)
+    expect(rows[1].remainingMinutes).not.toBe(0)
+  })
+
+  it('AC 6: a person with no chores is present with committed 0, not absent', () => {
+    const rows = commitmentByMember(members, [], capacities)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.committedMinutes)).toEqual([0, 0])
+  })
+
+  it('AC 9: comes back in ROSTER order, whatever the load — any other order is a ranking', () => {
+    // m2 carries far more than m1. A sort-by-load would put Placeholder Two
+    // first, and a leaderboard would have reached the screen through a function
+    // whose name says nothing about order.
+    const rows = commitmentByMember(members, [held('a', 5, 'm1'), held('b', 55, 'm2')], capacities)
+    expect(rows.map((r) => r.member.id)).toEqual(['m1', 'm2'])
+
+    const reversed = commitmentByMember([members[1], members[0]], [], capacities)
+    expect(reversed.map((r) => r.member.id)).toEqual(['m2', 'm1'])
+  })
+
+  it('takes capacity as an ARGUMENT, so an override changes the answer without touching this module', () => {
+    // #44 AC 7's rule, made observable: the same members and the same chores,
+    // with a capacity that is not the baseline, must produce a different
+    // remainder. If this module read members.weekly_minutes it could not.
+    const thisWeek = [
+      { id: 'm1', capacityMinutes: 30 },
+      { id: 'm2', capacityMinutes: 60 },
+    ]
+    const rows = commitmentByMember(members, [held('a', 45, 'm1')], thisWeek)
+    expect(rows[0].capacityMinutes).toBe(30)
+    expect(rows[0].remainingMinutes).toBe(-15)
+  })
+
+  it('treats a member missing from the capacity list as zero rather than crashing a render', () => {
+    const rows = commitmentByMember(members, [held('a', 10, 'm1')], [{ id: 'm1', capacityMinutes: 120 }])
+    expect(rows[1]).toMatchObject({ capacityMinutes: 0, committedMinutes: 0, remainingMinutes: 0 })
   })
 })

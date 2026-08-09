@@ -43,7 +43,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // belongs to its household, so the value would be a constant the client can
 // already name. 0003 carries the full reasoning.
 export const CHORE_COLUMNS =
-  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id'
+  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -198,6 +198,29 @@ export async function uncompleteChore(id) {
   )
 }
 
+/**
+ * Give a chore to a person - #36 AC 1.
+ *
+ * Through an RPC because `assigned_member_id` is absent from the update grant in
+ * 0003/0006, so this is not the preferred path - it is the only one. A client
+ * that could write the column directly would make the eligibility rule (#37),
+ * the churn bound (#41) and every allocator invariant advisory.
+ */
+export async function assignChore(choreId, memberId) {
+  return unwrap(
+    await getSupabase().rpc('assign_chore', { chore_id: choreId, member_id: memberId }),
+    'giving the chore to that person',
+  )
+}
+
+/** Take a chore off whoever is holding it - #36 AC 4. */
+export async function unassignChore(choreId) {
+  return unwrap(
+    await getSupabase().rpc('unassign_chore', { chore_id: choreId }),
+    'taking the chore off that person',
+  )
+}
+
 /** Is this chore still to do? The whole definition of outstanding, in one place. */
 export function isOutstanding(chore) {
   return chore.completed_at === null || chore.completed_at === undefined
@@ -215,6 +238,82 @@ export function outstandingMinutes(chores) {
   return chores.filter(isOutstanding).reduce((sum, c) => sum + (c.expected_minutes || 0), 0)
 }
 
+/**
+ * Minutes this person is still carrying - #36 AC 5.
+ *
+ * Computed at READ TIME by summing `expected_minutes` over that member's chores
+ * with no completion, and there is deliberately no stored counterpart. A
+ * `members.committed_minutes` column would be two sources for one quantity, and
+ * they would disagree the first time a chore was completed on another phone;
+ * 0006's comment carries the full argument and the pglite suite asserts the
+ * absence of any such column rather than only the presence of this sum.
+ *
+ * Outstanding only, for the reason `outstandingMinutes` gives: a figure that
+ * counts finished work can only grow, so it drifts upward all week and any
+ * re-balance derived from it is computed over work already done.
+ */
+export function committedMinutes(chores, memberId) {
+  // An absent member id returns zero rather than matching every UNASSIGNED
+  // chore, which is what a bare `=== memberId` does: `assigned_member_id` is
+  // null exactly when nobody holds the chore, so asking about "the null person"
+  // silently returns the size of the unassigned pile. Nothing calls it that way
+  // today - `commitmentByMember` always passes a real `member.id` - and it is
+  // guarded here because the wrong answer is a plausible number rather than a
+  // crash, which is how it would survive being read.
+  if (memberId === null || memberId === undefined) return 0
+  return chores
+    .filter((c) => c.assigned_member_id === memberId && isOutstanding(c))
+    .reduce((sum, c) => sum + (c.expected_minutes || 0), 0)
+}
+
+/**
+ * Every member with what they are carrying and what is left - #36 AC 5, 6.
+ *
+ * CAPACITY ARRIVES AS AN ARGUMENT and this module never reads
+ * `members.weekly_minutes`. That is #44 AC 7's rule, and it is enforced: a test
+ * in capacity.test.js allowlists the three files permitted to name the column,
+ * and its comment says the allowlist edit is where somebody should ask whether
+ * the new reader ought to be calling `effectiveCapacity` instead. It ought to.
+ * Reading the baseline here would have hard-coded capacity-as-constant into the
+ * first screen that shows a fairness number - the exact thing the charter says
+ * every competitor gets wrong.
+ *
+ * So `capacities` is the allocator's own shape, `{id, capacityMinutes}`, which
+ * is what `capacitiesFor` returns. Today the caller builds it from baselines
+ * because no override can exist yet; #46 changes that call site and nothing
+ * here.
+ *
+ * In ROSTER order, because any other order is a ranking. AC 9 forbids
+ * sort-by-load on the screen, and a sorted derivation would put a leaderboard
+ * there through a function whose name says nothing about order.
+ *
+ * `remainingMinutes` GOES NEGATIVE and is not clamped. That is the whole point
+ * of AC 6: the household must be able to see the fairness claim failing, and a
+ * figure that stops at zero says "exactly full" for someone three hours over.
+ * Note `formatMinutes` DOES clamp at zero, so a negative remainder must never be
+ * handed to it - the screen decides the sign and passes only the magnitude.
+ *
+ * A member with no chores appears with committed 0 rather than being absent: the
+ * person carrying nothing is the most important row on a fairness screen.
+ */
+export function commitmentByMember(members, chores, capacities) {
+  const capacityOf = new Map(capacities.map((c) => [c.id, c.capacityMinutes]))
+  return members.map((member) => {
+    const committed = committedMinutes(chores, member.id)
+    // A member absent from `capacities` is a caller bug, not a person with no
+    // time - but this runs inside a render, where throwing replaces the screen
+    // with nothing. `capacitiesFor` returns one entry per member and a test
+    // pins that, which is where the gap is caught instead.
+    const capacity = capacityOf.get(member.id) ?? 0
+    return {
+      member,
+      capacityMinutes: capacity,
+      committedMinutes: committed,
+      remainingMinutes: capacity - committed,
+    }
+  })
+}
+
 /** Remove a chore — AC 6. */
 export async function removeChore(id) {
   unwrap(await getSupabase().from('chores').delete().eq('id', id), 'removing the chore')
@@ -228,9 +327,12 @@ export async function removeChore(id) {
  */
 export { formatMinutes } from './household.js'
 
-// Deliberately absent: any total, per-member figure or assignee. #34's scope
-// fence, and it is not squeamishness — a household total here would be the
-// second dashboard the charter forbids, and there is genuinely nothing to
-// aggregate yet: completion arrives in #35 and assignment in #36. The
-// anti-leaderboard guard lives in #36, where members actually render on this
-// screen and the guard can fail.
+// Still deliberately absent, now that the per-member figure has arrived (#36):
+// any household-wide RANKING, share-of-capacity percentage, or ordering by load.
+// The per-member numbers above are in roster order and nothing here sorts them.
+//
+// The percentage is #47's, not an oversight. This story owns the DERIVATION and
+// says it in the ugliest form that is honest — plain minutes — because the
+// charter's test is that a proposal must not be satisfiable by a screenshot of
+// the 2020 all-users view. #47 replaces the presentation with share-of-own-
+// capacity; replacing it is cheap, and un-shipping a leaderboard is not.

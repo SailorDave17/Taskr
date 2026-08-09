@@ -23,7 +23,9 @@ from this file.
 their weekly available minutes, each person signs in on their own phone with an organizer-set PIN,
 and the household's chores are recorded as titled units of expected minutes with a due date. Chores can be marked done and
 un-done, with the completion moment stamped by the database's clock rather than the phone's, so a
-phone with the wrong date cannot move work between weeks. It
+phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**,
+and the screen says what every member is carrying and what is left of their week — in plain minutes,
+in roster order, derived at read time rather than stored. It
 persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in a
 hosted database rather than on the device.
 
@@ -38,16 +40,20 @@ file in `supabase/migrations/` is pasted into the Supabase SQL editor by a perso
 the story that adds it. `docs/access-model.md` tracks which ones are live. They are re-runnable and a
 test proves it, because a re-paste after a partial failure is the normal path.
 
-**The engine exists; nothing on screen reaches it yet.** The allocator (#40) divides work by capacity
-and says plainly when level is unreachable, judged against a 13-shape corpus; per-week capacity (#44)
-makes a person's minutes a fact about *this* week rather than a standing number. Both are pure,
-tested modules with **no caller** — so from a phone there is still **no allocation**, which is the
-thing the app is ultimately for. That gap is deliberate and it is where the next work goes: applying
-migration `0005` to the live project is #45, setting a week's capacity by hand is #46, and the load
-view that makes the split visible is #47.
+**The engine is half-wired.** The allocator (#40) divides work by capacity and says plainly when
+level is unreachable, judged against a 13-shape corpus; per-week capacity (#44) makes a person's
+minutes a fact about *this* week rather than a standing number. #36 connected the first of the two:
+the load figures resolve capacity through `capacity.js`, so a week override changes the numbers on
+screen the moment #46 can write one. **The allocator still has no caller** — nothing on a phone
+divides the work automatically, which is the thing the app is ultimately for.
 
-Still to come and genuinely absent: assigning a chore to a person (#36). The 2020 classroom original
-is preserved at tag `legacy-final` and is not the code in this branch.
+That is where the next work goes: setting a week's capacity by hand is #46, showing the split as a
+share of each person's own capacity is #47, and re-assigning from current capacity is #49. The
+figures #36 puts on screen are deliberately the ugliest honest form — plain minutes, no bar, no
+percentage, no ordering by load — because the charter's test is that a proposal satisfiable by a
+screenshot of the 2020 all-users view has collapsed. #47 owns the presentation.
+
+The 2020 classroom original is preserved at tag `legacy-final` and is not the code in this branch.
 
 ## Where it runs
 

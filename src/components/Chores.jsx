@@ -3,6 +3,7 @@ import PropTypes from 'prop-types'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
+  commitmentByMember,
   formatMinutes,
   isOutstanding,
   normalizeDueDate,
@@ -33,8 +34,9 @@ import {
 // but the refusal is ours, so it is one wording, tested, and the same on every
 // browser.
 //
-// Deliberately absent: any total, per-member figure or assignee. See the note at
-// the foot of src/lib/chores.js.
+// The assignee control and the per-person figures arrived with #36. What stays
+// deliberately absent is the RANKING — no bar, no percentage, no ordering by
+// load. See the note at the foot of src/lib/chores.js, and `Commitment` below.
 
 /**
  * Run the data layer's own validators and return the first complaint, or null.
@@ -54,7 +56,110 @@ function validate({ title, expectedMinutes, dueOn }) {
   }
 }
 
-function ChoreRow({ chore, busy, onSave, onRemove, onComplete, onUncomplete }) {
+/**
+ * The one place a chore is given to a person — #36 AC 1.
+ *
+ * A `<select>` rather than a list of buttons, because the number of options is
+ * the size of the household and the control has to work on a 360px phone. The
+ * empty option is "Nobody yet" and choosing it routes to `onUnassign`, not to
+ * `onAssign(null)` — `assign_chore` refuses a null person outright, so a dropped
+ * variable fails loudly instead of quietly clearing somebody's work.
+ *
+ * `assigned_member_id` may name a member this device cannot see. That is not
+ * hypothetical: the roster is re-read on every mutation, so between another
+ * phone removing a person and this one refreshing, the value points at nobody in
+ * `members`. A bare `value=` would silently fall back to the first option and
+ * the next change would look like a deliberate re-assignment, so the unknown id
+ * is carried as its own option instead.
+ */
+function AssigneeSelect({ chore, members, busy, onAssign, onUnassign }) {
+  const current = chore.assigned_member_id ?? ''
+  const known = members.some((m) => m.id === current)
+
+  return (
+    <label className="chore__assignee">
+      <span className="field__label">Who</span>
+      <select
+        className="field__input"
+        value={current}
+        disabled={busy}
+        aria-label={`Who is doing ${chore.title}`}
+        onChange={(e) => {
+          const chosen = e.target.value
+          const done = chosen === '' ? onUnassign(chore.id) : onAssign(chore.id, chosen)
+          // Two-arm, for the reason the remove button gives: onAssign routes
+          // through App's mutate(), which RETHROWS after recording the message.
+          done.then(() => {}, () => {})
+        }}
+      >
+        <option value="">Nobody yet</option>
+        {members.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.display_name}
+          </option>
+        ))}
+        {current !== '' && !known ? <option value={current}>Someone not on the roster</option> : null}
+      </select>
+    </label>
+  )
+}
+
+AssigneeSelect.propTypes = {
+  chore: PropTypes.object.isRequired,
+  members: PropTypes.array.isRequired,
+  busy: PropTypes.bool,
+  onAssign: PropTypes.func.isRequired,
+  onUnassign: PropTypes.func.isRequired,
+}
+
+/**
+ * What each person is carrying, and what is left of their week — #36 AC 5, 6, 9.
+ *
+ * Deliberately the ugliest honest form: plain minutes, in roster order, with no
+ * bar, no rank, no percentage and no sort-by-load. The charter says outright
+ * that a proposal satisfiable by a screenshot of the 2020 all-users view has
+ * collapsed, and every one of those four would be that screenshot. #47 owns the
+ * presentation — share of each person's OWN capacity, which is the number that
+ * actually means something — and replaces this. Replacing plain text is cheap;
+ * un-shipping a leaderboard is not.
+ *
+ * An over-committed person reads "40m over" rather than "0m left". AC 6 asks for
+ * exactly that, and `formatMinutes` clamps at zero, so the sign is decided here
+ * and only the magnitude is handed to the formatter.
+ */
+function Commitment({ members, chores, capacities }) {
+  const rows = commitmentByMember(members, chores, capacities)
+
+  return (
+    <section className="chore-load" aria-labelledby="load-heading">
+      <h3 id="load-heading" className="card__subheading">
+        Who is carrying what
+      </h3>
+      <ul className="chore-load__list">
+        {rows.map(({ member, committedMinutes, remainingMinutes }) => (
+          <li className="chore-load__row" key={member.id} data-testid={`load-${member.id}`}>
+            <span className="chore-load__name">{member.display_name}</span>
+            <span className="chore-load__figures">
+              {committedMinutes} min committed
+              <span aria-hidden="true"> · </span>
+              {remainingMinutes < 0
+                ? `${Math.abs(remainingMinutes)} min over`
+                : `${remainingMinutes} min left`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+Commitment.propTypes = {
+  members: PropTypes.array.isRequired,
+  chores: PropTypes.array.isRequired,
+  capacities: PropTypes.array.isRequired,
+}
+
+function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomplete, onAssign, onUnassign }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(chore.title)
   const [minutes, setMinutes] = useState(String(chore.expected_minutes))
@@ -169,6 +274,13 @@ function ChoreRow({ chore, busy, onSave, onRemove, onComplete, onUncomplete }) {
           <span aria-hidden="true"> · </span>
           <span className="chore__due">due {chore.due_on}</span>
         </span>
+        <AssigneeSelect
+          chore={chore}
+          members={members}
+          busy={busy}
+          onAssign={onAssign}
+          onUnassign={onUnassign}
+        />
       </div>
 
       <div className="row row--end">
@@ -243,14 +355,30 @@ function ChoreRow({ chore, busy, onSave, onRemove, onComplete, onUncomplete }) {
 
 ChoreRow.propTypes = {
   chore: PropTypes.object.isRequired,
+  members: PropTypes.array.isRequired,
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,
   onUncomplete: PropTypes.func.isRequired,
+  onAssign: PropTypes.func.isRequired,
+  onUnassign: PropTypes.func.isRequired,
 }
 
-export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, onComplete, onUncomplete }) {
+export default function Chores({
+  chores,
+  members,
+  capacities,
+  busy,
+  error,
+  onAdd,
+  onSave,
+  onRemove,
+  onComplete,
+  onUncomplete,
+  onAssign,
+  onUnassign,
+}) {
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
   const [dueOn, setDueOn] = useState('')
@@ -280,11 +408,14 @@ export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, o
               <ChoreRow
                 key={chore.id}
                 chore={chore}
+                members={members}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
                 onComplete={onComplete}
                 onUncomplete={onUncomplete}
+                onAssign={onAssign}
+                onUnassign={onUnassign}
               />
             ))}
           </ul>
@@ -297,6 +428,13 @@ export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, o
             <span className="chore__cost-human"> ({formatMinutes(outstandingMinutes(chores))})</span>
           </p>
         </>
+      ) : null}
+
+      {/* Keyed on the ROSTER, not on the chore list, so a person carrying
+          nothing still appears — AC 6. Hiding the empty-handed is how a load
+          view stops being a fairness view. */}
+      {members.length > 0 ? (
+        <Commitment members={members} chores={chores} capacities={capacities} />
       ) : null}
 
       {done.length > 0 ? (
@@ -314,11 +452,14 @@ export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, o
               <ChoreRow
                 key={chore.id}
                 chore={chore}
+                members={members}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
                 onComplete={onComplete}
                 onUncomplete={onUncomplete}
+                onAssign={onAssign}
+                onUnassign={onUnassign}
               />
             ))}
           </ul>
@@ -409,6 +550,8 @@ export default function Chores({ chores, busy, error, onAdd, onSave, onRemove, o
 
 Chores.propTypes = {
   chores: PropTypes.array.isRequired,
+  members: PropTypes.array.isRequired,
+  capacities: PropTypes.array.isRequired,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
@@ -416,4 +559,6 @@ Chores.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,
   onUncomplete: PropTypes.func.isRequired,
+  onAssign: PropTypes.func.isRequired,
+  onUnassign: PropTypes.func.isRequired,
 }

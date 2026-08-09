@@ -18,12 +18,15 @@ import {
 } from './lib/household.js'
 import {
   addChore,
+  assignChore,
   completeChore,
   listChores,
   removeChore,
+  unassignChore,
   uncompleteChore,
   updateChore,
 } from './lib/chores.js'
+import { capacitiesFor, periodStartFor } from './lib/capacity.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -135,6 +138,16 @@ export default function App() {
   // work between weeks.
   const handleCompleteChore = useCallback((id) => mutate(() => completeChore(id)), [mutate])
   const handleUncompleteChore = useCallback((id) => mutate(() => uncompleteChore(id)), [mutate])
+  // #36 — assignment goes through an RPC for ACCESS rather than the clock:
+  // `assigned_member_id` is absent from the update grant, so this is the only
+  // write path there is. Committed and remaining minutes are NOT fetched — they
+  // are derived from `chores` and `members` at render time, which is why nothing
+  // here has to be kept in step with them.
+  const handleAssignChore = useCallback(
+    (id, memberId) => mutate(() => assignChore(id, memberId)),
+    [mutate],
+  )
+  const handleUnassignChore = useCallback((id) => mutate(() => unassignChore(id)), [mutate])
   // The other half of the credential (#63). `claimMember` refuses anyone holding
   // a PIN outright, so without this a member the organizer had given a PIN to
   // could not get onto their own phone at all — and `set_member_pin` releases
@@ -145,6 +158,20 @@ export default function App() {
   )
 
   const me = findClaimedMember(members, deviceId)
+
+  // #36 — capacity for the load figures, resolved through THE single definition
+  // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
+  // makes that a rule and capacity.test.js enforces it with an allowlist; the
+  // alternative would have baked capacity-as-constant into the first screen that
+  // shows a fairness number.
+  //
+  // The override list is EMPTY and that is currently true rather than a stub:
+  // nothing in the app writes a `member_capacity` row yet, so every member
+  // resolves to their baseline. #46 is the story that sets one by hand, and it
+  // replaces `[]` with `await listCapacity(periodStart)` — one line, here, and
+  // nothing downstream changes.
+  const periodStart = household ? periodStartFor(new Date(), household.timezone) : null
+  const capacities = periodStart ? capacitiesFor(members, [], periodStart) : []
 
   // The organizer is a PERSON, not a session — an anonymous session expires
   // after 30 days idle and returns with a new auth id, so a device is the
@@ -217,6 +244,8 @@ export default function App() {
       {status === 'joined' && household ? (
         <Chores
           chores={chores}
+          members={members}
+          capacities={capacities}
           busy={busy}
           error={error}
           onAdd={handleAddChore}
@@ -224,6 +253,8 @@ export default function App() {
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}
           onUncomplete={handleUncompleteChore}
+          onAssign={handleAssignChore}
+          onUnassign={handleUnassignChore}
         />
       ) : null}
 

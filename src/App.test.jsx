@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The shell's own assertions (heading, fairness rule, build stamp) survive from
@@ -132,7 +132,16 @@ describe('when this device has joined nothing', () => {
 })
 
 describe('when this device has joined a household', () => {
-  const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+  // `timezone` is `not null default 'UTC'` since 0005, so a household row always
+  // carries one. #36's load figures resolve capacity for a PERIOD, and
+  // periodStartFor refuses to guess a zone rather than silently using the
+  // phone's — so a fixture without it is a fixture the database cannot produce.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
 
   beforeEach(() => {
     api.currentHousehold.mockResolvedValue(household)
@@ -141,9 +150,20 @@ describe('when this device has joined a household', () => {
     ])
   })
 
+  /**
+   * A member's name is on screen TWICE since #36 — once in the roster and once
+   * in the chore card's load list — so a bare findByText is ambiguous and these
+   * queries are scoped to the roster region deliberately. Scoping rather than
+   * switching to findAllByText: the claim these tests make is "the ROSTER is
+   * showing", and a count of two names anywhere on the page would go on passing
+   * if the roster disappeared and the load list rendered the same person twice.
+   */
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
   it('shows the roster rather than the join screen', async () => {
     await renderApp()
-    expect(await screen.findByText('Placeholder One')).toBeInTheDocument()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(inRoster().getByText('Placeholder One')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /join household/i })).not.toBeInTheDocument()
   })
 
@@ -152,7 +172,7 @@ describe('when this device has joined a household', () => {
   // from a device that merely remembered.
   it('reads the household from the server on every load, not from storage', async () => {
     await renderApp()
-    await screen.findByText('Placeholder One')
+    await screen.findByRole('region', { name: /who is in the household/i })
 
     expect(api.currentHousehold).toHaveBeenCalled()
     expect(api.listMembers).toHaveBeenCalled()
@@ -167,7 +187,7 @@ describe('when this device has joined a household', () => {
 
   it('re-reads from the server after a change, rather than patching what it has', async () => {
     await renderApp()
-    await screen.findByText('Placeholder One')
+    await screen.findByRole('region', { name: /who is in the household/i })
 
     const readsBefore = api.listMembers.mock.calls.length
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /refresh/i })))
@@ -199,7 +219,16 @@ describe('when the backend cannot be reached', () => {
 // ---------------------------------------------------------------------------
 
 describe('chores — the write path and the re-read', () => {
-  const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+  // `timezone` is `not null default 'UTC'` since 0005, so a household row always
+  // carries one. #36's load figures resolve capacity for a PERIOD, and
+  // periodStartFor refuses to guess a zone rather than silently using the
+  // phone's — so a fixture without it is a fixture the database cannot produce.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
   const chore = {
     id: 'c1',
     household_id: 'h1',

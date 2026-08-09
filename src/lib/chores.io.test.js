@@ -78,8 +78,17 @@ vi.mock('./household.js', async () => {
   return { ...actual, currentHousehold: (...a) => currentHousehold(...a) }
 })
 
-const { CHORE_COLUMNS, addChore, completeChore, listChores, removeChore, uncompleteChore, updateChore } =
-  await import('./chores.js')
+const {
+  CHORE_COLUMNS,
+  addChore,
+  assignChore,
+  completeChore,
+  listChores,
+  removeChore,
+  unassignChore,
+  uncompleteChore,
+  updateChore,
+} = await import('./chores.js')
 
 const HOUSEHOLD = { id: 'h1', name: 'Placeholder Household' }
 const ROW = {
@@ -286,5 +295,49 @@ describe('completion goes through the RPC, never an update — #35', () => {
   it('and the undo does too', async () => {
     results.uncomplete_chore = { data: null, error: { message: 'no such chore in your household' } }
     await expect(uncompleteChore('c1')).rejects.toThrow(/putting it back on the list: no such chore/i)
+  })
+})
+
+describe('assignment goes through the RPC, never an update — #36', () => {
+  const rpcs = () => calls.filter((c) => c.op === 'rpc')
+
+  it('assignChore calls assign_chore with the chore and the member', async () => {
+    results.assign_chore = { data: { ...ROW, assigned_member_id: 'm1' }, error: null }
+    const row = await assignChore('c1', 'm1')
+
+    expect(rpcs()).toEqual([
+      { op: 'rpc', name: 'assign_chore', args: { chore_id: 'c1', member_id: 'm1' } },
+    ])
+    expect(row.assigned_member_id).toBe('m1')
+    // The column has no update grant, so a direct write would be a runtime
+    // permission error rather than a silent bug — but the point of asserting it
+    // here is that the ONLY write path is the function, checked on this side too.
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('unassignChore calls its own function and names no member', async () => {
+    results.unassign_chore = { data: { ...ROW, assigned_member_id: null }, error: null }
+    await unassignChore('c1')
+
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'unassign_chore', args: { chore_id: 'c1' } }])
+    // Not `assign_chore(chore, null)`. That call is refused by the database, and
+    // routing an unassign through it would turn a dropped variable into a
+    // deliberate-looking act the moment somebody relaxed the refusal.
+    expect(JSON.stringify(rpcs()[0].args)).not.toMatch(/member_id/)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('reports a refusal with what we were doing', async () => {
+    results.assign_chore = { data: null, error: { message: 'that person is not in this household' } }
+    await expect(assignChore('c1', 'm9')).rejects.toThrow(
+      /giving the chore to that person: that person is not in this household/i,
+    )
+  })
+
+  it('and the unassign does too', async () => {
+    results.unassign_chore = { data: null, error: { message: 'no such chore in your household' } }
+    await expect(unassignChore('c1')).rejects.toThrow(
+      /taking the chore off that person: no such chore/i,
+    )
   })
 })

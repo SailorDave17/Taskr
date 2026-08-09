@@ -412,10 +412,12 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
-      // Widened by 0004, which made completion READABLE and neither column
-      // writable. The update set below is unchanged, which is the convention
-      // working: additive by column, and no later story revokes a shipped grant.
+      // Widened by 0004 (completion) and again by 0006 (assignment), each making
+      // its column READABLE and none of them writable. The update set below is
+      // unchanged across all three, which is the convention working: additive by
+      // column, and no later story revokes a shipped grant.
       expect(await granted('SELECT')).toEqual([
+        'assigned_member_id',
         'completed_at',
         'completed_by_member_id',
         'created_at',
@@ -428,11 +430,17 @@ describe('chores, run against a real Postgres', () => {
       expect(await granted('UPDATE')).toEqual(['due_on', 'expected_minutes', 'title'])
     })
 
-    it('the columns later stories add are absent, so their write guards land with them', async () => {
-      // #35 arrived and brought completed_at with its own write guard, which is
-      // the convention working rather than an exception to it. #36's
-      // assigned_member_id is still absent, and declaring it here would put the
-      // test proving a client cannot write it in a story with no reason to try.
+    it('every column a later story added arrived with its own write guard', async () => {
+      // The convention, now that both later stories have landed: #35 brought
+      // completed_at and #36 brought assigned_member_id, each with the test
+      // proving a client cannot write it living in the story that introduced it.
+      //
+      // This test used to assert assigned_member_id was ABSENT, which was the
+      // right assertion while it was — it stopped the column being declared here
+      // ahead of the story with a reason to try writing it. What survives that
+      // change is the property underneath: a column added later must not be in
+      // the UPDATE grant, and asserting that here catches a widening wherever it
+      // is introduced. #36's own suite proves the refusal end to end.
       const { rows } = await db.query(
         `select column_name from information_schema.columns
           where table_schema = 'public' and table_name = 'chores'
@@ -440,7 +448,21 @@ describe('chores, run against a real Postgres', () => {
       )
       const columns = rows.map((r) => r.column_name)
       expect(columns).toContain('completed_at')
-      expect(columns).not.toContain('assigned_member_id')
+      expect(columns).toContain('assigned_member_id')
+
+      const { rows: writable } = await db.query(
+        `select column_name from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'chores'
+            and grantee = 'authenticated' and privilege_type = 'UPDATE'
+          order by column_name`,
+      )
+      const updatable = writable.map((r) => r.column_name)
+      expect(updatable).not.toContain('completed_at')
+      expect(updatable).not.toContain('completed_by_member_id')
+      expect(updatable).not.toContain('assigned_member_id')
+      // POSITIVE CONTROL: the query can see an update grant when there is one,
+      // so the three absences above mean "withheld" rather than "query wrong".
+      expect(updatable).toContain('title')
     })
   })
 

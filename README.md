@@ -35,10 +35,17 @@ and the reasoning — including the honest statement of what the access model do
 against — is [`docs/access-model.md`](docs/access-model.md). Read that before touching the data
 layer.
 
-**Migrations are applied by hand.** There is no Supabase CLI or Docker on the build machine, so each
-file in `supabase/migrations/` is pasted into the Supabase SQL editor by a person, at the merge of
-the story that adds it. `docs/access-model.md` tracks which ones are live. They are re-runnable and a
-test proves it, because a re-paste after a partial failure is the normal path.
+**Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
+Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
+editor by a person, at the merge of the story that adds it. They are re-runnable and a test proves
+it, because a re-paste after a partial failure is the normal path.
+
+*Two were missed, and the live app could not hold a household for a day before an unrelated paste
+found it (2026-08-09).* `docs/access-model.md` records which are live and **was wrong in both
+directions** when this was discovered, so read it for the reasoning and treat the dashboard as the
+authority. Closing that gap is [#78](https://github.com/SailorDave17/Taskr/issues/78) — the pglite
+suite applies every migration from disk, so a green CI run says nothing whatsoever about the live
+project.
 
 **The engine is half-wired.** The allocator (#40) divides work by capacity and says plainly when
 level is unreachable, judged against a 13-shape corpus; per-week capacity (#44) makes a person's

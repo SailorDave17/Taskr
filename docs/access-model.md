@@ -5,14 +5,12 @@
 - Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants),
   #34 (chores, which inherits the column-grant convention) and #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural)
-- Status: **decided and implemented.** Migrations `0001` and `0002` are applied to the live
-  project — `0002` verified over the wire by the live RLS suite (PR #65, 13/13 against the real
-  project). `0003`, `0004` and `0006`: see *What is not done*.
-- **`0005` is recorded below as unapplied and that entry is stale.** #45 closed on 2026-08-09 with
-  its paste criterion ticked, so it is live. Left uncorrected here deliberately: the entry states a
-  fact about the live project, and the honest source for that is the dashboard or the live RLS
-  suite, not a checkbox on a closed issue. #38 owns the equivalent paste for `0003`/`0004`/`0006`
-  and is the story that should reconcile this whole section against what the project actually has.
+- Status: **decided and implemented. All six migrations are applied to the live project as of
+  2026-08-09** — `0001`/`0002` long since, `0005` at #45, and `0003`/`0004`/`0006` pasted in that
+  order on 2026-08-09 at the merge of #36. `0002` is verified over the wire by the live RLS suite
+  (PR #65, 13/13 against the real project); the rest are verified only by the paste succeeding.
+- **This page is prose about live state and prose is what failed here** — see the correction at the
+  head of *What is not done*. #78 exists to make a check the authority instead.
 
 ## Read this first — the decision below changed
 
@@ -276,9 +274,42 @@ delete from public.households where name like 'TEST %';
 
 ## What is not done
 
+### Correction, 2026-08-09 — this section was wrong in both directions at once
+
+**Every migration below is now applied.** The entries are kept because their *reasoning* is still
+the best record of what each file does and why; only their status claims were wrong. Read them for
+the design, never for what the live project has.
+
+What happened: pasting `0006` at the merge of #36 was rejected with
+`ERROR: 42P01: relation "public.chores" does not exist`. **`0003` and `0004` had never been
+applied**, though #34 and #35 merged on 2026-08-08 and deployed client code that reads those tables.
+For a day the live app could not hold a household at all — `refresh()` calls `listChores()` whenever
+one is found, so a joined device failed at boot and creating a household failed immediately. All
+three were then applied in order: `0003`, `0004`, `0006`.
+
+Meanwhile the `0005` entry claimed the opposite of the truth: it had been live since #45, and
+applied cleanly without `chores` existing because it only touches `households`, `members` and
+`member_capacity`.
+
+**So this page was right about two migrations, wrong about one, and load-bearing for neither** —
+nothing reads it. That is the actual defect, and it is filed as
+[#78](https://github.com/SailorDave17/Taskr/issues/78): a required deploy step performed by a human,
+recorded only in prose, and compared against nothing. Note why no test caught it — the pglite
+harness applies every file in `supabase/migrations/` **from disk**, so a green suite proves the
+schema is right in the one environment where it cannot be wrong, and `npm run test:rls`, the only
+thing that goes over the wire, contains zero references to `chores`.
+
+**Until #78 lands, the dashboard is the only authority on live state, and this section is a
+reasoning record.**
+
 ### Updated 2026-08-09 — story #36 added a sixth migration
 
-**`0006_chore_assignment.sql` has not been applied.** Paste it at the merge of #36, for the same
+**`0006_chore_assignment.sql` was applied 2026-08-09**, at the merge of #36, third of the three
+pasted that day. It had to go last: it alters the table `0003` creates. Its paste also settled a
+question no local test could — **Supabase accepts `on delete set null (assigned_member_id)`**, the
+Postgres 15+ column-list form, which until then was proven only against PGlite 18.
+
+Pasting it mattered for the same
 reason 0003 and 0004 must be: the merge deploys client code that reads `assigned_member_id`, the
 chore read shares `refresh()` with the roster, and a column a `select` list names but the project
 does not have fails the whole shell rather than just the chore list.
@@ -312,7 +343,9 @@ What it adds, and the two decisions worth knowing before pasting:
 
 ### Updated 2026-08-08 — story #35 added a fourth migration
 
-**`0004_chore_completion.sql` has not been applied.** Paste it at the merge of #35, for the same
+**`0004_chore_completion.sql` was applied 2026-08-09** — *four days after the merge of #35, not at
+it*, which is half of the outage described in the correction above. Second of the three pasted that
+day. It had to be pasted for the same
 reason 0003 must be — the merge deploys client code that reads `completed_at`, and the chore read
 shares `refresh()` with the roster, so the whole shell fails rather than just the chore list.
 
@@ -333,8 +366,10 @@ What it adds, and the one non-obvious decision:
 
 ### Updated 2026-08-08 — story #34 added a third migration
 
-**`0003_chores.sql` has not been applied either.** It creates `chores`, the fourth RLS-protected
-table, and it must be pasted into the Supabase SQL editor **at the merge of #34, not afterwards** —
+**`0003_chores.sql` was applied 2026-08-09** — *five days after the merge of #34*, and it is the
+missing one that broke the live app. First of the three pasted that day. It creates `chores`, the
+fourth RLS-protected table, and the instruction below was correct and was not followed: it must be
+pasted into the Supabase SQL editor **at the merge of #34, not afterwards** —
 the merge deploys client code that queries a table the live project does not have, and the failure
 is total rather than confined to the chore list, because the chore read sits in the same `refresh()`
 chain as the roster. Nothing in the repo enforces this; that is why it is written here, on the page
@@ -370,8 +405,9 @@ not been applied" is about 0001 and is now historical. What is outstanding is na
   default, so that fourth argument is the one signature change so far that does *not* break an older
   bundle — a three-argument call still resolves.
 
-- **`0005_weekly_capacity.sql` has not been applied.** Paste it at the merge of #45, which is the
-  story that owns the paste and proving the rules over the wire. It adds `member_capacity` — a
+- **`0005_weekly_capacity.sql` was applied at #45**, and this entry claimed otherwise until
+  2026-08-09 — the wrong direction of the same defect. #45 owns the paste and proving the rules over
+  the wire, and did both. It adds `member_capacity` — a
   per-member, per-week override on top of the `members.weekly_minutes` baseline — plus
   `households.timezone`. Three things about it are worth knowing before pasting:
 

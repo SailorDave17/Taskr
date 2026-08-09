@@ -277,8 +277,10 @@ body {
    thesis on screen — a chore IS a quantity of time — and it is why the number
    carries the accent colour while "due" stays dim.
 
-   No total, no per-member figure, no assignee: #34's scope fence, and there is
-   nothing to aggregate until completion (#35) and assignment (#36) exist.
+   The assignee control and the per-person figures arrived with #36. What is
+   still absent is a RANKING: no bar, no percentage, no ordering by load. Those
+   are #47's, and the charter's test is that a proposal satisfiable by a
+   screenshot of the 2020 all-users view has collapsed.
    --------------------------------------------------------------------------- */
 
 .chore-list {
@@ -368,4 +370,68 @@ body {
 
 .chore-list--done .chore__title {
   text-decoration: line-through;
+}
+
+/* Assignment and the load figures — story #36.
+
+   The select sits inside .chore__identity rather than in the button row: it is
+   part of what the chore IS this week, not an action taken on it, and putting it
+   among Done/Edit/Remove would make giving somebody two hours of work look like
+   the same weight of gesture as renaming a chore.
+
+   The load list is deliberately plain. No bar, no percentage, no ordering by
+   load — see the block comment above. It is styled to be READ, not scanned for a
+   winner: one weight, one colour, roster order. */
+
+.chore__assignee {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.chore__assignee .field__input {
+  /* Sized to the content rather than the row, so a two-person household does not
+     get a full-width control that reads as the primary action. 44px minimum
+     height is the same touch target every other control here uses. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.chore-load {
+  margin-top: 1rem;
+}
+
+.chore-load__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.chore-load__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.chore-load__name {
+  font-weight: 600;
+}
+
+.chore-load__figures {
+  /* One colour for both figures, and it is not the accent. An over-committed
+     person must not be painted red: red is for work, never for people — the same
+     rule the completed-work block states. The sentence says "over"; the styling
+     does not shout it. */
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
 }

@@ -32,6 +32,7 @@ export const MIGRATIONS = [
   '0003_chores.sql',
   '0004_chore_completion.sql',
   '0005_weekly_capacity.sql',
+  '0006_chore_assignment.sql',
 ]
 
 export function migrationSql(name) {

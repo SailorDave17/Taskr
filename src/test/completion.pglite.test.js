@@ -146,7 +146,16 @@ describe('completing a chore, run against a real Postgres', () => {
             and grantee = 'authenticated' and privilege_type = 'SELECT'
           order by column_name`,
       )
-      expect(rows.map((r) => r.column_name)).toEqual([
+      // `assigned_member_id` is in this list because 0006 landed after this file
+      // was written and the harness applies every migration in order — the set is
+      // the schema's, not this story's. What #35 actually claims is the two
+      // completion columns being present, which is asserted by name below so the
+      // point survives the next migration widening the list again.
+      const readable = rows.map((r) => r.column_name)
+      expect(readable).toContain('completed_at')
+      expect(readable).toContain('completed_by_member_id')
+      expect(readable).toEqual([
+        'assigned_member_id',
         'completed_at',
         'completed_by_member_id',
         'created_at',

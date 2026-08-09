@@ -74,16 +74,32 @@ describe('the chore flow is reachable from the app, not just exported', () => {
     expect(app).toMatch(/<Chores\b/)
   })
 
-  it('wires all three writes ON THE CHORE ELEMENT, not merely somewhere in the file', () => {
+  it('wires every write ON THE CHORE ELEMENT, not merely somewhere in the file', () => {
     // Scoped to the <Chores> element on purpose. Measured 2026-08-08: the
     // unscoped version stayed GREEN when the whole <Chores /> render was
     // deleted, because <Roster> carries onAdd, onSave and onRemove too — the
     // test passed on a neighbour and pinned nothing about chores.
+    //
+    // #36 added assignment, and it is the case the general form was written for:
+    // <Roster> has no onAssign, so an unscoped grep would have passed on the
+    // element list alone while the control reached nobody.
     const element = app.match(/<Chores[\s\S]*?\/>/)
     expect(element, 'no <Chores .../> element in App.jsx').not.toBeNull()
     expect(element[0]).toMatch(/onAdd=\{/)
     expect(element[0]).toMatch(/onSave=\{/)
     expect(element[0]).toMatch(/onRemove=\{/)
+    expect(element[0]).toMatch(/onAssign=\{/)
+    expect(element[0]).toMatch(/onUnassign=\{/)
+    // The load figures are derived from these two, so a <Chores> that renders
+    // without them shows every person carrying nothing — a plausible screen
+    // rather than a broken one, which is why it is pinned here.
+    expect(element[0]).toMatch(/members=\{/)
+    expect(element[0]).toMatch(/capacities=\{/)
+  })
+
+  it('imports the assignment writes, so the RPCs are not dead exports', () => {
+    expect(app).toMatch(/\bassignChore\b/)
+    expect(app).toMatch(/\bunassignChore\b/)
   })
 })
 
@@ -213,5 +229,80 @@ describe('the README lists nothing has fallen behind', () => {
     // a general "is the README current?" test cannot exist, but this one claim
     // was load-bearing enough to mislead a reader about the whole repo.
     expect(readme).not.toMatch(/persists nothing|no database wired up/i)
+  })
+})
+
+// #36 — AC 10, as a check rather than as a promise.
+//
+// The AC says the component tests for this screen must not assert an access rule
+// through the fake Supabase client. That is a property of a FILE, so no
+// behavioural test can see it and a reviewer reading carefully is the only thing
+// that would catch a regression — which is the shape every other guard in this
+// file exists for.
+//
+// The reason it matters: a fake client returns whatever the test tells it to. It
+// cannot refuse. A test that "proves" a household boundary against one has proved
+// that the test author wrote a rejection into a stub, and it stays green with the
+// column grants deleted, the policies dropped and the definer functions gone.
+// docs/access-model.md and cairn's supabase-rls-column-grants note both record
+// the live version of that mistake.
+describe('AC 10 — no component test proves an access rule', () => {
+  // Comments are stripped before scanning, and that is not a convenience: this
+  // very check tripped on the docblock in Chores.test.jsx EXPLAINING the rule.
+  // A guard that a correct file fails is a guard that gets deleted. Same helper
+  // shape as capacity.test.js codeOf, for the same reason.
+  const codeOf = (text) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+  const componentTests = readdirSync(resolve(process.cwd(), 'src/components'))
+    .filter((name) => name.endsWith('.test.jsx'))
+    .map((name) => ({
+      name,
+      text: codeOf(readFileSync(resolve(process.cwd(), 'src/components', name), 'utf8')),
+    }))
+
+  // POSTGRES vocabulary, deliberately not the human-readable refusals.
+  //
+  // A first version of this list included the definer functions own sentences —
+  // "no such chore in your household", "already claimed on another device" — and
+  // it fired on Roster.test.jsx, which uses the second as the NAME OF A UI STATE
+  // while asserting that a button is not offered. That is not an access-rule
+  // proof, and neither would a test be that renders a server message to check it
+  // reaches the screen: displaying a refusal is a legitimate component concern.
+  //
+  // What is left is vocabulary a component has no way to produce. A privilege
+  // error, a policy violation and the privilege catalogs belong to Postgres, so
+  // one appearing in a component test means a stub was taught to speak as the
+  // database — which is the thing AC 10 forbids.
+  const DATABASE_REFUSALS =
+    /permission denied|violates row-level|row-level security policy|column_privileges|table_privileges|grant (update|select|insert)|insufficient privilege/i
+
+  it('finds component tests to check, so an empty pass is impossible', () => {
+    expect(componentTests.length).toBeGreaterThan(2)
+    expect(componentTests.map((f) => f.name)).toContain('Chores.test.jsx')
+  })
+
+  it('none of them stands up a Supabase client, fake or real', () => {
+    // The strongest available form: a file with no client cannot assert a rule
+    // through one. These components take data and handlers as props, so there is
+    // nothing legitimate for a client to be doing in their tests.
+    const offenders = componentTests
+      .filter((f) => /supabase/i.test(f.text))
+      .map((f) => f.name)
+    expect(offenders, `component tests referencing a Supabase client: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('and none of them asserts a refusal that only the database can make', () => {
+    const offenders = componentTests.filter((f) => DATABASE_REFUSALS.test(f.text)).map((f) => f.name)
+    expect(offenders, `component tests asserting a database refusal: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the refusal pattern fires where those claims legitimately live', () => {
+    // Without this, the two assertions above pass identically if the regex is
+    // wrong — and an always-empty scan reads exactly like a clean bill of health.
+    const pglite = codeOf(
+      readFileSync(resolve(process.cwd(), 'src/test/assignment.pglite.test.js'), 'utf8'),
+    )
+    expect(DATABASE_REFUSALS.test(pglite), 'the pattern must match the suite that does prove these').toBe(true)
   })
 })

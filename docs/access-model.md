@@ -4,8 +4,9 @@
 - Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
 - Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants) and
   #34 (chores, which inherits the column-grant convention)
-- Status: **decided and implemented.** Migration `0001` is applied to the live project; `0002`,
-  `0003` and `0004` are not yet — see *What is not done*.
+- Status: **decided and implemented.** Migrations `0001` and `0002` are applied to the live
+  project — `0002` verified over the wire by the live RLS suite (PR #65, 13/13 against the real
+  project). `0003`, `0004` and `0005`: see *What is not done*.
 
 ## Read this first — the decision below changed
 
@@ -318,14 +319,33 @@ client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
 `0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
 not been applied" is about 0001 and is now historical. What is outstanding is narrower:
 
-- **`0002_member_pins_and_column_grants.sql` has not been applied.** Paste it into the Supabase SQL
-  editor. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure
+- **`0002_member_pins_and_column_grants.sql` — now applied**, verified live by PR #65's suite; the
+  rest of this bullet is historical. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure
   is the normal way this file gets used.
 - **It changes `create_household`'s signature** from one argument to three, and drops the old form
   deliberately — a household created without an organizer cannot be administered at all. So the
   deployed bundle and the database must move together: applying 0002 breaks the currently-deployed
   app until this PR's build is live, and vice versa. On a household app with no users yet that is a
-  non-event; it will not be later.
+  non-event; it will not be later. **0005 takes it to four**, adding the household timezone with a
+  default, so that fourth argument is the one signature change so far that does *not* break an older
+  bundle — a three-argument call still resolves.
+
+- **`0005_weekly_capacity.sql` has not been applied.** Paste it at the merge of #45, which is the
+  story that owns the paste and proving the rules over the wire. It adds `member_capacity` — a
+  per-member, per-week override on top of the `members.weekly_minutes` baseline — plus
+  `households.timezone`. Three things about it are worth knowing before pasting:
+
+  - **The week begins on Monday**, enforced by a check constraint rather than left to convention, so
+    a row filed under any other weekday cannot exist. Reasoning in
+    [`capacity-model.md`](capacity-model.md).
+  - **`household_id` is withheld from the select grant**, same convention as `chores` in 0003 — which
+    also means it cannot appear in a `WHERE` clause, because Postgres requires `SELECT` on any column
+    named in a predicate and reports the refusal as *"permission denied for table"*.
+  - **`households` gains its first `UPDATE` policy**, so that surface is column-granted to
+    `name, timezone` only. Without that bound, any member could rewrite `join_code` or reassign
+    `organizer_member_id` — the hole 0002 measured, reopened. **`SELECT` on `households` is
+    deliberately left un-granted-per-column**: `currentHousehold()` issues `select('*')`, which a
+    column grant makes fail outright.
 - **The existing test households are unusable under 0002.** They have no `organizer_member_id`, so
   `is_household_organizer()` returns false for them and no PIN can ever be set. They are `TEST …` rows
   and the cleanup statement in *Running it* removes them.

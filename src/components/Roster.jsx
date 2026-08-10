@@ -266,7 +266,7 @@ function MemberRow({
         />
       </div>
 
-      <div className="row row--end">
+      <div className="row row--end row--actions">
         {canClaim ? (
           <button
             className="button button--quiet"

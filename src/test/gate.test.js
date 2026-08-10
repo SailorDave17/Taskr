@@ -198,6 +198,41 @@ describe('every class name a component emits has a rule in the stylesheet', () =
   })
 })
 
+// #82 / #83 - phone-width layout, asserted against the STYLESHEET rather than
+// the rendered DOM. jsdom applies no stylesheet and computes no layout, so a
+// component test here would pass identically with these rules deleted. That is
+// the vacuity #80 and #82 both record, and the reason both issues ask for a
+// stylesheet assertion or a dated owner observation instead of a render test.
+//
+// Comments are stripped before matching: the #83 comment contains `{name}`, and
+// a `[^}]*` scan would stop at that brace and fail for the wrong reason.
+describe('the phone-width action row keeps its buttons together', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const roster = readFileSync(resolve(process.cwd(), 'src/components/Roster.jsx'), 'utf8')
+  const chores = readFileSync(resolve(process.cwd(), 'src/components/Chores.jsx'), 'utf8')
+
+  it('#82: stretches whatever lands on a wrapped line, so no button is left an orphan', () => {
+    expect(css).toMatch(/\.row--actions\s*>\s*\.button\s*\{[^}]*flex:\s*1\s+1\s+auto/)
+  })
+
+  it('#82: both action rows opt in, so it is one rule and not a per-screen patch', () => {
+    expect(roster).toContain('className="row row--end row--actions"')
+    expect(chores).toContain('className="row row--end row--actions"')
+  })
+
+  it('#82: the PIN forms do NOT opt in, because they were never measured', () => {
+    // `.row--end` is on both PIN forms as well as the action row. Hanging the
+    // stretch off that class would have restyled their submit buttons with no
+    // measurement behind it, which is why the opt-in class exists at all.
+    expect([...roster.matchAll(/row--actions/g)]).toHaveLength(1)
+    expect([...roster.matchAll(/className="row row--end"/g)].length).toBeGreaterThan(0)
+  })
+
+  it('#83: a label with no wrap opportunity breaks instead of overflowing the row', () => {
+    expect(css).toMatch(/\.button\s*\{[^}]*overflow-wrap:\s*anywhere/)
+  })
+})
+
 // #69 — the README carries two hand-maintained lists beside things that change:
 // the scripts table beside package.json, and the docs list beside docs/. Both
 // had already fallen behind (`npm run test:rls` and `docs/access-model.md` were

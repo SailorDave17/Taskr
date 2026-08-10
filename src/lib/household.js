@@ -169,7 +169,7 @@ export async function joinHousehold(code) {
 // That is deliberate: a household sibling who can read the bcrypt hash can
 // attack a four-digit PIN offline. `has_pin` is the generated boolean the UI
 // actually needs.
-const MEMBER_COLUMNS = 'id, household_id, display_name, weekly_minutes, claimed_by, has_pin, created_at'
+export const MEMBER_COLUMNS = 'id, household_id, display_name, weekly_minutes, claimed_by, has_pin, created_at'
 
 /** Everyone in this device's household, oldest first so the order is stable. */
 export async function listMembers() {

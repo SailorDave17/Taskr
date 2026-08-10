@@ -97,6 +97,7 @@ Other scripts:
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, so it reads schema and never data. Run it after pasting a migration. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the list it works from *is* checked by CI, in `src/lib/liveSchema.test.js` |
 
 ### The two variables you need
 

@@ -10,7 +10,9 @@
   order on 2026-08-09 at the merge of #36. `0002` is verified over the wire by the live RLS suite
   (PR #65, 13/13 against the real project); the rest are verified only by the paste succeeding.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
-  head of *What is not done*. #78 exists to make a check the authority instead.
+  head of *What is not done*. Since #78 the authority is a **check, not this page**: run
+  `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
+  migration exists and what it grants — which is the half a check cannot carry.
 
 ## Read this first — the decision below changed
 
@@ -299,8 +301,21 @@ harness applies every file in `supabase/migrations/` **from disk**, so a green s
 schema is right in the one environment where it cannot be wrong, and `npm run test:rls`, the only
 thing that goes over the wire, contains zero references to `chores`.
 
-**Until #78 lands, the dashboard is the only authority on live state, and this section is a
-reasoning record.**
+**#78 landed 2026-08-10, and the authority moved off this page.** `npm run check:live` probes every
+table and column the client reads, using the same column constants the queries use, and fails naming
+the missing object — `42P01` for a table a migration never created, `42703` for a column `0004` or
+`0006` would have added, `42501` for something present that this role may not read. It reads schema
+and never data (`limit(0)`), so it is safe to run against production at any time, and it refuses a
+secret key, which would answer a different question with broader grants.
+
+Two limits, stated rather than discovered later. It is **not run by CI** — CI has no credentials, and
+a check that skips itself when unconfigured is the vacuous pass this whole story is about — so it is
+a step a human runs after pasting a migration. And it covers **tables, not functions**: `0006` added
+`assign_chore` and `unassign_chore`, and a migration that adds only an RPC would pass this check
+while the app failed. The *list* it works from is guarded in CI by `src/lib/liveSchema.test.js`,
+which fails when the app reads a table the list does not name.
+
+This section remains a **reasoning record, not a status report** - read the entries below for what each migration does and why, and `npm run check:live` for what the project actually has.
 
 ### Updated 2026-08-09 — story #36 added a sixth migration
 

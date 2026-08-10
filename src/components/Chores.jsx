@@ -283,7 +283,7 @@ function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomp
         />
       </div>
 
-      <div className="row row--end">
+      <div className="row row--end row--actions">
         {isOutstanding(chore) ? (
           <button
             className="button"

@@ -137,6 +137,29 @@ body {
   justify-content: flex-end;
 }
 
+/* Action rows - #82.
+
+   `.row` wraps and `.row--end` justifies each flex line INDEPENDENTLY, so one
+   button over the limit becomes a right-aligned orphan on a line of its own
+   rather than a group that moved down together. Measured on SM-S918U at 384
+   CSS px: the action row is 273.16px and four of the six button sets these two
+   screens can emit do not fit, the worst short by more than a third of the
+   row. So this is not a gap trim - trimming would fix exactly one of them.
+
+   Stretching whatever lands on a wrapped line makes that line read as a
+   deliberate action instead of a stray. Rows that already fit stay on one line
+   and are charged no extra height, which is why a blanket stack rule was
+   rejected: `Done | Edit | Remove` is every outstanding chore on the main
+   screen, and stacking it would add ~104px each.
+
+   Deliberately NOT hung off `.row--end`. That class is also on both PIN forms
+   (`Roster.jsx`), which were never part of the measurement - scoping the
+   stretch to an opt-in class is what keeps their submit buttons untouched. */
+
+.row--actions > .button {
+  flex: 1 1 auto;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -180,6 +203,13 @@ body {
   border: 1px solid transparent;
   border-radius: 0.5rem;
   cursor: pointer;
+  /* #83 - a 40-character name with no spaces offers no soft wrap opportunity,
+     so the confirm label (`Remove {name}?`) measured 605px in a 273px row and
+     took the page with it. `anywhere` rather than `break-word` on purpose:
+     only `anywhere` reduces the intrinsic min-content width, which is what
+     lets a flex item actually shrink. Ordinary spaced names still break at
+     their spaces first, so nothing about them changes. */
+  overflow-wrap: anywhere;
 }
 
 .button:disabled {

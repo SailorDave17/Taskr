@@ -174,7 +174,7 @@ describe('setCapacity', () => {
     currentHousehold.mockResolvedValue(null)
     await expect(
       setCapacity({ memberId: 'm1', periodStart: MONDAY, minutes: 120 }),
-    ).rejects.toThrow(/has not joined a household/i)
+    ).rejects.toThrow(/not signed in to a household/i)
     expect(opsOn('member_capacity')).toHaveLength(0)
   })
 

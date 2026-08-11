@@ -144,6 +144,20 @@ $$;
 
 drop function if exists public.create_household(text);
 
+-- And the THREE-argument form, which this file is about to create. `create or
+-- replace` cannot rename a parameter, so re-pasting this migration onto a schema
+-- where some later file already owns `create_household(text, text, text)` fails
+-- with `cannot change name of input parameter` rather than replacing anything.
+-- 0007 is that later file: it takes the signature back to three arguments as
+-- (name, organizer, timezone), and without this line the whole list stops being
+-- re-runnable at the second file. Measured 2026-08-11 — the full-list re-run is
+-- asserted in migrations.pglite.test.js and this is what it caught.
+--
+-- Dropping first is this schema's established convention rather than a new idea:
+-- the line above does it for 0001's one-argument form, 0005 does it for this
+-- one, and 0007 does it for 0005's.
+drop function if exists public.create_household(text, text, text);
+
 create or replace function public.create_household(
   household_name text,
   organizer_name text,

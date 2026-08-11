@@ -1,3 +1,27 @@
+// ⚠ THIS FILE TARGETS THE MODEL #62 RETIRED. It has NOT been migrated.
+//
+// It signs in anonymously, joins with a code, and exercises `claim_member`,
+// `claim_member_with_pin`, `has_pin` and `household_devices` — every one of
+// which `0007_per_member_auth.sql` drops. Run against a project with 0007
+// applied it fails at setup, and the failure is correct.
+//
+// It was deliberately NOT rewritten during #62, and the reason is the same one
+// this file's own header gives for staying out of CI. Discharging #62 AC 9
+// means running `npm run test:rls` green against the live project, and that
+// needs two things that do not exist yet: the live project migrated to 0007
+// (blocked on the Edge Function — pasting it before then locks the household
+// out, see the migration's section 9) and Supabase credentials. Rewriting 574
+// lines that cannot be executed would produce a suite that looks migrated,
+// has never run, and would be trusted on sight — which is precisely the
+// vacuity the paragraph below is about.
+//
+// The pglite suite covers the same rules against the new model today, and
+// `src/test/migrations.pglite.test.js` carries the #62 policy proofs. What it
+// structurally cannot say is whether SUPABASE agrees, which is this file's
+// entire reason for existing and why it must be migrated rather than dropped.
+//
+// ── original header follows ──
+//
 // AC 6 — "the data layer itself rejects it, asserted by a test that bypasses the
 // client, because a client-side guard is not a guard."
 //

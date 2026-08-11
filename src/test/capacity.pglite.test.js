@@ -21,6 +21,8 @@ import {
   migrationFilesOnDisk,
   migrationSql,
   newDevice,
+  provisionMember,
+  databaseThrough,
   MIGRATIONS,
 } from './support/pgliteSupabase.js'
 // The pure resolvers, imported rather than reimplemented: #44 AC 7 asserts there
@@ -66,13 +68,14 @@ describe('weekly capacity, run against a real Postgres', () => {
 
     await asDevice(db, organizerDevice, async () => {
       const { rows } = await db.query(
-        `select * from public.create_household('Ours', 'Alex', '4821', 'America/New_York')`,
+        `select * from public.create_household('Ours', 'Alex', 'America/New_York')`,
       )
       household = rows[0]
-      const members = await db.query(
-        `select id, display_name from public.members where household_id = $1`,
-        [household.id],
-      )
+      // No `where household_id = $1`: #62 withholds that column from the members
+      // SELECT grant, so naming it in a WHERE is `permission denied for table
+      // members`. RLS already scopes this read to the caller's own household,
+      // which is what made the filter redundant even before it became illegal.
+      const members = await db.query(`select id, display_name from public.members`)
       organizer = members.rows[0]
       const added = await db.query(
         `insert into public.members (household_id, display_name, weekly_minutes)
@@ -85,7 +88,7 @@ describe('weekly capacity, run against a real Postgres', () => {
     // A stranger with a household of their own, so "cannot see" is tested
     // against a real other family rather than against having no household.
     await asDevice(db, strangerDevice, async () => {
-      await db.query(`select * from public.create_household('Theirs', 'Robin', '1234', 'UTC')`)
+      await db.query(`select * from public.create_household('Theirs', 'Robin', 'UTC')`)
     })
   })
 
@@ -425,20 +428,17 @@ describe('weekly capacity, run against a real Postgres', () => {
       expect(result.error).toMatch(/not a known timezone/)
     })
 
-    it('REGRESSION: a member cannot rewrite the join code or reassign the organizer', async () => {
+    it('REGRESSION: a member cannot reassign the organizer', async () => {
       // 0005 gives `households` its first UPDATE policy. Without the matching
-      // column grant that policy would let any member invite strangers or make
-      // themselves organizer — 0002's measured hole, reopened.
-      const code = await asDevice(db, organizerDevice, () =>
-        attempt(() =>
-          db.query(`update public.households set join_code = 'AAAAAAAA' where id = $1`, [
-            household.id,
-          ]),
-        ),
-      )
-      expect(code.ok).toBe(false)
-      expect(code.error).toMatch(/permission denied|column/i)
-
+      // column grant that policy would let any member make themselves organizer
+      // — 0002's measured hole, reopened.
+      //
+      // This test also asserted that `join_code` could not be rewritten, until
+      // 0007 dropped the column. That half was REMOVED rather than left to pass:
+      // its assertion was `/permission denied|column/i`, and "column join_code
+      // does not exist" matches it. It would have gone on passing while testing
+      // that the column is absent instead of that the grant refuses — green, and
+      // proving nothing. The absence is asserted on its own terms below.
       const boss = await asDevice(db, organizerDevice, () =>
         attempt(() =>
           db.query(`update public.households set organizer_member_id = $1 where id = $2`, [
@@ -449,6 +449,22 @@ describe('weekly capacity, run against a real Postgres', () => {
       )
       expect(boss.ok).toBe(false)
       expect(boss.error).toMatch(/permission denied|column/i)
+    })
+
+    it('and the join code is gone from the table, not merely ungranted', async () => {
+      // The admission route 0007 retires. A dropped column and an ungranted one
+      // fail a write identically from the client, so this asks the catalog
+      // rather than inferring it from a refusal.
+      const { rows } = await db.query(
+        `select column_name from information_schema.columns
+          where table_schema = 'public' and table_name = 'households'
+          order by column_name`,
+      )
+      const columns = rows.map((r) => r.column_name)
+      expect(columns).not.toContain('join_code')
+      // POSITIVE CONTROL: the same read does find the columns that survived, so
+      // an empty or misspelled query cannot produce the assertion above.
+      expect(columns).toEqual(expect.arrayContaining(['id', 'name', 'timezone', 'organizer_member_id']))
     })
 
     it('and a stranger cannot touch another household at all', async () => {
@@ -474,17 +490,26 @@ describe('weekly capacity, run against a real Postgres', () => {
   })
 
   describe('AC 2 — 0005 is re-runnable, because a re-paste is the normal path', () => {
+    // These build their own database THROUGH 0005 rather than reusing the
+    // full-stack `db`. Re-pasting a superseded file on top of a newer one is not
+    // the path a human takes, and after 0007 it is destructive: it restores the
+    // four-argument `create_household` and the policies that resolve through the
+    // dropped `household_devices`. All three of these went red on exactly that,
+    // which is the only reason it was noticed at all.
+
     it('applies a second time without error', async () => {
-      await expect(db.exec(migrationSql('0005_weekly_capacity.sql'))).resolves.toBeDefined()
+      const at0005 = await databaseThrough('0005_weekly_capacity.sql')
+      await expect(at0005.exec(migrationSql('0005_weekly_capacity.sql'))).resolves.toBeDefined()
     })
 
     it('and a re-run does not widen the grants', async () => {
-      const grantsBefore = await db.query(
+      const at0005 = await databaseThrough('0005_weekly_capacity.sql')
+      const grantsBefore = await at0005.query(
         `select privilege_type, column_name from information_schema.column_privileges
          where table_name = 'member_capacity' order by privilege_type, column_name`,
       )
-      await db.exec(migrationSql('0005_weekly_capacity.sql'))
-      const grantsAfter = await db.query(
+      await at0005.exec(migrationSql('0005_weekly_capacity.sql'))
+      const grantsAfter = await at0005.query(
         `select privilege_type, column_name from information_schema.column_privileges
          where table_name = 'member_capacity' order by privilege_type, column_name`,
       )
@@ -492,6 +517,8 @@ describe('weekly capacity, run against a real Postgres', () => {
     })
 
     it('and the data survives it', async () => {
+      // Seeded and re-pasted at HEAD. The question is whether a re-paste keeps
+      // rows, and the file a human re-pastes today is 0007.
       await asDevice(db, organizerDevice, async () => {
         await db.query(
           `insert into public.member_capacity (household_id, member_id, period_start, minutes)
@@ -499,7 +526,7 @@ describe('weekly capacity, run against a real Postgres', () => {
           [household.id, child.id, MONDAY],
         )
       })
-      await db.exec(migrationSql('0005_weekly_capacity.sql'))
+      await db.exec(migrationSql('0007_per_member_auth.sql'))
       const { rows } = await db.query(`select minutes from public.member_capacity`)
       expect(rows).toEqual([{ minutes: 90 }])
     })
@@ -597,13 +624,14 @@ describe('weekly capacity, run against a real Postgres', () => {
 
     it('one device sets 120 against a 300 baseline; another reads 120, and the baseline is intact', async () => {
       // `child` is seeded with weekly_minutes 300 in this file's beforeEach.
-      // Joined through `join_household`, which is the only path a real phone
-      // has — a direct insert into household_devices is refused by RLS, which is
-      // the policy working and was worth hitting once.
+      // The second phone is the CHILD's own, which after 0007 is the only thing
+      // a second phone can be: membership is a claimed member row, so there is
+      // no longer a phone that is in the household while being nobody. It is
+      // provisioned the way the Edge Function does it, as service_role —
+      // `claimed_by` is deliberately absent from the client update grant, and a
+      // signed-in caller attempting this write is refused.
       const secondDevice = await newDevice(db)
-      await asDevice(db, secondDevice, () =>
-        db.query('select public.join_household($1)', [household.join_code]),
-      )
+      await provisionMember(db, child.id, secondDevice)
 
       await asDevice(db, organizerDevice, () =>
         db.query(

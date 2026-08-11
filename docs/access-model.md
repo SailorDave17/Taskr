@@ -1,30 +1,109 @@
 # Access model — how a household joins, and what that actually protects
 
-- Date: 2026-08-05, **substantially revised 2026-08-06**
-- Decided by: owner (SailorDave17), at pickup of story #5, then overridden at pickup of story #23
+- Date: 2026-08-05, substantially revised 2026-08-06, **superseded again 2026-08-11 by story #62**
+- Decided by: owner (SailorDave17), at pickup of story #5, overridden at pickup of story #23, and
+  again at pickup of #62
 - Story: #5 (schema, policies, the bypass test), #23 (per-member credentials, column grants),
-  #34 (chores, which inherits the column-grant convention) and #36 (assignment, which is the first
-  to make the convention's rule structural as well as procedural)
-- Status: **decided and implemented. All six migrations are applied to the live project as of
-  2026-08-09** — `0001`/`0002` long since, `0005` at #45, and `0003`/`0004`/`0006` pasted in that
-  order on 2026-08-09 at the merge of #36. `0002` is verified over the wire by the live RLS suite
-  (PR #65, 13/13 against the real project); the rest are verified only by the paste succeeding.
+  #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
+  to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
+  which retires device auth entirely)**
+- Status: **`0001`–`0006` are applied to the live project. `0007` is NOT** — it is written, proven
+  against the pglite harness, and deliberately unapplied, because pasting it before the Edge Function
+  exists locks the household out of its own data. The ordering is in the migration's own section 9
+  and is load-bearing. `0002` is verified over the wire by the live RLS suite (PR #65, 13/13 against
+  the real project); the rest are verified only by the paste succeeding.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **`check:live` IS EXPECTED-RED until `0007` is applied, and that is the check working.** The client
+  now selects `members.email`, which the live project does not have, so the check reports
+  `members: a column this app selects does not exist in the live project [42703]`. Said here
+  explicitly because an authority that is red by design and does not say so is one whose *next*
+  genuine failure gets waved through — the exact way a real outage hid in plain sight on 2026-08-09.
+  The expected red is `members` and nothing else: a red on `households`, `chores` or
+  `member_capacity` is new and real. Each table has its own named test so they cannot hide inside
+  one another.
 
-## Read this first — the decision below changed
+## Read this first — the decision below changed, twice
 
-The original decision on this page was **a household join code plus anonymous auth, pick yourself
-from the roster**. The owner overrode it on 2026-08-05 in favour of **per-member credentials**. That
-older decision is kept further down, under *Superseded: the original decision*, because knowing what
-was believed and abandoned is worth having — but it is no longer what the app does.
+Two supersessions, and the second undoes an assumption the first was built on.
 
-The join code still exists. What changed is what it means: it is now only how a **device** gets into
-the household. It is no longer how a **person** is identified.
+1. **2026-08-05 → 2026-08-06.** The original decision was *a household join code plus anonymous auth,
+   pick yourself from the roster*. It was overridden in favour of **per-member credentials**: an
+   organizer-set PIN on the member row, checked by the database.
+2. **2026-08-06 → 2026-08-11 (#62).** That PIN scheme is now retired in favour of **real per-member
+   auth users**, which is what the section below calls the upgrade path and explicitly does not
+   reject on principle. Its stated blocker — *"the Supabase CLI is not installed, Docker is not
+   running"* — is what changed, not the reasoning.
 
-## The decision — 2026-08-06
+**What #62 actually changes**, in the order it matters:
+
+- **`auth.uid()` is a PERSON, not a device.** `members.claimed_by` holds their auth user, and it is
+  stable across time because a real credential returns the same user every session. That is what
+  makes the whole thing possible.
+- **`household_devices` is dropped.** It existed to absorb one hazard: an anonymous session expires
+  after 30 idle days and returns with a *new* auth id, so a rarely-active member would have become a
+  stranger to their own history. A stable auth id removes the hazard, so the table has nothing left
+  to do. Membership now resolves through `public.current_household_ids()`, a `security definer`
+  helper — necessary because a policy *on* `members` cannot subquery `members` without infinite RLS
+  recursion, which Postgres refuses outright.
+- **The join code is gone.** Not repurposed — dropped, along with `join_household` and
+  `generate_join_code`. Admission is an account provisioned for one named person, so there is no
+  shared secret to read out and nothing that works for whoever repeats it.
+- **PINs are gone as a database concept.** `pin_hash`, `has_pin`, `claim_member`,
+  `claim_member_with_pin` and `set_member_pin` are all dropped, on this repo's rule that *a dead
+  credential path which still works is a second way in*. A PIN can still be a person's password; the
+  database no longer knows or cares.
+- **`members.email` is the discriminator, and its nullability is the whole design.** A member with a
+  real address signs in with it and carries a longer secret; a member without one gets a synthetic
+  `<members.id>@taskr.invalid` address they never see or type, and a PIN. `.invalid` is reserved by
+  RFC 2606, so a synthetic address can never reach a real inbox. There is deliberately **no separate
+  `is_child` flag**, because a second field can disagree with the first.
+- **`members.id` still does not move.** No history migrates. That was true before #62 and is the
+  reason #62 was cheap — see *What it costs to change later*, which predicted this change and priced
+  it correctly.
+
+**What is NOT built yet, and is the honest gap.** Provisioning another person's account needs the
+`service_role` key, so it needs the Edge Function, and that is unbuilt: Docker's daemon is down on
+the build machine and the deploy is owner-only. Today an organizer can create a household and sign
+in, and can add people to the roster — and those people cannot sign in, because no account exists for
+them. The roster says so on each row rather than leaving it to be discovered.
+
+### Recovery, both directions — #62 AC 7 and AC 8
+
+The story required these to be *decided and written down* rather than left to be discovered, so both
+answers are here even though one of them is "not yet".
+
+**A member forgets their credential (AC 7).** The organizer resets it, and it still needs no inbox —
+a synthetic `<id>@taskr.invalid` address has no mailbox to send a link to, by construction. The reset
+is an admin password update, which needs `service_role`, so it lands with the Edge Function and is
+**not built yet**. This is a genuine regression in capability against the PIN model, which could do
+it with a plain RPC, and it is the price of a real auth identity rather than an oversight.
+
+**The organizer loses their own credential (AC 8).** *The answer changed, and this is the change.*
+Under the PIN scheme the answer was "a statement run in the Supabase SQL editor by whoever owns the
+project" — because there was no address to mail. Under #62 there is: the organizer signs up with a
+**real** email, which is required at household creation and is the one account in the household that
+cannot be synthetic. So the answer is now **Supabase's own password-reset flow**,
+`auth.resetPasswordForEmail`, with no bespoke recovery path and nobody needing dashboard access.
+
+Two things that are deliberately true and worth stating rather than implying:
+
+- **The UI for it is not built.** The mechanism is standard and needs no server, but until a "forgot
+  your password" link exists an organizer would have to trigger it from the dashboard. That is a
+  smaller gap than the old answer, and it is still a gap.
+- **The organizer is still the root.** There is nobody above them to authorise anything; what changed
+  is that they can now prove who they are to Supabase instead of to a person with database access.
+  That is acceptable for a household app and would not be for anything else.
+
+## Superseded: the PIN decision — 2026-08-06
+
+**Kept for the record. This is no longer what the app does — see *Read this first* above.** Retired
+by #62 on 2026-08-11. It is left in full because its reasoning is still the reason the schema has the
+shape it has, and because the section immediately below — *why not real per-member auth users* — is
+the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
+the Edge Function that was unavailable is now the plan.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 
@@ -115,6 +194,27 @@ function" was advisory until 0002 revoked the columns:
   household app and would not be for anything else.
 
 ## What it costs to change later
+
+**This section was written on 2026-08-06 as a prediction, and #62 is the change it predicted. It is
+worth reading against what actually happened, because it was right about the expensive part and
+incomplete about the rest** — which is the more useful kind of record than one quietly corrected
+after the fact.
+
+Right: no data migration, `members.id` unmoved, `pin_hash` dropped, the whole thing cheap for exactly
+the stated reason. What it did not name:
+
+- **Four `security definer` functions carried the old predicate in their bodies** —
+  `complete_chore`, `uncomplete_chore`, `assign_chore`, `unassign_chore` all joined
+  `household_devices`. A plpgsql body resolves its tables at call time, so dropping the table raised
+  nothing and the migration reported success; every one of those actions would have failed on its
+  first call in production. Re-pointing policies is visible work and re-pointing function bodies is
+  not.
+- **Dropping `household_devices` reintroduces the RLS recursion it was accidentally absorbing.** A
+  policy on `members` whose predicate subqueries `members` is refused outright by Postgres, so the
+  change needs a `security definer` helper it is easy not to see coming.
+- **The one-time re-claim is not re-runnable**, and every other file here is. Clearing `claimed_by`
+  is correct exactly once; a second paste clears the identities the Edge Function has since written
+  and locks the household out with no client-side recovery.
 
 Deliberately little, and the schema is why:
 

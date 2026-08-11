@@ -35,6 +35,15 @@ and the reasoning — including the honest statement of what the access model do
 against — is [`docs/access-model.md`](docs/access-model.md). Read that before touching the data
 layer.
 
+**The PIN sentence above is about the LIVE app, and the code has already moved past it.**
+[#62](https://github.com/SailorDave17/Taskr/issues/62) replaces the organizer-set PIN and the shared
+join code with real per-member sign-in — each person has their own account, and `auth.uid()`
+identifies a person rather than a phone. It is written and proven against the pglite harness, and
+`0007` is **deliberately not applied to the live project**: pasting it clears every existing claim,
+and restoring access needs an Edge Function that does not exist yet, so the household would be locked
+out of its own data in between. The migration's own section 9 carries the ordering. Until that
+function is deployed, what is live is the PIN.
+
 **Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
 Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
 editor by a person, at the merge of the story that adds it. They are re-runnable and a test proves
@@ -151,6 +160,19 @@ stale copy within a week.
   found.
 
 Every push to `rebuild/v1` deploys to production automatically.
+
+> **That coupling is what makes #62 dangerous to merge, and it is the thing to change first.**
+> Because the merge *is* the deploy, a branch whose client needs a migration nobody has pasted goes
+> live the moment it lands — the client asks for `members.email` and calls a three-argument
+> `create_household`, and the live project has neither. Owner decision, 2026-08-10: **decouple deploy
+> from merge before #62 merges** — point Vercel's production branch at a tag, or turn on manual
+> promote — so applying `0007` and promoting the client become two deliberate acts in the owner's
+> chosen order rather than one automatic one.
+>
+> This is not a hypothetical. It is the same shape as the 2026-08-09 outage recorded in
+> `docs/access-model.md`, where client code that read an unpasted migration deployed automatically
+> and the app could not hold a household for a day. The mitigation used *then* was an accurate
+> paragraph in a document — which is what this paragraph is, and it is why it is not the whole fix.
 
 ## The rest of `docs/`
 

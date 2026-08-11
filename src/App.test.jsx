@@ -13,16 +13,17 @@ import { resolve } from 'node:path'
 const backend = { hasSupabaseConfig: true }
 
 const api = {
-  ensureSession: vi.fn(),
+  currentSession: vi.fn(),
   currentHousehold: vi.fn(),
   listMembers: vi.fn(),
-  currentDeviceId: vi.fn(),
+  currentUserId: vi.fn(),
   createHousehold: vi.fn(),
-  joinHousehold: vi.fn(),
+  signIn: vi.fn(),
+  signUpOrganizer: vi.fn(),
+  signOut: vi.fn(),
   addMember: vi.fn(),
   updateMember: vi.fn(),
   removeMember: vi.fn(),
-  claimMember: vi.fn(),
 }
 
 // #34. Mocked separately from household.js because it is a separate module, and
@@ -95,10 +96,16 @@ beforeEach(() => {
   choresApi.addChore.mockResolvedValue(undefined)
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
-  api.ensureSession.mockResolvedValue({ user: { id: 'device-a' } })
+  // A session by default, because most tests are about a signed-in person. The
+  // signed-OUT case is now a first-class state rather than a failure, and it has
+  // its own describe below.
+  api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
   api.currentHousehold.mockResolvedValue(null)
   api.listMembers.mockResolvedValue([])
-  api.currentDeviceId.mockResolvedValue('device-a')
+  api.currentUserId.mockResolvedValue('person-a')
+  api.signIn.mockResolvedValue({ user: { id: 'person-a' } })
+  api.signUpOrganizer.mockResolvedValue({ user: { id: 'person-a' } })
+  api.signOut.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -130,30 +137,132 @@ describe('when the build has no backend', () => {
     await renderApp()
 
     expect(await screen.findByRole('region', { name: /no backend configured/i })).toBeInTheDocument()
-    // And it does not attempt a sign-in it cannot possibly complete.
-    expect(api.ensureSession).not.toHaveBeenCalled()
+    // And it does not attempt a session read it cannot possibly complete.
+    expect(api.currentSession).not.toHaveBeenCalled()
   })
 })
 
-describe('when this device has joined nothing', () => {
+describe('when nobody is signed in', () => {
   it('offers both ways in', async () => {
+    // The null session is load-bearing and was missing: this test sat inside
+    // "when nobody is signed in" while inheriting the default fixture, which HAS
+    // a session. It passed anyway until the sign-in pane started hiding itself
+    // for somebody already signed in — at which point the block's title and its
+    // fixture stopped agreeing out loud.
+    api.currentSession.mockResolvedValue(null)
     await renderApp()
     expect(await screen.findByRole('button', { name: /create household/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /join household/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
   })
 
-  it('signs the device in before asking the server anything', async () => {
+  it('asks the server nothing at all — signed out is a state, not a failure', async () => {
+    // #62's reversal. This test used to assert the opposite shape: that the app
+    // signed the DEVICE in anonymously BEFORE reading, so boot always ended with
+    // an identity. Now there is no identity to mint, and the reads are skipped
+    // rather than attempted-and-empty.
+    //
+    // Skipped deliberately, not incidentally: the reads would SUCCEED against a
+    // signed-out caller — every policy simply returns nothing — so "signed out"
+    // and "your household disappeared" would render identically, and the second
+    // reading is both wrong and the more alarming one.
+    api.currentSession.mockResolvedValue(null)
     await renderApp()
     await screen.findByRole('button', { name: /create household/i })
 
-    expect(api.ensureSession).toHaveBeenCalled()
-    expect(api.ensureSession.mock.invocationCallOrder[0]).toBeLessThan(
-      api.currentHousehold.mock.invocationCallOrder[0],
+    expect(api.currentSession).toHaveBeenCalled()
+    expect(api.currentHousehold).not.toHaveBeenCalled()
+    expect(api.listMembers).not.toHaveBeenCalled()
+  })
+
+  it('creates the account before the household, because the order is unrecoverable', async () => {
+    // `create_household` refuses an unauthenticated caller and claims the
+    // organizer's member row in the same statement. Reversed, the household
+    // would exist with an unclaimed organizer — visible to nobody, and not
+    // fixable from the client.
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+
+    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
+    fireEvent.change(screen.getByLabelText(/your email/i), {
+      target: { value: 'alex@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/your password/i), {
+      target: { value: 'longenough' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
     )
+
+    expect(api.signUpOrganizer).toHaveBeenCalledWith({
+      email: 'alex@example.com',
+      password: 'longenough',
+    })
+    expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
+    expect(api.signUpOrganizer.mock.invocationCallOrder[0]).toBeLessThan(
+      api.createHousehold.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('does not reach create_household when the signup fails', async () => {
+    // The order assertion above kills the mutation its comment describes —
+    // swapping the two statements — and NOT a dropped `await`, because both
+    // calls still happen in the same lexical order without one. This is the
+    // assertion that reddens on a dropped await, and the review found it missing.
+    api.currentSession.mockResolvedValue(null)
+    api.signUpOrganizer.mockRejectedValue(new Error('User already registered'))
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+
+    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
+    fireEvent.change(screen.getByLabelText(/your email/i), {
+      target: { value: 'alex@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'longenough' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
+    )
+
+    expect(api.createHousehold).not.toHaveBeenCalled()
+  })
+
+  it('skips the signup when a session already exists — the half-finished state', async () => {
+    // Account made, household not: two durable steps with no transaction, and
+    // against a project without 0007 the second fails every time. Calling
+    // `signUp` again for an address that now exists throws and never reaches the
+    // RPC, which is what made this a dead end. The session is what decides.
+    api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+    api.currentHousehold.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue('person-a')
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+
+    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
+    )
+
+    expect(api.signUpOrganizer).not.toHaveBeenCalled()
+    expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
+  })
+
+  it('signs an existing member in through the data layer', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821' })
   })
 })
 
-describe('when this device has joined a household', () => {
+describe('when the signed-in person belongs to a household', () => {
   // `timezone` is `not null default 'UTC'` since 0005, so a household row always
   // carries one. #36's load figures resolve capacity for a PERIOD, and
   // periodStartFor refuses to guess a zone rather than silently using the
@@ -161,14 +270,13 @@ describe('when this device has joined a household', () => {
   const household = {
     id: 'h1',
     name: 'Placeholder Household',
-    join_code: 'ABCD2345',
     timezone: 'America/New_York',
   }
 
   beforeEach(() => {
     api.currentHousehold.mockResolvedValue(household)
     api.listMembers.mockResolvedValue([
-      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'device-a' },
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
     ])
   })
 
@@ -182,11 +290,11 @@ describe('when this device has joined a household', () => {
    */
   const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
 
-  it('shows the roster rather than the join screen', async () => {
+  it('shows the roster rather than the sign-in screen', async () => {
     await renderApp()
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(inRoster().getByText('Placeholder One')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /join household/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
   })
 
   // AC 3: the roster is read from the server on load. If it were cached
@@ -202,7 +310,7 @@ describe('when this device has joined a household', () => {
     expect(window.localStorage.getItem('taskr.members')).toBeNull()
   })
 
-  it('marks the person this device is acting as, from the live auth id', async () => {
+  it('marks the person signed in on this phone, from the live auth id', async () => {
     await renderApp()
     expect(await screen.findByText(/· you/)).toBeInTheDocument()
   })
@@ -220,13 +328,15 @@ describe('when this device has joined a household', () => {
 
 describe('when the backend cannot be reached', () => {
   it('shows the reason rather than an empty household', async () => {
-    api.ensureSession.mockRejectedValue(new Error('Anonymous sign-ins are disabled'))
+    api.currentSession.mockRejectedValue(new Error('Failed to fetch'))
     await renderApp()
 
     expect(await screen.findByRole('region', { name: /could not reach the household/i })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(/anonymous sign-ins are disabled/i)
-    // Critically, not the join screen: offering "create a household" against a
-    // backend that is refusing would send the organizer round a loop.
+    expect(screen.getByRole('alert')).toHaveTextContent(/failed to fetch/i)
+    // Critically, not the sign-in screen: offering "create a household" against
+    // a backend that is refusing would send the organizer round a loop. The
+    // distinction is sharper since #62, because a signed-out phone ALSO shows
+    // that screen — so an unreachable backend must not be mistaken for one.
     expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
   })
 })

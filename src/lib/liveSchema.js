@@ -12,14 +12,19 @@ import { MEMBER_COLUMNS } from './household.js'
  * is #78 AC 3, and restating them here would have rebuilt the very gap this
  * story exists to close.
  *
- * Two entries have no constant because the data layer has no constant for them:
+ * One entry has no constant because the data layer has no constant for it:
  *
  * - `households` is read with `select('*')` (`household.js`, loading the
  *   household), so `*` is genuinely what the client asks for. Unlike `members`
  *   and `chores`, its grants were never narrowed to a column list, and a check
  *   that demanded a specific list here would assert something the app does not.
- * - `household_devices` is read for one column while deciding whether this
- *   device has joined.
+ *
+ * `household_devices` was the second such entry and left with #62, which drops
+ * the table. Removing it here is not bookkeeping: the check runs against the
+ * LIVE project, so an entry for a dropped table would fail every run — correctly
+ * — and the fix is to stop asking, not to tolerate the failure. It could only be
+ * removed once `household.js` stopped reading it, and `liveSchema.test.js` is
+ * what enforces that pairing in both directions.
  *
  * The RPCs are deliberately absent, and that is a stated limit rather than an
  * oversight: this list covers TABLES, per #78 AC 1. A migration that adds only a
@@ -29,7 +34,6 @@ import { MEMBER_COLUMNS } from './household.js'
  */
 export const LIVE_SCHEMA = Object.freeze([
   Object.freeze({ table: 'households', columns: '*' }),
-  Object.freeze({ table: 'household_devices', columns: 'household_id' }),
   Object.freeze({ table: 'members', columns: MEMBER_COLUMNS }),
   Object.freeze({ table: 'chores', columns: CHORE_COLUMNS }),
   Object.freeze({ table: 'member_capacity', columns: CAPACITY_COLUMNS }),

@@ -76,10 +76,24 @@ const supabase = createClient(url, anonKey, {
 // "revoked from anon" from "migration never ran" is not answering #78's question
 // at all.
 //
-// `household.js` calls `signInAnonymously()` before it reads anything, which puts
-// a real device on role `authenticated` — the role the per-column grants are
-// actually written for. This does the same, so the check asks its question with
-// the same credentials, the same role and the same column lists as the app.
+// An anonymous sign-in is what puts this check on role `authenticated`, which is
+// the role the per-column grants are written for. That is still exactly the
+// right probe, and the REASON it is right changed with #62.
+//
+// It used to be "the same credentials the app uses": `household.js` called
+// `signInAnonymously()` itself before reading anything. It does not any more —
+// the app signs a PERSON in — so the justification is now narrower and worth
+// stating precisely. What this check tests is whether the tables, columns and
+// GRANTS exist, and grants are keyed on the role, not on who is holding it. An
+// anonymous user is a first-class `authenticated` user with no member row, so it
+// lands on the same grants and simply sees no rows — which is all this check
+// needs, since it reads zero rows on purpose.
+//
+// The consequence, corrected: if anonymous sign-ins are disabled on the project,
+// THIS CHECK breaks and the app does not. That sentence used to say the
+// opposite, truthfully, and #62 made it false — anonymous sign-in is now used by
+// nothing but this file. Disabling it is a reasonable thing for the owner to do
+// after #62, and it would take `npm run check:live` down with it.
 //
 // THE COST, stated because it is a write to production: each run creates one
 // anonymous auth user, and there is no client-reachable way to delete it. That is
@@ -90,9 +104,11 @@ beforeAll(async () => {
   const { error } = await supabase.auth.signInAnonymously()
   if (error) {
     throw new Error(
-      `could not sign in anonymously, so this check cannot ask its question as the ` +
-        `role the app uses: ${error.message}. ` +
-        `If anonymous sign-ins are disabled on the project, the app itself is broken too.`,
+      `could not sign in anonymously, so this check cannot ask its question on role ` +
+        `\`authenticated\`, which is the role the column grants are written for: ${error.message}. ` +
+        `Since #62 the app no longer signs in anonymously, so this is a limitation of the ` +
+        `CHECK rather than a fault in the project — if the provider has been turned off, this ` +
+        `check needs a real member's credentials instead.`,
     )
   }
 })
@@ -113,7 +129,23 @@ async function probe(table, columns) {
 
 describe('#78 — the live project has every table and column this app reads', () => {
   it('has a schema list to check, so an empty pass is impossible', () => {
-    expect(LIVE_SCHEMA.length).toBeGreaterThanOrEqual(5)
+    // FOUR since #62 dropped `household_devices`. It said five, which is the
+    // count #78 shipped with, and leaving it made BOTH non-CI commands
+    // permanently red — this file and `rls.integration.test.js` are matched by
+    // the same `include` glob, and `test:rls` passes no path filter, so the
+    // over-the-wire suite reddened on it too. `check:live` could never exit 0
+    // against any project, healthy or broken, while `docs/access-model.md`
+    // names it as the authority on live state.
+    //
+    // The failure message is the part worth remembering: "expected 4 to be
+    // greater than or equal to 5", under a test called "so an empty pass is
+    // impossible" — it reads as an empty list and is a stale floor. A guard
+    // against vacuity became the thing that broke the run.
+    //
+    // The number goes DOWN when a table legitimately leaves. That edit should be
+    // deliberate and visible in review, which is why it is a literal rather than
+    // `LIVE_SCHEMA.length` — comparing the list to itself would pass at zero.
+    expect(LIVE_SCHEMA.length).toBeGreaterThanOrEqual(4)
   })
 
   // One test per table rather than a loop with one assertion: a failure should

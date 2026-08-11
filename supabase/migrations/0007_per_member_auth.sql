@@ -36,6 +36,36 @@
 -- A half-applied paste followed by a re-paste is the normal way this is used.
 
 -- ---------------------------------------------------------------------------
+-- 0. Is this the first application? Answered FIRST, because section 1 destroys
+--    the evidence.
+--
+-- Section 7 clears every `claimed_by`, and that is correct exactly once: the
+-- values are anonymous DEVICE ids and they have to go. Doing it a second time
+-- clears the identities the Edge Function has since written, and locks the
+-- household out of its own data with no recovery from the client.
+--
+-- So the clear needs to know whether this file has run before, and nothing in
+-- the DATA can tell it — a device id and a person id are both just a uuid in
+-- `claimed_by`. The schema can: `members.email` arrives in section 1 and exists
+-- afterwards forever, so its absence right now is exactly "0007 has not run".
+--
+-- `household_devices` looks like the same signal and is not. It was the first
+-- thing tried, and it is wrong for a reason worth recording: re-pasting the
+-- whole list runs 0001 again, which recreates that table, so by the time
+-- section 7 asked, it was always there. Measured 2026-08-11 — the guard read
+-- "first run" on a second paste and cleared the claims anyway.
+-- ---------------------------------------------------------------------------
+
+drop table if exists pg_temp.taskr_0007_first_run;
+create temporary table taskr_0007_first_run as
+select not exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'members'
+    and column_name = 'email'
+) as yes;
+
+-- ---------------------------------------------------------------------------
 -- 1. The identifier
 -- ---------------------------------------------------------------------------
 
@@ -145,11 +175,32 @@ create policy members_update_same_household
   using (household_id in (select public.current_household_ids()))
   with check (household_id in (select public.current_household_ids()));
 
+-- The delete policy carries one clause the others do not, and it is not a
+-- tightening for its own sake: under device auth, deleting your own member row
+-- was survivable because `household_devices` carried membership INDEPENDENTLY,
+-- so you stayed in the household and could pick a person again. This migration
+-- drops that table and makes `claimed_by` the sole membership predicate, which
+-- silently turns "remove me from the roster" into "lock myself out forever" —
+-- `current_household_ids()` returns nothing, every policy above denies, and
+-- `households.organizer_member_id` is `on delete set null`, so the household is
+-- left with no organizer and visible to nobody. Not recoverable from any client.
+--
+-- Nothing in the client CHANGED to cause this. `removeMember` and the Remove
+-- button are byte-identical to what shipped before; this migration changed what
+-- an unchanged call means. That is exactly why the guard belongs here rather
+-- than in the component: the component was already correct and still is.
+--
+-- Today it is not an edge case. Provisioning needs the Edge Function, so the
+-- organizer is usually the ONLY claimed member, and their row carries the
+-- "· you" badge right next to the Remove button.
 drop policy if exists members_delete_same_household on public.members;
 create policy members_delete_same_household
   on public.members for delete
   to authenticated
-  using (household_id in (select public.current_household_ids()));
+  using (
+    household_id in (select public.current_household_ids())
+    and claimed_by is distinct from (select auth.uid())
+  );
 
 -- chores ---------------------------------------------------------------------
 drop policy if exists chores_select_same_household on public.chores;
@@ -179,17 +230,21 @@ create policy chores_delete_same_household
 
 -- member_capacity ------------------------------------------------------------
 --
--- Keyed through the member rather than directly, exactly as 0005 wrote it: a
--- capacity row belongs to a member, and the member carries the household.
+-- Keyed on the row's OWN `household_id`, which is how 0005 wrote it. An earlier
+-- draft of this migration resolved through `member_id` instead and described
+-- itself as matching 0005; it did not, and the difference is not cosmetic. The
+-- composite foreign key `member_in_household` is what refuses a capacity row
+-- naming a member of another family, and a member-keyed policy refuses that same
+-- row at RLS first — so the key stops being the thing under test while the suite
+-- still claims to test it. Caught by capacity.pglite's `refuses an override
+-- naming a member of another household`, which asserts on the constraint by
+-- name.
 drop policy if exists member_capacity_select_same_household on public.member_capacity;
 create policy member_capacity_select_same_household
   on public.member_capacity for select
   to authenticated
   using (
-    member_id in (
-      select m.id from public.members m
-      where m.household_id in (select public.current_household_ids())
-    )
+    household_id in (select public.current_household_ids())
   );
 
 drop policy if exists member_capacity_insert_same_household on public.member_capacity;
@@ -197,10 +252,7 @@ create policy member_capacity_insert_same_household
   on public.member_capacity for insert
   to authenticated
   with check (
-    member_id in (
-      select m.id from public.members m
-      where m.household_id in (select public.current_household_ids())
-    )
+    household_id in (select public.current_household_ids())
   );
 
 drop policy if exists member_capacity_update_same_household on public.member_capacity;
@@ -208,16 +260,10 @@ create policy member_capacity_update_same_household
   on public.member_capacity for update
   to authenticated
   using (
-    member_id in (
-      select m.id from public.members m
-      where m.household_id in (select public.current_household_ids())
-    )
+    household_id in (select public.current_household_ids())
   )
   with check (
-    member_id in (
-      select m.id from public.members m
-      where m.household_id in (select public.current_household_ids())
-    )
+    household_id in (select public.current_household_ids())
   );
 
 drop policy if exists member_capacity_delete_same_household on public.member_capacity;
@@ -225,10 +271,7 @@ create policy member_capacity_delete_same_household
   on public.member_capacity for delete
   to authenticated
   using (
-    member_id in (
-      select m.id from public.members m
-      where m.household_id in (select public.current_household_ids())
-    )
+    household_id in (select public.current_household_ids())
   );
 
 -- ---------------------------------------------------------------------------
@@ -276,8 +319,25 @@ begin
   values (household_name, household_timezone)
   returning * into new_household;
 
-  insert into public.members (household_id, display_name, claimed_by)
-  values (new_household.id, organizer_name, (select auth.uid()))
+  -- `email` is taken from `auth.users`, not from a parameter. The organizer has
+  -- just signed up, so their real address is already known to the auth schema,
+  -- and reading it here is the only way to be sure the discriminator and the
+  -- auth account can never disagree — a parameter could be passed a different
+  -- address, or omitted, and nothing would notice.
+  --
+  -- It is null for a member the Edge Function provisions with a synthetic
+  -- `<id>@taskr.invalid` address, which is exactly what the column means: null
+  -- is "no real address, so a PIN", not "we forgot to fill this in". Without
+  -- this line NOTHING in the system ever writes the column and it is a constant
+  -- null for every member — the organizer, who is the one person guaranteed to
+  -- have a real address, most of all.
+  insert into public.members (household_id, display_name, claimed_by, email)
+  values (
+    new_household.id,
+    organizer_name,
+    (select auth.uid()),
+    (select u.email from auth.users u where u.id = (select auth.uid()))
+  )
   returning * into new_member;
 
   update public.households
@@ -293,7 +353,179 @@ revoke all on function public.create_household(text, text, text) from public, an
 grant execute on function public.create_household(text, text, text) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 5. Retire the device-auth admission routes
+-- 5. The definer functions re-pointed at the new predicate
+--
+-- Section 3 re-pointed every POLICY. These four are not policies: they are
+-- `security definer` functions that carry their own access rule as a join to
+-- `household_devices`, which section 6 drops. Nothing errors when that table
+-- goes - a plpgsql body resolves its tables when it RUNS, not when it is
+-- created - so without this section `drop table` succeeds, the migration
+-- reports success, and marking a chore done, undoing it, assigning and
+-- unassigning all fail at the first call with `relation
+-- "public.household_devices" does not exist`.
+--
+-- The predicate is the only thing that changes. `in (select
+-- public.current_household_ids())` replaces the join, which is the same
+-- membership question asked of `members.claimed_by` instead of a device row.
+-- The `for update of c` row lock, the not-found wording, and the deliberate
+-- refusal to say WHICH of "no such chore" or "not your household" was hit are
+-- all preserved exactly as 0004 and 0006 wrote them.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.complete_chore(chore_id uuid)
+returns public.chores
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target public.chores;
+  caller uuid := (select auth.uid());
+begin
+  if caller is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select c.* into target
+  from public.chores c
+  where c.id = chore_id
+    and c.household_id in (select public.current_household_ids())
+  for update of c;
+
+  if not found then
+    raise exception 'no such chore in your household';
+  end if;
+
+  update public.chores
+     set completed_at = now(),
+         completed_by_member_id = public.acting_member(target.household_id)
+   where id = chore_id
+  returning * into target;
+
+  return target;
+end;
+$$;
+
+create or replace function public.uncomplete_chore(chore_id uuid)
+returns public.chores
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target public.chores;
+  caller uuid := (select auth.uid());
+begin
+  if caller is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select c.* into target
+  from public.chores c
+  where c.id = chore_id
+    and c.household_id in (select public.current_household_ids())
+  for update of c;
+
+  if not found then
+    raise exception 'no such chore in your household';
+  end if;
+
+  update public.chores
+     set completed_at = null,
+         completed_by_member_id = null
+   where id = chore_id
+  returning * into target;
+
+  return target;
+end;
+$$;
+
+create or replace function public.assign_chore(chore_id uuid, member_id uuid)
+returns public.chores
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target public.chores;
+  caller uuid := (select auth.uid());
+begin
+  if caller is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if member_id is null then
+    raise exception 'assign_chore needs a person; use unassign_chore to clear it';
+  end if;
+
+  select c.* into target
+  from public.chores c
+  where c.id = chore_id
+    and c.household_id in (select public.current_household_ids())
+  for update of c;
+
+  if not found then
+    raise exception 'no such chore in your household';
+  end if;
+
+  if not exists (
+    select 1 from public.members m
+    where m.id = member_id and m.household_id = target.household_id
+  ) then
+    raise exception 'that person is not in this household';
+  end if;
+
+  update public.chores
+     set assigned_member_id = member_id
+   where id = chore_id
+  returning * into target;
+
+  return target;
+end;
+$$;
+
+create or replace function public.unassign_chore(chore_id uuid)
+returns public.chores
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target public.chores;
+  caller uuid := (select auth.uid());
+begin
+  if caller is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select c.* into target
+  from public.chores c
+  where c.id = chore_id
+    and c.household_id in (select public.current_household_ids())
+  for update of c;
+
+  if not found then
+    raise exception 'no such chore in your household';
+  end if;
+
+  update public.chores
+     set assigned_member_id = null
+   where id = chore_id
+  returning * into target;
+
+  return target;
+end;
+$$;
+
+-- `acting_member` needs no change: it already resolves through
+-- `members.claimed_by`, which is exactly the column this story makes stable.
+-- Its comment in 0004 - "returns null when the device is joined but has claimed
+-- nobody" - describes a state that can no longer exist, since claiming IS
+-- joining now. Left in place rather than rewritten: the function is correct and
+-- 0004 is history.
+
+-- ---------------------------------------------------------------------------
+-- 6. Retire the device-auth admission routes
 --
 -- Dropped rather than left in place: a credential path that still works is a
 -- second way in, and each of these grants household access without the new
@@ -316,14 +548,39 @@ alter table public.members drop column if exists pin_hash;
 alter table public.households drop column if exists join_code;
 
 -- ---------------------------------------------------------------------------
--- 6. The device table, last — nothing references it by here
+-- 7. The device table, last — nothing references it by here
 -- ---------------------------------------------------------------------------
+
+-- The one-time re-claim runs HERE. See section 9 for what it does and the
+-- ordering it forces on the owner.
+--
+-- Its POSITION is not load-bearing, and an earlier draft of this comment said it
+-- was — "the last moment at which 'was this schema on device auth?' is
+-- answerable", which is the guard section 0 records as measured-wrong. The flag
+-- is a `pg_temp` table created in section 0 and dropped at the very end of the
+-- file, so the clear is correct anywhere between them, the foot of the file
+-- included. Anyone relocating it on the retracted reasoning would swap a working
+-- guard for the one that failed.
+--
+-- Guarded, because an UNGUARDED clear is not re-runnable and this file claims to
+-- be. Measured 2026-08-11: pasting the list a second time cleared every
+-- `claimed_by` again and locked the household out of its own data, recoverable
+-- only from the Edge Function. A re-paste after a partial failure is the normal
+-- way these are applied, so that is not an edge case — it is the documented
+-- path.
+do $$
+begin
+  if (select yes from pg_temp.taskr_0007_first_run) then
+    update public.members set claimed_by = null where claimed_by is not null;
+  end if;
+end
+$$;
 
 drop policy if exists household_devices_select_own on public.household_devices;
 drop table if exists public.household_devices;
 
 -- ---------------------------------------------------------------------------
--- 7. Column grants for the new column
+-- 8. Column grants
 --
 -- 0002 established the convention and 0003 inherited it: revoke wholesale, then
 -- grant per column, so `select(*)` fails outright rather than quietly omitting
@@ -332,11 +589,24 @@ drop table if exists public.household_devices;
 --
 -- `anon` is revoked wholesale for the reason 0002 gives: no unauthenticated
 -- caller has any business reading a household.
+--
+-- `household_id` LEAVES THE READABLE SET, and that is a repair rather than a
+-- tightening. The `select(*)` refusal above was never a property of the grant
+-- SHAPE — it held because `pin_hash` was withheld, and once this migration drops
+-- that column every remaining column was granted, so `select(*)` quietly started
+-- succeeding while four separate comments went on asserting it "fails outright".
+-- Withholding one column that no client code reads restores the property those
+-- comments describe, and it is the convention `chores` (0003) and
+-- `member_capacity` (0005) already follow for exactly this column.
+--
+-- Nothing loses a capability: a client learns which household it is in from
+-- `households`, never from a member row, and `household_id` stays INSERTABLE
+-- because `addMember` must name the household it is writing into.
 -- ---------------------------------------------------------------------------
 
 revoke select, insert, update on public.members from authenticated, anon;
 
-grant select (id, household_id, display_name, weekly_minutes, claimed_by, email, created_at)
+grant select (id, display_name, weekly_minutes, claimed_by, email, created_at)
   on public.members to authenticated;
 grant insert (household_id, display_name, weekly_minutes, email)
   on public.members to authenticated;
@@ -349,7 +619,7 @@ grant update (display_name, weekly_minutes, email)
 -- become that person.
 
 -- ---------------------------------------------------------------------------
--- 8. The one-time re-claim, and the ordering that makes it survivable
+-- 9. The one-time re-claim, and the ordering that makes it survivable
 --
 -- OWNER ACTION REQUIRED. Read before pasting.
 --
@@ -372,6 +642,30 @@ grant update (display_name, weekly_minutes, email)
 --
 -- Doing (3) before (2) is not possible, and attempting it looks exactly like the
 -- app being broken. That is why the sequence is here and not only in the issue.
+--
+-- THE STATEMENT ITSELF IS IN SECTION 7, not here — a placement of convenience,
+-- not a constraint. What guards it is the `pg_temp` flag section 0 captures
+-- BEFORE section 1 adds `members.email`, and that flag is readable until the
+-- file's last line, so the clear would be equally correct at the foot.
+--
+-- This paragraph previously gave a different and RETRACTED reason: that the
+-- statement "has to run while `household_devices` still exists, because the
+-- presence of that table is what distinguishes a migration from a re-paste".
+-- That guard was tried and measured wrong — re-pasting the list runs 0001, and
+-- 0001 recreates the table, so it read "first run" on every paste and cleared
+-- the claims anyway. Section 0 records the replacement. Both paragraphs were
+-- written in the SAME change that retracted the guard, which is why the wrong
+-- one survived: there was no older text for a reviewer to notice going stale.
+--
+-- Unguarded, a re-paste cleared the claims of a household that had already been
+-- provisioned — the app looks broken, and the fix is another round of
+-- provisioning from outside it.
+--
+-- So: on the FIRST application this clears every claim and the ordering above
+-- is mandatory. On any later application it does nothing at all.
 -- ---------------------------------------------------------------------------
 
-update public.members set claimed_by = null where claimed_by is not null;
+-- The first-run flag from section 0 has done its work. Dropped rather than left
+-- behind so a later paste in the same session re-answers the question instead of
+-- inheriting this one's answer.
+drop table if exists pg_temp.taskr_0007_first_run;

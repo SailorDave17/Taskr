@@ -346,6 +346,72 @@ export async function removeMember(id) {
 // Function as `service_role`, and `members.claimed_by` is absent from the client
 // update grant precisely so this file cannot have a fourth attempt at it.
 
+/** The deployed function's name, in one place — #87. */
+const PROVISION_FUNCTION = 'provision-member'
+
+/**
+ * Ask the Edge Function to do something only `service_role` may do — #87.
+ *
+ * This is the ONLY route by which a member gains an auth identity. The key that
+ * makes it possible never comes near this bundle: `src/lib/keyShape.js` fails
+ * the build if a secret key is ever put in a `VITE_` variable, and
+ * `gate.test.js` asserts the built bundle is clean.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is rather
+ * than replaced with a generic message — "Only the household organizer can do
+ * that" is something the person can act on and "Something went wrong" is not.
+ */
+async function callProvisioning(action, { memberId, password }) {
+  const trimmed = String(password ?? '')
+  if (!memberId) throw new Error('Pick a person first.')
+  if (trimmed.length < 6) {
+    throw new Error('That credential is too short — use at least 6 characters.')
+  }
+
+  const { data, error } = await getSupabase().functions.invoke(PROVISION_FUNCTION, {
+    body: { action, memberId, password: trimmed },
+  })
+
+  if (error) {
+    // `FunctionsHttpError` carries the body, and the body is where the useful
+    // sentence lives — the error's own message is only "Edge Function returned
+    // a non-2xx status code", which tells the organizer nothing.
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const err = new Error(detail || `Could not ${action} that sign-in: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data
+}
+
+/**
+ * Give a member a way to sign in — #87 AC 2.
+ *
+ * The organizer stays signed in as themselves throughout, which is the whole
+ * reason this is a server call: `auth.signUp()` would sign them out and into the
+ * account it just made.
+ */
+export async function provisionMember({ memberId, password }) {
+  return callProvisioning('provision', { memberId, password })
+}
+
+/**
+ * Replace a member's credential when they forget it — #87 AC 3.
+ *
+ * No inbox is involved and none can be: a provisioned member's address is
+ * `<id>@taskr.invalid`, and `.invalid` can never resolve, so an emailed reset
+ * link would go nowhere. It is an admin password update instead.
+ */
+export async function resetMemberCredential({ memberId, password }) {
+  return callProvisioning('reset', { memberId, password })
+}
+
 /**
  * Which member this device is acting as, or null.
  *

@@ -131,12 +131,13 @@ entirely and must never reach any `VITE_` variable; the build refuses outright i
 
 ## Branching — read this before you cut a branch
 
-This repository has **three branch roles**, and only one of them is where work goes. The names are
+This repository has **four branch roles**, and only one of them is where work goes. The names are
 misleading if you go by convention, so go by this table.
 
 | Branch | Role |
 |---|---|
 | **`rebuild/v1`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
+| `release` | **What Vercel builds production from.** Entered only by a pull request from `rebuild/v1` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
 | `main` | The **cutover target**. Holds the tag `legacy-final` and receives the rebuild in one merge at the end. Not a working branch. |
 | `develop` | The **2020 legacy tip** — dead code, kept for reference. Never branch from it. |
 
@@ -159,20 +160,32 @@ stale copy within a week.
   becomes a deployment, including the settings that were wrong the first time and how they were
   found.
 
-Every push to `rebuild/v1` deploys to production automatically.
+**Merging into `rebuild/v1` does not deploy anything.** Production is built from `release`, and
+moves only when a pull request from `rebuild/v1` into `release` is merged — deliberately, by the
+owner, after the migrations the branch assumes have been pasted into the live project.
 
-> **That coupling is what makes #62 dangerous to merge, and it is the thing to change first.**
-> Because the merge *is* the deploy, a branch whose client needs a migration nobody has pasted goes
-> live the moment it lands — the client asks for `members.email` and calls a three-argument
-> `create_household`, and the live project has neither. Owner decision, 2026-08-10: **decouple deploy
-> from merge before #62 merges** — point Vercel's production branch at a tag, or turn on manual
-> promote — so applying `0007` and promoting the client become two deliberate acts in the owner's
-> chosen order rather than one automatic one.
+That split is 2026-08-12 and it replaced the opposite arrangement, where production tracked
+`rebuild/v1` and **the merge was the deploy**. Migrations here are applied by hand (see above), so
+that coupling meant a branch whose client needed an unpasted migration went live the instant it
+landed — which is the 2026-08-09 outage in [`docs/access-model.md`](docs/access-model.md), and was
+about to happen a second time. Splitting the branches makes applying the migration and promoting the
+client two acts in an order somebody chooses.
+
+> **Discharged 2026-08-12, and #62 was the thing that proved it.** This block used to say the
+> coupling was what made #62 dangerous to merge, and that the fix had to come first. It did, and it
+> worked — on that exact branch.
 >
-> This is not a hypothetical. It is the same shape as the 2026-08-09 outage recorded in
-> `docs/access-model.md`, where client code that read an unpasted migration deployed automatically
-> and the app could not hold a household for a day. The mitigation used *then* was an accurate
-> paragraph in a document — which is what this paragraph is, and it is why it is not the whole fix.
+> The danger was specific: #62's client asks for `members.email` and calls a three-argument
+> `create_household`, and the live project has neither until `0007` is pasted. Under merge-is-deploy
+> that goes live the instant it lands, which is the 2026-08-09 outage repeated. *Measured* when
+> PR #89 merged: `rebuild/v1` moved to `d20a809`, `release` stayed at `fcabfc7`, and production went
+> on serving `fcabfc7` — the same `assets/index-*.js` file, not a rebuild that happened to match. The
+> merge deployed nothing.
+>
+> The line worth keeping is the one this block ended on before it was discharged: the mitigation used
+> in August was *an accurate paragraph in a document*, and that is why it was never the whole fix. A
+> paragraph explains the hazard to whoever reads it. What actually held here was a branch that
+> deploys nothing and a `githooks/owner-only` entry refusing a push to the one that does.
 
 ## The rest of `docs/`
 

@@ -9,7 +9,9 @@ import {
   currentUserId,
   findClaimedMember,
   listMembers,
+  provisionMember,
   removeMember,
+  resetMemberCredential,
   signIn,
   signOut,
   signUpOrganizer,
@@ -194,6 +196,19 @@ export default function App() {
   const handleAdd = useCallback((person) => mutate(() => addMember(person)), [mutate])
   const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
   const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
+  // #87 - give somebody a sign-in, or replace one they forgot. Routed through
+  // mutate() like every other write, so the roster re-reads from the server and
+  // the row's "Signed in" state comes from `claimed_by` rather than from an
+  // optimistic local guess about whether the Edge Function succeeded.
+  const handleProvision = useCallback(
+    (memberId, password, isReset) =>
+      mutate(() =>
+        isReset
+          ? resetMemberCredential({ memberId, password })
+          : provisionMember({ memberId, password }),
+      ),
+    [mutate],
+  )
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
@@ -321,6 +336,7 @@ export default function App() {
           onAdd={handleAdd}
           onSave={handleSave}
           onRemove={handleRemove}
+          onProvision={handleProvision}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
           overrides={overrides}

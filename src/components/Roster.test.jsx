@@ -30,6 +30,10 @@ function setup(overrides = {}) {
     // touch every existing call in this file for no behavioural gain.
     onSetCapacity: vi.fn().mockResolvedValue(undefined),
     onClearCapacity: vi.fn().mockResolvedValue(undefined),
+    // #87 — provisioning. A spy rather than a stub returning undefined: the
+    // control chains `.then(close)` off it, so a non-promise would close the
+    // form for the wrong reason and hide a broken call.
+    onProvision: vi.fn().mockResolvedValue(undefined),
   }
   // The week the fixture override belongs to. Passed explicitly rather than
   // defaulted, because an override is only an override OF a period — matching on
@@ -68,13 +72,23 @@ describe('the household header — #62', () => {
     expect(screen.queryByText(/deterrence, not\s+a lock/i)).not.toBeInTheDocument()
   })
 
-  it('tells the organizer that provisioning is not built yet', () => {
-    // The honest refusal. An organizer can add people today and cannot give them
-    // a way in, because that needs the `service_role` key and therefore an Edge
-    // Function. Silence here means discovering the gap one family member at a
-    // time.
+  it('tells the organizer how to give somebody a sign-in — #87', () => {
+    // Was "tells the organizer that provisioning is not built yet", asserting
+    // the note said `not built yet`. #87 built it, so that assertion is now the
+    // wrong way round and is REPLACED rather than deleted: the note still has a
+    // job, and an organizer who is told nothing here has to guess whether the
+    // button on each row is the thing that fixes "No sign-in yet".
     setup({ isOrganizer: true })
-    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/not built yet/i)
+    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/sign-in from their row/i)
+  })
+
+  it('no longer claims provisioning is unbuilt — the placeholder must not outlive the gap', () => {
+    // #87 AC 6 names this explicitly. An honest placeholder that survives the
+    // thing it apologised for becomes a false statement that reads as
+    // documentation, and this one would send an organizer hunting for a tool
+    // that is now sitting on the row in front of them.
+    setup({ isOrganizer: true })
+    expect(screen.queryByText(/not built yet/i)).not.toBeInTheDocument()
   })
 
   it('does not say it to anyone who cannot act on it', () => {
@@ -541,5 +555,84 @@ describe('this week’s capacity — #46', () => {
       expect(css).toContain('.member__week {')
       expect(css.indexOf('.member__week {')).toBeLessThan(css.indexOf('.member__week-form'))
     })
+  })
+})
+
+// #87 AC 6 — the row stops merely reporting "No sign-in yet" and gains the
+// control that fixes it.
+describe('#87 — giving somebody a sign-in', () => {
+  it('offers the control to an organizer, on the row of somebody who has none', () => {
+    setup({ isOrganizer: true })
+    const control = screen.getByTestId('provision-m1')
+    expect(control).toHaveTextContent(/give a sign-in/i)
+  })
+
+  it('offers a RESET on the row of somebody who already has one', () => {
+    // Same control, different verb. The discriminator is `claimed_by`, which is
+    // the only thing that says whether an account exists — m2 has one.
+    setup({ isOrganizer: true })
+    expect(screen.getByTestId('provision-m2')).toHaveTextContent(/reset sign-in/i)
+  })
+
+  it('does NOT offer it to a non-organizer, who the function would refuse anyway', () => {
+    // Manners, not security: the Edge Function checks `is_household_organizer`
+    // as the caller and refuses. Rendering a control that is always refused
+    // promises something the app cannot deliver.
+    setup({ isOrganizer: false })
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+  })
+
+  it('sends the typed credential, and says whether it is a reset', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), {
+      target: { value: 'kid-secret-1' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    // Third argument is the reset flag — false here, because m1 has no account.
+    expect(handlers.onProvision).toHaveBeenCalledWith('m1', 'kid-secret-1', false)
+  })
+
+  it('sends the reset flag for somebody who already has an account', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m2'))
+    fireEvent.change(screen.getByTestId('provision-input-m2'), {
+      target: { value: 'kid-secret-2' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /reset it/i }))
+    })
+    expect(handlers.onProvision).toHaveBeenCalledWith('m2', 'kid-secret-2', true)
+  })
+
+  it('refuses a short credential WITHOUT calling the server', async () => {
+    // The floor is enforced in three places and this is the cheapest one. It is
+    // not the boundary — the Edge Function refuses too — but a round trip to be
+    // told "too short" is a worse experience than being told immediately.
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), { target: { value: 'abc' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    expect(handlers.onProvision).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least 6 characters/i)
+  })
+
+  it('tells the organizer to pass the credential on, because no email is sent', async () => {
+    // The one thing an organizer cannot discover by trying it: a provisioned
+    // member has a synthetic `.invalid` address, so nothing is ever delivered
+    // and the PIN exists nowhere else once this form closes.
+    setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    // Scoped to the row's form, and asserted on the half that appears ONLY
+    // there. The header note says "no email is sent" too, so a bare text query
+    // matches both and passes whether or not the form says anything — the
+    // assertion would have been about the wrong element.
+    expect(
+      within(rowFor('Placeholder One')).getByText(/nobody can look it up later/i),
+    ).toBeInTheDocument()
   })
 })

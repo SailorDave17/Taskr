@@ -409,3 +409,114 @@ describe('AC 10 — no component test proves an access rule', () => {
     expect(DATABASE_REFUSALS.test(pglite), 'the pattern must match the suite that does prove these').toBe(true)
   })
 })
+
+// #87 AC 1 — the `service_role` key must never reach the client bundle.
+//
+// The Edge Function holds a key that BYPASSES row-level security entirely: with
+// it, every policy in supabase/migrations/ is void. `src/lib/keyShape.js` already
+// refuses at build time if a secret key is put in a `VITE_` variable, but that
+// guards the VALUE. This guards the BOUNDARY — that the code which names the key
+// lives somewhere Vite cannot reach.
+//
+// Asserted on source rather than on `dist/`, deliberately. The bundle is built
+// FROM `src/`, so "no file under src/ names the secret" is the property that
+// makes inlining impossible, and it can be checked on every run. A dist/ scan
+// would need a build to have happened first and would SKIP when it had not,
+// which is the vacuous-pass shape this file exists to refuse.
+describe('#87 — the service_role key cannot reach the client bundle', () => {
+  const srcDir = resolve(process.cwd(), 'src')
+
+  function filesUnder(dir) {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = resolve(dir, entry.name)
+      return entry.isDirectory() ? filesUnder(full) : [full]
+    })
+  }
+
+  // The two spellings that matter: the env var the function reads, and the
+  // prefix of a modern secret key. Legacy JWT secret keys are covered by
+  // keyShape.js at build time, which reads the role claim rather than a prefix.
+  const FORBIDDEN = [/SUPABASE_SERVICE_ROLE_KEY/, /sb_secret_/]
+
+  // A guard whose subject is SOURCE TEXT cannot tell the hazard from prose
+  // about the hazard, so it refuses the very code written to detect it. Measured
+  // on the first run of this test: it flagged keyShape.js — the build-time check
+  // that exists to catch a secret key — plus its own tests.
+  //
+  // The repair is an allowlist with a stated reason per entry, NOT a looser
+  // pattern. Loosening is what turns a guard into decoration; an allowlist keeps
+  // the refusal sharp and turns each exemption into something a reader can argue
+  // with. Every entry is asserted to still exist below, so a rename cannot
+  // silently widen the exemption into a hole.
+  const ALLOWED = {
+    'src/lib/keyShape.js': 'the build-time detector itself — it must name what it refuses',
+    'src/lib/keyShape.test.js': 'proves the detector can fail, using real secret-key shapes',
+    'src/lib/supabase.test.js': 'asserts the client refuses a secret key',
+    'src/test/gate.test.js': 'this file — the patterns above and the prose around them',
+  }
+
+  function repoPath(file) {
+    return file.slice(process.cwd().length + 1).split('\\').join('/')
+  }
+
+  it('no file under src/ names the service_role key, outside the allowlist', () => {
+    const offenders = []
+    for (const file of filesUnder(srcDir)) {
+      if (!/\.(js|jsx|ts|tsx)$/.test(file)) continue
+      const relative = repoPath(file)
+      if (ALLOWED[relative]) continue
+      const text = readFileSync(file, 'utf8')
+      if (FORBIDDEN.some((pattern) => pattern.test(text))) {
+        offenders.push(relative)
+      }
+    }
+    expect(offenders, `these files could inline a secret key: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('every allowlisted file still exists, so a rename cannot widen the exemption', () => {
+    const missing = Object.keys(ALLOWED).filter((relative) => {
+      try {
+        readFileSync(resolve(process.cwd(), relative), 'utf8')
+        return false
+      } catch {
+        return true
+      }
+    })
+    expect(missing, `allowlist names files that are gone: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('every allowlisted file actually contains a forbidden pattern', () => {
+    // An exemption for a file that no longer needs one is a hole waiting for
+    // somebody to paste a key into a path already marked safe.
+    const unnecessary = Object.keys(ALLOWED).filter((relative) => {
+      const text = readFileSync(resolve(process.cwd(), relative), 'utf8')
+      return !FORBIDDEN.some((pattern) => pattern.test(text))
+    })
+    expect(unnecessary, `these exemptions are no longer needed: ${unnecessary.join(', ')}`).toEqual(
+      [],
+    )
+  })
+
+  it('POSITIVE CONTROL: the Edge Function DOES name it, so the search works', () => {
+    // Without this the test above passes just as happily against a typo in the
+    // pattern, or if the function were deleted — an absence proving nothing.
+    // The function lives outside src/, which is the whole point.
+    const fn = readFileSync(
+      resolve(process.cwd(), 'supabase/functions/provision-member/index.ts'),
+      'utf8',
+    )
+    expect(fn).toMatch(/SUPABASE_SERVICE_ROLE_KEY/)
+  })
+
+  it('the Edge Function is outside src/, so the bundler cannot follow an import', () => {
+    const offenders = []
+    for (const file of filesUnder(srcDir)) {
+      if (!/\.(js|jsx|ts|tsx)$/.test(file)) continue
+      const text = readFileSync(file, 'utf8')
+      if (/from\s+['"][^'"]*supabase\/functions/.test(text)) {
+        offenders.push(file.slice(process.cwd().length + 1))
+      }
+    }
+    expect(offenders, `src/ imports the Edge Function: ${offenders.join(', ')}`).toEqual([])
+  })
+})

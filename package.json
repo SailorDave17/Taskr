@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:rls": "vitest run --config vitest.integration.config.js",
+    "test:functions": "vitest run --config vitest.functions.config.js",
     "check:live": "vitest run --config vitest.integration.config.js src/test/schema.integration.test.js",
     "icons": "node scripts/generate-icons.mjs",
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs"

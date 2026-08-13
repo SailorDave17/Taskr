@@ -330,6 +330,14 @@ body {
   opacity: 0.75;
 }
 
+/* #87 — the provisioning form, opened from a member row. Same shape as the
+   week form above it: it replaces the row's button in place rather than
+   opening a dialog, so the organizer stays on the roster they are reading. */
+.member__signin-form {
+  gap: 0.5rem;
+  width: 100%;
+}
+
 .member__week-form {
   width: 100%;
   margin-top: 0.5rem;

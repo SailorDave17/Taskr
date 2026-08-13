@@ -162,13 +162,133 @@ CapacityControl.propTypes = {
   onClear: PropTypes.func.isRequired,
 }
 
+/**
+ * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6.
+ *
+ * Organizer-only, because the Edge Function refuses anybody else and a control
+ * that renders for a person who will always be refused is a promise the app
+ * cannot keep. The refusal is still the real boundary; this is manners.
+ *
+ * The organizer types the credential and tells the person out loud (owner
+ * decision, #87): a household already understands "your PIN is 1234", and the
+ * alternative — generating one and showing it once — needs a surface that
+ * displays a secret exactly once and a recovery path for the organizer who
+ * looks away. Reset uses this identical control, which is why the copy is the
+ * only thing that changes between the two states.
+ */
+function SignInControl({ member, busy, onProvision }) {
+  const [editing, setEditing] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [complaint, setComplaint] = useState(null)
+
+  const hasSignIn = Boolean(member.claimed_by)
+
+  function open() {
+    setSecret('')
+    setComplaint(null)
+    setEditing(true)
+  }
+
+  function close() {
+    setComplaint(null)
+    setEditing(false)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        className="button button--quiet"
+        type="button"
+        onClick={open}
+        disabled={busy}
+        data-testid={`provision-${member.id}`}
+        aria-label={
+          hasSignIn
+            ? `Reset the sign-in for ${member.display_name}`
+            : `Give ${member.display_name} a way to sign in`
+        }
+      >
+        {hasSignIn ? 'Reset sign-in' : 'Give a sign-in'}
+      </button>
+    )
+  }
+
+  return (
+    <form
+      className="stack member__signin-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        // The same floor the Edge Function enforces and the data layer restates.
+        // Checked here so the person gets the sentence before a round trip, not
+        // instead of the server check — the server is still what refuses.
+        if (secret.length < 6) {
+          setComplaint('Use at least 6 characters, so it is not guessable.')
+          return
+        }
+        setComplaint(null)
+        onProvision(member.id, secret, hasSignIn).then(close, () => {})
+      }}
+    >
+      <label className="field">
+        <span className="field__label">
+          {hasSignIn ? `New PIN for ${member.display_name}` : `PIN for ${member.display_name}`}
+        </span>
+        <input
+          className="field__input"
+          type="text"
+          value={secret}
+          autoComplete="off"
+          data-testid={`provision-input-${member.id}`}
+          onChange={(e) => setSecret(e.target.value)}
+        />
+      </label>
+      {/* Said once, here, rather than in a note somewhere else on the screen:
+          this is the moment the organizer needs to know the person never sees
+          an email, because it is the moment they decide what to tell them. */}
+      <p className="card__note">
+        Tell {member.display_name} this — they sign in with their name and this
+        PIN. No email is sent, and nobody can look it up later.
+      </p>
+      {complaint ? (
+        <p className="error" role="alert">
+          {complaint}
+        </p>
+      ) : null}
+      {/* Plain `.row`, deliberately WITHOUT the button-stretch opt-in the
+          action rows carry. gate.test.js counts that class and requires exactly
+          one per screen, because it was measured on a single row at phone width
+          (#82); taking it here would inherit a treatment nobody measured for
+          this form. The class is not named in this comment on purpose — the
+          check counts raw occurrences in the source, so writing it here would
+          trip the very guard being explained. */}
+      <div className="row">
+        <button className="button button--quiet" type="button" onClick={close} disabled={busy}>
+          Cancel
+        </button>
+        <button className="button" type="submit" disabled={busy}>
+          {hasSignIn ? 'Reset it' : 'Give the sign-in'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+SignInControl.propTypes = {
+  member: PropTypes.object.isRequired,
+  busy: PropTypes.bool,
+  onProvision: PropTypes.func.isRequired,
+}
+
 function MemberRow({
   member,
   override,
   isMe,
   busy,
+  isOrganizer,
   onSave,
   onRemove,
+  onProvision,
   onSetCapacity,
   onClearCapacity,
 }) {
@@ -254,6 +374,13 @@ function MemberRow({
         <span className="member__access" data-testid={`access-${member.id}`}>
           {member.claimed_by ? 'Signed in' : 'No sign-in yet'}
         </span>
+        {/* #87 — the row stops merely REPORTING the gap and gains the thing
+            that closes it. Organizer-only: the Edge Function refuses anybody
+            else, and offering a control that is always refused is worse than
+            not offering one. */}
+        {isOrganizer && onProvision ? (
+          <SignInControl member={member} busy={busy} onProvision={onProvision} />
+        ) : null}
         {/* The baseline above stays visible beside this week's number on
             purpose: an override that hid what it was overriding would make the
             figure impossible to sanity-check, and the product's claim is that
@@ -320,6 +447,8 @@ function MemberRow({
 }
 
 MemberRow.propTypes = {
+  isOrganizer: PropTypes.bool,
+  onProvision: PropTypes.func,
   member: PropTypes.object.isRequired,
   override: PropTypes.object,
   isMe: PropTypes.bool,
@@ -352,6 +481,7 @@ export default function Roster({
   onAdd,
   onSave,
   onRemove,
+  onProvision,
   onRefresh,
   onSignOut,
   overrides = [],
@@ -410,18 +540,18 @@ export default function Roster({
             themselves, so a household is no longer only as private as the least
             careful person holding a shared code.
 
-            The honest half — provisioning is not built yet. An organizer can add
-            a person to the roster today, and that person cannot sign in until an
-            account exists for them, which needs the `service_role` key and
-            therefore an Edge Function. Saying so here rather than nowhere: the
-            alternative is an organizer adding their family one by one and
-            discovering the gap from each of them in turn. */}
+            That note conceded provisioning was not built and told the organizer
+            to expect "No sign-in yet" with no way to fix it. #87 built it, so
+            the note is GONE rather than reworded: an honest placeholder that
+            outlives the gap it describes becomes a lie that reads as
+            documentation, and this one would have sent an organizer looking for
+            a tool that is now sitting on the row in front of them. The
+            replacement is not prose — it is the control itself. */}
         {isOrganizer ? (
           <p className="card__note" data-testid="provisioning-note">
-            You can add people to the roster now. Giving them a way to sign in
-            needs the organizer tool, which is not built yet — until it is, a new
-            person shows as &ldquo;No sign-in yet&rdquo; and only you can see the
-            household.
+            Add people here, then give each of them a sign-in from their row.
+            They sign in with their own name and a PIN you set — tell them what
+            it is, because no email is sent.
           </p>
         ) : null}
       </section>
@@ -455,8 +585,10 @@ export default function Roster({
                 // already being somebody. The row's only remaining say in
                 // identity is reporting whether an account exists.
                 busy={busy}
+                isOrganizer={isOrganizer}
                 onSave={onSave}
                 onRemove={onRemove}
+                onProvision={onProvision}
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
@@ -537,6 +669,7 @@ Roster.propTypes = {
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
+  onProvision: PropTypes.func,
   onRefresh: PropTypes.func.isRequired,
   onSignOut: PropTypes.func,
   overrides: PropTypes.array,

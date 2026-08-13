@@ -872,8 +872,9 @@ describe('the bypass this migration closes', () => {
       create extension if not exists pgcrypto with schema extensions;
       create role anon nologin;
       create role authenticated nologin;
-      grant usage on schema public, extensions to anon, authenticated;
-      alter default privileges in schema public grant all on tables to anon, authenticated;
+      create role service_role nologin;
+      grant usage on schema public, extensions to anon, authenticated, service_role;
+      alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
       create table auth.users (id uuid primary key default gen_random_uuid());
       create or replace function auth.uid() returns uuid language sql stable as $stub$
         select nullif(current_setting('test.uid', true), '')::uuid

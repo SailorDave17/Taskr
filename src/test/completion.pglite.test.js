@@ -194,8 +194,9 @@ describe('completing a chore, run against a real Postgres', () => {
         create extension if not exists pgcrypto with schema extensions;
         create role anon nologin;
         create role authenticated nologin;
-        grant usage on schema public, extensions to anon, authenticated;
-        alter default privileges in schema public grant all on tables to anon, authenticated;
+        create role service_role nologin;
+        grant usage on schema public, extensions to anon, authenticated, service_role;
+        alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
         -- email, because 0007 copies the organizer's address off this table.
         -- The stub in support/pgliteSupabase.js carries it too; this one is a
         -- deliberate second copy because the point of these mutated databases is

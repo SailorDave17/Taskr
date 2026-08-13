@@ -67,7 +67,19 @@ export default defineConfig({
     // as a gate with zero tests in it. The exclusion is stated in-band, in
     // src/test/rls.integration.test.js and docs/access-model.md, so a reader
     // counting the checks does not mistake four for five.
-    exclude: [...configDefaults.exclude, '**/*.integration.test.js'],
+    // The same argument covers `*.functions.test.js` (#87), which drives the
+    // Edge Function against a LOCAL Supabase stack — it needs Docker, Postgres,
+    // GoTrue and a service_role key, none of which CI has. It is loud rather
+    // than skipped for the same reason: its beforeAll FAILS with instructions
+    // when the stack is down. `npm run test:functions`, against
+    // vitest.functions.config.js. It is a third runner rather than joining the
+    // integration one because that config includes rls.integration.test.js,
+    // which is known-red until #88 migrates it off the retired model.
+    exclude: [
+      ...configDefaults.exclude,
+      '**/*.integration.test.js',
+      '**/*.functions.test.js',
+    ],
     // Pin a NON-UTC zone. Dates here are calendar dates (`chores.due_on`), and
     // the classic fault is a Date round-trip that parses YYYY-MM-DD as UTC
     // midnight and formats it back with local getters — returning the previous

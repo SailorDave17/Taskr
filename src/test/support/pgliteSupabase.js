@@ -34,6 +34,7 @@ export const MIGRATIONS = [
   '0005_weekly_capacity.sql',
   '0006_chore_assignment.sql',
   '0007_per_member_auth.sql',
+  '0008_provisioning_grants.sql',
 ]
 
 export function migrationSql(name) {
@@ -59,11 +60,28 @@ export function migrationFilesOnDisk() {
 // about the real platform; they are listed rather than bundled so a wrong one is
 // findable.
 //
-// The default privileges matter more than they look. Supabase grants ALL on
-// every table in `public` to `anon` and `authenticated`, which is precisely why
-// row-level security alone was not enough in 0001 and why 0002 has to revoke
-// and re-grant per column. Stubbing this wrongly — by granting nothing — would
-// make 0002's central fix untestable and, worse, make it look unnecessary.
+// The default privileges matter more than they look. This stub grants ALL on
+// every table in `public`, which is why row-level security alone was not enough
+// in 0001 and why 0002 has to revoke and re-grant per column. Stubbing it
+// wrongly — by granting nothing — would make 0002's central fix untestable and,
+// worse, make it look unnecessary.
+//
+// ⚠ THIS PARTICULAR LINE IS KNOWN TO OVERSTATE THE CURRENT PLATFORM, and it is
+// left that way deliberately. *Measured 2026-08-13* against `supabase start`
+// (CLI 2.114.0): the default ACL for tables created by `postgres` in `public`
+// is `anon=Dxtm authenticated=Dxtm service_role=Dxtm` — TRUNCATE, REFERENCES,
+// TRIGGER, MAINTAIN and no SELECT/INSERT/UPDATE/DELETE at all. Newer stacks
+// tightened it; the hosted project predates that and still has the permissive
+// form, which is the only reason the live app can read `households` (no
+// migration grants that, and a rebuilt project cannot).
+//
+// Keeping the permissive stub means this suite tests what 0002 was WRITTEN
+// against, and cannot see a missing grant. That blindness is real and is
+// exactly the shape of "a harness that builds its own environment cannot tell
+// you the environment is wrong" — the households gap was found by running the
+// app against a real stack, not here. Narrowing it to match is a change with
+// its own blast radius across every pglite file and belongs in the story that
+// fixes the grants, not in #87.
 const SUPABASE_ENV = `
   create schema if not exists auth;
   create schema if not exists extensions;
@@ -71,11 +89,16 @@ const SUPABASE_ENV = `
 
   create role anon nologin;
   create role authenticated nologin;
+  -- Added for #87. The provisioning Edge Function runs as this role, and 0008
+  -- grants it two column privileges - without the role, that migration fails to
+  -- apply at all. It is nologin here for the same reason the other two are: this
+  -- harness never authenticates, it uses set role.
+  create role service_role nologin;
 
-  grant usage on schema public     to anon, authenticated;
-  grant usage on schema extensions to anon, authenticated;
+  grant usage on schema public     to anon, authenticated, service_role;
+  grant usage on schema extensions to anon, authenticated, service_role;
 
-  alter default privileges in schema public grant all on tables to anon, authenticated;
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 
   -- email is a real column on Supabase's auth.users, and 0007 reads it: the
   -- organizer's address is copied onto their member row from here rather than

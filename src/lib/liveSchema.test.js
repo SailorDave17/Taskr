@@ -49,7 +49,10 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    expect(readTables.size).toBeGreaterThanOrEqual(5)
+    // Four since #62 dropped `household_devices`. The number is a floor against
+    // a vacuous pass, not a target — it goes DOWN when a table legitimately
+    // leaves, and that edit should be visible in review rather than automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(4)
     expect(readTables).toContain('chores')
   })
 
@@ -69,10 +72,15 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the five tables #78 names by number', () => {
-    for (const table of ['households', 'members', 'household_devices', 'chores', 'member_capacity']) {
+  it('covers the four tables the app still reads', () => {
+    // #78 named five. `household_devices` was the fifth and #62 drops it, so
+    // this list lost an entry rather than gaining one — worth stating, because
+    // a shrinking required-set is exactly the edit that would otherwise look
+    // like someone quietly weakening the check.
+    for (const table of ['households', 'members', 'chores', 'member_capacity']) {
       expect(LIVE_TABLES).toContain(table)
     }
+    expect(LIVE_TABLES).not.toContain('household_devices')
   })
 
   it('takes its column lists from the data layer rather than restating them', () => {
@@ -133,7 +141,7 @@ describe('#78 — a failure names the object that is missing', () => {
   })
 
   it('reports a grant failure rather than treating it as success', () => {
-    const line = describeSchemaError('members', 'id, has_pin', {
+    const line = describeSchemaError('members', 'id, email', {
       code: '42501',
       message: 'permission denied for table members',
     })

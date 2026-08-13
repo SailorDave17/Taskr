@@ -24,9 +24,9 @@ import {
   freshDatabase,
   migrationSql,
   newDevice,
+  databaseThrough,
 } from './support/pgliteSupabase.js'
 
-const PIN = '4821'
 
 describe('assigning a chore, run against a real Postgres', () => {
   let db, deviceA, deviceB, householdA, householdB, memberA, memberB, outsiderMember, choreId
@@ -63,18 +63,16 @@ describe('assigning a chore, run against a real Postgres', () => {
     deviceB = await newDevice(db)
 
     householdA = await asDevice(db, deviceA, async () => {
-      const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
         'Placeholder Household',
         'Placeholder Organizer',
-        PIN,
       ])
       return rows[0]
     })
     householdB = await asDevice(db, deviceB, async () => {
-      const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
         'Placeholder Other Household',
         'Placeholder Other Organizer',
-        PIN,
       ])
       return rows[0]
     })
@@ -255,7 +253,11 @@ describe('assigning a chore, run against a real Postgres', () => {
         create role authenticated nologin;
         grant usage on schema public, extensions to anon, authenticated;
         alter default privileges in schema public grant all on tables to anon, authenticated;
-        create table auth.users (id uuid primary key default gen_random_uuid());
+        -- email, because 0007 copies the organizer's address off this table.
+        -- The stub in support/pgliteSupabase.js carries it too; this one is a
+        -- deliberate second copy because the point of these mutated databases is
+        -- to apply migrations the shared helper would not.
+        create table auth.users (id uuid primary key default gen_random_uuid(), email text);
         create or replace function auth.uid() returns uuid language sql stable as $stub$
           select nullif(current_setting('test.uid', true), '')::uuid
         $stub$;
@@ -276,10 +278,9 @@ describe('assigning a chore, run against a real Postgres', () => {
         }
       }
       const hh = await as(device, async () => {
-        const { rows } = await mutated.query('select * from public.create_household($1, $2, $3)', [
+        const { rows } = await mutated.query('select * from public.create_household($1, $2)', [
           'Mutant Household',
           'Mutant Organizer',
-          PIN,
         ])
         return rows[0]
       })
@@ -433,12 +434,22 @@ describe('assigning a chore, run against a real Postgres', () => {
   // -------------------------------------------------------------------------
 
   describe('0006 is re-runnable, because a re-paste is the normal path', () => {
+    // Each test here builds its own database THROUGH this migration rather than
+    // reusing the full-stack `db`. Re-pasting a superseded file on top of a
+    // newer one is not the path a human takes, and after 0007 it is destructive:
+    // it restores the four-argument `create_household` and the policies that
+    // resolve through the dropped `household_devices`. Two of these assertions
+    // went on passing while doing exactly that — a green test that had already
+    // undone the migration under review.
+
     it('applies a second time without error', async () => {
-      const second = await attempt(() => db.exec(migrationSql('0006_chore_assignment.sql')))
+      const at0006 = await databaseThrough('0006_chore_assignment.sql')
+      const second = await attempt(() => at0006.exec(migrationSql('0006_chore_assignment.sql')))
       expect(second.error).toBeNull()
     })
 
     it('and a re-run does not widen the grants', async () => {
+      const db = await databaseThrough('0006_chore_assignment.sql')
       await db.exec(migrationSql('0006_chore_assignment.sql'))
       const { rows } = await db.query(
         `select column_name from information_schema.column_privileges
@@ -450,10 +461,15 @@ describe('assigning a chore, run against a real Postgres', () => {
     })
 
     it('and an assignment made before the re-paste survives it', async () => {
+      // Re-pastes the HEAD migration, not 0006. The data question is the same —
+      // does a re-paste preserve rows — but the file a human re-pastes today is
+      // 0007, and running 0006 here would re-point `assign_chore` back at the
+      // dropped device table and leave the suite asserting against a schema
+      // nobody has.
       await asDevice(db, deviceA, () =>
         db.query('select * from public.assign_chore($1, $2)', [choreId, memberA]),
       )
-      await db.exec(migrationSql('0006_chore_assignment.sql'))
+      await db.exec(migrationSql('0007_per_member_auth.sql'))
       expect(await assigneeOf(choreId)).toBe(memberA)
     })
   })

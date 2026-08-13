@@ -30,6 +30,7 @@ import {
   migrationFilesOnDisk,
   migrationSql,
   newDevice,
+  databaseThrough,
 } from './support/pgliteSupabase.js'
 
 /** The columns a client may read, matching 0003's select grant. */
@@ -49,7 +50,6 @@ const READABLE = 'id, title, expected_minutes, due_on, created_at'
 const asIsoDate = (value) =>
   value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10)
 
-const HOUSEHOLD_PIN = '4821'
 
 describe('chores, run against a real Postgres', () => {
   let db
@@ -77,10 +77,9 @@ describe('chores, run against a real Postgres', () => {
     deviceB = await newDevice(db)
 
     householdA = await asDevice(db, deviceA, async () => {
-      const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
         'Placeholder Household',
         'Placeholder Organizer',
-        HOUSEHOLD_PIN,
       ])
       return rows[0]
     })
@@ -198,10 +197,9 @@ describe('chores, run against a real Postgres', () => {
 
       // B is in a household of its own, not merely unjoined.
       await asDevice(db, deviceB, () =>
-        db.query('select * from public.create_household($1, $2, $3)', [
+        db.query('select * from public.create_household($1, $2)', [
           'Other Household',
           'Other Organizer',
-          '9999',
         ]),
       )
 
@@ -240,7 +238,7 @@ describe('chores, run against a real Postgres', () => {
     it('a device in another household cannot edit or delete a chore it cannot see', async () => {
       const chore = await insertChore(deviceA, { householdId: householdA.id })
       await asDevice(db, deviceB, () =>
-        db.query('select * from public.create_household($1, $2, $3)', ['Other', 'Other Org', '9999']),
+        db.query('select * from public.create_household($1, $2)', ['Other', 'Other Org']),
       )
 
       await asDevice(db, deviceB, () =>
@@ -270,10 +268,9 @@ describe('chores, run against a real Postgres', () => {
   describe('AC 4 — a device cannot file a chore into a household it has not joined', () => {
     it('refuses an insert naming another household', async () => {
       const otherHousehold = await asDevice(db, deviceB, async () => {
-        const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+        const { rows } = await db.query('select * from public.create_household($1, $2)', [
           'Other Household',
           'Other Organizer',
-          '9999',
         ])
         return rows[0]
       })
@@ -332,10 +329,9 @@ describe('chores, run against a real Postgres', () => {
     it('REGRESSION: a client cannot move a chore into another household by writing household_id', async () => {
       const chore = await insertChore(deviceA, { householdId: householdA.id })
       const otherHousehold = await asDevice(db, deviceB, async () => {
-        const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+        const { rows } = await db.query('select * from public.create_household($1, $2)', [
           'Other Household',
           'Other Organizer',
-          '9999',
         ])
         return rows[0]
       })
@@ -471,12 +467,22 @@ describe('chores, run against a real Postgres', () => {
   // -------------------------------------------------------------------------
 
   describe('AC 7 — 0003 is re-runnable', () => {
+    // Each test here builds its own database THROUGH this migration rather than
+    // reusing the full-stack `db`. Re-pasting a superseded file on top of a
+    // newer one is not the path a human takes, and after 0007 it is destructive:
+    // it restores the four-argument `create_household` and the policies that
+    // resolve through the dropped `household_devices`. Two of these assertions
+    // went on passing while doing exactly that — a green test that had already
+    // undone the migration under review.
+
     it('applies a second time without error, because a re-paste is the normal path', async () => {
-      const second = await attempt(() => db.exec(migrationSql('0003_chores.sql')))
+      const at0003 = await databaseThrough('0003_chores.sql')
+      const second = await attempt(() => at0003.exec(migrationSql('0003_chores.sql')))
       expect(second.error).toBeNull()
     })
 
     it('and a re-run does not widen the grants — the revoke/grant pair is idempotent too', async () => {
+      const db = await databaseThrough('0003_chores.sql')
       await db.exec(migrationSql('0003_chores.sql'))
       const { rows } = await db.query(
         `select column_name from information_schema.column_privileges

@@ -35,6 +35,15 @@ and the reasoning — including the honest statement of what the access model do
 against — is [`docs/access-model.md`](docs/access-model.md). Read that before touching the data
 layer.
 
+**The PIN sentence above is about the LIVE app, and the code has already moved past it.**
+[#62](https://github.com/SailorDave17/Taskr/issues/62) replaces the organizer-set PIN and the shared
+join code with real per-member sign-in — each person has their own account, and `auth.uid()`
+identifies a person rather than a phone. It is written and proven against the pglite harness, and
+`0007` is **deliberately not applied to the live project**: pasting it clears every existing claim,
+and restoring access needs an Edge Function that does not exist yet, so the household would be locked
+out of its own data in between. The migration's own section 9 carries the ordering. Until that
+function is deployed, what is live is the PIN.
+
 **Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
 Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
 editor by a person, at the merge of the story that adds it. They are re-runnable and a test proves
@@ -161,6 +170,22 @@ that coupling meant a branch whose client needed an unpasted migration went live
 landed — which is the 2026-08-09 outage in [`docs/access-model.md`](docs/access-model.md), and was
 about to happen a second time. Splitting the branches makes applying the migration and promoting the
 client two acts in an order somebody chooses.
+
+> **Discharged 2026-08-12, and #62 was the thing that proved it.** This block used to say the
+> coupling was what made #62 dangerous to merge, and that the fix had to come first. It did, and it
+> worked — on that exact branch.
+>
+> The danger was specific: #62's client asks for `members.email` and calls a three-argument
+> `create_household`, and the live project has neither until `0007` is pasted. Under merge-is-deploy
+> that goes live the instant it lands, which is the 2026-08-09 outage repeated. *Measured* when
+> PR #89 merged: `rebuild/v1` moved to `d20a809`, `release` stayed at `fcabfc7`, and production went
+> on serving `fcabfc7` — the same `assets/index-*.js` file, not a rebuild that happened to match. The
+> merge deployed nothing.
+>
+> The line worth keeping is the one this block ended on before it was discharged: the mitigation used
+> in August was *an accurate paragraph in a document*, and that is why it was never the whole fix. A
+> paragraph explains the hazard to whoever reads it. What actually held here was a branch that
+> deploys nothing and a `githooks/owner-only` entry refusing a push to the one that does.
 
 ## The rest of `docs/`
 

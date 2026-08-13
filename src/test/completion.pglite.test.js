@@ -19,11 +19,11 @@ import {
   freshDatabase,
   migrationSql,
   newDevice,
+  databaseThrough,
 } from './support/pgliteSupabase.js'
 
 const READABLE =
   'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id'
-const PIN = '4821'
 
 describe('completing a chore, run against a real Postgres', () => {
   let db, deviceA, deviceB, householdA, memberA, choreId
@@ -43,10 +43,9 @@ describe('completing a chore, run against a real Postgres', () => {
     deviceB = await newDevice(db)
 
     householdA = await asDevice(db, deviceA, async () => {
-      const { rows } = await db.query('select * from public.create_household($1, $2, $3)', [
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
         'Placeholder Household',
         'Placeholder Organizer',
-        PIN,
       ])
       return rows[0]
     })
@@ -197,7 +196,11 @@ describe('completing a chore, run against a real Postgres', () => {
         create role authenticated nologin;
         grant usage on schema public, extensions to anon, authenticated;
         alter default privileges in schema public grant all on tables to anon, authenticated;
-        create table auth.users (id uuid primary key default gen_random_uuid());
+        -- email, because 0007 copies the organizer's address off this table.
+        -- The stub in support/pgliteSupabase.js carries it too; this one is a
+        -- deliberate second copy because the point of these mutated databases is
+        -- to apply migrations the shared helper would not.
+        create table auth.users (id uuid primary key default gen_random_uuid(), email text);
         create or replace function auth.uid() returns uuid language sql stable as $stub$
           select nullif(current_setting('test.uid', true), '')::uuid
         $stub$;
@@ -219,11 +222,15 @@ describe('completing a chore, run against a real Postgres', () => {
         }
       }
       const hh = await as(device, async () => {
-        const { rows } = await mutated.query('select * from public.create_household($1, $2, $3)', [
-          'Mutant Household',
-          'Mutant Organizer',
-          PIN,
-        ])
+        // Three arguments, not two: this mutated database stops at 0004, where
+        // `create_household` is still 0002's `(name, organizer, pin)`. The
+        // signature is a fact about the VINTAGE being mutated, so it does not
+        // follow the head migration — a global rename to the new arity broke
+        // exactly this call and nothing else.
+        const { rows } = await mutated.query(
+          'select * from public.create_household($1, $2, $3)',
+          ['Mutant Household', 'Mutant Organizer', '4821'],
+        )
         return rows[0]
       })
       const { rows: seeded } = await mutated.query(
@@ -274,6 +281,37 @@ describe('completing a chore, run against a real Postgres', () => {
       })
       expect(back.completed_by_member_id).toBeNull()
     })
+
+    it('refuses an undo from another household, and the completion stands', async () => {
+      // `uncomplete_chore` carries its own access rule, the same one
+      // `complete_chore` carries, and until #62 nothing tested it: both existing
+      // tests above call it from inside the household. Measured 2026-08-11 —
+      // neutralising the predicate in uncomplete_chore reddened NOTHING while the
+      // same mutation to complete_chore reddened two, which is the whole tell.
+      //
+      // It matters more than an undo sounds: this is the one function that can
+      // erase a record of who did the work, so an outsider reaching it removes
+      // evidence rather than adding a row.
+      await asDevice(db, deviceA, () => db.query('select public.complete_chore($1)', [choreId]))
+      await asDevice(db, deviceB, () =>
+        db.query('select * from public.create_household($1, $2)', ['Other', 'Other Org']),
+      )
+
+      const refused = await attempt(() =>
+        asDevice(db, deviceB, () => db.query('select public.uncomplete_chore($1)', [choreId])),
+      )
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/no such chore in your household/i)
+
+      // Read as the owner, bypassing RLS: a refusal that still wrote would
+      // satisfy the assertion above and lose the attribution anyway.
+      const { rows } = await db.query(
+        'select completed_at, completed_by_member_id from public.chores where id = $1',
+        [choreId],
+      )
+      expect(rows[0].completed_at).not.toBeNull()
+      expect(rows[0].completed_by_member_id).toBe(memberA)
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -283,7 +321,7 @@ describe('completing a chore, run against a real Postgres', () => {
   describe('AC 6 — completion is scoped to the household', () => {
     it('refuses a chore in another household, and the row re-reads unchanged', async () => {
       await asDevice(db, deviceB, () =>
-        db.query('select * from public.create_household($1, $2, $3)', ['Other', 'Other Org', '9999']),
+        db.query('select * from public.create_household($1, $2)', ['Other', 'Other Org']),
       )
 
       const refused = await attempt(() =>
@@ -340,29 +378,54 @@ describe('completing a chore, run against a real Postgres', () => {
       expect(rows).toHaveLength(1)
     })
 
-    it('still completes when the device is acting as nobody, leaving attribution null', async () => {
-      // A phone can be joined to the household without having claimed a person.
-      // The work is still done, and refusing it would be the same argument as
-      // refusing an unassigned completion.
-      await asDevice(db, deviceB, () =>
-        db.query('select public.join_household($1)', [householdA.join_code]),
+    it('REFUSES a signed-in caller who has claimed no member — the state 0007 removed', async () => {
+      // This test asserted the OPPOSITE until #62, and the reversal is the
+      // behaviour change rather than a corrected mistake. Under device auth a
+      // phone could join a household and claim nobody, so `complete_chore`
+      // accepted the work and left attribution null — refusing it would have
+      // been the same argument as refusing an unassigned completion, which AC 7
+      // decided to allow.
+      //
+      // After 0007 that state cannot be reached. Membership IS a claimed member
+      // row, so a caller who has claimed nobody is in no household, and the
+      // chore is not found. The refusal is deliberately the same one a
+      // nonexistent id gets: which of the two you hit is free information.
+      const refused = await attempt(() =>
+        asDevice(db, deviceB, () =>
+          db.query('select * from public.complete_chore($1)', [choreId]),
+        ),
       )
-      const done = await asDevice(db, deviceB, async () => {
-        const { rows } = await db.query('select * from public.complete_chore($1)', [choreId])
-        return rows[0]
-      })
-      expect(done.completed_at).not.toBeNull()
-      expect(done.completed_by_member_id).toBeNull()
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/no such chore in your household/)
+
+      // And the chore really is untouched — a refusal that still wrote would
+      // pass the assertion above.
+      const { rows } = await db.query(
+        'select completed_at, completed_by_member_id from public.chores where id = $1',
+        [choreId],
+      )
+      expect(rows[0].completed_at).toBeNull()
+      expect(rows[0].completed_by_member_id).toBeNull()
     })
   })
 
   describe('0004 is re-runnable, because a human pastes it', () => {
+    // Each test here builds its own database THROUGH this migration rather than
+    // reusing the full-stack `db`. Re-pasting a superseded file on top of a
+    // newer one is not the path a human takes, and after 0007 it is destructive:
+    // it restores the four-argument `create_household` and the policies that
+    // resolve through the dropped `household_devices`. Two of these assertions
+    // went on passing while doing exactly that — a green test that had already
+    // undone the migration under review.
+
     it('applies a second time without error', async () => {
-      const second = await attempt(() => db.exec(migrationSql('0004_chore_completion.sql')))
+      const at0004 = await databaseThrough('0004_chore_completion.sql')
+      const second = await attempt(() => at0004.exec(migrationSql('0004_chore_completion.sql')))
       expect(second.error).toBeNull()
     })
 
     it('and a re-run does not widen the update grant', async () => {
+      const db = await databaseThrough('0004_chore_completion.sql')
       await db.exec(migrationSql('0004_chore_completion.sql'))
       const { rows } = await db.query(
         `select column_name from information_schema.column_privileges

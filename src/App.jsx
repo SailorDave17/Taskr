@@ -3,17 +3,16 @@ import { buildInfo } from './buildInfo.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
 import {
   addMember,
-  claimMember,
-  claimMemberWithPin,
   createHousehold,
-  currentDeviceId,
   currentHousehold,
-  ensureSession,
+  currentSession,
+  currentUserId,
   findClaimedMember,
-  joinHousehold,
   listMembers,
   removeMember,
-  setMemberPin,
+  signIn,
+  signOut,
+  signUpOrganizer,
   updateMember,
 } from './lib/household.js'
 import {
@@ -37,15 +36,21 @@ import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 
-// Story #5: the household roster, joinable from family phones.
+// Story #5: the household roster, on family phones.
 //
-// The screen is a function of one question — has this device joined a household?
-// — and that question is answered by the SERVER on every load, never by
-// localStorage. AC 3 asks that the roster survive a force-close, a reinstall and
-// a backend restart, and a locally cached roster would make a passing check
-// indistinguishable from a device that merely remembered. What IS held locally
-// is the Supabase auth session, which is the credential, not the data; that is
-// what makes AC 5's "stays joined days later" true without re-entering the code.
+// The screen is a function of one question — WHO is signed in, and do they
+// belong to a household? — and that question is answered by the SERVER on every
+// load, never by localStorage. AC 3 asks that the roster survive a force-close,
+// a reinstall and a backend restart, and a locally cached roster would make a
+// passing check indistinguishable from a device that merely remembered. What IS
+// held locally is the Supabase auth session, which is the credential, not the
+// data; that is what makes "still signed in days later" true without retyping
+// anything.
+//
+// #62 changed what that session IS. It used to be an anonymous DEVICE identity,
+// minted on boot so the app always had one, with a separate step to say which
+// person the device was acting as. Now it is the person: one identity, acquired
+// deliberately, and no state in which somebody is signed in as nobody.
 
 export default function App() {
   const [status, setStatus] = useState('loading')
@@ -58,7 +63,7 @@ export default function App() {
   // and the overrides are a server read like every other.
   const [overrides, setOverrides] = useState([])
   const [periodStart, setPeriodStart] = useState(null)
-  const [deviceId, setDeviceId] = useState(null)
+  const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -82,7 +87,7 @@ export default function App() {
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
     setOverrides(period ? await listCapacity(period) : [])
-    setDeviceId(await currentDeviceId())
+    setUserId(await currentUserId())
     return found
   }, [])
 
@@ -98,7 +103,22 @@ export default function App() {
         return
       }
       try {
-        await ensureSession()
+        // No session is a normal state now, not one to repair. Under device auth
+        // this called `ensureSession()`, which signed the phone in anonymously so
+        // that boot always ended with an identity; #62 removes the idea of being
+        // signed in as nobody, so a phone with no session gets the sign-in screen
+        // and a person decides who they are.
+        //
+        // The reads are skipped entirely rather than attempted and allowed to
+        // come back empty. They would succeed — every policy simply returns
+        // nothing to an unauthenticated caller — and "signed out" would be
+        // indistinguishable from "your household disappeared", which is the more
+        // alarming of the two readings and the wrong one.
+        const session = await currentSession()
+        if (!session) {
+          if (!cancelled) setStatus('onboarding')
+          return
+        }
         const found = await refresh()
         if (!cancelled) setStatus(found ? 'joined' : 'onboarding')
       } catch (err) {
@@ -140,17 +160,41 @@ export default function App() {
     [refresh],
   )
 
+  // Two steps in one action, and the order is load-bearing. `create_household`
+  // refuses an unauthenticated caller and claims the organizer's member row to
+  // `auth.uid()` in the same statement — so the account has to exist first, and
+  // the household created second is already reachable by the person who made it.
+  // Reversing them is not merely wrong, it is unrecoverable from the client:
+  // a household whose organizer row is unclaimed is visible to nobody.
+  //
+  // The signup is CONDITIONAL, and that is the repair for a dead end. These are
+  // two durable steps with no transaction between them, so the second can fail
+  // on its own — and it did more than hypothetically: against a project without
+  // 0007 applied, `create_household` fails every time. That left an auth account
+  // with no household, on a screen whose only Create button would call `signUp`
+  // again for an address that now exists, throw, and never reach the RPC.
+  //
+  // So when a session already exists, this skips straight to the household. The
+  // person who got half-way through is offered the half they are missing rather
+  // than the half they already have, and `Onboarding` renders `Sign out` in that
+  // state so the other way out exists too.
   const handleCreate = useCallback(
-    (name, organizer) => mutate(() => createHousehold(name, organizer)),
+    (name, { organizerName, email, password }) =>
+      mutate(async () => {
+        if (!userId) await signUpOrganizer({ email, password })
+        return createHousehold(name, { organizerName })
+      }),
+    [mutate, userId],
+  )
+  const handleSignIn = useCallback(
+    (credentials) => mutate(() => signIn(credentials)),
     [mutate],
   )
-  const handleJoin = useCallback((code) => mutate(() => joinHousehold(code)), [mutate])
+  const handleSignOut = useCallback(() => mutate(() => signOut()), [mutate])
   const handleAdd = useCallback((person) => mutate(() => addMember(person)), [mutate])
   const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
   const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
-  const handleClaim = useCallback((id) => mutate(() => claimMember(id)), [mutate])
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
-  const handleSetPin = useCallback((id, pin) => mutate(() => setMemberPin(id, pin)), [mutate])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.
@@ -172,14 +216,6 @@ export default function App() {
     [mutate],
   )
   const handleUnassignChore = useCallback((id) => mutate(() => unassignChore(id)), [mutate])
-  // The other half of the credential (#63). `claimMember` refuses anyone holding
-  // a PIN outright, so without this a member the organizer had given a PIN to
-  // could not get onto their own phone at all — and `set_member_pin` releases
-  // whatever phone they were on, so setting one locked them out.
-  const handleSignIn = useCallback(
-    (id, pin) => mutate(() => claimMemberWithPin(id, pin)),
-    [mutate],
-  )
   // #46 — set or clear THIS period's capacity. Both take the period from state
   // rather than recomputing it, so the write lands in the same week the screen
   // is showing even if midnight passes mid-session.
@@ -203,7 +239,7 @@ export default function App() {
     [mutate, periodStart],
   )
 
-  const me = findClaimedMember(members, deviceId)
+  const me = findClaimedMember(members, userId)
 
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
@@ -262,7 +298,16 @@ export default function App() {
       ) : null}
 
       {status === 'onboarding' ? (
-        <Onboarding onCreate={handleCreate} onJoin={handleJoin} busy={busy} />
+        <Onboarding
+          onCreate={handleCreate}
+          onSignIn={handleSignIn}
+          onSignOut={handleSignOut}
+          // Non-null only when boot found a session, because the signed-out path
+          // returns before refresh() runs. Signed in AND on this screen is
+          // precisely the half-finished state described above.
+          signedIn={Boolean(userId)}
+          busy={busy}
+        />
       ) : null}
 
       {status === 'joined' && household ? (
@@ -276,10 +321,8 @@ export default function App() {
           onAdd={handleAdd}
           onSave={handleSave}
           onRemove={handleRemove}
-          onClaim={handleClaim}
-          onSetPin={handleSetPin}
-          onSignIn={handleSignIn}
           onRefresh={handleRefresh}
+          onSignOut={handleSignOut}
           overrides={overrides}
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}

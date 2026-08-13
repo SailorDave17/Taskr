@@ -31,6 +31,10 @@ function makeQuery(table) {
     order() {
       return q
     },
+    limit(n) {
+      calls.push({ op: 'limit', table, n })
+      return q
+    },
     eq(column, value) {
       calls.push({ op: 'eq', table, column, value })
       return q
@@ -63,13 +67,31 @@ const fakeClient = {
   auth: {
     getSession: () => Promise.resolve({ data: { session: authState.session ?? null } }),
     getUser: () => Promise.resolve({ data: { user: authState.user ?? null } }),
-    signInAnonymously: () => {
-      calls.push({ op: 'signInAnonymously' })
+    // `signInAnonymously` stood here until #62. It is gone rather than left
+    // unused: a stub for a call the app must never make again would let a
+    // regression pass, and its absence turns one into a TypeError naming the
+    // method.
+    signInWithPassword: (credentials) => {
+      calls.push({ op: 'signInWithPassword', credentials })
       return Promise.resolve(
         authState.signInError
           ? { data: null, error: { message: authState.signInError } }
-          : { data: { session: { user: { id: 'new-device' } } }, error: null },
+          : { data: { session: { user: { id: 'person-1' } } }, error: null },
       )
+    },
+    signUp: (credentials) => {
+      calls.push({ op: 'signUp', credentials })
+      if (authState.signUpError) {
+        return Promise.resolve({ data: null, error: { message: authState.signUpError } })
+      }
+      return Promise.resolve({
+        data: { session: authState.signUpNeedsConfirmation ? null : { user: { id: 'organizer-1' } } },
+        error: null,
+      })
+    },
+    signOut: () => {
+      calls.push({ op: 'signOut' })
+      return Promise.resolve({ error: authState.signOutError ? { message: authState.signOutError } : null })
     },
   },
 }
@@ -81,18 +103,17 @@ vi.mock('./supabase.js', () => ({
 
 const {
   addMember,
-  claimMember,
-  claimMemberWithPin,
   currentHousehold,
   createHousehold,
+  currentSession,
   deviceTimezone,
-  ensureSession,
   findClaimedMember,
   formatMinutes,
-  joinHousehold,
   listMembers,
   normalizeMinutes,
-  setMemberPin,
+  signIn,
+  signOut,
+  signUpOrganizer,
   updateMember,
 } = await import('./household.js')
 
@@ -164,59 +185,146 @@ describe('which member this device is acting as', () => {
   })
 })
 
-describe('signing this device in', () => {
-  it('reuses an existing session instead of creating a second anonymous user', async () => {
+describe('signing in as a person', () => {
+  // #62. Every test in this block replaced one about anonymous DEVICE sign-in,
+  // and the difference they are all circling is that a session is now acquired
+  // deliberately by somebody rather than minted on boot for a phone.
+
+  it('reports no session rather than creating one', async () => {
+    // The behaviour reversal. `ensureSession()` promised a session and made one;
+    // this returns null and the app answers with a sign-in screen. A stub that
+    // still signed in anonymously would leave every caller's null-check dead.
+    await expect(currentSession()).resolves.toBeNull()
+    expect(calls.filter((c) => c.op === 'signUp' || c.op === 'signInWithPassword')).toHaveLength(0)
+  })
+
+  it('returns the existing session when there is one', async () => {
     authState.session = { user: { id: 'already-here' } }
-    const session = await ensureSession()
-
-    expect(session.user.id).toBe('already-here')
-    expect(calls.filter((c) => c.op === 'signInAnonymously')).toHaveLength(0)
+    await expect(currentSession()).resolves.toMatchObject({ user: { id: 'already-here' } })
   })
 
-  it('signs in anonymously when there is no session yet', async () => {
-    const session = await ensureSession()
-
-    expect(session.user.id).toBe('new-device')
-    expect(calls.filter((c) => c.op === 'signInAnonymously')).toHaveLength(1)
+  it('signs a person in with the credential they hold', async () => {
+    const session = await signIn({ email: '  alex@example.com  ', password: '4821' })
+    expect(session.user.id).toBe('person-1')
+    // Trimmed, because a phone keyboard offers a trailing space after an
+    // autocompleted address and the auth endpoint does not forgive one.
+    expect(calls).toContainEqual({
+      op: 'signInWithPassword',
+      credentials: { email: 'alex@example.com', password: '4821' },
+    })
   })
 
-  it('says the provider may be disabled, because that failure does not say so itself', async () => {
-    authState.signInError = 'Anonymous sign-ins are disabled'
-    await expect(ensureSession()).rejects.toThrow(/Anonymous Sign-Ins are enabled/i)
+  it('keeps the refusal vague, because a household is a small closed set of people', async () => {
+    // Supabase answers a wrong password and an unknown address identically. This
+    // asserts we do not helpfully undo that: "no such account" would tell a
+    // guesser which addresses exist, and there are only a handful.
+    authState.signInError = 'Invalid login credentials'
+    await expect(signIn({ email: 'nobody@example.com', password: 'x' })).rejects.toThrow(
+      /did not match/i,
+    )
+    await expect(signIn({ email: 'nobody@example.com', password: 'x' })).rejects.not.toThrow(
+      /no such|unknown|not found/i,
+    )
   })
 
-  it('distinguishes the per-IP rate limit, which presents as a bug in our own code', async () => {
+  it('names an unconfirmed email instead of blaming the password', async () => {
+    // Collapsed, this told somebody holding the RIGHT password to try again
+    // forever. It leaks nothing: GoTrue checks the password BEFORE confirmation
+    // state, so this code only reaches a caller who already proved they hold it.
+    authState.signInError = 'Email not confirmed'
+    await expect(signIn({ email: 'alex@example.com', password: 'right' })).rejects.toThrow(
+      /needs its email confirmed/i,
+    )
+  })
+
+  it('names the shared-NAT rate limit, which presents as a credential fault', async () => {
+    // `ensureSession` carried this branch and it was dropped when the call
+    // changed to signInWithPassword. The reasoning did not stop applying: a
+    // household is one IP, so several people signing in on one evening trip it.
     authState.signInError = 'Request rate limit reached'
-    await expect(ensureSession()).rejects.toThrow(/from this network in the last hour/i)
+    await expect(signIn({ email: 'alex@example.com', password: 'right' })).rejects.toThrow(
+      /too many sign-in attempts/i,
+    )
+  })
+
+  it('POSITIVE CONTROL: an ordinary refusal is still the vague one', () => {
+    // Without this, widening the branches until everything is named would pass
+    // every test above while undoing the enumeration protection entirely.
+    authState.signInError = 'Invalid login credentials'
+    return expect(signIn({ email: 'nobody@example.com', password: 'x' })).rejects.toThrow(
+      /did not match/i,
+    )
+  })
+
+  it('creates the organizer their own account, which is the one signup a client may do', async () => {
+    const session = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
+    expect(session.user.id).toBe('organizer-1')
+    expect(calls).toContainEqual({
+      op: 'signUp',
+      credentials: { email: 'alex@example.com', password: 'longenough' },
+    })
+  })
+
+  it('says plainly when the account needs email confirmation, rather than returning a null session', async () => {
+    // Supabase returns `{ session: null }` with NO error when confirmation is
+    // on. Passing that back would hand the caller a session-shaped null and the
+    // failure would surface three steps later as "not signed in".
+    authState.signUpNeedsConfirmation = true
+    await expect(
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    ).rejects.toThrow(/email confirmation/i)
+  })
+
+  it('surfaces a signup refusal with its reason, unlike sign-in', async () => {
+    // Deliberately the opposite of the vagueness above, and for a reason that
+    // does not conflict: you are creating your OWN account, so "that address is
+    // already registered" tells you nothing you did not know and is the only
+    // thing that lets you act.
+    authState.signUpError = 'User already registered'
+    await expect(
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    ).rejects.toThrow(/already registered/i)
+  })
+
+  it('signs out, which is the only way off a shared phone', async () => {
+    await signOut()
+    expect(calls).toContainEqual({ op: 'signOut' })
   })
 })
 
-describe('finding the household this device belongs to', () => {
-  it('is null when this device has joined nothing, rather than an error', async () => {
-    results.household_devices = { data: null, error: null }
+describe('finding the household the signed-in person belongs to', () => {
+  // #62 turned this from two reads into one. Under device auth it resolved
+  // `household_devices` and then fetched the household by id; the table is gone
+  // and membership is `members.claimed_by = auth.uid()`, which the households
+  // SELECT policy resolves inside the database. So the client asks for
+  // households and gets its own — the filtering that used to be a second query
+  // is now the policy.
+  it('is null when nobody is signed in as a member, rather than an error', async () => {
+    results.households = { data: [], error: null }
     await expect(currentHousehold()).resolves.toBeNull()
   })
 
-  it('loads the household named by the membership row', async () => {
-    results.household_devices = { data: { household_id: 'h1' }, error: null }
-    results.households = { data: { id: 'h1', name: 'Placeholder Household' }, error: null }
+  it('loads the household the policy returns, without naming an id itself', async () => {
+    results.households = { data: [{ id: 'h1', name: 'Placeholder Household' }], error: null }
 
     await expect(currentHousehold()).resolves.toMatchObject({ id: 'h1' })
-    expect(calls).toContainEqual({ op: 'eq', table: 'households', column: 'id', value: 'h1' })
+    // The absence is the point: an `eq('id', …)` here would mean the client is
+    // choosing which household to load, and it has nothing to choose from.
+    expect(calls).not.toContainEqual(
+      expect.objectContaining({ op: 'eq', table: 'households', column: 'id' }),
+    )
+    expect(calls).toContainEqual({ op: 'limit', table: 'households', n: 1 })
   })
 
   it('names what it was doing when the query fails, not just the driver message', async () => {
-    results.household_devices = { data: null, error: { message: 'connection reset' } }
-    await expect(currentHousehold()).rejects.toThrow(
-      /checking whether this device has joined a household: connection reset/,
-    )
+    results.households = { data: null, error: { message: 'connection reset' } }
+    await expect(currentHousehold()).rejects.toThrow(/loading the household: connection reset/)
   })
 })
 
 describe('maintaining the roster', () => {
   beforeEach(() => {
-    results.household_devices = { data: { household_id: 'h1' }, error: null }
-    results.households = { data: { id: 'h1', name: 'Placeholder Household' }, error: null }
+    results.households = { data: [{ id: 'h1', name: 'Placeholder Household' }], error: null }
     results.members = { data: { id: 'm9' }, error: null }
   })
 
@@ -244,11 +352,17 @@ describe('maintaining the roster', () => {
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
-  it('refuses to add anyone when this device has joined no household', async () => {
-    results.household_devices = { data: null, error: null }
+  it('refuses to add anyone when nobody is signed in to a household', async () => {
+    // The empty ARRAY is the new "not a member": the households policy returns
+    // the caller's own and nothing else, so no rows means no membership. Setting
+    // the old `household_devices` fixture to null left this passing vacuously —
+    // that table is not read any more, so the fixture said nothing and the
+    // beforeEach's household was still returned.
+    results.households = { data: [], error: null }
     await expect(addMember({ displayName: 'Placeholder One', weeklyMinutes: 60 })).rejects.toThrow(
-      /has not joined a household/i,
+      /not signed in to a household/i,
     )
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
   it('edits only the fields it was given', async () => {
@@ -267,110 +381,117 @@ describe('maintaining the roster', () => {
   })
 })
 
-describe('the two ways into a household', () => {
-  it('creates a household through the server function, never a direct insert', async () => {
-    results.create_household = { data: { id: 'h1', join_code: 'ABCD2345' }, error: null }
+describe('creating a household', () => {
+  it('creates it through the server function, never a direct insert', async () => {
+    results.create_household = { data: { id: 'h1', name: 'Placeholder Household' }, error: null }
     const household = await createHousehold('  Placeholder Household  ', {
       organizerName: '  Placeholder Organizer  ',
-      organizerPin: '4821',
     })
 
-    expect(household.join_code).toBe('ABCD2345')
-    // The organizer and their PIN go in the SAME call. A household that exists
-    // for even one round trip without an organizer is one nobody can administer,
-    // and is_household_organizer() fails closed on it.
+    expect(household.id).toBe('h1')
+    // The organizer goes in the SAME call, and #62 raised the stakes on that
+    // rather than changing it: `create_household` claims their member row to
+    // `auth.uid()`, and a household whose organizer row is unclaimed is visible
+    // to NOBODY under the new predicate — including the person who just made it.
+    // A second round trip to attach them would leave a window with no way out.
+    //
+    // THREE arguments, not four. 0007 dropped the PIN and the third position is
+    // now the timezone, which is why the old shape did not fail cleanly: the PIN
+    // landed in the timezone slot and Postgres refused with `not a known
+    // timezone: 4821` — an error naming neither the caller nor the migration.
     expect(calls).toContainEqual({
       op: 'rpc',
       name: 'create_household',
       args: {
         household_name: 'Placeholder Household',
         organizer_name: 'Placeholder Organizer',
-        organizer_pin: '4821',
         // #44: the household's timezone goes in the same statement too, and for
         // a related reason — a week boundary is a local-time fact, and a second
         // round trip to set it can fail on its own, leaving the household filing
         // capacity under UTC weeks nobody lives in.
-        household_tz: deviceTimezone(),
+        household_timezone: deviceTimezone(),
       },
     })
     expect(calls.filter((c) => c.op === 'insert' && c.table === 'households')).toHaveLength(0)
   })
 
+  it('sends no credential to create_household at all', async () => {
+    // The specific regression. Any leftover PIN key would be silently accepted
+    // by this fake and refused by Postgres, so asserting the exact arg set above
+    // is not enough on its own — that assertion would still pass if a fifth key
+    // were added, since toContainEqual compares the object it is given.
+    results.create_household = { data: { id: 'h1' }, error: null }
+    await createHousehold('A Household', { organizerName: 'Organizer' })
+    const call = calls.find((c) => c.op === 'rpc' && c.name === 'create_household')
+    expect(Object.keys(call.args).sort()).toEqual([
+      'household_name',
+      'household_timezone',
+      'organizer_name',
+    ])
+  })
+
   it('sends a REAL zone from this device, not a placeholder — #44 AC 6', async () => {
-    // Asserting `household_tz: deviceTimezone()` above compares the code to
+    // Asserting `household_timezone: deviceTimezone()` above compares the code to
     // itself: it passes whatever both say, including both wrong together. This
     // is the half that says the value is an actual IANA zone the device
-    // resolved, so a 4th parameter nobody meaningfully fills would fail here.
-    results.create_household = { data: { id: 'h1', join_code: 'ABCD2345' }, error: null }
-    await createHousehold('A Household', {
-      organizerName: 'Organizer',
-      organizerPin: '4821',
-    })
+    // resolved, so a parameter nobody meaningfully fills would fail here.
+    results.create_household = { data: { id: 'h1' }, error: null }
+    await createHousehold('A Household', { organizerName: 'Organizer' })
     const call = calls.find((c) => c.op === 'rpc' && c.name === 'create_household')
-    expect(call.args.household_tz).toMatch(/^[A-Za-z]+\/[A-Za-z_+-]+$|^UTC$/)
-    expect(Intl.DateTimeFormat(undefined, { timeZone: call.args.household_tz })).toBeTruthy()
+    expect(call.args.household_timezone).toMatch(/^[A-Za-z]+\/[A-Za-z_+-]+$|^UTC$/)
+    expect(Intl.DateTimeFormat(undefined, { timeZone: call.args.household_timezone })).toBeTruthy()
   })
 
   it('refuses a household with no name', async () => {
     await expect(createHousehold('  ')).rejects.toThrow(/needs a name/i)
   })
 
-  it('sends the code to the server rather than validating the alphabet locally', async () => {
-    results.join_household = { data: { id: 'h1' }, error: null }
-    await joinHousehold('abcd-2345')
-
-    // Passed through as typed. The server normalises, and it is the only holder
-    // of the alphabet — a second copy here could drift and reject a valid code.
-    expect(calls).toContainEqual({ op: 'rpc', name: 'join_household', args: { code: 'abcd-2345' } })
-  })
-
-  it('surfaces the deliberately vague refusal without decorating it', async () => {
-    results.join_household = { data: null, error: { message: 'no household matches that code' } }
-    await expect(joinHousehold('ZZZZZZZZ')).rejects.toThrow(/no household matches that code/)
-  })
-
-  it('claims a person through the server function, so a race is serialised there', async () => {
-    results.claim_member = { data: { id: 'm9' }, error: null }
-    await claimMember('m9')
-
-    expect(calls).toContainEqual({ op: 'rpc', name: 'claim_member', args: { member_id: 'm9' } })
-    expect(calls.filter((c) => c.op === 'update' && c.table === 'members')).toHaveLength(0)
+  it('needs an organizer name, not just a household name', async () => {
+    await expect(createHousehold('A Household', {})).rejects.toThrow(/organizer needs a name/i)
   })
 })
 
-describe('per-member credentials', () => {
-  it('sets a PIN through the server function — there is no column a client could write', async () => {
-    // members.pin_hash is not in the grant list in migration 0002, so a direct
-    // update is refused by Postgres. This asserts the app does not even try,
-    // which is manners; the database is what makes it a rule.
-    results.set_member_pin = { data: { id: 'm1', has_pin: true }, error: null }
-    await setMemberPin('m1', '4821')
-    expect(calls).toContainEqual({
-      op: 'rpc',
-      name: 'set_member_pin',
-      args: { member_id: 'm1', new_pin: '4821' },
-    })
-    expect(calls.filter((c) => c.op === 'update' && c.table === 'members')).toHaveLength(0)
+describe('the retired credential path', () => {
+  // #62 AC 5 — "a test asserts no client-reachable route to the old credential
+  // path survives". The database half is asserted in migrations.pglite.test.js,
+  // which checks the functions are absent from the catalog. This is the client
+  // half, and it is worth having separately: a wrapper left behind here would
+  // turn a compile-time absence into a runtime `PGRST202 function not found`,
+  // discovered by a child on a phone rather than by CI.
+  it('exports no wrapper for any dropped RPC', async () => {
+    const household = await import('./household.js')
+    for (const gone of [
+      'joinHousehold',
+      'claimMember',
+      'claimMemberWithPin',
+      'setMemberPin',
+      'ensureSession',
+      'currentDeviceId',
+    ]) {
+      expect(household[gone], `${gone} is still exported`).toBeUndefined()
+    }
   })
 
-  it('refuses a PIN too short to be one before spending a round trip', async () => {
-    await expect(setMemberPin('m1', '12')).rejects.toThrow(/between 4 and 12/i)
-    expect(calls.filter((c) => c.op === 'rpc')).toHaveLength(0)
+  it('POSITIVE CONTROL: the module does still export the functions that replaced them', () => {
+    // Without this, a typo in the import above — or a module that failed to load
+    // — would make every assertion vacuously true.
+    expect(typeof signIn).toBe('function')
+    expect(typeof signUpOrganizer).toBe('function')
+    expect(typeof currentSession).toBe('function')
   })
+})
 
-  it('claims a person by proving you are them, via the PIN route', async () => {
-    results.claim_member_with_pin = { data: { id: 'm1' }, error: null }
-    await claimMemberWithPin('m1', '4821')
-    expect(calls).toContainEqual({
-      op: 'rpc',
-      name: 'claim_member_with_pin',
-      args: { member_id: 'm1', pin: '4821' },
-    })
-  })
-
-  it('never asks for pin_hash, because the grants would refuse the whole select', async () => {
-    // `select('*')` on members now fails outright rather than quietly omitting
-    // the column, so this is a working/not-working distinction, not tidiness.
+describe('the roster read', () => {
+  it('asks for a column list, never `*`, because the grants would refuse the whole select', async () => {
+    // `select('*')` on members fails outright rather than quietly omitting a
+    // column, so this is a working/not-working distinction, not tidiness.
+    //
+    // #62: the credential columns this used to name are gone. `pin_hash` was
+    // withheld from the client on purpose and `has_pin` was the boolean the UI
+    // read instead; 0007 drops both, and `email` is what the roster now reads to
+    // tell the two credential kinds apart. Asserting their ABSENCE as well as
+    // email's presence, because a column list that still named them would fail
+    // against the live project rather than degrade.
     results.members = { data: [], error: null }
     await listMembers()
     const selects = calls.filter((c) => c.op === 'select' && c.table === 'members')
@@ -378,7 +499,8 @@ describe('per-member credentials', () => {
     for (const call of selects) {
       expect(call.cols).not.toBe('*')
       expect(call.cols).not.toMatch(/pin_hash/)
-      expect(call.cols).toMatch(/has_pin/)
+      expect(call.cols).not.toMatch(/has_pin/)
+      expect(call.cols).toMatch(/email/)
     }
   })
 
@@ -388,9 +510,4 @@ describe('per-member credentials', () => {
     )
   })
 
-  it('creating a household needs a usable organizer PIN', async () => {
-    await expect(
-      createHousehold('A Household', { organizerName: 'Placeholder Organizer', organizerPin: '1' }),
-    ).rejects.toThrow(/between 4 and 12/i)
-  })
 })

@@ -46,12 +46,31 @@ describe('the CI gate can actually fail', () => {
 describe('the credential flow is reachable from the app, not just exported', () => {
   const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
 
-  it('imports the PIN claim from the data layer', () => {
-    expect(app).toMatch(/claimMemberWithPin/)
+  // #62 replaced the functions this guard names, and the guard is kept rather
+  // than retired because the FAILURE it caught is a property of the shape, not
+  // of those two names: a credential path is exactly the kind of code that can
+  // be exported, unit-tested and reachable by nobody. The names below are the
+  // new ones; if they are ever the wrong names, this test fails loudly, which is
+  // the intended cost.
+  it('imports both halves of the sign-in path from the data layer', () => {
+    // Both, because they fail differently. Without `signIn` an existing member
+    // cannot get back in; without `signUpOrganizer` a new household cannot be
+    // made at all, since `create_household` refuses an unauthenticated caller.
+    expect(app).toMatch(/\bsignIn\b/)
+    expect(app).toMatch(/\bsignUpOrganizer\b/)
   })
 
-  it('hands it to the roster, which is the only place a person can reach it', () => {
+  it('hands them to onboarding, which is the only place a person can reach them', () => {
     expect(app).toMatch(/onSignIn=\{/)
+    expect(app).toMatch(/onCreate=\{/)
+  })
+
+  it('and offers a way back out, which device auth never needed', () => {
+    // A session is a PERSON now. On a shared family tablet, no sign-out means no
+    // way to stop being that person — and no way to correct signing in as the
+    // wrong one.
+    expect(app).toMatch(/\bsignOut\b/)
+    expect(app).toMatch(/onSignOut=\{/)
   })
 })
 
@@ -220,12 +239,22 @@ describe('the phone-width action row keeps its buttons together', () => {
     expect(chores).toContain('className="row row--end row--actions"')
   })
 
-  it('#82: the PIN forms do NOT opt in, because they were never measured', () => {
-    // `.row--end` is on both PIN forms as well as the action row. Hanging the
-    // stretch off that class would have restyled their submit buttons with no
-    // measurement behind it, which is why the opt-in class exists at all.
+  it('#82: the opt-in stays narrow — one row per screen, never `.row--end` at large', () => {
+    // This test used to name the two PIN forms: they carried `.row--end` without
+    // `.row--actions`, and they were the evidence that hanging the stretch off
+    // `.row--end` would have restyled buttons nobody had measured.
+    //
+    // #62 deleted both forms, so that evidence is gone and the second assertion
+    // — "something uses bare `.row--end`" — went to zero. It was NOT simply
+    // dropped: an assertion whose subject has left is exactly the shape that
+    // goes on passing while measuring nothing. What it was really protecting is
+    // that `.row--actions` is applied deliberately and in one place, which is
+    // still true and still checkable.
     expect([...roster.matchAll(/row--actions/g)]).toHaveLength(1)
-    expect([...roster.matchAll(/className="row row--end"/g)].length).toBeGreaterThan(0)
+    expect([...chores.matchAll(/row--actions/g)]).toHaveLength(1)
+    // And the stretch rule is keyed on the opt-in, not on `.row--end`, so a row
+    // that has not been measured cannot inherit it.
+    expect(css).not.toMatch(/\.row--end\s*>\s*\.button\s*\{[^}]*flex:\s*1\s+1\s+auto/)
   })
 
   it('#83: a label with no wrap opportunity breaks instead of overflowing the row', () => {

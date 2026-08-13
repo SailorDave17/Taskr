@@ -27,6 +27,22 @@ wrong.
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Output directory: `dist`
+> **PENDING CHANGE, owner decision 2026-08-10 (#62): decouple deploy from merge.**
+>
+> Everything below describes merge-is-deploy, which is what the project does today and what step 4
+> sets up. It is also the mechanism behind the 2026-08-09 outage recorded further down, and #62's
+> review found it about to cause a second one: that branch's client cannot be served by the live
+> project until `0007` is pasted, so merging it would break a live household automatically.
+>
+> The agreed fix is to make promotion deliberate — point Production → Branch Tracking at a **tag**,
+> or enable **manual promote** — so "the migration is applied" and "the client is live" become two
+> acts the owner sequences. Until that is done in the Vercel dashboard, treat every merge to
+> `rebuild/v1` as a production release of whatever the client currently assumes about the schema.
+>
+> **This block describes an intended state, not a verified one.** Delete it and rewrite step 4 once
+> the setting has actually been changed — a runbook that describes a setting nobody made is the same
+> failure as the correction recorded in step 4 itself, which talked a reader out of checking.
+
 4. **Set the production branch to `rebuild/v1`** — not `main`. It is **Settings → Environments →
    Production → Branch Tracking**, *not* Settings → Git, where older instructions put it. Read the
    sentence it prints back: *"Every commit pushed to the `<branch>` branch will create a Production

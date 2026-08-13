@@ -27,20 +27,41 @@ wrong.
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Output directory: `dist`
-4. **Set the production branch to `rebuild/v1`** — not `main`. It is **Settings → Environments →
-   Production → Branch Tracking**, *not* Settings → Git, where older instructions put it. Read the
-   sentence it prints back: *"Every commit pushed to the `<branch>` branch will create a Production
-   Deployment."*
+4. **Set the production branch to `release`.** It is **Settings → Environments → Production → Branch
+   Tracking**, *not* Settings → Git, where older instructions put it. Read the sentence it prints
+   back: *"Every commit pushed to the `<branch>` branch will create a Production Deployment."*
 
-   **This step is real and it was missed.** *Measured 2026-08-05*: Vercel had it set to **`main`**,
-   so pushes to `rebuild/v1` produced **Preview** deployments and the production URL kept serving
-   the import-time build. The original warning here was right, and a correction written earlier the
-   same day — claiming Vercel "picked `rebuild/v1` correctly, verified by the first deployment
-   building the exact tip of `rebuild/v1`" — was **wrong**, and talked a reader out of the check.
-   The inference does not hold: Vercel marks the **import** deployment Production whatever branch it
-   builds, so building the right SHA is equally consistent with the production branch being set to
-   something else. One observation, two explanations, and the convenient one got written down as
-   verified. **Read the setting; do not infer it from a deployment.**
+   **Changed 2026-08-12, owner decision, and this is the current setting.** It was `rebuild/v1` from
+   2026-08-05 until then, which made **merging a pull request the act of deploying it**. That
+   coupling caused the 2026-08-09 outage recorded in `docs/access-model.md` — client code that
+   needed an unpasted migration went live automatically — and #62's review found it about to cause a
+   second one. Splitting the two branches makes *"the migration is applied"* and *"the client is
+   live"* two acts the owner sequences: work merges into `rebuild/v1` and deploys nothing;
+   production moves only when `release` does.
+
+   **The promotion step is therefore a pull request from `rebuild/v1` into `release`**, merged by
+   the owner after the migrations that branch assumes have been pasted. `githooks/owner-only` lists
+   `release` for that reason — a local push to it is refused, because a push to `release` is a
+   production release.
+
+   **This step is real and it has been missed once already.** *Measured 2026-08-05*: Vercel had it
+   set to **`main`**, so pushes to `rebuild/v1` produced **Preview** deployments and the production
+   URL kept serving the import-time build. The correction written earlier that same day — claiming
+   Vercel "picked `rebuild/v1` correctly, verified by the first deployment building the exact tip of
+   `rebuild/v1`" — was **wrong**, and talked a reader out of the check. The inference does not hold:
+   Vercel marks the **import** deployment Production whatever branch it builds, so building the
+   right SHA is equally consistent with the production branch being set to something else. One
+   observation, two explanations, and the convenient one got written down as verified. **Read the
+   setting; do not infer it from a deployment.**
+
+   **That warning applies to the 2026-08-12 change itself, which is recorded here as owner-asserted
+   and is not yet observed.** At the time of writing `release` and `rebuild/v1` are the *same
+   commit* (`fcabfc7`), and production serves `fcabfc7` — so the deployment is byte-identical under
+   either setting and **no observation available today can tell the two apart.** This is the same
+   trap as the two production URLs that served identical bytes: the distinction lives in a Vercel
+   setting, not in any response. **The first merge into `rebuild/v1` is the test** — if production
+   keeps serving its current `build <sha>` after that merge, the decoupling is real. Record that
+   observation here when it happens, and until then do not upgrade this line to verified.
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
 6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
    **This step was missing from the original runbook and it blocks AC 1 completely.**

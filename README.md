@@ -122,12 +122,13 @@ entirely and must never reach any `VITE_` variable; the build refuses outright i
 
 ## Branching — read this before you cut a branch
 
-This repository has **three branch roles**, and only one of them is where work goes. The names are
+This repository has **four branch roles**, and only one of them is where work goes. The names are
 misleading if you go by convention, so go by this table.
 
 | Branch | Role |
 |---|---|
 | **`rebuild/v1`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
+| `release` | **What Vercel builds production from.** Entered only by a pull request from `rebuild/v1` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
 | `main` | The **cutover target**. Holds the tag `legacy-final` and receives the rebuild in one merge at the end. Not a working branch. |
 | `develop` | The **2020 legacy tip** — dead code, kept for reference. Never branch from it. |
 
@@ -150,7 +151,16 @@ stale copy within a week.
   becomes a deployment, including the settings that were wrong the first time and how they were
   found.
 
-Every push to `rebuild/v1` deploys to production automatically.
+**Merging into `rebuild/v1` does not deploy anything.** Production is built from `release`, and
+moves only when a pull request from `rebuild/v1` into `release` is merged — deliberately, by the
+owner, after the migrations the branch assumes have been pasted into the live project.
+
+That split is 2026-08-12 and it replaced the opposite arrangement, where production tracked
+`rebuild/v1` and **the merge was the deploy**. Migrations here are applied by hand (see above), so
+that coupling meant a branch whose client needed an unpasted migration went live the instant it
+landed — which is the 2026-08-09 outage in [`docs/access-model.md`](docs/access-model.md), and was
+about to happen a second time. Splitting the branches makes applying the migration and promoting the
+client two acts in an order somebody chooses.
 
 ## The rest of `docs/`
 

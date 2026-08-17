@@ -27,12 +27,25 @@
 //
 // The half that DOES run in CI is `src/lib/liveSchema.test.js`, which checks the
 // table list against the source. This file checks the list against the project.
+//
+// #85 EXTENDS IT TO FUNCTIONS. #78 covered tables and columns and said so as a
+// stated limit: `0006` adds two RPCs as well as a column, and a migration that
+// added ONLY a function would pass the table check completely while every
+// assignment in the app failed. The RPC half is at the foot of this file, and
+// it probes with a GET rather than the POST `.rpc()` normally issues — which is
+// what makes calling a function that writes safe to do against production.
 
 import { createClient } from '@supabase/supabase-js'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { isSecretKey } from '../lib/keyShape.js'
-import { LIVE_SCHEMA, describeSchemaError } from '../lib/liveSchema.js'
+import {
+  LIVE_RPCS,
+  LIVE_SCHEMA,
+  describeRpcError,
+  describeSchemaError,
+  rpcProbeArgs,
+} from '../lib/liveSchema.js'
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
@@ -186,6 +199,97 @@ describe('#78 AC 2 — POSITIVE CONTROL: this check can actually fail', () => {
     expect(error, 'a missing column must be an error, not an empty result').toBeTruthy()
     expect(error.code).toBe('42703')
     expect(error.message).toContain(column)
+  })
+})
+
+/**
+ * Ask whether the function is there, without letting it do its job — #85.
+ *
+ * `{ get: true }` turns `.rpc()` from a POST into a GET, and PostgREST serves a
+ * GET inside a READ-ONLY TRANSACTION. That is the whole trick, and it is the
+ * function-shaped equivalent of `limit(0)`: every one of these RPCs writes, so
+ * the database refuses the write and answers `25006` — which proves the function
+ * resolved and ran, and proves it changed nothing, in the same round trip.
+ *
+ * Every argument gets a nil-UUID placeholder, so even the read the function does
+ * before its write matches no row of any household.
+ */
+async function probeRpc(fn, args) {
+  const { error } = await supabase.rpc(fn, rpcProbeArgs(args), { get: true })
+  return error
+}
+
+describe('#85 — the live project has every function this app calls', () => {
+  it('has an RPC list to check, so an empty pass is impossible', () => {
+    // Same shape and same reason as the table floor above, including the trap it
+    // has already sprung once: this is a FLOOR against a vacuous pass, not a
+    // target, and it goes down when an RPC legitimately leaves. Five since `0007`
+    // retires four of the nine #85 was filed naming.
+    expect(LIVE_RPCS.length).toBeGreaterThanOrEqual(5)
+  })
+
+  it('probes inside a read-only transaction, so a probe cannot write — #85 AC 3', async () => {
+    // THE CONTROL FOR AC 3, and it is evidence rather than a promise: every
+    // assertion in this describe rests on the claim that a GET cannot mutate, and
+    // that claim is only true while PostgREST keeps serving GET read-only.
+    //
+    // `complete_chore` takes a `for update` row lock as its first act, so if the
+    // transaction were writable this would come back `P0001` (no such chore).
+    // Postgres answering `25006` IS the read-only transaction, observed.
+    //
+    // It goes through `probeRpc` rather than calling the client directly, and
+    // that is the load-bearing detail: the safety of this whole file rests on one
+    // option — `{ get: true }` — living in one function, and a control that
+    // reached past it would stay green while every probe below started POSTing.
+    // Dropping the option makes this the test that fails, which is the only
+    // arrangement where AC 3 is guarded rather than asserted.
+    const error = await probeRpc('complete_chore', ['chore_id'])
+    expect(error?.code, 'the probe is no longer read-only — every probe below now WRITES').toBe(
+      '25006',
+    )
+  })
+
+  // One test per function, for the table half's reason: a failure should name the
+  // function in the run output, so the person who just pasted a migration reads
+  // which one is missing without opening a file.
+  for (const { fn, args } of LIVE_RPCS) {
+    it(`${fn}(${args.join(', ')}) exists, with the arguments the app passes`, async () => {
+      const error = await probeRpc(fn, args)
+      expect(describeRpcError(fn, args, error) ?? 'ok').toBe('ok')
+    })
+  }
+})
+
+describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () => {
+  // Without these, every assertion above is consistent with a probe that cannot
+  // report a problem — a GET that always errors the same way, a client swallowing
+  // the code, a classification that returns null for everything.
+
+  it('fails on a function that does not exist, and names it', async () => {
+    const fn = 'taskr_no_such_function_positive_control'
+    const error = await probeRpc(fn, ['chore_id'])
+    expect(error, 'a missing function must be an error, not an empty result').toBeTruthy()
+    expect(error.code).toBe('PGRST202')
+    const line = describeRpcError(fn, ['chore_id'], error)
+    expect(line).toContain(fn)
+    // MEASURED during the mutation pass: naming the function is not enough on its
+    // own. Disarming the `PGRST202` classification left this control GREEN — the
+    // fallback still produced a line, and that line still contained the function
+    // name, so the assertion could not tell "reported as missing" from "reported
+    // as unprovable". Pinning the classification is what makes it a control.
+    expect(line).toContain('never ran, or its signature changed')
+  })
+
+  it('fails on a function whose ARGUMENTS have changed, and names it', async () => {
+    // The sharper half, and the one that decides whether this check is worth
+    // more than a name list. `complete_chore` exists; `complete_chore(chore)`
+    // does not, because PostgREST resolves by argument names. A signature that
+    // drifts away from the client is exactly the live failure this check is for,
+    // and a name-only check would call it healthy.
+    const error = await probeRpc('complete_chore', ['chore'])
+    expect(error, 'a changed signature must be an error, not an empty result').toBeTruthy()
+    expect(error.code).toBe('PGRST202')
+    expect(describeRpcError('complete_chore', ['chore'], error)).toContain('signature changed')
   })
 })
 

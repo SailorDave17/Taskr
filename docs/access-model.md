@@ -21,9 +21,16 @@
   `members: a column this app selects does not exist in the live project [42703]`. Said here
   explicitly because an authority that is red by design and does not say so is one whose *next*
   genuine failure gets waved through — the exact way a real outage hid in plain sight on 2026-08-09.
-  The expected red is `members` and nothing else: a red on `households`, `chores` or
-  `member_capacity` is new and real. Each table has its own named test so they cannot hide inside
-  one another.
+  **The expected red is exactly two, `members` and `create_household`, and nothing else.** A red on
+  `households`, `chores` or `member_capacity`, or on any of the other four RPCs, is new and real.
+  Each table and each function has its own named test so they cannot hide inside one another.
+- **`create_household` joined that list on 2026-08-16, and it was not there before #85 could see
+  it.** The live project carries `create_household(household_name, household_tz, organizer_name,
+  organizer_pin)` — the four-argument version with the PIN — while the client since #62 calls the
+  three-argument one `0007` creates. Both are named `create_household`, so nothing that checked
+  names alone could tell them apart, and the first run of #85's RPC check is what surfaced it. It is
+  the same single cause as the `members.email` red: `0007` is written, proven, and deliberately
+  unapplied. **Pasting `0007` should clear both reds together** — if it clears only one, that is new.
 
 ## Read this first — the decision below changed, twice
 
@@ -408,12 +415,30 @@ the missing object — `42P01` for a table a migration never created, `42703` fo
 and never data (`limit(0)`), so it is safe to run against production at any time, and it refuses a
 secret key, which would answer a different question with broader grants.
 
-Two limits, stated rather than discovered later. It is **not run by CI** — CI has no credentials, and
-a check that skips itself when unconfigured is the vacuous pass this whole story is about — so it is
-a step a human runs after pasting a migration. And it covers **tables, not functions**: `0006` added
-`assign_chore` and `unassign_chore`, and a migration that adds only an RPC would pass this check
-while the app failed. The *list* it works from is guarded in CI by `src/lib/liveSchema.test.js`,
-which fails when the app reads a table the list does not name.
+One limit remains, stated rather than discovered later: it is **not run by CI** — CI has no
+credentials, and a check that skips itself when unconfigured is the vacuous pass this whole story is
+about — so it is a step a human runs after pasting a migration. The *list* it works from is guarded
+in CI by `src/lib/liveSchema.test.js`, which fails when the app reads a table the list does not name.
+
+**The second limit closed with #85, 2026-08-16.** It used to cover *tables, not functions* — `0006`
+adds `assign_chore` and `unassign_chore` as well as a column, so a migration that added only an RPC
+would pass the check while the app failed. `check:live` now probes the five RPCs the client calls as
+well, **by their argument names**, because PostgREST resolves an overload by the set of argument
+names rather than by position: `create_household(household_name, organizer_name,
+household_timezone)` and `create_household(household_name, household_tz, organizer_name,
+organizer_pin)` are two different functions to it, and only the second is on the live project today.
+
+How a function is probed without calling it is the part worth carrying: the probe is a **GET**, and
+PostgREST serves a GET inside a **read-only transaction**. All five of these RPCs write, so Postgres
+refuses the write and answers `25006` — which proves the function resolved *and* proves nothing
+changed, in one round trip. It is the function-shaped equivalent of `limit(0)`, and the check asserts
+that read-only behaviour with a control of its own rather than trusting it. A `PGRST202` is the
+failure: PostgREST answered from its schema cache, so the function was never resolved.
+
+#85 was filed naming **nine** RPCs and the answer is **five**. That is not a narrowing: `0007` drops
+`claim_member`, `claim_member_with_pin`, `set_member_pin` and `join_household`, and the client
+stopped calling them at #62 — so probing for them would make the check red against a *fully migrated*
+project, which is the `household_devices` mistake in the other direction.
 
 This section remains a **reasoning record, not a status report** - read the entries below for what each migration does and why, and `npm run check:live` for what the project actually has.
 

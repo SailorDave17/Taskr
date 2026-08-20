@@ -38,12 +38,19 @@ layer.
 **The PIN sentence above is about the LIVE app, and the code has already moved past it.**
 [#62](https://github.com/SailorDave17/Taskr/issues/62) replaces the organizer-set PIN and the shared
 join code with real per-member sign-in — each person has their own account, and `auth.uid()`
-identifies a person rather than a phone. It is written and proven against the pglite harness, and
-`0007` is **deliberately not applied to the live project**: pasting it clears every existing claim,
-and restoring access needs the Edge Function — written (#87, `supabase/functions/provision-member/`,
-both provision and reset paths) but deployed to the live project by the owner separately — so pasting
-before that deploy would lock the household out of its own data in between. The migration's own section 9 carries the ordering. Until that
-function is deployed, what is live is the PIN.
+identifies a person rather than a phone.
+
+**`0007` and `0008` were pasted to the live project on 2026-08-20** ([#108](https://github.com/SailorDave17/Taskr/issues/108)),
+so the database is now on per-member auth and `npm run check:live` is green at 17 of 17. Two things
+are deliberately still true after that paste, and both are sequence rather than oversight:
+
+- **What production serves is still the PIN build.** Vercel builds production from `release`, which
+  sits behind `rebuild/v1` until the promotion pull request is merged. That split is the whole point
+  — see *Branches* below.
+- **The Edge Function is not deployed.** Pasting `0007` cleared every existing claim, and restoring
+  access needs `service_role`, so it needs the function built by #87
+  (`supabase/functions/provision-member/`, both provision and reset paths). The migration's own
+  section 9 carries the ordering: provision the organizer first, then everyone else from the app.
 
 **Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
 Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
@@ -108,7 +115,7 @@ Other scripts:
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
 | `npm run test:functions` | **The provisioning Edge Function, against a real stack.** Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, and every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write. It reads schema and never data, and calls nothing for real. Run it after pasting a migration. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **Two reds are expected until `0007` is pasted**; [`docs/access-model.md`](docs/access-model.md) names them |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, and every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write. It reads schema and never data, and calls nothing for real. Run it after pasting a migration. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **No red is expected any more** — `0007` and `0008` were pasted on 2026-08-20 and it returns 17 of 17, so any red is new and real; [`docs/access-model.md`](docs/access-model.md) carries the history |
 
 ### The two variables you need
 
@@ -178,7 +185,7 @@ client two acts in an order somebody chooses.
 > worked — on that exact branch.
 >
 > The danger was specific: #62's client asks for `members.email` and calls a three-argument
-> `create_household`, and the live project has neither until `0007` is pasted. Under merge-is-deploy
+> `create_household`, and the live project had neither until `0007` was pasted. Under merge-is-deploy
 > that goes live the instant it lands, which is the 2026-08-09 outage repeated. *Measured* when
 > PR #89 merged: `rebuild/v1` moved to `d20a809`, `release` stayed at `fcabfc7`, and production went
 > on serving `fcabfc7` — the same `assets/index-*.js` file, not a rebuild that happened to match. The

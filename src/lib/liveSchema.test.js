@@ -205,7 +205,8 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
   it('reads argument names, not just function names', () => {
     // PostgREST resolves an overload by argument NAMES, so a list that captured
     // only the function name would pass against a project carrying a different
-    // signature - which is the exact live state until `0007` is pasted.
+    // signature - which was the exact live state until `0007` was pasted on
+    // 2026-08-20 (#108).
     expect(calledRpcs.get('assign_chore')).toEqual(['chore_id', 'member_id'])
     expect(calledRpcs.get('create_household')).toEqual([
       'household_name',

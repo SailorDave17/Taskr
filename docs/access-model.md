@@ -7,30 +7,39 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0006` are applied to the live project. `0007` is NOT** — it is written, proven
-  against the pglite harness, and deliberately unapplied, because pasting it before the Edge Function
-  exists locks the household out of its own data. The ordering is in the migration's own section 9
-  and is load-bearing. `0002` is verified over the wire by the live RLS suite (PR #65, 13/13 against
-  the real project); the rest are verified only by the paste succeeding.
+- Status: **`0001`–`0008` are ALL applied to the live project**, as of 2026-08-20 (#108). `0007` and
+  `0008` were pasted together, which is what emptied the expected-red set two bullets below. `0002`
+  is verified over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`
+  and `0008` are verified by `npm run check:live` returning 17 of 17; the rest are verified only by
+  the paste succeeding.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` IS EXPECTED-RED until `0007` is applied, and that is the check working.** The client
-  now selects `members.email`, which the live project does not have, so the check reports
-  `members: a column this app selects does not exist in the live project [42703]`. Said here
-  explicitly because an authority that is red by design and does not say so is one whose *next*
-  genuine failure gets waved through — the exact way a real outage hid in plain sight on 2026-08-09.
-  **The expected red is exactly two, `members` and `create_household`, and nothing else.** A red on
-  `households`, `chores` or `member_capacity`, or on any of the other four RPCs, is new and real.
-  Each table and each function has its own named test so they cannot hide inside one another.
-- **`create_household` joined that list on 2026-08-16, and it was not there before #85 could see
-  it.** The live project carries `create_household(household_name, household_tz, organizer_name,
-  organizer_pin)` — the four-argument version with the PIN — while the client since #62 calls the
-  three-argument one `0007` creates. Both are named `create_household`, so nothing that checked
-  names alone could tell them apart, and the first run of #85's RPC check is what surfaced it. It is
-  the same single cause as the `members.email` red: `0007` is written, proven, and deliberately
-  unapplied. **Pasting `0007` should clear both reds together** — if it clears only one, that is new.
+- **`check:live` is GREEN, the expected-red set is now EMPTY, and therefore ANY red is real.**
+  *Measured 2026-08-20*, immediately after the paste: **17 of 17**, with both previously-expected
+  reds clearing on the same paste — exactly as the bullet below predicted. That prediction is the
+  whole reason #108 existed: had only one cleared, it would have been a new fault rather than a
+  partial success.
+
+  **This bullet is inverted rather than deleted, and the distinction is the point.** Its old form
+  existed because an authority that is red by design and does not say so is one whose *next* genuine
+  failure gets waved through — the exact way a real outage hid in plain sight on 2026-08-09. That
+  hazard does not go away when the set empties; it changes sign. There is now **no** red this page
+  excuses, so a red on any table or any RPC is new, real, and to be investigated rather than matched
+  against a list. Each table and each function still has its own named test, so they cannot hide
+  inside one another.
+- **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
+  Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
+  organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since
+  #62 called the three-argument one `0007` creates. Both are named `create_household`, so nothing
+  that checked names alone could tell them apart, and the first run of #85's RPC check is what
+  surfaced it on 2026-08-16. It shared one cause with the `members.email` red, which is why this page
+  predicted **both would clear on the same paste** and why #108 was filed to check that rather than
+  assume it. *Measured*: both cleared together. Kept rather than deleted because the mechanism is
+  still live knowledge — PostgREST resolves an overload by its **set of argument names**, so a check
+  written against names alone would have called this project healthy while every household creation
+  in the app failed.
 
 ## Read this first — the decision below changed, twice
 
@@ -427,7 +436,9 @@ would pass the check while the app failed. `check:live` now probes the five RPCs
 well, **by their argument names**, because PostgREST resolves an overload by the set of argument
 names rather than by position: `create_household(household_name, organizer_name,
 household_timezone)` and `create_household(household_name, household_tz, organizer_name,
-organizer_pin)` are two different functions to it, and only the second is on the live project today.
+organizer_pin)` are two different functions to it. Until the `0007` paste on 2026-08-20 only the
+second was on the live project while the client called the first — which is precisely the divergence
+this probe was built to catch, and it caught it on its first run.
 
 How a function is probed without calling it is the part worth carrying: the probe is a **GET**, and
 PostgREST serves a GET inside a **read-only transaction**. All five of these RPCs write, so Postgres

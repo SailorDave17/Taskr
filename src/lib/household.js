@@ -361,6 +361,34 @@ const PROVISION_FUNCTION = 'provision-member'
  * than replaced with a generic message — "Only the household organizer can do
  * that" is something the person can act on and "Something went wrong" is not.
  */
+/**
+ * What to say when the call never got an answer at all — #112.
+ *
+ * `FunctionsFetchError` means the `fetch` itself rejected: no status, no body,
+ * nothing to quote. Its own message is "Failed to send a request to the Edge
+ * Function", which reads like a transient blip and is the one thing it usually
+ * is not. In a browser the likely causes are a CORS preflight the function
+ * refused, and the function not being deployed to this project at all — and both
+ * are indistinguishable from being offline, because a blocked request and an
+ * unreachable one fail in exactly the same way.
+ *
+ * So the sentence names both rather than picking one. Guessing "not deployed"
+ * would send an organizer to a dashboard when their train went into a tunnel;
+ * guessing "you are offline" would hide a deploy nobody has run. It also says
+ * nothing was changed, which is the one thing that IS certain here: a request
+ * that never left cannot have half-provisioned anybody.
+ */
+function describeProvisioningFailure(action, error) {
+  if (error?.name === 'FunctionsFetchError') {
+    return (
+      'Could not reach the sign-in service, so nothing was changed. Check this ' +
+      `device's connection — if it is fine, the ${PROVISION_FUNCTION} function ` +
+      'has not been deployed to this project yet (see docs/access-model.md).'
+    )
+  }
+  return `Could not ${action} that sign-in: ${error?.message ?? 'unknown error'}`
+}
+
 async function callProvisioning(action, { memberId, password }) {
   const trimmed = String(password ?? '')
   if (!memberId) throw new Error('Pick a person first.')
@@ -383,7 +411,7 @@ async function callProvisioning(action, { memberId, password }) {
     } catch {
       detail = ''
     }
-    const err = new Error(detail || `Could not ${action} that sign-in: ${error.message}`)
+    const err = new Error(detail || describeProvisioningFailure(action, error))
     err.cause = error
     throw err
   }

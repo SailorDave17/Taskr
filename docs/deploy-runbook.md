@@ -244,9 +244,16 @@ every Edge Function with exactly this preflight:
 npm run check:live
 ```
 
-It reads **19 of 20** until this deploy lands and **20 of 20** afterwards, and the one red names the
-deploy command. That makes the transition itself the proof - there is no state in which the check is
-green and the function is missing, so nothing here has to be taken on trust.
+Before a **first** deploy it reads one short, with the Edge Function line failing and the deploy
+command inside the failure; afterwards it is green. That makes the transition itself the proof -
+there is no state in which the check is green and the function is missing, so nothing here has to be
+taken on trust.
+
+Two caveats on reading it that way. On a **redeploy** the check is green on both sides, since it
+answers *is a function there and callable* and not *is this the build you just pushed* - use the
+timestamp in the dashboard for that. And the count is deliberately not written here: it moves
+whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
+defect `check:live` exists to catch, one level up.
 
 ## 4. Verifying AC 1 and AC 2
 

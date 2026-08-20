@@ -40,8 +40,9 @@ layer.
 join code with real per-member sign-in — each person has their own account, and `auth.uid()`
 identifies a person rather than a phone. It is written and proven against the pglite harness, and
 `0007` is **deliberately not applied to the live project**: pasting it clears every existing claim,
-and restoring access needs an Edge Function that does not exist yet, so the household would be locked
-out of its own data in between. The migration's own section 9 carries the ordering. Until that
+and restoring access needs the Edge Function — written (#87, `supabase/functions/provision-member/`,
+both provision and reset paths) but deployed to the live project by the owner separately — so pasting
+before that deploy would lock the household out of its own data in between. The migration's own section 9 carries the ordering. Until that
 function is deployed, what is live is the PIN.
 
 **Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or

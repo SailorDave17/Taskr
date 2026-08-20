@@ -71,9 +71,9 @@ Two supersessions, and the second undoes an assumption the first was built on.
   reason #62 was cheap — see *What it costs to change later*, which predicted this change and priced
   it correctly.
 
-**What is NOT built yet, and is the honest gap.** Provisioning another person's account needs the
-`service_role` key, so it needs the Edge Function, and that is unbuilt: Docker's daemon is down on
-the build machine and the deploy is owner-only. Today an organizer can create a household and sign
+**What is NOT deployed yet, and is the honest gap.** Provisioning another person's account needs the
+`service_role` key, so it needs the Edge Function — built by #87 (PR #92) — and the deploy is
+owner-only and has not happened. Today an organizer can create a household and sign
 in, and can add people to the roster — and those people cannot sign in, because no account exists for
 them. The roster says so on each row rather than leaving it to be discovered.
 
@@ -84,8 +84,9 @@ answers are here even though one of them is "not yet".
 
 **A member forgets their credential (AC 7).** The organizer resets it, and it still needs no inbox —
 a synthetic `<id>@taskr.invalid` address has no mailbox to send a link to, by construction. The reset
-is an admin password update, which needs `service_role`, so it lands with the Edge Function and is
-**not built yet**. This is a genuine regression in capability against the PIN model, which could do
+is an admin password update, which needs `service_role`, so it lands with the Edge Function — built
+by #87 (`provision-member`, action: `"reset"`; PR #92, merged 2026-08-13) and live once that function
+is deployed to the hosted project. This is a genuine regression in capability against the PIN model, which could do
 it with a plain RPC, and it is the price of a real auth identity rather than an oversight.
 
 **The organizer loses their own credential (AC 8).** *The answer changed, and this is the change.*

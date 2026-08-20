@@ -49,9 +49,29 @@ function syntheticAddressFor(memberId: string): string {
   return `${memberId}@taskr.invalid`
 }
 
+// Every header supabase-js puts on a `functions.invoke` call — because a browser
+// preflight asks about ALL of them at once, and an allow-list missing even one
+// fails the whole request before it is sent. The client then reports
+// `FunctionsFetchError`, whose message is "Failed to send a request to the Edge
+// Function": it names no header, mentions no preflight, and reads exactly like a
+// dropped connection. That sentence is what #112 was reported as.
+//
+// `authorization` and `content-type` are the two you would think of. The other
+// two are sent whether or not you ask for them, which is why the short list
+// looked complete: the client's fetch wrapper sets `apikey` on every request,
+// and `X-Client-Info` is a default header on every Supabase client.
+// `x-retry-count` is postgrest-js's, and is listed so this stays a SUPERSET of
+// the SDK's canonical set rather than the subset we happened to notice.
+//
+// That canonical set ships as `@supabase/supabase-js/cors`, and
+// `src/test/edge-function-cors.test.js` asserts this list still covers it — so
+// an SDK release that adds a header fails the gate here rather than on a phone.
+// It is deliberately NOT imported: this list is a deploy-path constant, and a
+// value that must not change silently should not be resolved at deploy time.
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-retry-count',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 

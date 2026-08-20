@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const calls = []
 let results = {}
 let authState = {}
+let invokeResult = null
 
 /**
  * A chainable stand-in for supabase-js's query builder. It is thenable, like
@@ -60,6 +61,16 @@ function makeQuery(table) {
 
 const fakeClient = {
   from: (table) => makeQuery(table),
+  // #87 - the Edge Function is the only route to an auth identity, so the layer
+  // above it is worth testing even though the function itself is not reachable
+  // from here. What is asserted below is how a FAILURE is reported, which is the
+  // half a person actually reads.
+  functions: {
+    invoke: (name, options) => {
+      calls.push({ op: 'invoke', name, body: options?.body })
+      return Promise.resolve(invokeResult ?? { data: null, error: null })
+    },
+  },
   rpc: (name, args) => {
     calls.push({ op: 'rpc', name, args })
     return Promise.resolve(results[name] ?? { data: null, error: null })
@@ -111,6 +122,8 @@ const {
   formatMinutes,
   listMembers,
   normalizeMinutes,
+  provisionMember,
+  resetMemberCredential,
   signIn,
   signOut,
   signUpOrganizer,
@@ -121,6 +134,7 @@ beforeEach(() => {
   calls.length = 0
   results = {}
   authState = {}
+  invokeResult = null
 })
 
 describe('weekly minutes', () => {
@@ -510,4 +524,106 @@ describe('the roster read', () => {
     )
   })
 
+})
+
+describe('provisioning a sign-in - #87, and how it fails - #112', () => {
+  // Stand-ins for the SDK's error classes. `callProvisioning` branches on
+  // `name`, which is what the real classes set, and constructing the real ones
+  // would mean importing the client this file deliberately fakes.
+  function fetchError() {
+    const error = new Error('Failed to send a request to the Edge Function')
+    error.name = 'FunctionsFetchError'
+    return error
+  }
+
+  function httpError(body) {
+    const error = new Error('Edge Function returned a non-2xx status code')
+    error.name = 'FunctionsHttpError'
+    error.context = { json: () => Promise.resolve(body) }
+    return error
+  }
+
+  async function failureFrom(call) {
+    let thrown = null
+    try {
+      await call()
+    } catch (error) {
+      thrown = error
+    }
+    // Asserted rather than assumed: if the call ever stopped throwing, every
+    // message assertion below would be skipped and the test would still be
+    // green, having checked nothing.
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    return thrown
+  }
+
+  it("passes the function's own refusal through verbatim", () => {
+    // The function answers in sentences on purpose: "Only the household
+    // organizer can do that" is something the person can act on, and replacing
+    // it with a generic message would throw away the only useful part.
+    invokeResult = {
+      data: null,
+      error: httpError({ error: 'Only the household organizer can do that.' }),
+    }
+    return failureFrom(() => provisionMember({ memberId: 'm1', password: 'a good one' })).then(
+      (thrown) => {
+        expect(thrown.message).toBe('Only the household organizer can do that.')
+      },
+    )
+  })
+
+  it('says what is wrong and what to do when the request never got an answer', async () => {
+    // #112, reported from a phone as: "Could not provision that sign-in: Failed
+    // to send a request to the Edge Function". A fetch-level failure has no
+    // status and no body, so there is nothing to quote - and the SDK's own
+    // message names no header, mentions no preflight, and reads like the network
+    // dropped. In a browser it is far more often a refused CORS preflight or a
+    // function that was never deployed.
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await failureFrom(() =>
+      provisionMember({ memberId: 'm1', password: 'a good one' }),
+    )
+
+    expect(thrown.message).not.toMatch(/Failed to send a request/)
+    expect(thrown.message).toMatch(/connection/i)
+    expect(thrown.message).toMatch(/provision-member/)
+    expect(thrown.message).toMatch(/deployed/i)
+    // The one thing that IS certain: a request that never left cannot have
+    // half-provisioned anybody, and saying so stops an organizer retrying into a
+    // state they are afraid of.
+    expect(thrown.message).toMatch(/nothing was changed/i)
+  })
+
+  it('keeps the original error as the cause, so the detail survives for a console', async () => {
+    const original = fetchError()
+    invokeResult = { data: null, error: original }
+    const thrown = await failureFrom(() =>
+      resetMemberCredential({ memberId: 'm1', password: 'a good one' }),
+    )
+    expect(thrown.cause).toBe(original)
+  })
+
+  it('refuses a short credential without a round trip', async () => {
+    // The floor is Supabase's own, stated here so the refusal is a sentence
+    // rather than a 400 from the admin API - and checked before the call, so a
+    // typo costs nothing.
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await failureFrom(() => provisionMember({ memberId: 'm1', password: 'abc' }))
+    expect(thrown.message).toMatch(/at least 6/)
+    expect(calls.filter((call) => call.op === 'invoke')).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: a successful provision reaches the function and returns its answer', async () => {
+    // Without this, every assertion above could be satisfied by a client that
+    // always fails - and the fake would be proving nothing about the happy path
+    // it is standing in for.
+    invokeResult = { data: { ok: true, action: 'provision', memberId: 'm1' }, error: null }
+    const result = await provisionMember({ memberId: 'm1', password: 'a good one' })
+    expect(result).toEqual({ ok: true, action: 'provision', memberId: 'm1' })
+    expect(calls).toContainEqual({
+      op: 'invoke',
+      name: 'provision-member',
+      body: { action: 'provision', memberId: 'm1', password: 'a good one' },
+    })
+  })
 })

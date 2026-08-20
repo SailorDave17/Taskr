@@ -82,7 +82,9 @@ Two supersessions, and the second undoes an assumption the first was built on.
 
 **What is NOT deployed yet, and is the honest gap.** Provisioning another person's account needs the
 `service_role` key, so it needs the Edge Function — built by #87 (PR #92) — and the deploy is
-owner-only and has not happened. Today an organizer can create a household and sign
+owner-only and has not happened. The step, and the check that proves it landed, are section 3 of
+`docs/deploy-runbook.md`; it was missing from that runbook entirely until #112, which is a large part
+of why it has never been run. Today an organizer can create a household and sign
 in, and can add people to the roster — and those people cannot sign in, because no account exists for
 them. The roster says so on each row rather than leaving it to be discovered.
 

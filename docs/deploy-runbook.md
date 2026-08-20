@@ -175,7 +175,42 @@ persists anything.
 5. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
 
-## 3. Verifying AC 1 and AC 2
+## 3. The provisioning Edge Function
+
+Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
+and touches nothing here. Until this has run, an organizer who tries to give somebody a sign-in gets a
+failure, and nobody but the organizer can sign in at all.
+
+```
+npx supabase login
+npx supabase link --project-ref <project ref>
+npx supabase functions deploy provision-member
+```
+
+Docker must be running. The function reads its own secrets from the platform - Supabase injects the
+project URL, the anon key and the service-role credential into every function - so there is nothing to
+set by hand and nothing that could end up in git.
+
+**Then prove it, because from the app's side the failure is silent and ambiguous.** A deploy that never
+happened, and one that went to a different project, leave the app failing in exactly the same way:
+
+```
+curl -i -X OPTIONS   https://<project ref>.supabase.co/functions/v1/provision-member   -H "Origin: https://<the deployed app>"   -H "Access-Control-Request-Method: POST"   -H "Access-Control-Request-Headers: authorization, content-type, apikey, x-client-info"
+```
+
+Read **two** things off the answer, not one:
+
+- The status is **200**, not 404. A `{"code":"NOT_FOUND"}` body means the function is not there - and
+  it is byte-identical to the answer for a name that never existed, so the status does not tell you
+  *which* project answered. The `sb-project-ref` header does.
+- `access-control-allow-headers` comes back covering **all four** requested headers. A browser asks
+  about every one of them in a single preflight and refuses the request if any is missing, so a list
+  covering three works from `curl` and fails from a phone.
+
+The second check is the one nobody writes, and it is the one #112 needed: the gateway's own 404 answer
+carries three of the four by itself, which is enough to look healthy at a glance.
+
+## 4. Verifying AC 1 and AC 2
 
 Both **verified 2026-08-05** on the owner's Android phone.
 
@@ -208,7 +243,8 @@ If iOS ever joins the household, `apple-touch-icon` and `apple-mobile-web-app-*`
 addition needed; they were deliberately left out rather than added speculatively for a platform
 nobody owns.
 
-## 4. What you cannot delegate
+## 5. What you cannot delegate
 
-Steps 1 and 2 create accounts and hold credentials, so they are the owner's. Everything downstream of
+Steps 1, 2 and 3 create accounts, hold credentials, or need Docker and a project link, so they are
+the owner's. Everything downstream of
 them — wiring the client, the roster schema, RLS policies — is ordinary work in later stories.

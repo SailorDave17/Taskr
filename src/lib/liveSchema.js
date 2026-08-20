@@ -1,3 +1,4 @@
+import { corsHeaders } from '@supabase/supabase-js/cors'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { MEMBER_COLUMNS } from './household.js'
@@ -156,6 +157,146 @@ export function describeRpcError(fn, args, error) {
     `${fn}: presence is UNPROVEN — the probe failed before Postgres could answer, so ` +
     `this says nothing about whether the function is there [${code}] — ${detail}${asked}`
   )
+}
+
+/**
+ * Edge Functions this app invokes - #115.
+ *
+ * A separate list from `LIVE_RPCS`, and the separation is the whole point: a
+ * Postgres function arrives with a migration paste, an Edge Function arrives
+ * with `supabase functions deploy` and no migration mentions it. Nothing that
+ * checked migrations could ever have noticed - which is exactly how
+ * `provision-member` stayed undeployed from 2026-08-13 to 2026-08-20 while every
+ * check in this repo was green (#112).
+ *
+ * Derived from the call sites like every other list here, and
+ * `liveSchema.test.js` fails if it stops matching them in either direction. That
+ * scan has one wrinkle worth knowing: the call site passes a CONST rather than a
+ * literal, so a naive `invoke('name')` regex finds nothing and reports an empty
+ * set - which would pass vacuously. The scan resolves the const and asserts it
+ * resolved.
+ */
+export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member'])
+
+/**
+ * The headers a browser names in the preflight before `functions.invoke`.
+ *
+ * IMPORTED from the SDK's published set, never written out, for the same reason
+ * the column lists above are imported. Two of these - `apikey` and
+ * `x-client-info` - are attached by the client's own fetch wrapper and appear at
+ * no call site in this repo, so a hand-written list here would reproduce #112's
+ * defect inside the check built to catch it. It also means an SDK release that
+ * adds a header tightens this check automatically.
+ */
+export const PREFLIGHT_HEADERS = Object.freeze(
+  splitHeaderList(corsHeaders['Access-Control-Allow-Headers']),
+)
+
+/** `a, B , c` -> `['a','b','c']`. Header names are case-insensitive (RFC 9110). */
+function splitHeaderList(value) {
+  return String(value ?? '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/**
+ * Ask the live project whether an Edge Function is there, without invoking it.
+ *
+ * The probe is the CORS preflight a browser sends before `functions.invoke`, and
+ * that single difference is what makes it safe against production - the same
+ * argument as `probeRpc`'s read-only GET, one layer out. A preflight is not the
+ * call: no body is sent, nothing is invoked, no auth user is created. There is
+ * no argument value that could make it unsafe, because it carries none.
+ *
+ * It also answers BOTH of #112's halves in one round trip, which no other single
+ * probe does. The status separates deployed from absent; the echoed allow-list
+ * separates a function a browser can call from one it cannot. Reading only one
+ * of them passes in a state the other refuses - and the gateway's own 404
+ * already returns three of the four headers, so the header half alone reads
+ * healthy against a function that is not deployed at all.
+ */
+export async function probeEdgeFunction(baseUrl, name, fetchImpl = fetch) {
+  const root = String(baseUrl ?? '').replace(/\/+$/, '')
+  try {
+    const response = await fetchImpl(`${root}/functions/v1/${name}`, {
+      method: 'OPTIONS',
+      headers: {
+        // `.invalid` can never resolve (RFC 2606), so this names no real site.
+        // The function answers `Access-Control-Allow-Origin: *`, so the value
+        // does not change the outcome - it only has to be present for the
+        // request to be a preflight at all.
+        Origin: 'https://taskr.invalid',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': PREFLIGHT_HEADERS.join(', '),
+      },
+    })
+    return {
+      status: response.status,
+      allowHeaders: response.headers.get('access-control-allow-headers') ?? '',
+    }
+  } catch (error) {
+    // Returned rather than thrown, so the classifier decides what it means. A
+    // network failure is UNPROVEN, not absent, and those route differently.
+    return { status: null, allowHeaders: '', error }
+  }
+}
+
+/**
+ * Did this preflight prove the function is callable, and if not, say what is wrong.
+ *
+ * Three outcomes with three different repairs, which is why they are three
+ * branches and not one boolean:
+ *
+ * - **NOT DEPLOYED** (404). The gateway has no such function. Repair is
+ *   `supabase functions deploy`, and no code change helps.
+ * - **DEPLOYED AND UNCALLABLE** (2xx, allow-list too narrow). The function is
+ *   there and a browser is still refused, because a preflight is refused WHOLE
+ *   if any single requested header is unlisted. Repair is a source change and a
+ *   redeploy. This is #112's latent half, and it is invisible to every test that
+ *   runs outside a browser - Node's `fetch` preflights nothing.
+ * - **UNPROVEN** (no answer at all). Says nothing either way, and is reported as
+ *   such rather than passed, following `describeRpcError`: an absent answer must
+ *   never read as a clean one.
+ */
+export function describeEdgeFunctionError(name, probe) {
+  const asked = `\n    asked for: OPTIONS /functions/v1/${name}`
+
+  if (!probe || probe.error || probe.status === null || probe.status === undefined) {
+    const detail = probe?.error?.message ?? String(probe?.error ?? 'no answer')
+    return (
+      `${name}: presence is UNPROVEN - the preflight never completed, so this says ` +
+      `nothing about whether the function is deployed - ${detail}${asked}`
+    )
+  }
+
+  if (probe.status === 404) {
+    return (
+      `${name}: NOT DEPLOYED - the functions gateway has no function of this name. ` +
+      'A migration cannot carry it; run `npx supabase functions deploy ' +
+      `${name}\` and see docs/deploy-runbook.md section 3 [404]${asked}`
+    )
+  }
+
+  if (probe.status < 200 || probe.status >= 300) {
+    return (
+      `${name}: the preflight was refused, so deployed state is UNPROVEN ` +
+      `[${probe.status}]${asked}`
+    )
+  }
+
+  const allowed = new Set(splitHeaderList(probe.allowHeaders))
+  const missing = PREFLIGHT_HEADERS.filter((header) => !allowed.has(header))
+  if (missing.length) {
+    return (
+      `${name}: DEPLOYED, and a browser still cannot call it - its CORS allow-list ` +
+      `is missing ${missing.join(', ')}. A preflight is refused whole if any one ` +
+      `requested header is absent, so the app fails with a network-shaped error ` +
+      `[${probe.status}]${asked}`
+    )
+  }
+
+  return null
 }
 
 /**

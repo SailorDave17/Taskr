@@ -42,8 +42,11 @@ import { isSecretKey } from '../lib/keyShape.js'
 import {
   LIVE_RPCS,
   LIVE_SCHEMA,
+  LIVE_EDGE_FUNCTIONS,
+  describeEdgeFunctionError,
   describeRpcError,
   describeSchemaError,
+  probeEdgeFunction,
   rpcProbeArgs,
 } from '../lib/liveSchema.js'
 
@@ -290,6 +293,49 @@ describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () =>
     expect(error, 'a changed signature must be an error, not an empty result').toBeTruthy()
     expect(error.code).toBe('PGRST202')
     expect(describeRpcError('complete_chore', ['chore'], error)).toContain('signature changed')
+  })
+})
+
+describe('#115 - the live project is RUNNING every Edge Function this app invokes', () => {
+  // The gap this closes: everything above probes things a migration paste
+  // creates. An Edge Function arrives by `supabase functions deploy` and no
+  // migration mentions it, so `provision-member` sat undeployed from 2026-08-13
+  // to 2026-08-20 with all 17 checks above green, and the app failed on a phone
+  // with a network-shaped error (#112).
+  it('has an Edge Function list to check, so an empty pass is impossible', () => {
+    // The floor, for the same reason as the table and RPC floors: a list that
+    // silently empties turns this whole describe into a vacuous pass.
+    expect(LIVE_EDGE_FUNCTIONS.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // One test per function, so a failure names it in the run output rather than
+  // making somebody open a file to find out which one is missing.
+  for (const name of LIVE_EDGE_FUNCTIONS) {
+    it(`${name} is deployed, and a browser could actually call it`, async () => {
+      const probe = await probeEdgeFunction(url, name)
+      expect(describeEdgeFunctionError(name, probe) ?? 'ok').toBe('ok')
+    })
+  }
+})
+
+describe('#115 AC 5 - POSITIVE CONTROL: the Edge Function check can actually fail', () => {
+  it('reports a function name that does not exist, and names it', async () => {
+    // Live rather than synthetic, matching the table and RPC controls: this
+    // proves the probe reaches the real gateway and that the classifier fires on
+    // a real answer, not that a hand-built object routes correctly - the unit
+    // tests in liveSchema.test.js already cover that.
+    //
+    // A caveat worth stating in band, because it expires: while
+    // `provision-member` is itself undeployed this control returns the SAME
+    // verdict as the real test above, so the pair does not yet DISCRIMINATE. It
+    // starts to the moment the deploy lands, which is also the moment the
+    // expected-red entry in docs/access-model.md clears. Until then this proves
+    // the instrument works and the test above reports the truth.
+    const absent = 'taskr-check-live-no-such-function'
+    const probe = await probeEdgeFunction(url, absent)
+    const line = describeEdgeFunctionError(absent, probe)
+    expect(line, 'the gateway answered as though this function exists').toContain('NOT DEPLOYED')
+    expect(line).toContain(absent)
   })
 })
 

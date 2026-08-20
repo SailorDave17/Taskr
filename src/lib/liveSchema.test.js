@@ -6,6 +6,12 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { MEMBER_COLUMNS } from './household.js'
 import {
+  LIVE_EDGE_FUNCTIONS,
+  PREFLIGHT_HEADERS,
+  describeEdgeFunctionError,
+  probeEdgeFunction,
+} from './liveSchema.js'
+import {
   LIVE_RPCS,
   LIVE_RPC_NAMES,
   LIVE_SCHEMA,
@@ -352,5 +358,150 @@ describe('#85 — a probe failure names the function and what was asked of it', 
   it('returns null when there is no error, so a caller cannot report a phantom', () => {
     expect(describeRpcError('complete_chore', ['chore_id'], null)).toBeNull()
     expect(describeRpcError('complete_chore', ['chore_id'], undefined)).toBeNull()
+  })
+})
+
+describe('#115 - the Edge Function list cannot fall behind the code', () => {
+  // The call site passes a CONST, not a literal, so the naive scan for
+  // `invoke('name')` finds NOTHING and reports an empty set - which would pass
+  // every assertion below vacuously. Resolving the const is the whole reason
+  // this scan is more than one regex, and `unresolved` is asserted empty so it
+  // cannot quietly go back to finding nothing.
+  const invoked = new Set()
+  const unresolved = []
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8')
+    const consts = new Map(
+      [...source.matchAll(/const\s+([A-Za-z_$][\w$]*)\s*=\s*'([^']+)'/g)].map(
+        ([, name, value]) => [name, value],
+      ),
+    )
+    for (const [, arg] of source.matchAll(/\.functions\.invoke\(\s*([^,)\s]+)/g)) {
+      const literal = arg.match(/^'([^']+)'$/)
+      if (literal) invoked.add(literal[1])
+      else if (consts.has(arg)) invoked.add(consts.get(arg))
+      else unresolved.push(`${file}: ${arg}`)
+    }
+  }
+
+  it('finds an invocation to check, so an empty pass is impossible', () => {
+    expect(invoked.size).toBeGreaterThan(0)
+    expect(LIVE_EDGE_FUNCTIONS.length).toBeGreaterThan(0)
+  })
+
+  it('resolved every invoke argument, so the scan is not silently under-reporting', () => {
+    expect(unresolved, `could not resolve: ${unresolved.join(', ')}`).toEqual([])
+  })
+
+  it('lists exactly the functions the app invokes, in both directions', () => {
+    // Both directions, for LIVE_RPCS' reason: a function added here but never
+    // called makes check:live permanently red against a healthy project, and one
+    // called but never listed is the hole #112 fell through.
+    expect(sorted(LIVE_EDGE_FUNCTIONS)).toEqual(sorted(invoked))
+  })
+})
+
+describe('#115 - the preflight header set comes from the SDK, not from us', () => {
+  it('carries the two headers no call site mentions', () => {
+    // The entire point. `apikey` and `x-client-info` are attached by the
+    // client's fetch wrapper, appear nowhere in this repo's calling code, and
+    // are exactly what #112's hand-written allow-list omitted. If these ever
+    // stop being present, this check has quietly become the defect it catches.
+    expect(PREFLIGHT_HEADERS).toContain('apikey')
+    expect(PREFLIGHT_HEADERS).toContain('x-client-info')
+    expect(PREFLIGHT_HEADERS).toContain('authorization')
+    expect(PREFLIGHT_HEADERS).toContain('content-type')
+  })
+})
+
+describe('#115 - a preflight is classified into the three states that have different repairs', () => {
+  const healthy = { status: 200, allowHeaders: PREFLIGHT_HEADERS.join(', ') }
+
+  it('POSITIVE CONTROL: a healthy preflight is not reported as a problem', () => {
+    // Without this, every assertion below is satisfied by a classifier that
+    // simply always complains.
+    expect(describeEdgeFunctionError('provision-member', healthy)).toBeNull()
+  })
+
+  it('calls a 404 NOT DEPLOYED, and names the command that fixes it', () => {
+    // Measured against the live project 2026-08-20: the gateway answers 404 for
+    // an absent function AND returns three of the four headers while doing it,
+    // so the header half alone would read healthy here. The status is what
+    // separates them.
+    const line = describeEdgeFunctionError('provision-member', {
+      status: 404,
+      allowHeaders: 'authorization, x-client-info, apikey',
+    })
+    expect(line).toContain('NOT DEPLOYED')
+    expect(line).toContain('provision-member')
+    expect(line).toContain('supabase functions deploy')
+  })
+
+  it('calls a narrow allow-list DEPLOYED and uncallable, naming the missing headers', () => {
+    // #112's latent half, and the one no test outside a browser can reach: Node
+    // preflights nothing, so the function answers every Node caller happily.
+    const line = describeEdgeFunctionError('provision-member', {
+      status: 200,
+      allowHeaders: 'authorization, content-type',
+    })
+    expect(line).toContain('DEPLOYED')
+    expect(line).not.toContain('NOT DEPLOYED')
+    expect(line).toContain('apikey')
+    expect(line).toContain('x-client-info')
+  })
+
+  it('refuses to call presence proven when the preflight never completed', () => {
+    // Same rule as describeRpcError: an absent answer must never read as a clean
+    // one. A network failure says nothing about whether the function is there.
+    for (const probe of [
+      { status: null, allowHeaders: '', error: new Error('fetch failed') },
+      undefined,
+    ]) {
+      expect(describeEdgeFunctionError('provision-member', probe)).toContain('UNPROVEN')
+    }
+  })
+
+  it('reports an unexpected status as UNPROVEN rather than guessing', () => {
+    const line = describeEdgeFunctionError('provision-member', { status: 500, allowHeaders: '' })
+    expect(line).toContain('UNPROVEN')
+    expect(line).not.toContain('NOT DEPLOYED')
+  })
+})
+
+describe('#115 - the probe is a preflight, which is what makes it safe against production', () => {
+  it('sends OPTIONS and never a body, so it cannot invoke anything', async () => {
+    // THE CONTROL FOR SAFETY, and it goes through the real function rather than
+    // rebuilding the request - the same argument as the read-only-transaction
+    // control in schema.integration.test.js. A test that built its own OPTIONS
+    // request would stay green while probeEdgeFunction started POSTing.
+    let seen = null
+    const fake = (url, init) => {
+      seen = { url, init }
+      return Promise.resolve({ status: 200, headers: { get: () => 'authorization' } })
+    }
+    await probeEdgeFunction('https://example.test', 'provision-member', fake)
+
+    expect(seen.init.method).toBe('OPTIONS')
+    expect(seen.init.body, 'a preflight carries no body - this would be an invocation').toBeUndefined()
+    expect(seen.url).toBe('https://example.test/functions/v1/provision-member')
+    expect(seen.init.headers['Access-Control-Request-Headers']).toContain('apikey')
+  })
+
+  it('strips a trailing slash rather than building a double-slash URL', async () => {
+    let seen = null
+    const fake = (url) => {
+      seen = url
+      return Promise.resolve({ status: 200, headers: { get: () => '' } })
+    }
+    await probeEdgeFunction('https://example.test/', 'provision-member', fake)
+    expect(seen).toBe('https://example.test/functions/v1/provision-member')
+  })
+
+  it('turns a thrown fetch into an UNPROVEN result instead of propagating', async () => {
+    const probe = await probeEdgeFunction('https://example.test', 'x', () => {
+      throw new Error('ECONNREFUSED')
+    })
+    expect(probe.status).toBeNull()
+    expect(describeEdgeFunctionError('x', probe)).toContain('UNPROVEN')
   })
 })

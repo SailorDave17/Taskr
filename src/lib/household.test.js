@@ -8,9 +8,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // wire. What is tested here is the layer above — that the app asks the right
 // questions and refuses the obviously wrong ones before a round trip.
 //
-// Every name below is synthetic. #19 has not yet settled whether a real
-// household member's name may appear in a fixture, and until it does the answer
-// is treated as no.
+// Every name below is synthetic, and since #19 that is a RULE rather than a
+// habit: docs/data-outside-production.md, enforced by the #19 block in
+// src/test/gate.test.js. Adding a name here means adding it to the declared
+// vocabulary, in a diff, where somebody can see it.
 
 const calls = []
 let results = {}

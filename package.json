@@ -14,6 +14,7 @@
     "test:rls": "vitest run --config vitest.integration.config.js",
     "test:functions": "vitest run --config vitest.functions.config.js",
     "check:live": "vitest run --config vitest.integration.config.js src/test/schema.integration.test.js",
+    "deploy:function": "node scripts/deploy-function.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs"
   },

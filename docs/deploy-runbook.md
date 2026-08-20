@@ -86,9 +86,10 @@ wrong.
    2026-08-09 outage again. The first real exercise of the mechanism was against the hazard it was
    built for, and it held.
 
-   What remains true regardless: `0007` is still deliberately unapplied, so the live app is still the
-   PIN build. That is now a **choice with a sequence**, which is the whole point — apply the
-   migration, then promote.
+   What remains true regardless: the live app is still the PIN build — because production is built
+   from `release`, and that branch has not moved. **`0007` and `0008` were pasted on 2026-08-20**
+   (#108), so the first half of the sequence is done and the promotion is what is outstanding. That
+   is a **choice with a sequence**, which is the whole point — apply the migration, then promote.
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
 6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
    **This step was missing from the original runbook and it blocks AC 1 completely.**

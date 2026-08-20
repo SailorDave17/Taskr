@@ -51,7 +51,9 @@ export const LIVE_TABLES = Object.freeze(LIVE_SCHEMA.map((entry) => entry.table)
  * household_tz, organizer_name, organizer_pin)` are two different functions to
  * it. A check that asked only about the name would call the live project healthy
  * while every household creation in the app failed — which is not hypothetical:
- * that is exactly the state the live project is in until `0007` is pasted.
+ * that was exactly the live project's state until `0007` was pasted on
+ * 2026-08-20, and this check is what caught it (#85, then #108 confirmed the
+ * paste cleared it).
  *
  * #85 was filed naming NINE RPCs. Five is correct and the difference is not a
  * narrowing of scope: `0007` DROPS `claim_member`, `claim_member_with_pin`,

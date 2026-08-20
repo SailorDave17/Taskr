@@ -181,21 +181,48 @@ Owner-only, and **separate from every other deploy on this page**: a `git push` 
 and touches nothing here. Until this has run, an organizer who tries to give somebody a sign-in gets a
 failure, and nobody but the organizer can sign in at all.
 
+**Every command takes the `npx` prefix, and must run from the repo root.** Both halves of that cost a
+round trip on 2026-08-20 and neither is guessable:
+
+- The CLI is not in `package.json` and is not installed globally, so `npx` fetches it per invocation
+  and leaves **no `supabase` command on `PATH`**. A bare `supabase login` answers *"is not recognized
+  as an internal or external command"*, which reads like a missing login and is a missing binary.
+- `functions deploy` reads `supabase/functions/<name>/` **relative to the working directory**, so
+  running it from a home directory finds nothing to deploy. `--workdir <repo>` is the alternative to
+  `cd`.
+
 ```
+cd <the repo>
 npx supabase login
-npx supabase link --project-ref <project ref>
-npx supabase functions deploy provision-member
+npx supabase functions deploy provision-member --project-ref <project ref> --use-api
 ```
 
-Docker must be running. The function reads its own secrets from the platform - Supabase injects the
-project URL, the anon key and the service-role credential into every function - so there is nothing to
-set by hand and nothing that could end up in git.
+Two flags remove two steps that can go wrong. `--project-ref` on the deploy makes a separate
+`supabase link` unnecessary. **`--use-api` bundles the function server-side, so Docker is not
+required at all** - which is worth stating plainly, because *"Docker's daemon is down on the build
+machine"* is the reason this repo recorded, twice, for why the Edge Function was never deployed. An
+avoidable dependency had been sitting on record as a blocker.
+
+If the browser flow is awkward - a remote-control session, say - `login` can be replaced with a
+personal access token from `supabase.com/dashboard/account/tokens`:
+
+```
+set SUPABASE_ACCESS_TOKEN=<token>          cmd.exe
+export SUPABASE_ACCESS_TOKEN=<token>       POSIX shell
+```
+
+That is session-scoped, and belongs in no file: a token that can deploy to the project is a
+credential, and `.env.local` is for values the browser is allowed to see.
+
+The function reads its own secrets from the platform - Supabase injects the project URL, the anon key
+and the service-role credential into every function - so there is nothing else to set by hand and
+nothing that could end up in git.
 
 **Then prove it, because from the app's side the failure is silent and ambiguous.** A deploy that never
 happened, and one that went to a different project, leave the app failing in exactly the same way:
 
 ```
-curl -i -X OPTIONS   https://<project ref>.supabase.co/functions/v1/provision-member   -H "Origin: https://<the deployed app>"   -H "Access-Control-Request-Method: POST"   -H "Access-Control-Request-Headers: authorization, content-type, apikey, x-client-info"
+curl -i -X OPTIONS https://<project ref>.supabase.co/functions/v1/provision-member -H "Origin: https://<the deployed app>" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization, content-type, apikey, x-client-info"
 ```
 
 Read **two** things off the answer, not one:
@@ -209,6 +236,17 @@ Read **two** things off the answer, not one:
 
 The second check is the one nobody writes, and it is the one #112 needed: the gateway's own 404 answer
 carries three of the four by itself, which is enough to look healthy at a glance.
+
+**Or just run the check, which asks both questions for you.** Since #115, `npm run check:live` probes
+every Edge Function with exactly this preflight:
+
+```
+npm run check:live
+```
+
+It reads **19 of 20** until this deploy lands and **20 of 20** afterwards, and the one red names the
+deploy command. That makes the transition itself the proof - there is no state in which the check is
+green and the function is missing, so nothing here has to be taken on trust.
 
 ## 4. Verifying AC 1 and AC 2
 
@@ -245,6 +283,7 @@ nobody owns.
 
 ## 5. What you cannot delegate
 
-Steps 1, 2 and 3 create accounts, hold credentials, or need Docker and a project link, so they are
-the owner's. Everything downstream of
+Steps 1, 2 and 3 create accounts or hold credentials, so they are the owner's. Step 3 needs no
+Docker and no `link` - see the flags there - but it does need an access token, which is the part that
+cannot be delegated. Everything downstream of
 them — wiring the client, the roster schema, RLS policies — is ordinary work in later stories.

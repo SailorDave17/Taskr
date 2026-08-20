@@ -54,9 +54,12 @@ are deliberately still true after that paste, and both are sequence rather than 
   (`supabase/functions/provision-member/`, both provision and reset paths). The migration's own
   section 9 carries the ordering: provision the organizer first, then everyone else from the app.
 
-**Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
-Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
-editor by a person, at the merge of the story that adds it. They are re-runnable and a test proves
+**Migrations are applied by hand, and nothing checks that they were.** Each file in
+`supabase/migrations/` is pasted into the Supabase SQL editor by a person, at the merge of the story
+that adds it. *The reason recorded here used to be "there is no Supabase CLI or Docker on the build
+machine". Both are available as of 2026-08-20 - the CLI through `npx`, Docker running - so the
+hand-paste is a workflow that has outlived its stated cause. Automating it is a real decision rather
+than a tidy-up, because it couples a merge to a schema change, and it has not been taken.* They are re-runnable and a test proves
 it, because a re-paste after a partial failure is the normal path.
 
 *Two were missed, and the live app could not hold a household for a day before an unrelated paste

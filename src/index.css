@@ -285,6 +285,18 @@ body {
   opacity: 0.75;
 }
 
+/* Whether this person can sign in yet — story #62.
+
+   Quiet on purpose. For most of a household's life every row says "Signed in",
+   and a status that shouts is a status people stop reading; the one that matters
+   is "No sign-in yet", which is the state an organizer has to do something
+   about. Same weight and opacity as the budget line beside it, so it reads as
+   another fact about the person rather than as a warning. */
+.member__access {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
 /* This week's capacity — story #46.
 
    Sits directly under the baseline rather than replacing it: the override is
@@ -316,6 +328,14 @@ body {
      One is not better than the other, and styling the override as an exception
      would make saying "I have less time" feel like an admission. */
   opacity: 0.75;
+}
+
+/* #87 — the provisioning form, opened from a member row. Same shape as the
+   week form above it: it replaces the row's button in place rather than
+   opening a dialog, so the organizer stays on the roster they are reading. */
+.member__signin-form {
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .member__week-form {

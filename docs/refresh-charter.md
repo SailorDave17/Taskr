@@ -303,10 +303,50 @@ at filing.
   particular risks shipping a capability matrix — a form — in the same window the bet exists to
   delete forms.
 
+## Decision taken 2026-08-16 — the calendar is an input, both halves, capacity first
+
+Settles the "what does *busy week* mean as an input" item that had been open below since the
+retrofit. Owner decision, taken with the tradeoffs stated at the gate.
+
+- **Google Calendar read is in scope, and it serves two distinct features — both are wanted:**
+  1. **Capacity inference** (primary): read a member's calendar to inform how busy their week is,
+     feeding the fairness split. This is the half that serves the signature moment — re-balancing
+     needs *current* capacity, and a calendar is the one place busy-ness already lives without
+     anyone typing it.
+  2. **Event import** (secondary): pull a calendar item in as a one-time chore so it is not typed
+     twice.
+- **Sequencing: capacity inference first, import later.** Both halves share the OAuth/consent
+  work; the capacity half is the one no competitor has and the one the charter's thesis needs.
+  Import without capacity would be scope spent on the half that muddies the fairness arithmetic
+  (imported commitments are not household chores) while the signature moment waits.
+- **This is not a second bet.** The deliberate bet stays LLM capture on the setup/capacity/chore
+  paths. Calendar OAuth and a read of the events API are boring, proven technology, which is what
+  the "one bet" directive requires of everything else. Calendar-inferred capacity is an *input* to
+  the same capacity model the bet feeds; neither replaces the other, and manual entry remains the
+  floor under both.
+- **What kills it:** consent friction (per-member Google sign-in is a real setup cost, and setup
+  burden is the field scan's universal killer) — if connecting a calendar costs more than it saves,
+  the declared-by-the-person path stays primary and calendar stays an accelerator; or inference
+  wrong often enough that members stop trusting the split, which is the same trust-erosion kill
+  condition the bet carries.
+
+New open questions this creates (owed at grooming, not settled here):
+
+- **Data minimization** — store the derived busy-minutes or the events themselves. Third-party
+  calendar contents in the household DB is a materially bigger privacy surface than anything #19
+  currently weighs.
+- **Whose calendars** — adults only, or kids' school calendars too. Bears directly on the
+  kids-data question.
+- **Where the read runs** — the Google credential must never reach the client bundle
+  (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
+  same Edge Function surface #56 stands up.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.
   Adding capture adds input burden, which is the failure mode the bet exists to fight.
-- **What "busy week" means as an input** — declared by the person, inferred from completions, or
+- ~~**What "busy week" means as an input** — declared by the person, inferred from completions, or
   read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
-  It bears on whether #12's actuals ever become an input to capacity.
+  It bears on whether #12's actuals ever become an input to capacity.~~ **Settled 2026-08-16 —
+  see the decision section above.** The #12 sub-question (whether actuals feed capacity) is *not*
+  settled by it and stays open.

@@ -175,7 +175,7 @@ describe('addChore', () => {
   it('refuses before any request when the device has joined nothing', async () => {
     currentHousehold.mockResolvedValue(null)
     await expect(addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10' })).rejects.toThrow(
-      /has not joined a household/i,
+      /not signed in to a household/i,
     )
     expect(opsOn('chores')).toHaveLength(0)
   })

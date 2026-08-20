@@ -27,20 +27,69 @@ wrong.
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Output directory: `dist`
-4. **Set the production branch to `rebuild/v1`** — not `main`. It is **Settings → Environments →
-   Production → Branch Tracking**, *not* Settings → Git, where older instructions put it. Read the
-   sentence it prints back: *"Every commit pushed to the `<branch>` branch will create a Production
-   Deployment."*
+4. **Set the production branch to `release`.** It is **Settings → Environments → Production → Branch
+   Tracking**, *not* Settings → Git, where older instructions put it. Read the sentence it prints
+   back: *"Every commit pushed to the `<branch>` branch will create a Production Deployment."*
 
-   **This step is real and it was missed.** *Measured 2026-08-05*: Vercel had it set to **`main`**,
-   so pushes to `rebuild/v1` produced **Preview** deployments and the production URL kept serving
-   the import-time build. The original warning here was right, and a correction written earlier the
-   same day — claiming Vercel "picked `rebuild/v1` correctly, verified by the first deployment
-   building the exact tip of `rebuild/v1`" — was **wrong**, and talked a reader out of the check.
-   The inference does not hold: Vercel marks the **import** deployment Production whatever branch it
-   builds, so building the right SHA is equally consistent with the production branch being set to
-   something else. One observation, two explanations, and the convenient one got written down as
-   verified. **Read the setting; do not infer it from a deployment.**
+   **Changed 2026-08-12, owner decision, and this is the current setting.** It was `rebuild/v1` from
+   2026-08-05 until then, which made **merging a pull request the act of deploying it**. That
+   coupling caused the 2026-08-09 outage recorded in `docs/access-model.md` — client code that
+   needed an unpasted migration went live automatically — and #62's review found it about to cause a
+   second one. Splitting the two branches makes *"the migration is applied"* and *"the client is
+   live"* two acts the owner sequences: work merges into `rebuild/v1` and deploys nothing;
+   production moves only when `release` does.
+
+   **The promotion step is therefore a pull request from `rebuild/v1` into `release`**, merged by
+   the owner after the migrations that branch assumes have been pasted. `githooks/owner-only` lists
+   `release` for that reason — a local push to it is refused, because a push to `release` is a
+   production release.
+
+   **This step is real and it has been missed once already.** *Measured 2026-08-05*: Vercel had it
+   set to **`main`**, so pushes to `rebuild/v1` produced **Preview** deployments and the production
+   URL kept serving the import-time build. The correction written earlier that same day — claiming
+   Vercel "picked `rebuild/v1` correctly, verified by the first deployment building the exact tip of
+   `rebuild/v1`" — was **wrong**, and talked a reader out of the check. The inference does not hold:
+   Vercel marks the **import** deployment Production whatever branch it builds, so building the
+   right SHA is equally consistent with the production branch being set to something else. One
+   observation, two explanations, and the convenient one got written down as verified. **Read the
+   setting; do not infer it from a deployment.**
+
+   **That warning applied to the 2026-08-12 change itself, and it is now discharged by measurement
+   rather than by assertion.** It is worth reading how, because the sequence is what makes it
+   evidence.
+
+   When the setting was first reported, it could **not** be checked: `release` and `rebuild/v1` were
+   the *same commit* (`fcabfc7`) and production served `fcabfc7`, so the deployment was
+   byte-identical under either setting and no available observation distinguished them — the same
+   trap as the two production URLs above, where the distinction lives in a Vercel setting and not in
+   any response. There is no Vercel CLI or token on the build machine, so *read the setting* was not
+   available either. So it was written down as owner-asserted, with the discriminating observation
+   named **in advance**: the first merge into `rebuild/v1` is the test, and production keeping its
+   `build <sha>` afterwards is the pass.
+
+   *Measured 2026-08-12, and the prediction was recorded before the event:*
+
+   | | before | after PR #89 merged |
+   |---|---|---|
+   | `origin/rebuild/v1` | `fcabfc7` | **`d20a809`** — moved |
+   | `origin/release` | `fcabfc7` | `fcabfc7` — unmoved |
+   | production `build <sha>` | `fcabfc7` | **`fcabfc7`** — unchanged |
+   | production asset | `assets/index-DzNO4orx.js` | `assets/index-DzNO4orx.js` — identical |
+
+   **The decoupling is real.** A merge landed on the integration branch, production did not move, and
+   the bytes are the same file rather than a rebuild that happened to match.
+
+   **The test subject makes it stronger than a routine pass.** PR #89 is the per-member-auth branch —
+   the exact client that cannot be served by a project without `0007`, and the specific near-miss
+   that motivated this change. Under the previous arrangement that merge *would have deployed a
+   client asking for `members.email` against a live project that does not have it*, which is the
+   2026-08-09 outage again. The first real exercise of the mechanism was against the hazard it was
+   built for, and it held.
+
+   What remains true regardless: the live app is still the PIN build — because production is built
+   from `release`, and that branch has not moved. **`0007` and `0008` were pasted on 2026-08-20**
+   (#108), so the first half of the sequence is done and the promotion is what is outstanding. That
+   is a **choice with a sequence**, which is the whole point — apply the migration, then promote.
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
 6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
    **This step was missing from the original runbook and it blocks AC 1 completely.**
@@ -65,6 +114,14 @@ wrong.
 
 After this, every push to `rebuild/v1` deploys automatically. That is AC 8's "documented, repeatable
 pipeline" and it needs no further wiring.
+
+> **Superseded 2026-08-12 — that sentence is no longer true, and the paragraphs below are kept as
+> history rather than as instructions.** Production is built from `release`; a push to `rebuild/v1`
+> deploys nothing. See step 4 above for the current arrangement and the measurement that confirmed
+> it. What survives here undiminished is the *method* — the build stamp, and the rule that a deploy
+> is confirmed by reading what the URL serves rather than by trusting a dashboard. That method is
+> exactly what proved the 2026-08-12 change, so it is worth reading even though its conclusion has
+> moved.
 
 *Status of that claim, 2026-08-05*: **it was false, and the first test caught it.** The project had
 exactly one deployment, created by the import at 14:30Z, while the last commit to `rebuild/v1` had

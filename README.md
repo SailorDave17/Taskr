@@ -35,6 +35,23 @@ and the reasoning — including the honest statement of what the access model do
 against — is [`docs/access-model.md`](docs/access-model.md). Read that before touching the data
 layer.
 
+**The PIN sentence above is about the LIVE app, and the code has already moved past it.**
+[#62](https://github.com/SailorDave17/Taskr/issues/62) replaces the organizer-set PIN and the shared
+join code with real per-member sign-in — each person has their own account, and `auth.uid()`
+identifies a person rather than a phone.
+
+**`0007` and `0008` were pasted to the live project on 2026-08-20** ([#108](https://github.com/SailorDave17/Taskr/issues/108)),
+so the database is now on per-member auth and `npm run check:live` is green at 17 of 17. Two things
+are deliberately still true after that paste, and both are sequence rather than oversight:
+
+- **What production serves is still the PIN build.** Vercel builds production from `release`, which
+  sits behind `rebuild/v1` until the promotion pull request is merged. That split is the whole point
+  — see *Branches* below.
+- **The Edge Function is not deployed.** Pasting `0007` cleared every existing claim, and restoring
+  access needs `service_role`, so it needs the function built by #87
+  (`supabase/functions/provision-member/`, both provision and reset paths). The migration's own
+  section 9 carries the ordering: provision the organizer first, then everyone else from the app.
+
 **Migrations are applied by hand, and nothing checks that they were.** There is no Supabase CLI or
 Docker on the build machine, so each file in `supabase/migrations/` is pasted into the Supabase SQL
 editor by a person, at the merge of the story that adds it. They are re-runnable and a test proves
@@ -97,7 +114,8 @@ Other scripts:
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, so it reads schema and never data. Run it after pasting a migration. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the list it works from *is* checked by CI, in `src/lib/liveSchema.test.js` |
+| `npm run test:functions` | **The provisioning Edge Function, against a real stack.** Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, and every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write. It reads schema and never data, and calls nothing for real. Run it after pasting a migration. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **No red is expected any more** — `0007` and `0008` were pasted on 2026-08-20 and it returns 17 of 17, so any red is new and real; [`docs/access-model.md`](docs/access-model.md) carries the history |
 
 ### The two variables you need
 
@@ -122,12 +140,13 @@ entirely and must never reach any `VITE_` variable; the build refuses outright i
 
 ## Branching — read this before you cut a branch
 
-This repository has **three branch roles**, and only one of them is where work goes. The names are
+This repository has **four branch roles**, and only one of them is where work goes. The names are
 misleading if you go by convention, so go by this table.
 
 | Branch | Role |
 |---|---|
 | **`rebuild/v1`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
+| `release` | **What Vercel builds production from.** Entered only by a pull request from `rebuild/v1` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
 | `main` | The **cutover target**. Holds the tag `legacy-final` and receives the rebuild in one merge at the end. Not a working branch. |
 | `develop` | The **2020 legacy tip** — dead code, kept for reference. Never branch from it. |
 
@@ -150,7 +169,32 @@ stale copy within a week.
   becomes a deployment, including the settings that were wrong the first time and how they were
   found.
 
-Every push to `rebuild/v1` deploys to production automatically.
+**Merging into `rebuild/v1` does not deploy anything.** Production is built from `release`, and
+moves only when a pull request from `rebuild/v1` into `release` is merged — deliberately, by the
+owner, after the migrations the branch assumes have been pasted into the live project.
+
+That split is 2026-08-12 and it replaced the opposite arrangement, where production tracked
+`rebuild/v1` and **the merge was the deploy**. Migrations here are applied by hand (see above), so
+that coupling meant a branch whose client needed an unpasted migration went live the instant it
+landed — which is the 2026-08-09 outage in [`docs/access-model.md`](docs/access-model.md), and was
+about to happen a second time. Splitting the branches makes applying the migration and promoting the
+client two acts in an order somebody chooses.
+
+> **Discharged 2026-08-12, and #62 was the thing that proved it.** This block used to say the
+> coupling was what made #62 dangerous to merge, and that the fix had to come first. It did, and it
+> worked — on that exact branch.
+>
+> The danger was specific: #62's client asks for `members.email` and calls a three-argument
+> `create_household`, and the live project had neither until `0007` was pasted. Under merge-is-deploy
+> that goes live the instant it lands, which is the 2026-08-09 outage repeated. *Measured* when
+> PR #89 merged: `rebuild/v1` moved to `d20a809`, `release` stayed at `fcabfc7`, and production went
+> on serving `fcabfc7` — the same `assets/index-*.js` file, not a rebuild that happened to match. The
+> merge deployed nothing.
+>
+> The line worth keeping is the one this block ended on before it was discharged: the mitigation used
+> in August was *an accurate paragraph in a document*, and that is why it was never the whole fix. A
+> paragraph explains the hazard to whoever reads it. What actually held here was a branch that
+> deploys nothing and a `githooks/owner-only` entry refusing a push to the one that does.
 
 ## The rest of `docs/`
 

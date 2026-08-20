@@ -185,7 +185,7 @@ export async function setCapacity({ memberId, periodStart, minutes, note = null,
   const value = normalizeCapacityMinutes(minutes)
 
   const household = await currentHousehold()
-  if (!household) throw new Error('This device has not joined a household.')
+  if (!household) throw new Error('You are not signed in to a household.')
 
   return unwrap(
     await getSupabase()

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, isValidPin } from '../lib/pin.js'
 import PropTypes from 'prop-types'
 import { formatMinutes } from '../lib/household.js'
 import {
@@ -163,29 +162,139 @@ CapacityControl.propTypes = {
   onClear: PropTypes.func.isRequired,
 }
 
+/**
+ * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6.
+ *
+ * Organizer-only, because the Edge Function refuses anybody else and a control
+ * that renders for a person who will always be refused is a promise the app
+ * cannot keep. The refusal is still the real boundary; this is manners.
+ *
+ * The organizer types the credential and tells the person out loud (owner
+ * decision, #87): a household already understands "your PIN is 1234", and the
+ * alternative — generating one and showing it once — needs a surface that
+ * displays a secret exactly once and a recovery path for the organizer who
+ * looks away. Reset uses this identical control, which is why the copy is the
+ * only thing that changes between the two states.
+ */
+function SignInControl({ member, busy, onProvision }) {
+  const [editing, setEditing] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [complaint, setComplaint] = useState(null)
+
+  const hasSignIn = Boolean(member.claimed_by)
+
+  function open() {
+    setSecret('')
+    setComplaint(null)
+    setEditing(true)
+  }
+
+  function close() {
+    setComplaint(null)
+    setEditing(false)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        className="button button--quiet"
+        type="button"
+        onClick={open}
+        disabled={busy}
+        data-testid={`provision-${member.id}`}
+        aria-label={
+          hasSignIn
+            ? `Reset the sign-in for ${member.display_name}`
+            : `Give ${member.display_name} a way to sign in`
+        }
+      >
+        {hasSignIn ? 'Reset sign-in' : 'Give a sign-in'}
+      </button>
+    )
+  }
+
+  return (
+    <form
+      className="stack member__signin-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        // The same floor the Edge Function enforces and the data layer restates.
+        // Checked here so the person gets the sentence before a round trip, not
+        // instead of the server check — the server is still what refuses.
+        if (secret.length < 6) {
+          setComplaint('Use at least 6 characters, so it is not guessable.')
+          return
+        }
+        setComplaint(null)
+        onProvision(member.id, secret, hasSignIn).then(close, () => {})
+      }}
+    >
+      <label className="field">
+        <span className="field__label">
+          {hasSignIn ? `New PIN for ${member.display_name}` : `PIN for ${member.display_name}`}
+        </span>
+        <input
+          className="field__input"
+          type="text"
+          value={secret}
+          autoComplete="off"
+          data-testid={`provision-input-${member.id}`}
+          onChange={(e) => setSecret(e.target.value)}
+        />
+      </label>
+      {/* Said once, here, rather than in a note somewhere else on the screen:
+          this is the moment the organizer needs to know the person never sees
+          an email, because it is the moment they decide what to tell them. */}
+      <p className="card__note">
+        Tell {member.display_name} this — they sign in with their name and this
+        PIN. No email is sent, and nobody can look it up later.
+      </p>
+      {complaint ? (
+        <p className="error" role="alert">
+          {complaint}
+        </p>
+      ) : null}
+      {/* Plain `.row`, deliberately WITHOUT the button-stretch opt-in the
+          action rows carry. gate.test.js counts that class and requires exactly
+          one per screen, because it was measured on a single row at phone width
+          (#82); taking it here would inherit a treatment nobody measured for
+          this form. The class is not named in this comment on purpose — the
+          check counts raw occurrences in the source, so writing it here would
+          trip the very guard being explained. */}
+      <div className="row">
+        <button className="button button--quiet" type="button" onClick={close} disabled={busy}>
+          Cancel
+        </button>
+        <button className="button" type="submit" disabled={busy}>
+          {hasSignIn ? 'Reset it' : 'Give the sign-in'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+SignInControl.propTypes = {
+  member: PropTypes.object.isRequired,
+  busy: PropTypes.bool,
+  onProvision: PropTypes.func.isRequired,
+}
+
 function MemberRow({
   member,
   override,
   isMe,
-  canClaim,
-  canSignIn,
-  canSetPin,
   busy,
+  isOrganizer,
   onSave,
   onRemove,
-  onClaim,
-  onSetPin,
-  onSignIn,
+  onProvision,
   onSetCapacity,
   onClearCapacity,
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
   const [minutes, setMinutes] = useState(String(member.weekly_minutes))
-  const [pin, setPin] = useState('')
-  const [settingPin, setSettingPin] = useState(false)
-  const [signInPin, setSignInPin] = useState('')
-  const [signingIn, setSigningIn] = useState(false)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
   function cancel() {
@@ -253,6 +362,25 @@ function MemberRow({
           {member.weekly_minutes} min/week
           <span className="member__budget-human"> ({formatMinutes(member.weekly_minutes)})</span>
         </span>
+        {/* Whether this person can get in yet — #62.
+
+            `claimed_by` is now identity rather than "which phone is holding
+            this row", so its absence means something a household can act on: no
+            account exists for them, and until one does they are a name on a
+            roster who cannot sign in. Saying so on the row is the honest version
+            of a screen that used to offer a "Set PIN" button here; the button is
+            gone because the thing behind it is gone, and hiding the state
+            entirely would leave the organizer wondering why nothing happens. */}
+        <span className="member__access" data-testid={`access-${member.id}`}>
+          {member.claimed_by ? 'Signed in' : 'No sign-in yet'}
+        </span>
+        {/* #87 — the row stops merely REPORTING the gap and gains the thing
+            that closes it. Organizer-only: the Edge Function refuses anybody
+            else, and offering a control that is always refused is worse than
+            not offering one. */}
+        {isOrganizer && onProvision ? (
+          <SignInControl member={member} busy={busy} onProvision={onProvision} />
+        ) : null}
         {/* The baseline above stays visible beside this week's number on
             purpose: an override that hid what it was overriding would make the
             figure impossible to sanity-check, and the product's claim is that
@@ -267,27 +395,6 @@ function MemberRow({
       </div>
 
       <div className="row row--end row--actions">
-        {canClaim ? (
-          <button
-            className="button button--quiet"
-            type="button"
-            onClick={() => onClaim(member.id)}
-            disabled={busy}
-          >
-            This is me
-          </button>
-        ) : null}
-        {canSignIn ? (
-          <button
-            className="button button--quiet"
-            type="button"
-            onClick={() => setSigningIn((open) => !open)}
-            disabled={busy}
-            aria-label={`Sign in as ${member.display_name}`}
-          >
-            This is me — I have a PIN
-          </button>
-        ) : null}
         <button
           className="button button--quiet"
           type="button"
@@ -296,17 +403,6 @@ function MemberRow({
         >
           Edit
         </button>
-        {canSetPin ? (
-          <button
-            className="button button--quiet"
-            type="button"
-            onClick={() => setSettingPin((open) => !open)}
-            disabled={busy}
-            aria-label={`${member.has_pin ? 'Reset' : 'Set'} PIN for ${member.display_name}`}
-          >
-            {member.has_pin ? 'Reset PIN' : 'Set PIN'}
-          </button>
-        ) : null}
         {confirmingRemove ? (
           <>
             <button
@@ -339,170 +435,55 @@ function MemberRow({
         )}
       </div>
 
-      {signingIn ? (
-        <form
-          className="row row--end"
-          onSubmit={(e) => {
-            e.preventDefault()
-            onSignIn(member.id, signInPin).then(
-              () => {
-                setSignInPin('')
-                setSigningIn(false)
-              },
-              // Leave the form open and the digits in place on a refusal. The
-              // database deliberately will not say whether the person or the PIN
-              // was wrong, so the only useful thing this can do is let them try
-              // again without retyping from scratch.
-              () => {},
-            )
-          }}
-        >
-          <label className="field">
-            <span className="field__label">PIN for {member.display_name}</span>
-            <input
-              className="field__input field__input--code"
-              type="password"
-              value={signInPin}
-              onChange={(e) => setSignInPin(e.target.value)}
-              placeholder="4 digits or more"
-              inputMode="numeric"
-              autoComplete="current-password"
-              minLength={PIN_MIN_LENGTH}
-              maxLength={PIN_MAX_LENGTH}
-              aria-label={`Enter PIN to sign in as ${member.display_name}`}
-            />
-          </label>
-          <button className="button" type="submit" disabled={busy || !isValidPin(signInPin)}>
-            Sign in
-          </button>
-        </form>
-      ) : null}
-
-      {settingPin ? (
-        <form
-          className="row row--end"
-          onSubmit={(e) => {
-            e.preventDefault()
-            onSetPin(member.id, pin).then(
-              () => {
-                setPin('')
-                setSettingPin(false)
-              },
-              () => {},
-            )
-          }}
-        >
-          <label className="field">
-            <span className="field__label">
-              {member.has_pin ? 'New PIN' : 'PIN'} for {member.display_name}
-            </span>
-            <input
-              className="field__input field__input--code"
-              type="password"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="4 digits or more"
-              inputMode="numeric"
-              autoComplete="new-password"
-              minLength={PIN_MIN_LENGTH}
-              maxLength={PIN_MAX_LENGTH}
-              aria-label={`PIN for ${member.display_name}`}
-            />
-          </label>
-          <button className="button" type="submit" disabled={busy || !isValidPin(pin)}>
-            Save PIN
-          </button>
-        </form>
-      ) : null}
+      {/* The sign-in and Set-PIN forms stood here until #62.
+          
+          Both are gone with the RPCs behind them. A member no longer proves who
+          they are to the ROSTER — they sign in on the sign-in screen, as
+          themselves, and arrive already being that person. The status line above
+          is what is left: it reports whether an account exists, which is the only
+          part of this a household member can act on. */}
     </li>
   )
 }
 
 MemberRow.propTypes = {
+  isOrganizer: PropTypes.bool,
+  onProvision: PropTypes.func,
   member: PropTypes.object.isRequired,
   override: PropTypes.object,
   isMe: PropTypes.bool,
-  canClaim: PropTypes.bool,
-  canSignIn: PropTypes.bool,
-  onSignIn: PropTypes.func,
-  canSetPin: PropTypes.bool,
-  onSetPin: PropTypes.func,
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
-  onClaim: PropTypes.func.isRequired,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
 }
 
-/**
- * AC 1 asks for a credential the organizer can "read out **or send**".
- *
- * Reading it out is the paper case and needs no affordance. Sending it does:
- * on a phone, selecting eight monospace characters by long-press is exactly the
- * interaction that produces a typo, and a typo here is indistinguishable from a
- * wrong code because the server deliberately refuses both identically.
- *
- * Web Share is offered where it exists, since it reaches the messaging app the
- * family actually uses; clipboard is the fallback, and where neither exists the
- * code is still on screen and selectable, so nothing is lost.
- */
-function ShareCode({ household }) {
-  const [said, setSaid] = useState(null)
-
-  const message = `Join our Taskr household "${household.name}" with code ${household.join_code}`
-
-  async function share() {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share({ text: message })
-        return
-      }
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(household.join_code)
-        setSaid('Code copied.')
-        return
-      }
-      setSaid('Select the code above to copy it.')
-    } catch {
-      // A cancelled share rejects, and so does a clipboard blocked by
-      // permissions. Neither is an error worth a red banner — the code is on
-      // screen either way.
-      setSaid('Select the code above to copy it.')
-    }
-  }
-
-  return (
-    <>
-      <button className="button button--quiet" type="button" onClick={share}>
-        Copy or send code
-      </button>
-      {/* Polite, so it is announced without interrupting whatever is being read. */}
-      <span className="card__note" role="status">
-        {said}
-      </span>
-    </>
-  )
-}
-
-ShareCode.propTypes = {
-  household: PropTypes.object.isRequired,
-}
+// `ShareCode` stood here until #62 — a button that copied or sent the household's
+// eight-character join code, because AC 1 asked for a credential the organizer
+// could "read out or send".
+//
+// It went with the credential. There is no code to send: admission is an account
+// the organizer provisions for one named person, not a secret that works for
+// whoever repeats it. The affordance was real and the reasoning behind it still
+// holds for anything code-shaped — selecting eight monospace characters by
+// long-press on a phone is exactly the interaction that produces a typo — so it
+// is recorded here rather than deleted silently, in case a shareable invite ever
+// comes back.
 
 export default function Roster({
   household,
   members,
   me,
   isOrganizer,
-  onSetPin,
-  onSignIn,
   busy,
   error,
   onAdd,
   onSave,
   onRemove,
-  onClaim,
+  onProvision,
   onRefresh,
+  onSignOut,
   overrides = [],
   periodStart = null,
   onSetCapacity,
@@ -533,21 +514,46 @@ export default function Roster({
 
   return (
     <div className="roster">
-      <section className="card" aria-labelledby="code-heading">
-        <h2 id="code-heading" className="card__heading">
-          {household.name}
-        </h2>
-        <p className="card__body">
-          Join code — read this out to a phone that needs to join.
-        </p>
-        <p className="joincode" data-testid="join-code">
-          {household.join_code}
-        </p>
-        <ShareCode household={household} />
-        <p className="card__note">
-          Anyone with this code can see and change the household. It is deterrence, not
-          a lock.
-        </p>
+      <section className="card" aria-labelledby="household-heading">
+        <div className="row row--between">
+          <h2 id="household-heading" className="card__heading">
+            {household.name}
+          </h2>
+          {/* A way out, which device auth never needed: the session WAS the
+              phone, so signing out of it meant nothing and there was nothing to
+              sign back in as. Now the session is a person, and a family sharing
+              one tablet needs to hand it over without handing over an identity.
+              Also the only way to correct a sign-in as the wrong person. */}
+          {onSignOut ? (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={onSignOut}
+              disabled={busy}
+            >
+              Sign out
+            </button>
+          ) : null}
+        </div>
+        {/* The join code lived here, with a note conceding it was "deterrence,
+            not a lock". #62 is what replaced it: everyone signs in as
+            themselves, so a household is no longer only as private as the least
+            careful person holding a shared code.
+
+            That note conceded provisioning was not built and told the organizer
+            to expect "No sign-in yet" with no way to fix it. #87 built it, so
+            the note is GONE rather than reworded: an honest placeholder that
+            outlives the gap it describes becomes a lie that reads as
+            documentation, and this one would have sent an organizer looking for
+            a tool that is now sitting on the row in front of them. The
+            replacement is not prose — it is the control itself. */}
+        {isOrganizer ? (
+          <p className="card__note" data-testid="provisioning-note">
+            Add people here, then give each of them a sign-in from their row.
+            They sign in with their own name and a PIN you set — tell them what
+            it is, because no email is sent.
+          </p>
+        ) : null}
       </section>
 
       <section className="card" aria-labelledby="roster-heading">
@@ -572,26 +578,17 @@ export default function Roster({
                 key={member.id}
                 member={member}
                 isMe={me?.id === member.id}
-                // Only offer "this is me" when this device is not already
-                // someone, and the person is unclaimed. The server refuses a
-                // double claim regardless; this just avoids offering a button
-                // whose only outcome is an error.
-                // A person with a PIN is claimed by proving you are them, which
-                // is the sign-in flow — claim_member refuses them outright, so
-                // offering the button here would only produce an error.
-                canClaim={!me && !member.claimed_by && !member.has_pin}
-                // The other side of that coin, and its absence was the bug
-                // (#63): a person WITH a PIN is claimed by proving you are
-                // them. Without this the two conditions between them offered
-                // nothing at all to anyone holding a credential.
-                canSignIn={!me && !member.claimed_by && Boolean(member.has_pin) && Boolean(onSignIn)}
-                onSignIn={onSignIn}
-                canSetPin={Boolean(isOrganizer && onSetPin)}
-                onSetPin={onSetPin}
+                // "This is me", "I have a PIN" and "Set PIN" were all passed in
+                // here until #62, each gated on a different combination of
+                // `claimed_by` and `has_pin`. None survives: you do not pick
+                // yourself off a list any more, you sign in, and you arrive
+                // already being somebody. The row's only remaining say in
+                // identity is reporting whether an account exists.
                 busy={busy}
+                isOrganizer={isOrganizer}
                 onSave={onSave}
                 onRemove={onRemove}
-                onClaim={onClaim}
+                onProvision={onProvision}
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
@@ -667,15 +664,14 @@ Roster.propTypes = {
   members: PropTypes.array.isRequired,
   me: PropTypes.object,
   isOrganizer: PropTypes.bool,
-  onSetPin: PropTypes.func,
-  onSignIn: PropTypes.func,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
-  onClaim: PropTypes.func.isRequired,
+  onProvision: PropTypes.func,
   onRefresh: PropTypes.func.isRequired,
+  onSignOut: PropTypes.func,
   overrides: PropTypes.array,
   periodStart: PropTypes.string,
   onSetCapacity: PropTypes.func.isRequired,

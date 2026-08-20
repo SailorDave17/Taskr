@@ -11,13 +11,18 @@
 // here would quietly undo them:
 //
 //   1. `members.id` is the durable person. Chores, completions and the
-//      expected-vs-actual history in later stories reference THAT.
-//   2. `claimed_by` is only ever "which device session is acting as this
-//      person". An anonymous session expires after 30 days idle and the user
-//      returns with a NEW auth id, so nothing durable may be keyed to it.
+//      expected-vs-actual history in later stories reference THAT. This is
+//      unchanged by #62 and is the reason that story was cheap: nothing
+//      durable was ever keyed to an auth id, so per-member sign-in migrated
+//      identity without migrating history.
+//   2. `claimed_by` is the person's AUTH USER — since #62, and it used to be
+//      the opposite. It meant "which device session is acting as this person",
+//      and could not be relied on because an anonymous session expired after 30
+//      idle days and returned with a new auth id. A real credential returns the
+//      same auth user every time, which is what let `household_devices` go and
+//      what makes this column the sole input to every policy in the schema.
 
 import { getSupabase } from './supabase.js'
-import { assertPinShape } from './pin.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -37,28 +42,70 @@ function unwrap({ data, error }, whatWeWereDoing) {
 }
 
 /**
- * The signed-in session for this device, creating an anonymous one if needed.
+ * The signed-in session, or null. It no longer creates one — #62.
  *
- * Anonymous auth is the household's access model (owner decision, #5): a device
- * gets an identity without anybody collecting an email address for a
- * nine-year-old. It is a *device* identity, not a person — who the device is
- * acting as is `claimMember` below.
+ * Under device auth this was `ensureSession()`, and it signed the DEVICE in
+ * anonymously so that a phone always had an identity before it had a person.
+ * That is exactly what per-member sign-in removes: an identity now belongs to
+ * somebody, and there is no such thing as being signed in as nobody. So a phone
+ * with no session is a normal state that the UI answers with a sign-in screen,
+ * not a condition to be repaired behind the user's back.
+ *
+ * Renamed rather than reused. `ensureSession` promised to return a session and
+ * this returns null routinely; leaving the old name on the new behaviour would
+ * have every caller's null-check read as defensive rather than load-bearing.
  */
-export async function ensureSession() {
-  const supabase = getSupabase()
+export async function currentSession() {
+  const { data } = await getSupabase().auth.getSession()
+  return data?.session ?? null
+}
 
-  const { data: existing } = await supabase.auth.getSession()
-  if (existing?.session) return existing.session
-
-  const { data, error } = await supabase.auth.signInAnonymously()
+/**
+ * Sign a person in with the credential they hold.
+ *
+ * Both kinds go through here. A member with a real address types it; a member
+ * without one has a synthetic `<members.id>@taskr.invalid` address they never
+ * see, and their PIN is the password — so from this function's point of view
+ * there is one flow, and `members.email` is the only thing that differs.
+ */
+export async function signIn({ email, password }) {
+  const { data, error } = await getSupabase().auth.signInWithPassword({
+    email: String(email ?? '').trim(),
+    password: String(password ?? ''),
+  })
   if (error) {
-    // Named explicitly because both of these present as a bug in our own code.
-    // Anonymous sign-in is capped at 30/hour per IP and a whole household
-    // shares one home NAT; and the provider is OFF by default, which fails with
-    // a message that does not obviously say so.
-    const hint = /rate|limit|429/i.test(error.message)
-      ? 'Too many devices have joined from this network in the last hour. Wait and try again.'
-      : 'The backend is not accepting new devices. Check that Anonymous Sign-Ins are enabled in Supabase → Authentication → Providers.'
+    // Two failures are named, and everything else is deliberately collapsed.
+    //
+    // COLLAPSED: a wrong password and an unknown address. Supabase answers those
+    // identically on purpose and this keeps the property rather than helpfully
+    // undoing it — a household is a small closed set of people, so "no such
+    // account" tells a guesser which addresses exist.
+    //
+    // NAMED, because neither is a credential problem and both are otherwise
+    // unactionable:
+    //
+    //   - `email_not_confirmed`. Leaving it collapsed tells somebody with the
+    //     RIGHT password to try again forever, or to reset a password that was
+    //     never wrong. It leaks nothing: GoTrue validates the password BEFORE
+    //     checking confirmation state, so this code only ever reaches a caller
+    //     who already proved they hold the credential.
+    //   - the rate limit. `ensureSession` carried this branch and it was dropped
+    //     when the call changed to `signInWithPassword` — but the reasoning did
+    //     not stop applying: a household shares one home NAT, so several people
+    //     signing in on one evening are one IP, and "that did not match" sends
+    //     them hunting a credential fault that does not exist.
+    const code = error.code || ''
+    let hint = 'That email and password did not match. Try again.'
+    if (code === 'email_not_confirmed' || /not confirmed/i.test(error.message)) {
+      hint =
+        'That account still needs its email confirmed. Check the inbox for the link — ' +
+        'the password was right.'
+    } else if (code === 'over_request_rate_limit' || /rate limit|429/i.test(error.message)) {
+      hint =
+        'Too many sign-in attempts from this network in the last hour — a household shares ' +
+        'one connection, so this counts everyone. Wait and try again; nothing is wrong with ' +
+        'the password.'
+    }
     const err = new Error(hint)
     err.cause = error
     throw err
@@ -66,14 +113,64 @@ export async function ensureSession() {
   return data.session
 }
 
-/** The auth user id of this device session, or null if there is no session. */
-export async function currentDeviceId() {
+/**
+ * Register the organizer's own account, which is the one signup a client may do.
+ *
+ * The distinction is the whole reason #62 needs an Edge Function. `signUp()`
+ * signs the CALLER in as the account it creates, so an organizer using it to
+ * make a child's account would be signed out of their own and into the child's.
+ * That is fine here and only here, because the account being created IS the
+ * caller's. Everybody else is provisioned server-side with the `service_role`
+ * key, which must never reach this bundle — `src/lib/keyShape.js` fails the
+ * build over it.
+ */
+export async function signUpOrganizer({ email, password }) {
+  const { data, error } = await getSupabase().auth.signUp({
+    email: String(email ?? '').trim(),
+    password: String(password ?? ''),
+  })
+  if (error) {
+    const err = new Error(`Could not create your account: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  // Null when the project requires email confirmation. Not an error and not
+  // something this app can work around — say so plainly rather than leaving the
+  // caller with a session-shaped null.
+  if (!data.session) {
+    throw new Error(
+      'Your account was created but needs email confirmation before you can sign in. ' +
+        'Check your inbox, or turn off email confirmation in Supabase → Authentication → Providers.',
+    )
+  }
+  return data.session
+}
+
+/** End the session on this phone. */
+export async function signOut() {
+  const { error } = await getSupabase().auth.signOut()
+  if (error) {
+    const err = new Error(`Could not sign out: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+}
+
+/**
+ * The auth user id of the signed-in person, or null.
+ *
+ * Was `currentDeviceId`. The value it returns changed meaning in #62 — it used
+ * to identify a phone's anonymous session and now identifies a PERSON — and the
+ * old name would have gone on reading correctly while meaning something else,
+ * which is the kind of drift this repo has already paid for once.
+ */
+export async function currentUserId() {
   const { data } = await getSupabase().auth.getUser()
   return data?.user?.id ?? null
 }
 
 /**
- * The household this device has joined, or null if it has not joined one.
+ * The household the signed-in person belongs to, or null if they belong to none.
  *
  * Read from the server every time. It is deliberately NOT cached in
  * localStorage: AC 3 requires that the roster survive a reinstall and a backend
@@ -83,54 +180,64 @@ export async function currentDeviceId() {
 export async function currentHousehold() {
   const supabase = getSupabase()
 
-  // A device sees its own membership row and nothing else, so an empty result
-  // here means "not joined" rather than "no such household".
-  const membership = unwrap(
-    await supabase.from('household_devices').select('household_id').maybeSingle(),
-    'checking whether this device has joined a household',
-  )
-  if (!membership) return null
-
-  return unwrap(
-    await supabase.from('households').select('*').eq('id', membership.household_id).maybeSingle(),
+  // One read, not two. Under device auth this resolved `household_devices`
+  // first and then fetched the household by id, because the device's membership
+  // row was the only thing it could see. #62 dropped that table: membership is
+  // now `members.claimed_by = auth.uid()`, and `households_select_joined`
+  // resolves it inside the policy — so selecting households returns the
+  // caller's own and nothing else, and an empty result means "not signed in as
+  // anybody" rather than "no such household".
+  //
+  // `limit(1)` rather than a bare `maybeSingle()`: the membership predicate
+  // returns a set, so a person could in principle belong to two households, and
+  // `maybeSingle()` treats a second row as an error rather than as a choice.
+  // One household per person is today's product decision, not a schema
+  // guarantee, and this read should not be the thing that discovers otherwise.
+  const rows = unwrap(
+    await supabase.from('households').select('*').limit(1),
     'loading the household',
   )
+  return rows?.[0] ?? null
 }
 
 /**
- * Create a household and put this device in it. Returns the household including
- * its join code, which is the credential the organizer reads out — AC 1.
+ * Create a household, with the caller as its organizer — AC 1.
+ *
+ * The join code it used to return went with #62: admission is no longer a shared
+ * secret anybody holding it can spend, it is an account provisioned per person.
  *
  * The insert is server-side (`create_household` runs as definer) because there
  * is no insert policy on `households` at all. A client cannot mint one.
  */
-export async function createHousehold(name, { organizerName, organizerPin } = {}) {
+export async function createHousehold(name, { organizerName } = {}) {
   const trimmed = (name ?? '').trim()
   if (!trimmed) throw new Error('A household needs a name.')
 
   const organizer = (organizerName ?? '').trim()
   if (!organizer) throw new Error('The organizer needs a name — they are a person in the household too.')
 
-  assertPinShape(organizerPin)
-
-  // The organizer's own member row and PIN are created in the same statement as
-  // the household. A PIN set afterwards would leave a window in which the
-  // organizer cannot move to a new phone, and a household briefly without an
-  // organizer is a household nobody can administer.
+  // The organizer's own member row is created in the same statement as the
+  // household, claimed by them. That is what stops a household being born
+  // unreachable: under #62's predicate a household with no claimed member is
+  // visible to NOBODY, including the person who just made it, so a second round
+  // trip to attach the organizer would leave a window with no way out of it.
   //
-  // The timezone goes in the SAME statement for the same class of reason (#44).
-  // A week boundary is a local-time fact and the household's zone is what
-  // decides it; a second round trip to set it afterwards can fail on its own and
-  // would leave the household filing capacity under UTC weeks nobody lives in.
-  // 0005 defaults the argument to 'UTC', so an older client still works — this
-  // is what makes "defaulted from the creating device" true rather than
-  // available.
+  // No PIN argument any more. 0007 takes the signature back to three arguments
+  // and the third is the TIMEZONE — the same position the PIN used to occupy,
+  // which is why passing the old shape did not fail cleanly: `organizer_pin`
+  // landed in the timezone slot and the household was refused with `not a known
+  // timezone: 4821`, an error that names neither the caller's mistake nor the
+  // migration.
+  //
+  // The timezone still goes in the SAME statement, for #44's reason. A week
+  // boundary is a local-time fact and the household's zone decides it; setting
+  // it afterwards can fail on its own and would leave the household filing
+  // capacity under UTC weeks nobody lives in.
   return unwrap(
     await getSupabase().rpc('create_household', {
       household_name: trimmed,
       organizer_name: organizer,
-      organizer_pin: String(organizerPin),
-      household_tz: deviceTimezone(),
+      household_timezone: deviceTimezone(),
     }),
     'creating the household',
   )
@@ -152,24 +259,24 @@ export function deviceTimezone() {
 }
 
 
-/**
- * Join an existing household by code — AC 5.
- *
- * The code is normalised on both sides. `normalizeJoinCode` is in joinCode.js
- * and deliberately does not restate the alphabet; a wrong character is the
- * server's answer to give, and it gives the same answer for "no such code" and
- * "malformed" so a guesser learns nothing.
- */
-export async function joinHousehold(code) {
-  return unwrap(await getSupabase().rpc('join_household', { code }), 'joining the household')
-}
-
-// The columns a client is allowed to read. `pin_hash` is NOT among them — the
-// grants in migration 0002 refuse it — so `select('*')` now fails outright.
-// That is deliberate: a household sibling who can read the bcrypt hash can
-// attack a four-digit PIN offline. `has_pin` is the generated boolean the UI
-// actually needs.
-export const MEMBER_COLUMNS = 'id, household_id, display_name, weekly_minutes, claimed_by, has_pin, created_at'
+// The columns a client is allowed to read, and `select('*')` still fails
+// outright — 0002 established that by revoking wholesale and granting per
+// column, and 0007 re-issued the grant keeping one column back so that stays
+// true. It very nearly stopped being true: the refusal was a side effect of
+// withholding `pin_hash`, so dropping that column would have made `select('*')`
+// quietly succeed while this comment went on claiming otherwise. `household_id`
+// is the withheld column now, as it already was on `chores` and
+// `member_capacity` — a client learns its household from `households`.
+//
+// What changed in #62: `pin_hash` and its generated boolean `has_pin` are gone
+// with the credential they described, and `email` takes their place. It is not
+// a like-for-like swap. `has_pin` told the UI which sign-in control to draw;
+// `email` says which KIND of credential a member has — an address means a real
+// one and a longer secret, null means a synthetic `<id>@taskr.invalid` address
+// and a PIN, and there is deliberately no second flag that can disagree with
+// it. Reading it is safe in a way `pin_hash` never was: it identifies a person,
+// it does not authenticate them.
+export const MEMBER_COLUMNS = 'id, display_name, weekly_minutes, claimed_by, email, created_at'
 
 /** Everyone in this device's household, oldest first so the order is stable. */
 export async function listMembers() {
@@ -193,7 +300,7 @@ export async function addMember({ displayName, weeklyMinutes }) {
   if (!name) throw new Error('A person needs a name.')
 
   const household = await currentHousehold()
-  if (!household) throw new Error('This device has not joined a household.')
+  if (!household) throw new Error('You are not signed in to a household.')
 
   return unwrap(
     await getSupabase()
@@ -230,47 +337,79 @@ export async function removeMember(id) {
   unwrap(await getSupabase().from('members').delete().eq('id', id), 'removing the person')
 }
 
+// `claimMember`, `setMemberPin` and `claimMemberWithPin` were here until #62.
+//
+// All three are gone rather than deprecated, because 0007 drops the RPCs they
+// called: keeping a wrapper would turn a compile-time absence into a runtime
+// `PGRST202 function not found`, discovered by a child on a phone. Identity is
+// no longer something a client asks for at all — it is written by the Edge
+// Function as `service_role`, and `members.claimed_by` is absent from the client
+// update grant precisely so this file cannot have a fourth attempt at it.
+
+/** The deployed function's name, in one place — #87. */
+const PROVISION_FUNCTION = 'provision-member'
+
 /**
- * Say "this device is this person" — the attribution AC 5 asks for.
+ * Ask the Edge Function to do something only `service_role` may do — #87.
  *
- * Server-side (`claim_member` takes FOR UPDATE) so two phones racing to claim
- * the same person serialise and the second is refused, rather than both reading
- * "unclaimed" and both writing.
+ * This is the ONLY route by which a member gains an auth identity. The key that
+ * makes it possible never comes near this bundle: `src/lib/keyShape.js` fails
+ * the build if a secret key is ever put in a `VITE_` variable, and
+ * `gate.test.js` asserts the built bundle is clean.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is rather
+ * than replaced with a generic message — "Only the household organizer can do
+ * that" is something the person can act on and "Something went wrong" is not.
  */
-export async function claimMember(memberId) {
-  return unwrap(await getSupabase().rpc('claim_member', { member_id: memberId }), 'picking who you are')
+async function callProvisioning(action, { memberId, password }) {
+  const trimmed = String(password ?? '')
+  if (!memberId) throw new Error('Pick a person first.')
+  if (trimmed.length < 6) {
+    throw new Error('That credential is too short — use at least 6 characters.')
+  }
+
+  const { data, error } = await getSupabase().functions.invoke(PROVISION_FUNCTION, {
+    body: { action, memberId, password: trimmed },
+  })
+
+  if (error) {
+    // `FunctionsHttpError` carries the body, and the body is where the useful
+    // sentence lives — the error's own message is only "Edge Function returned
+    // a non-2xx status code", which tells the organizer nothing.
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const err = new Error(detail || `Could not ${action} that sign-in: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data
 }
 
 /**
- * Set or reset a person's PIN. Organizer only, enforced server-side — the check
- * here would be advice.
+ * Give a member a way to sign in — #87 AC 2.
  *
- * A reset releases whichever phone is currently acting as that person, so a
- * child who has forgotten their PIN and a phone that has been handed on are the
- * same operation. That is the whole of the recovery story: there is no email to
- * send a reset link to, and deliberately so.
+ * The organizer stays signed in as themselves throughout, which is the whole
+ * reason this is a server call: `auth.signUp()` would sign them out and into the
+ * account it just made.
  */
-export async function setMemberPin(memberId, pin) {
-  assertPinShape(pin)
-  return unwrap(
-    await getSupabase().rpc('set_member_pin', { member_id: memberId, new_pin: String(pin) }),
-    'setting the PIN',
-  )
+export async function provisionMember({ memberId, password }) {
+  return callProvisioning('provision', { memberId, password })
 }
 
 /**
- * Claim a person by proving you are them.
+ * Replace a member's credential when they forget it — #87 AC 3.
  *
- * Unlike `claimMember`, this deliberately succeeds when the person is already
- * claimed on another device — that is what a credential is for. The same child
- * on a new phone must be able to say so without an organizer reset, and holding
- * the PIN is what makes them the same child.
+ * No inbox is involved and none can be: a provisioned member's address is
+ * `<id>@taskr.invalid`, and `.invalid` can never resolve, so an emailed reset
+ * link would go nowhere. It is an admin password update instead.
  */
-export async function claimMemberWithPin(memberId, pin) {
-  return unwrap(
-    await getSupabase().rpc('claim_member_with_pin', { member_id: memberId, pin: String(pin ?? '') }),
-    'signing in as this person',
-  )
+export async function resetMemberCredential({ memberId, password }) {
+  return callProvisioning('reset', { memberId, password })
 }
 
 /**
@@ -281,9 +420,9 @@ export async function claimMemberWithPin(memberId, pin) {
  * reports "nobody" and the user picks themselves again, instead of a stale
  * local value attributing work to the wrong person.
  */
-export function findClaimedMember(members, deviceId) {
-  if (!deviceId) return null
-  return members.find((m) => m.claimed_by === deviceId) ?? null
+export function findClaimedMember(members, userId) {
+  if (!userId) return null
+  return members.find((m) => m.claimed_by === userId) ?? null
 }
 
 /**

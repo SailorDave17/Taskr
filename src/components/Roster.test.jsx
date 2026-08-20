@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import Roster from './Roster.jsx'
@@ -7,7 +7,7 @@ import Roster from './Roster.jsx'
 // ACs 2 and 4 (people with budgets, edited and removed) and the "pick yourself"
 // half of AC 5. Names are synthetic — see #19.
 
-const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+const household = { id: 'h1', name: 'Placeholder Household' }
 
 const PERIOD = '2026-08-10'
 
@@ -21,9 +21,8 @@ function setup(overrides = {}) {
     onAdd: vi.fn().mockResolvedValue(undefined),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
-    onClaim: vi.fn().mockResolvedValue(undefined),
     onRefresh: vi.fn(),
-    onSetPin: vi.fn().mockResolvedValue(undefined),
+    onSignOut: vi.fn().mockResolvedValue(undefined),
     // #46. The parameter this function already calls `overrides` is the PROP
     // BAG; the Roster prop of the same name is the capacity override list, and
     // `setup({ overrides: [...] })` sets exactly that. Confusing on first read
@@ -31,6 +30,10 @@ function setup(overrides = {}) {
     // touch every existing call in this file for no behavioural gain.
     onSetCapacity: vi.fn().mockResolvedValue(undefined),
     onClearCapacity: vi.fn().mockResolvedValue(undefined),
+    // #87 — provisioning. A spy rather than a stub returning undefined: the
+    // control chains `.then(close)` off it, so a non-promise would close the
+    // form for the wrong reason and hide a broken call.
+    onProvision: vi.fn().mockResolvedValue(undefined),
   }
   // The week the fixture override belongs to. Passed explicitly rather than
   // defaulted, because an override is only an override OF a period — matching on
@@ -51,66 +54,54 @@ const rowFor = (name) => screen.getByText(name).closest('li')
  */
 const clickAndSettle = (element) => act(async () => void fireEvent.click(element))
 
-describe('the join credential', () => {
-  it('shows the code so the organizer can read it out — AC 1', () => {
+describe('the household header — #62', () => {
+  // Two whole describes stood here: one asserting the join code was on screen
+  // for the organizer to read out, and one covering the share sheet and
+  // clipboard fallbacks behind AC 1's "read out OR SEND".
+  //
+  // Both went with the code itself. Admission is an account provisioned for one
+  // named person, so there is nothing to read out and nothing to send. The
+  // screen's remaining job here is to say what it cannot yet do.
+
+  it('shows no join code, because there is none', () => {
     setup()
-    expect(screen.getByTestId('join-code')).toHaveTextContent('ABCD2345')
+    expect(screen.queryByTestId('join-code')).not.toBeInTheDocument()
+    // The old note conceded the code was "deterrence, not a lock". That
+    // concession is what #62 removed; asserting its absence keeps a copy-paste
+    // from quietly reinstating a claim that is no longer true.
+    expect(screen.queryByText(/deterrence, not\s+a lock/i)).not.toBeInTheDocument()
   })
 
-  it('states plainly that the code is deterrence, not a lock', () => {
-    setup()
-    expect(screen.getByText(/deterrence, not\s+a lock/i)).toBeInTheDocument()
-  })
-})
-
-describe('sending the code — AC 1’s "or send"', () => {
-  const shareButton = () => screen.getByRole('button', { name: /copy or send code/i })
-
-  afterEach(() => {
-    delete navigator.share
-    delete navigator.clipboard
+  it('tells the organizer how to give somebody a sign-in — #87', () => {
+    // Was "tells the organizer that provisioning is not built yet", asserting
+    // the note said `not built yet`. #87 built it, so that assertion is now the
+    // wrong way round and is REPLACED rather than deleted: the note still has a
+    // job, and an organizer who is told nothing here has to guess whether the
+    // button on each row is the thing that fixes "No sign-in yet".
+    setup({ isOrganizer: true })
+    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/sign-in from their row/i)
   })
 
-  it('shares through the OS share sheet where one exists', async () => {
-    const share = vi.fn().mockResolvedValue(undefined)
-    navigator.share = share
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // The message must carry the code itself, not just a link: the receiving
-    // phone types it into the join box.
-    expect(share).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('ABCD2345') }))
+  it('no longer claims provisioning is unbuilt — the placeholder must not outlive the gap', () => {
+    // #87 AC 6 names this explicitly. An honest placeholder that survives the
+    // thing it apologised for becomes a false statement that reads as
+    // documentation, and this one would send an organizer hunting for a tool
+    // that is now sitting on the row in front of them.
+    setup({ isOrganizer: true })
+    expect(screen.queryByText(/not built yet/i)).not.toBeInTheDocument()
   })
 
-  it('falls back to the clipboard, copying the bare code and nothing else', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    navigator.clipboard = { writeText }
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // The bare code, because it is pasted into a field that expects exactly it.
-    expect(writeText).toHaveBeenCalledWith('ABCD2345')
-    expect(await screen.findByText(/code copied/i)).toBeInTheDocument()
+  it('does not say it to anyone who cannot act on it', () => {
+    setup({ isOrganizer: false })
+    expect(screen.queryByTestId('provisioning-note')).not.toBeInTheDocument()
   })
 
-  it('says what to do instead when neither is available, rather than failing silently', async () => {
-    setup()
-    await clickAndSettle(shareButton())
-    expect(await screen.findByText(/select the code above/i)).toBeInTheDocument()
-  })
-
-  it('treats a cancelled share as a non-event, not an error', async () => {
-    navigator.share = vi.fn().mockRejectedValue(new Error('AbortError'))
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // Cancelling a share sheet is the commonest outcome of opening one by
-    // accident. It must not read as a failure.
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByTestId('join-code')).toHaveTextContent('ABCD2345')
+  it('offers a way to sign out, which device auth never needed', () => {
+    // A session is a PERSON now. On a shared tablet this is the only way to
+    // stop being them, and the only way to undo signing in as the wrong one.
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
+    expect(onSignOut).toHaveBeenCalled()
   })
 })
 
@@ -137,36 +128,32 @@ describe('showing the roster', () => {
   })
 })
 
-describe('picking who you are on this device — AC 5', () => {
-  it('offers unclaimed people when this device is nobody yet', () => {
-    setup()
-    expect(within(rowFor('Placeholder One')).getByRole('button', { name: /this is me/i })).toBeInTheDocument()
-  })
+describe('who you are, and who can get in — #62', () => {
+  // This block used to be "picking who you are on this device": a "This is me"
+  // button on every unclaimed row, because a phone had an identity and a person
+  // did not. You no longer pick yourself off a list — you sign in, and you
+  // arrive already being somebody. What the row still reports is whether an
+  // account exists for a person, which is the part an organizer can act on.
 
-  it('does not offer someone already claimed on another device', () => {
+  it('offers nobody a way to pick themselves off the roster', () => {
     setup()
-    expect(
-      within(rowFor('Placeholder Two')).queryByRole('button', { name: /this is me/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('offers nobody once this device already is someone', () => {
-    setup({ me: roster[0] })
     expect(screen.queryByRole('button', { name: /this is me/i })).not.toBeInTheDocument()
   })
 
-  it('marks which person this device is acting as', () => {
+  it('says who has a way in and who does not', () => {
+    setup()
+    expect(within(rowFor('Placeholder One')).getByTestId('access-m1')).toHaveTextContent(
+      /no sign-in yet/i,
+    )
+    expect(within(rowFor('Placeholder Two')).getByTestId('access-m2')).toHaveTextContent(
+      /signed in/i,
+    )
+  })
+
+  it('marks which person this phone is signed in as', () => {
     setup({ me: roster[0] })
     expect(within(rowFor('Placeholder One')).getByText(/· you/)).toBeInTheDocument()
     expect(within(rowFor('Placeholder Two')).queryByText(/· you/)).not.toBeInTheDocument()
-  })
-
-  it('claims by member id, not by name', async () => {
-    const { onClaim } = setup()
-    await clickAndSettle(
-      within(rowFor('Placeholder One')).getByRole('button', { name: /this is me/i }),
-    )
-    expect(onClaim).toHaveBeenCalledWith('m1')
   })
 })
 
@@ -307,137 +294,25 @@ describe('seeing another phone’s changes — AC 2', () => {
   })
 })
 
-describe('per-member credentials — story #23', () => {
-  const organizerId = 'm1'
-  const withPins = [
-    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 0, claimed_by: 'device-a', has_pin: true },
-    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: null, has_pin: false },
-    { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null, has_pin: true },
-  ]
-  const asOrganizer = {
-    members: withPins,
-    me: withPins[0],
-    isOrganizer: true,
-    household: { ...household, organizer_member_id: organizerId },
-  }
-
-  it('offers the organizer a control on every person', () => {
-    setup(asOrganizer)
-    expect(screen.getByLabelText(/set pin for Placeholder Two/i)).toBeInTheDocument()
-    // Already has one, so it is a reset — the wording has to say which, because
-    // a parent needs to know they are about to invalidate a child's PIN.
-    expect(screen.getByLabelText(/reset pin for Placeholder Three/i)).toBeInTheDocument()
-  })
-
-  it('offers it to nobody else, because the database would refuse them anyway', () => {
-    setup({ ...asOrganizer, isOrganizer: false, me: withPins[1] })
-    expect(screen.queryByLabelText(/set pin for/i)).toBeNull()
-    expect(screen.queryByLabelText(/reset pin for/i)).toBeNull()
-  })
-
-  it('sends the PIN for the person whose row it was typed in', async () => {
-    const { onSetPin } = setup(asOrganizer)
-    fireEvent.click(screen.getByLabelText(/set pin for Placeholder Two/i))
-    fireEvent.change(screen.getByLabelText(/^PIN for Placeholder Two$/i), {
-      target: { value: '4821' },
-    })
-    await clickAndSettle(screen.getByRole('button', { name: /save pin/i }))
-    expect(onSetPin).toHaveBeenCalledWith('m2', '4821')
-  })
-
-  it('will not send one too short to be a credential', () => {
-    const { onSetPin } = setup(asOrganizer)
-    fireEvent.click(screen.getByLabelText(/set pin for Placeholder Two/i))
-    fireEvent.change(screen.getByLabelText(/^PIN for Placeholder Two$/i), { target: { value: '12' } })
-    expect(screen.getByRole('button', { name: /save pin/i })).toBeDisabled()
-    expect(onSetPin).not.toHaveBeenCalled()
-  })
-
-  // #63 — the other half of that sentence. Until this existed, "that is the
-  // sign-in flow" pointed at nothing: `claimMemberWithPin` was exported, unit
-  // tested, and called by no component, so it was tree-shaken out of the
-  // deployed bundle. Setting someone's PIN released their phone and left them
-  // no way back in.
-  //
-  // Every test below that asserts the control is ABSENT passed before the fix
-  // too. Only the ones asserting it is PRESENT could have caught the bug, which
-  // is the lesson rather than the coverage.
-  it('offers a sign-in control to a person who has a PIN and is claimed by nobody', () => {
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
-    expect(screen.getByLabelText(/sign in as Placeholder Three/i)).toBeInTheDocument()
-  })
-
-  it('does not offer it to a person with no PIN — for them it is "this is me"', () => {
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
-    expect(screen.queryByLabelText(/sign in as Placeholder Two/i)).not.toBeInTheDocument()
-  })
-
-  it('does not offer it for someone already claimed on another device', () => {
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
-    expect(screen.queryByLabelText(/sign in as Placeholder One/i)).not.toBeInTheDocument()
-  })
-
-  it('does not offer it once this device is already someone', () => {
-    setup({ members: withPins, me: withPins[0], isOrganizer: false, onSignIn: vi.fn() })
-    expect(screen.queryByLabelText(/sign in as Placeholder Three/i)).not.toBeInTheDocument()
-  })
-
-  it('sends the PIN for the person whose row it was typed in', async () => {
-    const onSignIn = vi.fn().mockResolvedValue(undefined)
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
-    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
-    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
-      target: { value: '4821' },
-    })
-    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
-    expect(onSignIn).toHaveBeenCalledWith('m3', '4821')
-  })
-
-  it('will not send one too short to be a credential', async () => {
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn: vi.fn() })
-    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
-    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
-      target: { value: '12' },
-    })
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
-  })
-
-  it('keeps the digits and the form open when the PIN is refused, so nothing is retyped', async () => {
-    const onSignIn = vi.fn().mockRejectedValue(new Error('that was not the right PIN'))
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
-    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
-    const field = screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i)
-    fireEvent.change(field, { target: { value: '9999' } })
-    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
-    expect(onSignIn).toHaveBeenCalled()
-    expect(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i)).toHaveValue('9999')
-  })
-
-  it('invents no message of its own about WHY a PIN was refused', async () => {
-    // The database deliberately will not say whether the person or the PIN was
-    // wrong. A helpful-looking component message would undo that at the only
-    // layer the attacker can see.
-    const onSignIn = vi.fn().mockRejectedValue(new Error('that was not the right PIN'))
-    setup({ members: withPins, me: null, isOrganizer: false, onSignIn })
-    await clickAndSettle(screen.getByLabelText(/sign in as Placeholder Three/i))
-    fireEvent.change(screen.getByLabelText(/enter PIN to sign in as Placeholder Three/i), {
-      target: { value: '9999' },
-    })
-    await clickAndSettle(screen.getByRole('button', { name: 'Sign in' }))
-    expect(screen.queryByText(/wrong PIN|no such person|incorrect PIN|not a member/i)).not.toBeInTheDocument()
-  })
-
-  it('does not offer "this is me" for a person with a PIN — that is the sign-in flow', () => {
-    // claim_member() refuses a PIN-protected member outright, so the button's
-    // only possible outcome would be an error message.
-    setup({ members: withPins, me: null, isOrganizer: false })
-    const three = rowFor('Placeholder Three')
-    expect(within(three).queryByRole('button', { name: /this is me/i })).toBeNull()
-
-    const two = rowFor('Placeholder Two')
-    expect(within(two).getByRole('button', { name: /this is me/i })).toBeInTheDocument()
-  })
-})
+// `per-member credentials — story #23` stood here: seventeen tests over the
+// organizer's Set PIN control, the PIN sign-in form, and the rule about which
+// rows offered which. All of it tested UI for RPCs that 0007 drops, so there is
+// no version of it that could be repaired rather than removed.
+//
+// What replaced the coverage, so this is a move rather than a loss:
+//   - that the old route is gone from the CLIENT — household.test.js, "exports
+//     no wrapper for any dropped RPC", with a positive control;
+//   - that it is gone from the DATABASE — migrations.pglite.test.js, "every
+//     retired function is absent from the catalog", also with a positive
+//     control;
+//   - that the new route is reachable at all — gate.test.js, which reads
+//     App.jsx, because no behavioural test can see whether a person has a path
+//     to the code;
+//   - that a member's access state is visible — the block above.
+//
+// What is NOT replaced, and is the honest gap: nothing here exercises an
+// organizer GIVING somebody access, because nothing does that yet. It needs the
+// Edge Function.
 
 // ---------------------------------------------------------------------------
 // #46 — this week's capacity, on the roster row.
@@ -680,5 +555,84 @@ describe('this week’s capacity — #46', () => {
       expect(css).toContain('.member__week {')
       expect(css.indexOf('.member__week {')).toBeLessThan(css.indexOf('.member__week-form'))
     })
+  })
+})
+
+// #87 AC 6 — the row stops merely reporting "No sign-in yet" and gains the
+// control that fixes it.
+describe('#87 — giving somebody a sign-in', () => {
+  it('offers the control to an organizer, on the row of somebody who has none', () => {
+    setup({ isOrganizer: true })
+    const control = screen.getByTestId('provision-m1')
+    expect(control).toHaveTextContent(/give a sign-in/i)
+  })
+
+  it('offers a RESET on the row of somebody who already has one', () => {
+    // Same control, different verb. The discriminator is `claimed_by`, which is
+    // the only thing that says whether an account exists — m2 has one.
+    setup({ isOrganizer: true })
+    expect(screen.getByTestId('provision-m2')).toHaveTextContent(/reset sign-in/i)
+  })
+
+  it('does NOT offer it to a non-organizer, who the function would refuse anyway', () => {
+    // Manners, not security: the Edge Function checks `is_household_organizer`
+    // as the caller and refuses. Rendering a control that is always refused
+    // promises something the app cannot deliver.
+    setup({ isOrganizer: false })
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+  })
+
+  it('sends the typed credential, and says whether it is a reset', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), {
+      target: { value: 'kid-secret-1' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    // Third argument is the reset flag — false here, because m1 has no account.
+    expect(handlers.onProvision).toHaveBeenCalledWith('m1', 'kid-secret-1', false)
+  })
+
+  it('sends the reset flag for somebody who already has an account', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m2'))
+    fireEvent.change(screen.getByTestId('provision-input-m2'), {
+      target: { value: 'kid-secret-2' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /reset it/i }))
+    })
+    expect(handlers.onProvision).toHaveBeenCalledWith('m2', 'kid-secret-2', true)
+  })
+
+  it('refuses a short credential WITHOUT calling the server', async () => {
+    // The floor is enforced in three places and this is the cheapest one. It is
+    // not the boundary — the Edge Function refuses too — but a round trip to be
+    // told "too short" is a worse experience than being told immediately.
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), { target: { value: 'abc' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    expect(handlers.onProvision).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least 6 characters/i)
+  })
+
+  it('tells the organizer to pass the credential on, because no email is sent', async () => {
+    // The one thing an organizer cannot discover by trying it: a provisioned
+    // member has a synthetic `.invalid` address, so nothing is ever delivered
+    // and the PIN exists nowhere else once this form closes.
+    setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    // Scoped to the row's form, and asserted on the half that appears ONLY
+    // there. The header note says "no email is sent" too, so a bare text query
+    // matches both and passes whether or not the form says anything — the
+    // assertion would have been about the wrong element.
+    expect(
+      within(rowFor('Placeholder One')).getByText(/nobody can look it up later/i),
+    ).toBeInTheDocument()
   })
 })

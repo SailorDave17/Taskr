@@ -10,25 +10,33 @@
 - Status: **`0001`–`0008` are ALL applied to the live project**, as of 2026-08-20 (#108). `0007` and
   `0008` were pasted together, which is what emptied the expected-red set two bullets below. `0002`
   is verified over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`
-  and `0008` are verified by `npm run check:live` returning 17 of 17; the rest are verified only by
+  and `0008` are verified by `npm run check:live`, whose every table and RPC check is green
+  (19 of 20 since #115 gave it an Edge Function probe — see the expected-red bullet below); the
+  rest are verified only by
   the paste succeeding.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` is GREEN, the expected-red set is now EMPTY, and therefore ANY red is real.**
-  *Measured 2026-08-20*, immediately after the paste: **17 of 17**, with both previously-expected
-  reds clearing on the same paste — exactly as the bullet below predicted. That prediction is the
-  whole reason #108 existed: had only one cleared, it would have been a new fault rather than a
-  partial success.
+- **`check:live` has exactly ONE expected red: `provision-member` is NOT DEPLOYED.** *Measured
+  2026-08-20 (#115)*: **19 of 20**. The red is the Edge Function probe #115 added, and it is
+  reporting the truth — the function has never been deployed, which is what #112 cost. It clears
+  on `npx supabase functions deploy provision-member` (section 3 of `docs/deploy-runbook.md`) and
+  on nothing else: no paste clears it, no merge clears it, and no Vercel deploy clears it, because
+  an Edge Function is not carried by any of them. **Every other red is real.**
 
-  **This bullet is inverted rather than deleted, and the distinction is the point.** Its old form
-  existed because an authority that is red by design and does not say so is one whose *next* genuine
-  failure gets waved through — the exact way a real outage hid in plain sight on 2026-08-09. That
-  hazard does not go away when the set empties; it changes sign. There is now **no** red this page
-  excuses, so a red on any table or any RPC is new, real, and to be investigated rather than matched
-  against a list. Each table and each function still has its own named test, so they cannot hide
-  inside one another.
+  *This bullet read GREEN and EMPTY at 17 of 17 until #115.* The set did not grow because anything
+  regressed — it grew because the check stopped being **blind** to something already broken, which
+  is the outcome a new check is supposed to have. Reading that as a regression would be mistaking
+  the instrument for the fault. The two previous entries cleared on the `0007`/`0008` paste exactly
+  as #108 predicted; that history is unchanged and is why #108 existed.
+
+  **The hazard the empty-set form named is live again, so it is restated rather than dropped.** An
+  authority that is red by design and does not say so is one whose *next* genuine failure gets
+  waved through — the exact way a real outage hid in plain sight on 2026-08-09. There is exactly
+  one red this page excuses and it is named above; a red on any table, any RPC, or any **other**
+  Edge Function is new, real, and to be investigated rather than matched against a list. Each
+  subject still has its own named test, so they cannot hide inside one another.
 - **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
   Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
   organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since

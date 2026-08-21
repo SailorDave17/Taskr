@@ -94,6 +94,14 @@ wrong.
 6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
    **This step was missing from the original runbook and it blocks AC 1 completely.**
 
+   > **This step is scheduled to be reversed, and is deliberately left as-is until it is.** #19
+   > decided (2026-08-20) that previews must be gated once real household data exists — via a custom
+   > domain plus *Standard Protection*, exactly the route the paragraph below prices. The reasoning
+   > is in [`data-outside-production.md`](data-outside-production.md); the dashboard change is
+   > **#121**, and **rewriting this step is #121's job, not a documentation tidy-up** — because until
+   > that change is made, the instructions below are what the project actually does, and a runbook
+   > describing an intention is worse than one describing a state.
+
    A new Hobby project ships with Deployment Protection **on**, so both the generated deployment URL
    and the production alias redirect to `vercel.com/login`. Nobody but the project owner can load
    the app.

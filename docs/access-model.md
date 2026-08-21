@@ -634,5 +634,10 @@ Supabase **auth session** locally and nothing else. That session is the credenti
 makes AC 5's "stays joined days later without re-entering the code" true; the household and roster are
 re-read from the server on every load, so a device that merely *remembered* would be indistinguishable
 from one that is genuinely still joined — and AC 3 is precisely the check that would be fooled.
-- **Preview deployments are world-readable** (Vercel Authentication is off project-wide), so once real
-  data exists this file's assumptions interact with #19. Nothing here decides that; #19 does.
+- **Preview deployments are world-readable** (Vercel Authentication is off project-wide) — and each
+  one carries the PRODUCTION Supabase host, measured 2026-08-20, so a preview is a second front door
+  onto the live database rather than a sandbox. **#19 decided to gate them**, via a custom domain
+  plus Standard Protection; see [`data-outside-production.md`](data-outside-production.md). That
+  change is a dashboard action and is **not yet applied** — tracked as #121 — so the sentence above
+  is still true today. It is the policies on this page that hold the line until it lands, and they
+  remain the defence afterwards.

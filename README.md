@@ -211,6 +211,10 @@ client two acts in an order somebody chooses.
   was rebuild rather than refactor.
 - [`hosting-decision.md`](docs/hosting-decision.md) — the hosting and backend choice, the
   alternatives, and the free-tier limits later stories must be designed against.
+- [`data-outside-production.md`](docs/data-outside-production.md) — who can see household data in
+  the environments *around* production: the decision to gate preview deployments behind a custom
+  domain (**decided, not yet applied — #121**), and the rule that keeps real household names out of
+  fixtures and screenshots. **Read before writing a fixture or committing an image.**
 - [`allocation-corpus.md`](docs/allocation-corpus.md) — the scenario corpus the allocator is
   judged against, the recorded proportion of household shapes that reach level, and the ones
   that arithmetically cannot.

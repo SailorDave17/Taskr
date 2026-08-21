@@ -74,7 +74,11 @@ export default defineConfig({
     // when the stack is down. `npm run test:functions`, against
     // vitest.functions.config.js. It is a third runner rather than joining the
     // integration one because that config includes rls.integration.test.js,
-    // which is known-red until #88 migrates it off the retired model.
+    // which needs a hosted project and a seeded account while this one needs a
+    // LOCAL stack and a service_role key — two different environments, so one
+    // runner would be unsatisfiable by either. (#88 migrated that file off the
+    // retired model on 2026-08-21; it is no longer known-red, and this reason
+    // is the one that survives.)
     exclude: [
       ...configDefaults.exclude,
       '**/*.integration.test.js',

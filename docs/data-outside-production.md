@@ -28,7 +28,7 @@ are not.**
 |---|---|
 | Preview `taskr-ny8k2wptu-mad-cow1.vercel.app` | `302` to `vercel.com/sso-api`, landing on `vercel.com/login` |
 | Its bundle, fetched anonymously | **unreachable** — the response is the login page and names no `assets/` path |
-| `taskr.madcowhq.com` bundle `assets/index-D45Q7VGT.js` | contains `https://oitdjvxtqdvegsrimexn.supabase.co` |
+| `taskr.madcowhq.com` bundle | contains `https://oitdjvxtqdvegsrimexn.supabase.co` |
 | `taskr-khaki.vercel.app` bundle | the **same** bundle, the **same** Supabase host |
 | Repository | `PRIVATE` |
 
@@ -36,6 +36,11 @@ Read the first two rows against the ones they replace. Before the change that sa
 `200` with no redirect and served a bundle naming the **live** Supabase host, so a preview was a
 second, world-readable front door onto the production database — different bundle, same backend.
 That door is shut to anyone not logged into this Vercel account.
+
+The bundle's filename is deliberately not cited. It is content-hashed, so it changes on every
+build — this table named `assets/index-D45Q7VGT.js` for about two hours before the #124/#125
+promotion made it `assets/index-D7p86CEG.js`. The claim is about what the bundle contains, and the
+filename was never part of it.
 
 The last two rows are unchanged, deliberately: **both production domains still ship the live Supabase
 host, because that is what production is.** Gating previews did not narrow what a production URL

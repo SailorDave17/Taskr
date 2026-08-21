@@ -43,16 +43,26 @@ identifies a person rather than a phone.
 **`0007` and `0008` were pasted to the live project on 2026-08-20** ([#108](https://github.com/SailorDave17/Taskr/issues/108)),
 so the database is now on per-member auth and `npm run check:live` is green at **20 of 20** —
 every table, every RPC, and the `provision-member` Edge Function, which was deployed on
-2026-08-20 (#112) with `npm run deploy:function`. No red is expected, so any red is real. Two things
-are deliberately still true after that paste, and both are sequence rather than oversight:
+2026-08-20 (#112) with `npm run deploy:function`. No red is expected, so any red is real.
 
-- **What production serves is still the PIN build.** Vercel builds production from `release`, which
-  sits behind `rebuild/v1` until the promotion pull request is merged. That split is the whole point
-  — see *Branches* below.
-- **The Edge Function is not deployed.** Pasting `0007` cleared every existing claim, and restoring
-  access needs `service_role`, so it needs the function built by #87
-  (`supabase/functions/provision-member/`, both provision and reset paths). The migration's own
-  section 9 carries the ordering: provision the organizer first, then everyone else from the app.
+**`0009` is written and has NOT been pasted** ([#127](https://github.com/SailorDave17/Taskr/issues/127)),
+so the repo is one migration ahead of the live project. Nothing above becomes false because of it —
+`check:live` covers tables, columns, RPCs and the Edge Function, and `0009` changes only two
+indexes, so the check is **structurally blind to it** and stays green either way. Do not read that
+green as "the database matches the repo".
+
+**Production serves per-member auth too, since the same day.** `rebuild/v1` was promoted to `release`
+by [#111](https://github.com/SailorDave17/Taskr/pull/111), and Vercel builds production from
+`release`. That split is still the point and still how anything reaches a phone — see *Branches*
+below.
+
+*This paragraph was followed by two bullets headed "Two things are deliberately still true after that
+paste" until 2026-08-21, and by then neither was: production had been promoted, and the Edge Function
+had been deployed — **eight lines under a sentence in this same paragraph saying it was deployed on
+2026-08-20**. Both bullets were written before that day's work and were correct for a few hours. The
+lesson is not that a README goes stale; it is that the correcting edit landed in the paragraph
+directly above and stopped there, so the section a new reader opens to learn what is missing was the
+one still describing a system that no longer exists.*
 
 **Migrations are applied by hand, and nothing checks that they were.** Each file in
 `supabase/migrations/` is pasted into the Supabase SQL editor by a person, at the merge of the story

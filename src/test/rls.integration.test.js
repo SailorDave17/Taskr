@@ -28,21 +28,51 @@
 // checking — in `support/retiredVocabulary.test.js`, which CI runs; see *the
 // vocabulary* below for why it is there and not here.
 //
-// ── ⚠ THIS FILE HAS NEVER BEEN EXECUTED ────────────────────────────────────
+// ── FIRST RAN GREEN 2026-08-21 — 31 of 31, every test executing ────────────
 //
-// Stated first because it is the thing most likely to be assumed the other way,
-// and because the version this replaced argued in its own header that a suite
-// which "looks migrated, has never run, and would be trusted on sight" is worse
-// than one that is honestly stale.
+// #127 ran it. It failed in `beforeAll`, creating the SECOND household:
 //
-// #88 shipped it unrun, deliberately and with the owner's decision recorded on
-// the issue. Two of the three blockers that header named ARE now discharged —
-// the live project is on `0007` and the Edge Function is deployed, both
-// 2026-08-20 — and the third is not: running this needs a pre-confirmed account
-// that only the project owner can create (see the next section). Every claim
-// below is therefore REASONED FROM THE MIGRATIONS AND THE FUNCTION SOURCE, not
-// measured. Expect the first real run to find things; that is what a first run
-// is for, and it is tracked as its own issue rather than left implied here.
+//     23505 duplicate key value violates unique constraint
+//           "members_claimed_by_key"
+//
+// That is a fact about the SCHEMA, not about this file. `members_claimed_by_key`
+// is 0001's, written when `claimed_by` meant a device session; 0007 re-pointed
+// the column at a person's stable auth identity and left the index alone, so it
+// had come to mean "one person belongs to at most one household, ever". The
+// shape below — one organizer in both households — cannot be built under it, and
+// neither can anything else that puts a person in two places.
+//
+// `0009_membership_is_per_household.sql` rescopes both that index and
+// `members_email_key` to be per household. It was pasted 2026-08-21, and this
+// suite went green on the next run — 31 of 31, no skips, both cross-household
+// directions refusing. THIS SUITE IS THE ONLY THING THAT CAN CONFIRM 0009 IS
+// APPLIED: `check:live` reads tables, columns, RPCs and the Edge Function, not
+// indexes, so it is blind to that migration and stays green either way.
+//
+// Everything below was written by reading the migrations and the function
+// source, and the first green run changed exactly one claim — the cost of a run,
+// corrected at the foot of this header. Nothing else needed touching, which is
+// the case FOR shipping a suite unrun: the reasoning was sound and the one thing
+// it could not reach was reachable only by executing.
+//
+// ── HOW THE ONE BLOCKER GOT PAST REVIEW ────────────────────────────────────
+//
+// #88 shipped this file unrun, deliberately, with the owner's decision recorded
+// on the issue, and it named three blockers. All three were discharged by
+// 2026-08-21 — the live project on `0007`, the Edge Function deployed, the
+// pre-confirmed account created. A FOURTH then appeared on first execution, and
+// it could only ever have appeared that way.
+//
+// It is worth being precise about why, because the blocker list was not sloppy.
+// `members_claimed_by_key` is declared in 0001 with a comment explaining it, and
+// 0007 CITES IT APPROVINGLY on the way past. Nothing contradicts anything; there
+// is no stale sentence to catch and no inconsistency to grep for. What changed
+// was the meaning of the column underneath a constraint nobody re-read. Review
+// cannot reach that, and neither can any check in this repo — only running it.
+//
+// So the case for shipping a suite unrun stands, and is stronger than #88 put
+// it: the reasoning was sound everywhere reading could reach, and the single
+// place it was wrong is the single place only execution could go.
 //
 // What HAS been measured, on 2026-08-21 against the live project, is only what
 // the next section says: the auth settings, the address validation, the send
@@ -108,9 +138,21 @@
 //
 // ── COST OF A RUN ─── #88 AC 4 ─────────────────────────────────────────────
 //
-// Each run leaves, on the live project: two households named
-// `TEST 88 <timestamp> …`, four member rows, and TWO auth users (the two
+// MEASURED 2026-08-21 across two consecutive green runs, correcting the figure
+// #88 reasoned. Each run leaves, on the live project: two households named
+// `TEST 88 <timestamp> …`, FIVE member rows, and two auth users (the two
 // provisioned members). The seeded account is reused and never multiplies.
+//
+// Five, not the four #88 predicted. The fifth is `Not Yet Provisioned`, and the
+// reason the count was wrong is worth more than the count: it is created by a
+// TEST BODY rather than by `beforeAll`, so a cost derived by reading setup could
+// not see it. Anything that counts residue must count what the assertions create,
+// not only what the fixture does.
+//
+// New since 0009, and unbounded: the seeded organizer now holds a member row in
+// EVERY household this suite has ever made, growing by two per run. Before 0009
+// that was impossible — one global claim — so the accumulation is a genuine
+// consequence of the fix rather than an oversight. It costs nothing but rows.
 //
 // They are LEFT rather than cleaned up, and that is the same deliberate choice
 // the previous version documented: there is no client-reachable way to delete a

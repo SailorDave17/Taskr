@@ -811,7 +811,7 @@ describe('the migrations, run against a real Postgres', () => {
       expect(bad.error).toMatch(/members_email_shape/)
     })
 
-    it('refuses two members sharing an address, case-insensitively, because it maps 1:1 to an auth user', async () => {
+    it('refuses two members of ONE household sharing an address, case-insensitively', async () => {
       await asDevice(db, organizerDevice, () =>
         db.query('update public.members set email = $1 where id = $2', [
           'shared@example.com',
@@ -828,7 +828,7 @@ describe('the migrations, run against a real Postgres', () => {
         ),
       )
       expect(clash.ok).toBe(false)
-      expect(clash.error).toMatch(/members_email_key/)
+      expect(clash.error).toMatch(/members_household_email_key/)
     })
 
     it('but any number of members may have no address at all', async () => {
@@ -932,5 +932,107 @@ describe('the bypass this migration closes', () => {
       return rows[0].claimed_by
     })
     expect(stolen).toBe(deviceB)
+  })
+})
+
+describe('#127 — membership is per household, not per database', () => {
+  // 0009. Found by RUNNING the live RLS suite for the first time: one signed-in
+  // person creating two households failed at setup, which is a fact about the
+  // schema rather than about the suite. The reasoning lives in the migration.
+  // These assert both halves of it — what 0009 opens, and what it must not.
+
+  it('one person may create, and belong to, two households', async () => {
+    const db = await freshDatabase()
+    const uid = await newDevice(db, 'organizer@example.com')
+
+    const made = await asDevice(db, uid, async () => ({
+      first: await attempt(() =>
+        db.query('select public.create_household($1, $2, $3)', ['Placeholder Household', 'Organizer', 'UTC']),
+      ),
+      second: await attempt(() =>
+        db.query('select public.create_household($1, $2, $3)', ['Placeholder Other Household', 'Organizer', 'UTC']),
+      ),
+    }))
+
+    // Before 0009 the second call raised 23505 on members_claimed_by_key. That
+    // is the exact failure the live suite hit on 2026-08-21.
+    expect(made.first.error).toBeNull()
+    expect(made.second.error).toBeNull()
+
+    const { rows } = await db.query(
+      'select count(distinct household_id)::int as n from public.members where claimed_by = $1',
+      [uid],
+    )
+    expect(rows[0].n).toBe(2)
+    await db.close()
+  })
+
+  it('their address is written into both member rows, which the global email index forbade', async () => {
+    // The second half of the fix, and the one that is easy to miss: rescoping
+    // claimed_by alone moves the failure to members_email_key rather than
+    // removing it, because create_household copies the organizer's address out
+    // of auth.users every time it runs. Measured before 0009 was written.
+    const db = await freshDatabase()
+    const uid = await newDevice(db, 'organizer@example.com')
+
+    await asDevice(db, uid, async () => {
+      await db.query('select public.create_household($1, $2, $3)', ['Placeholder Household', 'Organizer', 'UTC'])
+      await db.query('select public.create_household($1, $2, $3)', ['Placeholder Other Household', 'Organizer', 'UTC'])
+    })
+
+    const { rows } = await db.query(
+      'select count(*)::int as n from public.members where lower(email) = $1',
+      ['organizer@example.com'],
+    )
+    expect(rows[0].n).toBe(2)
+    await db.close()
+  })
+
+  it('but within ONE household a person still claims at most one member row', async () => {
+    // The rule 0001 wrote the index for, and the only part of it that was ever
+    // about ambiguity: "who did this" must stay answerable. 0009 narrows the
+    // index's reach across households and leaves this exactly as it was, so a
+    // green result here is what stops the fix being a deletion.
+    const db = await freshDatabase()
+    const uid = await newDevice(db, 'organizer@example.com')
+
+    const householdId = await asDevice(db, uid, async () => {
+      const { rows } = await db.query('select (public.create_household($1, $2, $3)).id as id', [
+        'Placeholder Household', 'Organizer', 'UTC',
+      ])
+      return rows[0].id
+    })
+
+    const spare = await asDevice(db, uid, async () => {
+      const { rows } = await db.query(
+        `insert into public.members (household_id, display_name, weekly_minutes)
+         values ($1, 'Spare', 30) returning id`,
+        [householdId],
+      )
+      return rows[0].id
+    })
+
+    const doubled = await attempt(() => provisionMember(db, spare, uid))
+    expect(doubled.ok).toBe(false)
+    expect(doubled.error).toMatch(/members_household_claimed_by_key/)
+    await db.close()
+  })
+
+  it('re-pasting 0009 is a no-op, because a re-paste is the normal path', async () => {
+    const db = await freshDatabase()
+    const again = await attempt(() => db.exec(migrationSql('0009_membership_is_per_household.sql')))
+    expect(again.error).toBeNull()
+
+    const { rows } = await db.query(
+      `select indexname from pg_indexes
+        where schemaname = 'public' and tablename = 'members'
+        order by indexname`,
+    )
+    const names = rows.map((r) => r.indexname)
+    expect(names).toContain('members_household_claimed_by_key')
+    expect(names).toContain('members_household_email_key')
+    expect(names).not.toContain('members_claimed_by_key')
+    expect(names).not.toContain('members_email_key')
+    await db.close()
   })
 })

@@ -7,12 +7,19 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0008` are ALL applied to the live project**, as of 2026-08-20 (#108). `0007` and
+- Status: **`0001`–`0008` are applied to the live project**, as of 2026-08-20 (#108). `0007` and
   `0008` were pasted together, which is what emptied the expected-red set two bullets below. `0002`
   is verified over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`
   and `0008` are verified by `npm run check:live`, which is green at 20 of 20 — every table,
   every RPC, and (since #115) the Edge Function; the rest are verified only by
   the paste succeeding.
+- **`0009` is written and NOT applied** (#127). It is the head of the paste queue, and until it is
+  pasted the live RLS suite cannot run at all — `create_household` refuses the second household it
+  builds. **`check:live` cannot see this migration**, which is worth stating beside the green above:
+  the check covers tables, columns, RPCs and the Edge Function, and `0009` changes only two
+  indexes. So 20 of 20 is true and is *not* evidence that `0009` has been pasted. That is the one
+  case an empty expected-red set does not cover — the instrument is blind to the migration by
+  construction rather than by accident, so the paste has to be confirmed by running the RLS suite.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each

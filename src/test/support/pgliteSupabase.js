@@ -36,6 +36,7 @@ export const MIGRATIONS = [
   '0007_per_member_auth.sql',
   '0008_provisioning_grants.sql',
   '0009_membership_is_per_household.sql',
+  '0010_chore_exclusions.sql',
 ]
 
 export function migrationSql(name) {

@@ -527,3 +527,74 @@ body {
   color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
 }
+
+/* Who cannot do a chore — story #37.
+
+   Two elements, both quiet on purpose.
+
+   The NOTE is the one to look at hardest. It says a named person is holding work
+   they are marked as unable to do, which is the only place in this app where a
+   sentence is about a person and a problem at the same time — and the rule this
+   stylesheet has stated twice already is that RED IS FOR WORK, NEVER FOR PEOPLE.
+   So it does not use the .error palette, it does not use the accent, and it does
+   not get a warning colour: it is the same dim ink as the load figures, with a
+   left rule to separate it from the control above. The household decided this;
+   the screen is recording it, not objecting to it.
+
+   The CONTROL is styled below the assignee select and smaller than it, because
+   giving somebody a chore is the everyday act and saying they cannot do one is
+   the rare correction. Both keep the 44px touch target every other control here
+   uses — rare is not the same as fiddly. */
+
+.chore__warning {
+  margin: 0.375rem 0 0;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+.chore__exclusions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.chore__exclusion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chore__exclusion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.5rem;
+}
+
+.chore__exclusion-name {
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+.chore__exclusion-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chore__exclusion-add .field__input {
+  /* Sized to the content rather than the row, exactly as .chore__assignee is:
+     a full-width control here would read as the primary action on the chore,
+     which is the opposite of what this is. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+}

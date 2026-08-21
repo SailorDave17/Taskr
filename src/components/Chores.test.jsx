@@ -58,12 +58,15 @@ function setup(overrides = {}) {
     onUncomplete: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
+    onExclude: vi.fn().mockResolvedValue(undefined),
+    onAllow: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Chores
       chores={chores}
       members={members}
       capacities={capacities}
+      exclusions={[]}
       {...handlers}
       {...overrides}
     />,
@@ -83,8 +86,10 @@ function setupRerenderable() {
     onUncomplete: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
+    onExclude: vi.fn().mockResolvedValue(undefined),
+    onAllow: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, ...handlers }
+  const props = { members, capacities, exclusions: [], ...handlers }
   const view = render(<Chores chores={chores} {...props} />)
   return {
     handlers,
@@ -527,6 +532,7 @@ describe('the load figures — #36 AC 5, 6, 9', () => {
         chores={list}
         members={members}
         capacities={capacities}
+        exclusions={[]}
         onAdd={vi.fn()}
         onSave={vi.fn()}
         onRemove={vi.fn()}
@@ -534,6 +540,8 @@ describe('the load figures — #36 AC 5, 6, 9', () => {
         onUncomplete={vi.fn()}
         onAssign={vi.fn()}
         onUnassign={vi.fn()}
+        onExclude={vi.fn()}
+        onAllow={vi.fn()}
       />,
     )
 
@@ -611,5 +619,264 @@ describe('the load figures — #36 AC 5, 6, 9', () => {
   it('shows nothing at all when the roster is empty, rather than an empty heading', () => {
     setup({ members: [], capacities: [] })
     expect(screen.queryByRole('region', { name: /who is carrying what/i })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #37 — who cannot do a chore
+//
+// Everything here is about the SCREEN. The rules — who may write an exclusion,
+// which household a row may name, what happens when a member is deleted — live
+// in Postgres and are exercised by src/test/exclusions.pglite.test.js, because a
+// fake client cannot refuse and so cannot prove a refusal (#36 AC 10, which
+// src/test/gate.test.js turns into a check over this very file).
+// ---------------------------------------------------------------------------
+
+/** Render with a handle to change chores AND exclusions on the same instance. */
+function setupExclusionRerender(initialChores, initialExclusions) {
+  const handlers = {
+    onAdd: vi.fn().mockResolvedValue(undefined),
+    onSave: vi.fn().mockResolvedValue(undefined),
+    onRemove: vi.fn().mockResolvedValue(undefined),
+    onComplete: vi.fn().mockResolvedValue(undefined),
+    onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onAssign: vi.fn().mockResolvedValue(undefined),
+    onUnassign: vi.fn().mockResolvedValue(undefined),
+    onExclude: vi.fn().mockResolvedValue(undefined),
+    onAllow: vi.fn().mockResolvedValue(undefined),
+  }
+  const props = { members, capacities, ...handlers }
+  const view = render(
+    <Chores chores={initialChores} exclusions={initialExclusions} {...props} />,
+  )
+  return {
+    handlers,
+    // view.rerender rather than a fresh render: unmounting would reset the state
+    // this exists to observe changing, which is exactly what a refresh does not do.
+    rerender: (nextChores, nextExclusions) =>
+      view.rerender(<Chores chores={nextChores} exclusions={nextExclusions} {...props} />),
+  }
+}
+
+describe('recording an exclusion — #37 ACs 2, 3', () => {
+  const cannotMow = [{ id: 'x1', chore_id: 'c2', member_id: 'm2' }]
+
+  it('AC 2: choosing somebody records exactly that pair, from the chore itself', () => {
+    const { onExclude } = setup()
+    fireEvent.change(screen.getByLabelText(/mark someone as unable to do placeholder chore/i), {
+      target: { value: 'm2' },
+    })
+    expect(onExclude).toHaveBeenCalledTimes(1)
+    expect(onExclude).toHaveBeenCalledWith('c1', 'm2')
+  })
+
+  it('offers everybody when nothing is excluded, and stops offering a person once they are', () => {
+    setup({ exclusions: cannotMow })
+    const stillOpen = screen.getByLabelText(/mark someone as unable to do placeholder other chore/i)
+    expect([...stillOpen.options].map((o) => o.textContent)).toEqual([
+      'Everyone can',
+      'Placeholder One',
+    ])
+    // The other chore has no exclusions and its control is untouched — this is a
+    // fold over the rows per chore, not a setting on the screen.
+    const other = screen.getByLabelText(/mark someone as unable to do placeholder chore/i)
+    expect([...other.options]).toHaveLength(3)
+  })
+
+  it('says who cannot do it, in words rather than by absence from a list', () => {
+    setup({ exclusions: cannotMow })
+    const row = screen.getByTestId('exclusions-c2')
+    expect(within(row).getByText(/placeholder two cannot do this/i)).toBeInTheDocument()
+  })
+
+  it('undoing one calls onAllow with the pair', async () => {
+    const { onAllow } = setup({ exclusions: cannotMow })
+    await clickAndSettle(
+      screen.getByRole('button', {
+        name: /let placeholder two do placeholder other chore again/i,
+      }),
+    )
+    expect(onAllow).toHaveBeenCalledWith('c2', 'm2')
+  })
+
+  it('never shows a selection, because the control is an action and the list is the state', () => {
+    // A select that kept the last choice would read as "this is who cannot do
+    // it" while meaning "this is who I last added", and the two diverge the
+    // moment a second person is added.
+    setup({ exclusions: cannotMow })
+    const select = screen.getByLabelText(/mark someone as unable to do placeholder other chore/i)
+    expect(select).toHaveValue('')
+  })
+
+  it('offers no control at all once every member is excluded, rather than an empty one', () => {
+    const nobody = [
+      { id: 'x1', chore_id: 'c1', member_id: 'm1' },
+      { id: 'x2', chore_id: 'c1', member_id: 'm2' },
+    ]
+    setup({ exclusions: nobody })
+    expect(
+      screen.queryByLabelText(/mark someone as unable to do placeholder chore/i),
+    ).not.toBeInTheDocument()
+    // The people are still named, so the state stays legible rather than blank.
+    const row = screen.getByTestId('exclusions-c1')
+    expect(within(row).getAllByText(/cannot do this/i)).toHaveLength(2)
+  })
+
+  it('disables both halves while a write is in flight, so a double tap is not two rows', () => {
+    setup({ exclusions: cannotMow, busy: true })
+    expect(screen.getByLabelText(/mark someone as unable to do placeholder chore/i)).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: /let placeholder two do placeholder other chore again/i }),
+    ).toBeDisabled()
+  })
+
+  it('AC 3: there is ONE control per chore, never one per chore-and-person pair', () => {
+    // The grid #8 asked for, refused as a rendered fact rather than as a
+    // paragraph. Two chores and two members: a capability matrix would put four
+    // controls on this screen, and the count is what tells the two shapes apart.
+    setup()
+    expect(screen.getAllByLabelText(/mark someone as unable to do/i)).toHaveLength(chores.length)
+    expect(chores.length).toBe(2)
+    expect(members.length).toBe(2)
+  })
+
+  it('a rejected exclude does not escape as an unhandled rejection', () => {
+    let handlerAttached = false
+    const rejecting = () => {
+      const p = Promise.reject(new Error('refused'))
+      const then = p.then.bind(p)
+      p.then = (...a) => {
+        if (a[1]) handlerAttached = true
+        return then(...a)
+      }
+      return p
+    }
+    setup({ onExclude: rejecting })
+    fireEvent.change(screen.getByLabelText(/mark someone as unable to do placeholder chore/i), {
+      target: { value: 'm2' },
+    })
+    expect(handlerAttached, 'the exclude change ignored the promise it was given').toBe(true)
+  })
+
+  it('a rejected undo does not either', async () => {
+    let handlerAttached = false
+    const rejecting = () => {
+      const p = Promise.reject(new Error('refused'))
+      const then = p.then.bind(p)
+      p.then = (...a) => {
+        if (a[1]) handlerAttached = true
+        return then(...a)
+      }
+      return p
+    }
+    setup({ exclusions: cannotMow, onAllow: rejecting })
+    await clickAndSettle(
+      screen.getByRole('button', {
+        name: /let placeholder two do placeholder other chore again/i,
+      }),
+    )
+    expect(handlerAttached, 'the undo click ignored the promise it was given').toBe(true)
+  })
+})
+
+describe('an excluded person holding the chore anyway — #37 ACs 6, 7', () => {
+  // ONE fixture for both criteria, because they are the same rendered state
+  // reached by two orders of events: exclude then assign (AC 6), or assign then
+  // exclude (AC 7). The component cannot tell them apart and must not try — two
+  // sentences for one situation would leave the household guessing which of them
+  // they had caused.
+  const heldByTwo = [{ ...chores[0], assigned_member_id: 'm2' }, chores[1]]
+  const cannot = [{ id: 'x1', chore_id: 'c1', member_id: 'm2' }]
+
+  it('AC 6: names the excluded person, in the warning own wording', () => {
+    setup({ chores: heldByTwo, exclusions: cannot })
+    expect(
+      screen.getByText('Placeholder Two is marked as unable to do this, and has it anyway.'),
+    ).toBeInTheDocument()
+  })
+
+  it('AC 6: and the assignment still stands — the screen warns, it does not refuse', () => {
+    // Owner decision, option (a): a parent overriding is signal, not error. The
+    // database agrees, and exclusions.pglite.test.js asserts the write succeeds
+    // so nobody later "fixes" this into a block.
+    setup({ chores: heldByTwo, exclusions: cannot })
+    expect(screen.getByLabelText(/who is doing placeholder chore/i)).toHaveValue('m2')
+  })
+
+  it('AC 6: the excluded person is STILL offered in the assignee picker', () => {
+    // Option (b) was to drop them from the list. It was declined, and this is
+    // the assertion that fails if somebody implements it by accident while
+    // tidying up the picker.
+    setup({ chores: heldByTwo, exclusions: cannot })
+    const select = screen.getByLabelText(/who is doing placeholder chore/i)
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      'Nobody yet',
+      'Placeholder One',
+      'Placeholder Two',
+    ])
+  })
+
+  it('AC 7: the note appears when the exclusion arrives AFTER the assignment', async () => {
+    // The same end state reached the other way round, and reached by a props
+    // change into the SAME component instance — which is what a refresh is.
+    const { rerender } = setupExclusionRerender(heldByTwo, [])
+    expect(screen.queryByText(/marked as unable/i)).not.toBeInTheDocument()
+    await act(async () => rerender(heldByTwo, cannot))
+    expect(screen.getByText(/placeholder two is marked as unable/i)).toBeInTheDocument()
+  })
+
+  it('AC 7: and the chore stays where it was, rather than returning to the unassigned group', async () => {
+    // Option (b) — automatically unassigning — was declined: it would drop the
+    // work into the unassigned pile with no allocator to re-place it. Asserted
+    // ACROSS the change rather than on a static fixture, because "it was never
+    // unassigned" is the claim and a single render cannot make it.
+    const { rerender } = setupExclusionRerender(heldByTwo, [])
+    await act(async () => rerender(heldByTwo, cannot))
+    expect(screen.getByLabelText(/who is doing placeholder chore/i)).toHaveValue('m2')
+  })
+
+  it('says nothing when the holder is NOT excluded, so the note is not permanent furniture', () => {
+    setup({ chores: heldByTwo, exclusions: [{ id: 'x9', chore_id: 'c1', member_id: 'm1' }] })
+    expect(screen.queryByText(/marked as unable/i)).not.toBeInTheDocument()
+  })
+
+  it('says nothing about an UNASSIGNED chore, whoever is excluded from it', () => {
+    // The null-assignee case, which every render asks. A bare equality against
+    // assigned_member_id would match a row whose member_id was null; no such row
+    // can exist, and isExcluded guards it anyway because the wrong answer would
+    // be a plausible sentence rather than a crash.
+    setup({ chores, exclusions: cannot })
+    expect(screen.queryByText(/marked as unable/i)).not.toBeInTheDocument()
+  })
+
+  it('is a STATEMENT, not a demand: it offers nothing to click', () => {
+    // #8's answer was a conflict flag with somewhere to go and fix it, and that
+    // was recommended against — a flag asking a human to resolve something is the
+    // negotiation the signature moment exists to remove.
+    setup({ chores: heldByTwo, exclusions: cannot })
+    const note = screen.getByText(/marked as unable/i)
+    expect(note.querySelector('button')).toBeNull()
+    expect(note.querySelector('a')).toBeNull()
+  })
+
+  it('is not styled or announced as an error — red is for work, never for people', () => {
+    // The rule #35 AC 9 states for completed work, applied to the one sentence in
+    // this app that is about a person and a problem at once.
+    setup({ chores: heldByTwo, exclusions: cannot })
+    const note = screen.getByText(/marked as unable/i)
+    expect(note.className).not.toMatch(/error/)
+    expect(note.getAttribute('role')).toBe('status')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('still says something when the holder has left the roster, rather than vanishing', () => {
+    // The pairing is what is wrong, not the label. Between another phone removing
+    // a person and this one refreshing the id names nobody, and the exclusion row
+    // is still there until its cascade lands.
+    setup({
+      chores: [{ ...chores[0], assigned_member_id: 'gone' }, chores[1]],
+      exclusions: [{ id: 'x1', chore_id: 'c1', member_id: 'gone' }],
+    })
+    expect(screen.getByText(/someone not on the roster is marked as unable/i)).toBeInTheDocument()
   })
 })

@@ -27,8 +27,24 @@ should not receive the same chore count.
 
 1. **Fairness = time-budget allocation.** Proportional to capacity (total → remaining available
    time), never equal counts.
-2. **Capability constraints.** A task only goes to someone who can do it (the legacy
-   `usersWhoCanDoThisTask` set on a template).
+2. **Capability constraints.** A task only goes to someone who can do it — expressed as an
+   **exclusion** set: everyone can do everything until somebody says otherwise (the legacy
+   `usersWhoCannotDoThisTask` set on a template).
+
+   *Corrected in band 2026-08-21 by story #37, and the correction matters because it inverts the
+   polarity.* This line cited `usersWhoCanDoThisTask`, a positive capability set. **Measured**:
+   `git grep usersWhoCanDoThisTask legacy-final` returns **nothing** — no such identifier exists
+   anywhere in the 2020 tree. The field is `usersWhoCannotDoThisTask`
+   (`back-end/src/main/java/com/taskr/core/model/TaskTemplate.java:22`, 15 references), and
+   `ResourceManager.allocateSingleTask` filters on it hard:
+   `if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user))`.
+
+   The constraint is unchanged and still ratified; what was wrong was the *shape* it was recorded
+   in. It is worth stating rather than fixing quietly, because a positive capability set would have
+   been ruled out anyway by *"being set up is not a project"* below: it means a fresh household
+   allocates **nothing** until somebody has configured every person against every chore, which is
+   the setup burden the field scan measures at 70% abandonment within 100 days. The two arguments
+   agree, and only one of them needed the legacy code to be read correctly.
 3. **Visibility.** Every member's load and progress on one screen (the legacy all-users view with
    progress bars).
 4. **Recurring chores as templates**, instantiated into dated concrete tasks (`TaskTemplate` → `Task`).

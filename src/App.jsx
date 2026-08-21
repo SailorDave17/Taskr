@@ -34,6 +34,7 @@ import {
   periodStartFor,
   setCapacity,
 } from './lib/capacity.js'
+import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -65,6 +66,11 @@ export default function App() {
   // and the overrides are a server read like every other.
   const [overrides, setOverrides] = useState([])
   const [periodStart, setPeriodStart] = useState(null)
+  // #37 — who cannot do what. Server state like everything else here, and
+  // deliberately NOT derived into a per-chore map in this file: the screen folds
+  // over the rows where it needs them, so there is one representation and no
+  // second copy to fall out of step with the first.
+  const [exclusions, setExclusions] = useState([])
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -89,6 +95,11 @@ export default function App() {
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
     setOverrides(period ? await listCapacity(period) : [])
+    // #37 AC 9 — read from the server on every refresh, through the same path as
+    // everything else, so a device holds no exclusion state of its own. What
+    // another phone recorded is on this screen after the next mutation for the
+    // same reason the roster is: there is no cache to be stale.
+    setExclusions(found ? await listExclusions() : [])
     setUserId(await currentUserId())
     return found
   }, [])
@@ -231,6 +242,32 @@ export default function App() {
     [mutate],
   )
   const handleUnassignChore = useCallback((id) => mutate(() => unassignChore(id)), [mutate])
+  // #37 — the two exclusion writes, and they are handed to the chore screen and
+  // to nothing else. That is AC 3 as a wiring decision rather than a promise: a
+  // household reaches this from a chore already on the list and from nowhere
+  // else, so there is no route to hand to onboarding or to the roster in the
+  // first place. gate.test.js checks it rather than trusting this paragraph.
+  //
+  // The chore element is named here in words only, with no angle brackets and
+  // no quoted pattern. gate.test.js finds that element by matching its opening
+  // tag through to the first self-closing tag after it, over the RAW SOURCE with
+  // comments left in — so any comment that spells the tag hijacks the match and
+  // the guard then inspects whatever element comes next.
+  //
+  // Measured twice while writing this story: first by a comment naming the tag,
+  // then by the comment written to warn about it, which quoted the pattern and
+  // so contained the tag again. That is cairn's
+  // `a-guard-that-reads-source-must-survive-its-own-docs`, arriving from a note
+  // about the hazard rather than from the hazard — and the second time is the
+  // one worth recording, because knowing the rule is what produced the breach.
+  const handleExcludeMember = useCallback(
+    (choreId, memberId) => mutate(() => excludeMember(choreId, memberId)),
+    [mutate],
+  )
+  const handleAllowMember = useCallback(
+    (choreId, memberId) => mutate(() => allowMember(choreId, memberId)),
+    [mutate],
+  )
   // #46 — set or clear THIS period's capacity. Both take the period from state
   // rather than recomputing it, so the write lands in the same week the screen
   // is showing even if midnight passes mid-session.
@@ -351,6 +388,7 @@ export default function App() {
           chores={chores}
           members={members}
           capacities={capacities}
+          exclusions={exclusions}
           busy={busy}
           error={error}
           onAdd={handleAddChore}
@@ -360,6 +398,8 @@ export default function App() {
           onUncomplete={handleUncompleteChore}
           onAssign={handleAssignChore}
           onUnassign={handleUnassignChore}
+          onExclude={handleExcludeMember}
+          onAllow={handleAllowMember}
         />
       ) : null}
 

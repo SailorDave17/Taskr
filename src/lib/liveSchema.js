@@ -1,6 +1,7 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
+import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 
 /**
@@ -37,6 +38,13 @@ export const LIVE_SCHEMA = Object.freeze([
   Object.freeze({ table: 'members', columns: MEMBER_COLUMNS }),
   Object.freeze({ table: 'chores', columns: CHORE_COLUMNS }),
   Object.freeze({ table: 'member_capacity', columns: CAPACITY_COLUMNS }),
+  // #37. Added with `0010`, which is NOT pasted at merge — so this entry makes
+  // `check:live` red on purpose until it is. That is the entry doing its job:
+  // the check exists precisely because a paste is a human step recorded nowhere,
+  // and an entry withheld until after the paste would leave the window it is
+  // meant to cover uncovered. docs/access-model.md carries it as an expected red
+  // with the single action that clears it.
+  Object.freeze({ table: 'chore_exclusions', columns: EXCLUSION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -65,6 +73,15 @@ export const LIVE_TABLES = Object.freeze(LIVE_SCHEMA.map((entry) => entry.table)
  * list is derived from the call sites, and `liveSchema.test.js` fails if it ever
  * stops matching them in either direction.
  */
+// #37's `is_member_eligible` and `eligible_members` are deliberately NOT here,
+// and the reason is the list's own rule rather than an omission: this list is
+// derived from the CALL SITES, and the client calls neither. `0010` withholds
+// execute from `authenticated` on purpose (a definer predicate a client could
+// call would answer about other households), so probing for them would report a
+// missing execute grant on a healthy project — the `household_devices` mistake
+// with the sign flipped. What covers their paste is the `chore_exclusions` entry
+// above: both functions and the table arrive in one file, so a project with the
+// table has run the whole of it.
 export const LIVE_RPCS = Object.freeze([
   Object.freeze({
     fn: 'create_household',

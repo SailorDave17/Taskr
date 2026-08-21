@@ -47,6 +47,16 @@ const capacityApi = {
   clearCapacity: vi.fn(),
 }
 
+// #37 — only the three IMPURE exclusion functions are stubbed. `isExcluded`,
+// `excludedMemberIds` and `eligibleMembers` stay real for the reason the
+// capacity mock gives: they are pure, they have their own tests, and a stub of
+// them could disagree with the single implementation those tests assert.
+const exclusionsApi = {
+  listExclusions: vi.fn(),
+  excludeMember: vi.fn(),
+  allowMember: vi.fn(),
+}
+
 vi.mock('./lib/supabase.js', () => ({
   get hasSupabaseConfig() {
     return backend.hasSupabaseConfig
@@ -64,6 +74,11 @@ vi.mock('./lib/chores.js', async () => {
 vi.mock('./lib/capacity.js', async () => {
   const actual = await vi.importActual('./lib/capacity.js')
   return { ...actual, ...capacityApi }
+})
+
+vi.mock('./lib/exclusions.js', async () => {
+  const actual = await vi.importActual('./lib/exclusions.js')
+  return { ...actual, ...exclusionsApi }
 })
 
 vi.mock('./lib/household.js', async () => {
@@ -89,6 +104,10 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
+  Object.values(exclusionsApi).forEach((fn) => fn.mockReset())
+  exclusionsApi.listExclusions.mockResolvedValue([])
+  exclusionsApi.excludeMember.mockResolvedValue(undefined)
+  exclusionsApi.allowMember.mockResolvedValue(undefined)
   capacityApi.listCapacity.mockResolvedValue([])
   capacityApi.setCapacity.mockResolvedValue(undefined)
   capacityApi.clearCapacity.mockResolvedValue(undefined)
@@ -664,5 +683,152 @@ describe('capacity — this week, set by hand (#46)', () => {
     // matching, which is how an empty result reads as a clean bill of health.
     const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(1)
+  })
+})
+
+// #37 — who cannot do a chore, at the level only App can answer.
+//
+// The component tests cover what the screen DRAWS; these cover the two things
+// that are App's alone and that a component test cannot see, because the
+// component only calls the handler it is given:
+//
+//   AC 9 — the exclusions come from the SERVER on every refresh, and a write is
+//          followed by a re-read rather than by patching what is already here.
+//   AC 3 — the write path exists at all, and reaches a person through the chore
+//          screen. The route ENUMERATION is in gate.test.js, which can see the
+//          files this one has mocked away.
+describe('exclusions — the write path and the re-read (#37)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  const members = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null },
+  ]
+
+  const chore = {
+    id: 'c1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
+    assigned_member_id: null,
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(members)
+    choresApi.listChores.mockResolvedValue([chore])
+  })
+
+  const onScreen = () => screen.findByRole('region', { name: /what needs doing/i })
+
+  const markUnable = async (memberId) => {
+    fireEvent.change(screen.getByLabelText(/mark someone as unable to do placeholder chore/i), {
+      target: { value: memberId },
+    })
+    await act(async () => {})
+  }
+
+  it('AC 9: reads the exclusions from the server on load', async () => {
+    await renderApp()
+    await onScreen()
+    expect(exclusionsApi.listExclusions).toHaveBeenCalled()
+  })
+
+  it('AC 9: re-reads from the SERVER after a write, rather than patching local state', async () => {
+    await renderApp()
+    await onScreen()
+
+    const readsBefore = exclusionsApi.listExclusions.mock.calls.length
+    await markUnable('m2')
+
+    expect(exclusionsApi.excludeMember).toHaveBeenCalledWith('c1', 'm2')
+    await waitFor(() =>
+      expect(exclusionsApi.listExclusions.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 9: what another device recorded is on this screen after the re-read', async () => {
+    // The whole point of re-reading rather than patching: the row this device
+    // did not write arrives anyway, because the state is the server's. Asserted
+    // through the RENDERED sentence, not through the mock, since a call count
+    // says nothing about whether the answer reached the screen.
+    exclusionsApi.listExclusions
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 'x1', chore_id: 'c1', member_id: 'm1' }])
+
+    await renderApp()
+    await onScreen()
+    expect(screen.queryByText(/placeholder one cannot do this/i)).not.toBeInTheDocument()
+
+    await markUnable('m2')
+    await waitFor(() =>
+      expect(screen.getByText(/placeholder one cannot do this/i)).toBeInTheDocument(),
+    )
+  })
+
+  it('undoing one goes through the data layer and re-reads too', async () => {
+    exclusionsApi.listExclusions.mockResolvedValue([
+      { id: 'x1', chore_id: 'c1', member_id: 'm2' },
+    ])
+    await renderApp()
+    await onScreen()
+
+    const readsBefore = exclusionsApi.listExclusions.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(
+        screen.getByRole('button', {
+          name: /let placeholder two do placeholder chore again/i,
+        }),
+      ),
+    )
+
+    expect(exclusionsApi.allowMember).toHaveBeenCalledWith('c1', 'm2')
+    await waitFor(() =>
+      expect(exclusionsApi.listExclusions.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('the write goes through lib/exclusions.js, never the Supabase client directly', async () => {
+    // getSupabase() throws in this file's mock, so a component reaching past the
+    // data layer fails loudly here rather than shipping.
+    await renderApp()
+    await onScreen()
+    await markUnable('m2')
+    expect(screen.queryByText(/must not reach the client directly/i)).not.toBeInTheDocument()
+  })
+
+  it('a failed write reports itself and leaves the screen usable', async () => {
+    exclusionsApi.excludeMember.mockRejectedValue(
+      new Error('That person is already marked as unable to do this chore.'),
+    )
+    await renderApp()
+    await onScreen()
+    await markUnable('m2')
+
+    // Scoped to the chore card. App hands the same `error` to the roster too, so
+    // an unscoped query finds two nodes and fails on the count rather than on
+    // the claim — and the claim is that the message lands BESIDE the control
+    // that caused it, which is the repair #34 made for exactly this.
+    const card = await onScreen()
+    expect(await within(card).findByText(/already marked as unable/i)).toBeInTheDocument()
+    // And the control is not left disabled — `mutate` clears busy in a finally,
+    // so a refusal must not end with a screen nobody can use.
+    expect(
+      screen.getByLabelText(/mark someone as unable to do placeholder chore/i),
+    ).not.toBeDisabled()
+  })
+
+  it('reads nothing when there is no household, rather than asking for another one’s rows', async () => {
+    api.currentHousehold.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('region', { name: /start a household/i })
+    expect(exclusionsApi.listExclusions).not.toHaveBeenCalled()
   })
 })

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
@@ -518,5 +519,270 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
       }
     }
     expect(offenders, `src/ imports the Edge Function: ${offenders.join(', ')}`).toEqual([])
+  })
+})
+
+// #19 — no real household name, and no screenshot, reaches version control.
+//
+// The decision is docs/data-outside-production.md; this is the half a check can
+// see. The measured fact that makes it a guard rather than a preference: a
+// preview bundle carries the PRODUCTION Supabase host — measured 2026-08-20, the
+// same host production serves. Previews were world-readable until 2026-08-21,
+// and a name committed here is in git whether or not a URL is gated.
+//
+// #19 decided to gate previews behind a custom domain; #121 applied it on
+// 2026-08-21, and that does NOT retire this guard — it is the reason the
+// guard is worth having rather than the reason it is not. A name in version
+// control is exposed to everyone with repository access, to every future
+// reader, and to whatever
+// the hosting arrangement happens to be on the day; gating one URL changes none
+// of those. #121 has landed and this block stays.
+//
+// The obvious design is unavailable. A DENYLIST of the household's real names
+// would put those names in git, which is the exact thing being prevented. So the
+// vocabulary is positive: every name-shaped literal must be DECLARED, which
+// converts "somebody committed a real name" into "somebody added a name to a
+// list, in a diff, where a human can see it". That is the whole of what a check
+// can do here — none of these assertions can tell a real name from a plausible
+// one, and the doc says so rather than implying otherwise.
+//
+// Two scans, with DIFFERENT blind spots, and neither is sufficient alone:
+//
+//   SHAPE    — every capitalised-word-shaped literal in the corpus, in ANY
+//              position, so a name cannot hide in syntax nobody taught the
+//              check about. Blind to a name written in lower case.
+//   POSITION — every person-shaped literal in a name POSITION, case
+//              insensitively, so `name: 'alex'` is caught. Blind to a position
+//              not on the list.
+//
+// The single-letter household 'H' is the worked example of why both exist: it
+// fails the shape test (one character) and is caught by position alone.
+describe('#19 — no real household name reaches version control', () => {
+  const tracked = execSync('git ls-files -z', {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean)
+
+  // Discovered, never hard-coded: a test file added tomorrow is scanned the day
+  // it lands. A hand-maintained corpus list is the drift this file already
+  // guards against twice (the README lists, the migrations array).
+  //
+  // gate.test.js excludes ITSELF, and the reason is the hazard cairn records as
+  // `a-guard-that-reads-source-must-survive-its-own-docs`: the declaration
+  // cannot be its own subject. Every vocabulary entry appears in this file as a
+  // literal, and the positive control below must contain a name the vocabulary
+  // REFUSES — so scanning this file would refuse the correct file. The cost is
+  // stated rather than hidden: a real name pasted into this file is not caught
+  // by these assertions.
+  const corpus = tracked.filter(
+    (path) =>
+      path !== 'src/test/gate.test.js' &&
+      (/^src\/.*\.test\.jsx?$/.test(path) ||
+        /^src\/test\/.*\.jsx?$/.test(path) ||
+        path === 'src/lib/allocation.corpus.js' ||
+        /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
+  )
+
+  // Comments stripped before scanning, per extension. A `--` strip on JavaScript
+  // would eat a decrement operator, and a `//` strip on SQL would eat nothing
+  // useful, so the two are not interchangeable.
+  //
+  // Split out from codeOf so it can be exercised on text rather than only on the
+  // corpus, and the reason is a MEASURED finding: deleting the stripping
+  // entirely reddened NOTHING here, because no comment in the corpus happens to
+  // QUOTE an undeclared name today. The defence against
+  // `a-guard-that-reads-source-must-survive-its-own-docs` is real, the corpus
+  // does not exercise it, and an unexercised defence is one nobody has asked.
+  // The positive control below asks it.
+  function stripComments(text, isSql) {
+    const withoutBlocks = text.replace(/\/\*[\s\S]*?\*\//g, ' ')
+    return isSql
+      ? withoutBlocks.replace(/--[^\n]*/g, ' ')
+      : withoutBlocks.replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  }
+
+  function codeOf(path) {
+    return stripComments(readFileSync(resolve(process.cwd(), path), 'utf8'), path.endsWith('.sql'))
+  }
+
+  // One to three words, first word capitalised and NOT all-caps — which is what
+  // keeps SELECT, POST, JWT and UTC out without an exemption each.
+  const NAME_SHAPE = /^[A-Z][a-z][A-Za-z'’-]*(?: [A-Z][A-Za-z'’-]*){0,2}$/
+  // The same shape with the capital dropped, used only inside a name position,
+  // where a lower-case word IS the interesting case.
+  const PERSON_SHAPE = /^[A-Za-z][A-Za-z'’-]*(?: [A-Za-z][A-Za-z'’-]*){0,2}$/
+
+  // The arguments and keys that CREATE a person or a household. `\bname` does
+  // not match `table_name` or `function_name`, which is why the SQL identifiers
+  // those tests carry need no exemptions.
+  const NAME_POSITIONS = [
+    /create_household\(\s*'([^']*)'\s*,\s*'([^']*)'/g,
+    /create_household\(\s*'([^']*)'/g,
+    /organizer_?name\s*[:=]\s*['"]([^'"]*)['"]/gi,
+    // Both spellings. The column is `display_name` and the client prop is
+    // `displayName`, and `\bname` below matches NEITHER — the underscore is a
+    // word character, so there is no boundary in front of `name`. Found by
+    // reading the fixtures rather than by the mutation pass, which would have
+    // reported a clean POSITION scan while every member name in every component
+    // fixture was covered by the shape scan alone.
+    /display_?[Nn]ame\s*[:=]\s*['"]([^'"]*)['"]/g,
+    /\bname\s*:\s*['"]([^'"]*)['"]/g,
+    /\bname\s*=\s*'([^']*)'/g,
+  ]
+
+  // The vocabulary. People and households only — audited against the real
+  // household by the owner on 2026-08-20, which is an OBSERVATION and not
+  // something these assertions establish. Alex, Robin and Sam are ordinary
+  // given names rather than structured placeholders, and they are declared for
+  // that reason: they are the entries a reader should look at hardest.
+  const PLACEHOLDER_NAMES = new Set([
+    'Alex', 'Robin', 'Sam',
+    'Organizer', 'Person', 'Kid', 'Sibling', 'Spare', 'Second Child', 'Third Child',
+    'Intruder', 'Hijacked', 'Smuggled', 'Not Yet Provisioned', 'Kid renamed',
+    'Placeholder', 'Placeholder One', 'Placeholder One Renamed', 'Placeholder Two',
+    'Placeholder Three', 'Placeholder Child', 'Placeholder Organizer', 'Renamed Placeholder',
+    'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
+    'Other', 'Other Org', 'Other Household', 'Other Organizer',
+    'Mutant Household', 'Mutant Organizer',
+    'Ours', 'Theirs', 'Mine now', 'H',
+  ])
+
+  // Literals that match a scan and are not names. Each carries its reason, and
+  // each is asserted below to still be NEEDED — an exemption whose subject has
+  // left is a hole waiting for somebody to reuse the string.
+  const NOT_NAMES = {
+    Dishes: 'a chore title in App.test.jsx',
+    'Placeholder Chore': 'a chore title',
+    'Placeholder Other Chore': 'a chore title',
+    Taskr: 'the application name',
+    Monday: 'the week boundary, asserted in capacity.test.js',
+    'nothing to do': 'an allocation corpus scenario name',
+    'provision-member': 'the Edge Function name',
+    FunctionsFetchError: 'a supabase-js error class',
+    FunctionsHttpError: 'a supabase-js error class',
+    'Access-Control-Allow-Origin': 'an HTTP header asserted by the CORS tests',
+    'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
+    'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
+    'Access-Control-Request-Headers': 'an HTTP header asserted by the CORS tests',
+  }
+
+  const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])
+  const declaredLower = new Set([...declared].map((value) => value.toLowerCase()))
+
+  // Both scanners take TEXT rather than a path, so the positive controls below
+  // can run them against a sample containing a name the vocabulary refuses.
+  // Routed through the same functions the real scan uses — a control that
+  // builds its own matcher proves the control, not the guard.
+  function shapeOffenders(text) {
+    const found = []
+    for (const match of text.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)) {
+      const value = match[1] ?? match[2]
+      if (value && NAME_SHAPE.test(value) && !declared.has(value)) found.push(value)
+    }
+    return found
+  }
+
+  function positionOffenders(text) {
+    const found = []
+    for (const pattern of NAME_POSITIONS) {
+      for (const match of text.matchAll(pattern)) {
+        for (const value of match.slice(1)) {
+          if (value && PERSON_SHAPE.test(value) && !declaredLower.has(value.toLowerCase())) {
+            found.push(value)
+          }
+        }
+      }
+    }
+    return found
+  }
+
+  it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
+    // Without this the whole describe passes the moment the filter stops
+    // matching — a directory rename, a move to .ts, a git invocation that
+    // returns nothing. An always-empty scan reads exactly like a clean tree.
+    expect(corpus.length).toBeGreaterThan(20)
+    expect(corpus).toContain('src/App.test.jsx')
+    expect(corpus).toContain('src/test/migrations.pglite.test.js')
+    expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
+  })
+
+  it('SHAPE: every name-shaped literal in the fixture corpus is declared', () => {
+    const offenders = corpus.flatMap((path) =>
+      shapeOffenders(codeOf(path)).map((value) => `${value} (${path})`),
+    )
+    expect(
+      [...new Set(offenders)],
+      'undeclared name-shaped literals — add them to PLACEHOLDER_NAMES or NOT_NAMES, and confirm none is a real household name',
+    ).toEqual([])
+  })
+
+  it('POSITION: every person-shaped literal in a name position is declared', () => {
+    const offenders = corpus.flatMap((path) =>
+      positionOffenders(codeOf(path)).map((value) => `${value} (${path})`),
+    )
+    expect([...new Set(offenders)], 'undeclared literals in a name position').toEqual([])
+  })
+
+  it('POSITIVE CONTROL: both scans catch a name the vocabulary does not declare', () => {
+    // The two halves are deliberately different: the shape scan is given a name
+    // in an arbitrary position, and the position scan is given a LOWER-CASE one,
+    // which is precisely what the shape scan cannot see. If either assertion
+    // ever needs weakening, the scan it belongs to has stopped working.
+    const sample = `const fixture = { id: 'm1', name: 'jordan', role: 'Marguerite' }`
+    expect(shapeOffenders(sample)).toContain('Marguerite')
+    expect(positionOffenders(sample)).toContain('jordan')
+    // ...and the vocabulary is what lets the declared ones through, rather than
+    // the scans simply matching nothing.
+    expect(shapeOffenders(`const m = { name: 'Placeholder One' }`)).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: a name QUOTED IN A COMMENT is prose, not a fixture', () => {
+    // Written because the mutation said so: removing the stripping changed
+    // nothing against the corpus as it stands, so this defence was carried on
+    // faith. Both dialects, because they are stripped by different rules — and
+    // the third assertion is what stops this passing for the wrong reason, by
+    // showing the same string OUTSIDE a comment is still caught.
+    const js = `// the fixture used to say 'Marguerite' here\nconst x = 1`
+    const sql = `-- the organizer used to be 'Marguerite'\nselect 1;`
+    expect(shapeOffenders(stripComments(js, false))).toEqual([])
+    expect(shapeOffenders(stripComments(sql, true))).toEqual([])
+    expect(shapeOffenders(stripComments(`const x = 'Marguerite'`, false))).toContain('Marguerite')
+  })
+
+  it('every NOT_NAMES exemption is still needed', () => {
+    // An exemption for a string that has left the corpus is a hole: the next
+    // person to use it inherits a pass nobody granted them.
+    const text = corpus.map(codeOf).join('\n')
+    const unnecessary = Object.keys(NOT_NAMES).filter((value) => !text.includes(value))
+    expect(unnecessary, `these exemptions are no longer needed: ${unnecessary.join(', ')}`).toEqual(
+      [],
+    )
+  })
+
+  // The other face of the same decision: an image is a name too, and a
+  // screenshot of the running app carries the whole roster at once.
+  const ALLOWED_ASSETS = {
+    'public/favicon.svg': 'the tab icon',
+    'public/icons/icon-192.png': 'PWA manifest icon, generated by scripts/generate-icons.mjs',
+    'public/icons/icon-512.png': 'PWA manifest icon, generated by scripts/generate-icons.mjs',
+    'public/icons/icon-512-maskable.png':
+      'PWA maskable icon, generated by scripts/generate-icons.mjs',
+  }
+  const IMAGE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|avif|svg)$/i
+
+  it('no image is committed except the icon set the manifest names', () => {
+    const offenders = tracked.filter((path) => IMAGE.test(path) && !ALLOWED_ASSETS[path])
+    expect(offenders, `committed images outside the icon set: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the icon set is tracked and the pattern matches it', () => {
+    // Without this, the assertion above passes identically against a typo in the
+    // extension list, or a `git ls-files` that returned nothing.
+    const images = tracked.filter((path) => IMAGE.test(path))
+    expect(images).toEqual(expect.arrayContaining(Object.keys(ALLOWED_ASSETS)))
+    expect(images.length).toBe(Object.keys(ALLOWED_ASSETS).length)
   })
 })

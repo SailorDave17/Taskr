@@ -4,11 +4,13 @@
 - Story: #4
 - Status: **executed.** Vercel and Supabase accounts exist and are owner-controlled; environment
   variables are set. AC 1 and AC 2 verified on a real phone 2026-08-05 (see §3).
-- Production URL: <https://taskr-khaki.vercel.app> — this is the domain Vercel lists under
-  **Settings → Environments → Production → Domains**, and it is the one to publish.
-  <https://taskr-mad-cow1.vercel.app> also resolves and served the same build during setup, but it
-  is the `<project>-<account>` alias rather than the assigned production domain; do not assume the
-  two stay pointed at the same deployment. Confirm with the footer's `build <sha>` stamp.
+- Production URL: <https://taskr.madcowhq.com> — the custom domain added by #121 on 2026-08-21, and
+  the one to publish. The assigned `taskr-khaki.vercel.app` still resolves, still serves the same
+  build, and is **not** gated by Standard Protection (see step 6), so the two coexist; the custom
+  domain is the published one and the assigned domain is the fallback nobody needs to be moved off.
+  <https://taskr-mad-cow1.vercel.app> also resolves, but it is the `<project>-<account>` alias rather
+  than a project domain; do not assume any two stay pointed at the same deployment. Confirm with the
+  footer's `build <sha>` stamp.
 
 The one prerequisite code cannot discharge: hosting and backend accounts must exist and be
 owner-controlled. Free tiers suffice. **Credentials never enter git.**
@@ -91,26 +93,43 @@ wrong.
    (#108), so the first half of the sequence is done and the promotion is what is outstanding. That
    is a **choice with a sequence**, which is the whole point — apply the migration, then promote.
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
-6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
-   **This step was missing from the original runbook and it blocks AC 1 completely.**
+6. **Turn Vercel Authentication on, at *Standard Protection*** — Settings → Deployment Protection →
+   *Require Log In*, then the deployment-type dropdown that appears beside it. Applied 2026-08-21 by
+   #121; the dropdown defaults to *Standard Protection*, which is what is wanted.
 
-   A new Hobby project ships with Deployment Protection **on**, so both the generated deployment URL
-   and the production alias redirect to `vercel.com/login`. Nobody but the project owner can load
-   the app.
+   A new Hobby project ships with Deployment Protection **on**, so every URL redirects to
+   `vercel.com/login` and nobody but the owner can load the app. This project ran with it **off**
+   from 2026-08-05 to 2026-08-21, deliberately: the shell held no data, and #17 scoped that reasoning
+   to exactly that condition. #19 retired it once real household records existed.
 
-   The trap is the setting's name. **Standard Protection does not mean "previews only"** — Vercel's
-   own wording is *"Protect all except production **Custom Domains** for your project"*, so the
-   generated `*.vercel.app` production URL is protected under it by design. On Hobby the dropdown
-   offers only *Standard Protection* and *All Deployments* (Pro-gated); there is **no previews-only
-   option**. So the choice is: switch Vercel Authentication off entirely, or add a custom domain.
-   This project switched it off — the shell holds no data, and real access control arrives with the
-   first persisted record in #5 (RLS plus a household join credential), which is why the ordering of
-   those stories matters.
+   **What Standard Protection actually protects — measured, because the documented wording misleads.**
+   Vercel describes it as *"protect all except production **Custom Domains** for your project"*, which
+   reads as though the assigned `*.vercel.app` production URL is protected by design. It is not.
+   Measured 2026-08-21, uncached paths, same second:
 
-   Note the save is unreliable and lies convincingly: after toggling, the control showed unchecked
-   and *Save* went disabled — the signature of success — yet a reload showed protection back on. A
-   second identical attempt persisted. **Verify by reloading the page and then loading the public
-   URL, not by the form's own state.**
+   | URL | result |
+   |---|---|
+   | `taskr.madcowhq.com` — production custom domain | reaches the app |
+   | `taskr-khaki.vercel.app` — production assigned domain | **reaches the app** |
+   | the production deployment's own `taskr-<hash>-mad-cow1.vercel.app` | `302` to login |
+   | any preview deployment URL | `302` to login |
+
+   The exemption follows the **domain**, not the deployment: both production domains are exempt and
+   every per-deployment URL is gated, the production deployment's own URL included. On Hobby the
+   dropdown offers *Standard Protection* and *All Deployments* (Pro-gated), so there is still **no
+   previews-only option**; *Deployment Protection Exceptions*, which would let you name domains to
+   exclude, is Pro-only and greyed out.
+
+   **A cached `200` is not evidence.** The first check after the change showed `taskr-khaki.vercel.app`
+   answering `200`, which happens to be the right answer for the wrong reason: the headers read
+   `x-vercel-cache: HIT` with `age: 23841`, a six-hour-old object that predates the change. Probe a
+   path with no cache entry — `/__probe_<random>` — because a protected deployment answers `302` on
+   **every** path, so a `404` from the app is what proves you reached it.
+
+   The save has lied convincingly before: on 2026-08-05 the control showed unchecked and *Save* went
+   disabled — the signature of success — while a reload showed protection back on, and a second
+   identical attempt was needed. It persisted first time on 2026-08-21. **Verify by reloading the
+   page and then probing the URLs, never by the form's own state.**
 
 After this, every push to `rebuild/v1` deploys automatically. That is AC 8's "documented, repeatable
 pipeline" and it needs no further wiring.
@@ -181,21 +200,48 @@ Owner-only, and **separate from every other deploy on this page**: a `git push` 
 and touches nothing here. Until this has run, an organizer who tries to give somebody a sign-in gets a
 failure, and nobody but the organizer can sign in at all.
 
+**Every command takes the `npx` prefix, and must run from the repo root.** Both halves of that cost a
+round trip on 2026-08-20 and neither is guessable:
+
+- The CLI is not in `package.json` and is not installed globally, so `npx` fetches it per invocation
+  and leaves **no `supabase` command on `PATH`**. A bare `supabase login` answers *"is not recognized
+  as an internal or external command"*, which reads like a missing login and is a missing binary.
+- `functions deploy` reads `supabase/functions/<name>/` **relative to the working directory**, so
+  running it from a home directory finds nothing to deploy. `--workdir <repo>` is the alternative to
+  `cd`.
+
 ```
+cd <the repo>
 npx supabase login
-npx supabase link --project-ref <project ref>
-npx supabase functions deploy provision-member
+npx supabase functions deploy provision-member --project-ref <project ref> --use-api
 ```
 
-Docker must be running. The function reads its own secrets from the platform - Supabase injects the
-project URL, the anon key and the service-role credential into every function - so there is nothing to
-set by hand and nothing that could end up in git.
+Two flags remove two steps that can go wrong. `--project-ref` on the deploy makes a separate
+`supabase link` unnecessary. **`--use-api` bundles the function server-side, so Docker is not
+required at all** - which is worth stating plainly, because *"Docker's daemon is down on the build
+machine"* is the reason this repo recorded, twice, for why the Edge Function was never deployed. An
+avoidable dependency had been sitting on record as a blocker.
+
+If the browser flow is awkward - a remote-control session, say - `login` can be replaced with a
+personal access token from `supabase.com/dashboard/account/tokens`:
+
+```
+set SUPABASE_ACCESS_TOKEN=<token>          cmd.exe
+export SUPABASE_ACCESS_TOKEN=<token>       POSIX shell
+```
+
+That is session-scoped, and belongs in no file: a token that can deploy to the project is a
+credential, and `.env.local` is for values the browser is allowed to see.
+
+The function reads its own secrets from the platform - Supabase injects the project URL, the anon key
+and the service-role credential into every function - so there is nothing else to set by hand and
+nothing that could end up in git.
 
 **Then prove it, because from the app's side the failure is silent and ambiguous.** A deploy that never
 happened, and one that went to a different project, leave the app failing in exactly the same way:
 
 ```
-curl -i -X OPTIONS   https://<project ref>.supabase.co/functions/v1/provision-member   -H "Origin: https://<the deployed app>"   -H "Access-Control-Request-Method: POST"   -H "Access-Control-Request-Headers: authorization, content-type, apikey, x-client-info"
+curl -i -X OPTIONS https://<project ref>.supabase.co/functions/v1/provision-member -H "Origin: https://<the deployed app>" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization, content-type, apikey, x-client-info"
 ```
 
 Read **two** things off the answer, not one:
@@ -209,6 +255,24 @@ Read **two** things off the answer, not one:
 
 The second check is the one nobody writes, and it is the one #112 needed: the gateway's own 404 answer
 carries three of the four by itself, which is enough to look healthy at a glance.
+
+**Or just run the check, which asks both questions for you.** Since #115, `npm run check:live` probes
+every Edge Function with exactly this preflight:
+
+```
+npm run check:live
+```
+
+Before a **first** deploy it reads one short, with the Edge Function line failing and the deploy
+command inside the failure; afterwards it is green. That makes the transition itself the proof -
+there is no state in which the check is green and the function is missing, so nothing here has to be
+taken on trust.
+
+Two caveats on reading it that way. On a **redeploy** the check is green on both sides, since it
+answers *is a function there and callable* and not *is this the build you just pushed* - use the
+timestamp in the dashboard for that. And the count is deliberately not written here: it moves
+whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
+defect `check:live` exists to catch, one level up.
 
 ## 4. Verifying AC 1 and AC 2
 
@@ -245,6 +309,7 @@ nobody owns.
 
 ## 5. What you cannot delegate
 
-Steps 1, 2 and 3 create accounts, hold credentials, or need Docker and a project link, so they are
-the owner's. Everything downstream of
+Steps 1, 2 and 3 create accounts or hold credentials, so they are the owner's. Step 3 needs no
+Docker and no `link` - see the flags there - but it does need an access token, which is the part that
+cannot be delegated. Everything downstream of
 them — wiring the client, the roster schema, RLS policies — is ordinary work in later stories.

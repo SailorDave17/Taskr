@@ -94,24 +94,31 @@ Two supersessions, and the second undoes an assumption the first was built on.
   reason #62 was cheap — see *What it costs to change later*, which predicted this change and priced
   it correctly.
 
-**What is NOT deployed yet, and is the honest gap.** Provisioning another person's account needs the
-`service_role` key, so it needs the Edge Function — built by #87 (PR #92) — and the deploy is
-owner-only and has not happened. The step, and the check that proves it landed, are section 3 of
-`docs/deploy-runbook.md`; it was missing from that runbook entirely until #112, which is a large part
-of why it has never been run. Today an organizer can create a household and sign
-in, and can add people to the roster — and those people cannot sign in, because no account exists for
-them. The roster says so on each row rather than leaving it to be discovered.
+**Provisioning is DEPLOYED and live, since 2026-08-20.** Giving another person an account needs the
+`service_role` key, so it needs the Edge Function — built by #87 (PR #92), deployed by
+`npm run deploy:function` on 2026-08-20 (#112 AC 5), and proved from outside by `check:live`'s Edge
+Function probe (#115), which is what the 20-of-20 bullet at the head of this page is reporting. An
+organizer can add somebody to the roster and give them a sign-in, and that person signs in as
+themselves. Since 2026-08-21 the live RLS suite exercises the whole path over the wire (#88): add a
+member, provision them, sign in as them, and confirm the cross-household refusals still refuse.
+
+*This paragraph said the deploy **"is owner-only and has not happened"** until 2026-08-21 — for a
+day, while the header of this same page said `check:live` went green "immediately after
+`npm run deploy:function`". PR #109 swept this document for exactly that claim and corrected the
+sentences that named the function; these did not name it, so they survived. Two halves of one page
+disagreed, and the stale half was the one in the section a reader opens to find out what is missing.
+The step, and the check that proves it landed, are section 3 of `docs/deploy-runbook.md`.*
 
 ### Recovery, both directions — #62 AC 7 and AC 8
 
 The story required these to be *decided and written down* rather than left to be discovered, so both
-answers are here even though one of them is "not yet".
+answers are here — and since 2026-08-20 both are live rather than one being "not yet".
 
 **A member forgets their credential (AC 7).** The organizer resets it, and it still needs no inbox —
 a synthetic `<id>@taskr.invalid` address has no mailbox to send a link to, by construction. The reset
 is an admin password update, which needs `service_role`, so it lands with the Edge Function — built
-by #87 (`provision-member`, action: `"reset"`; PR #92, merged 2026-08-13) and live once that function
-is deployed to the hosted project. This is a genuine regression in capability against the PIN model, which could do
+by #87 (`provision-member`, action: `"reset"`; PR #92, merged 2026-08-13) and **deployed 2026-08-20**.
+This is a genuine regression in capability against the PIN model, which could do
 it with a plain RPC, and it is the price of a real auth identity rather than an oversight.
 
 **The organizer loses their own credential (AC 8).** *The answer changed, and this is the change.*

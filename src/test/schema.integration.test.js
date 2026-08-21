@@ -325,12 +325,15 @@ describe('#115 AC 5 - POSITIVE CONTROL: the Edge Function check can actually fai
     // a real answer, not that a hand-built object routes correctly - the unit
     // tests in liveSchema.test.js already cover that.
     //
-    // A caveat worth stating in band, because it expires: while
-    // `provision-member` is itself undeployed this control returns the SAME
-    // verdict as the real test above, so the pair does not yet DISCRIMINATE. It
-    // starts to the moment the deploy lands, which is also the moment the
-    // expected-red entry in docs/access-model.md clears. Until then this proves
-    // the instrument works and the test above reports the truth.
+    // The caveat this carried has EXPIRED, and it said in band that it would.
+    // While `provision-member` was itself undeployed, this control returned the
+    // SAME verdict as the real test above, so the pair did not DISCRIMINATE —
+    // and a control that cannot yet tell two things apart looks identical to
+    // one that works. The deploy landed on 2026-08-20 and they now disagree:
+    // the test above reports deployed and callable, this reports absent. That
+    // disagreement is what makes the pair evidence rather than two guesses that
+    // happen to match. (Cleared 2026-08-21 by #88, along with the expected-red
+    // entry in docs/access-model.md the caveat was keyed to.)
     const absent = 'taskr-check-live-no-such-function'
     const probe = await probeEdgeFunction(url, absent)
     const line = describeEdgeFunctionError(absent, probe)

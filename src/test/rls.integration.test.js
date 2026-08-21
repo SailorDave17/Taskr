@@ -1,47 +1,134 @@
-// ⚠ THIS FILE TARGETS THE MODEL #62 RETIRED. It has NOT been migrated.
+// Row-level security, exercised over the wire against the REAL Supabase project
+// — migrated to per-member sign-in by #88.
 //
-// It signs in anonymously, joins with a code, and exercises `claim_member`,
-// `claim_member_with_pin`, `has_pin` and `household_devices` — every one of
-// which `0007_per_member_auth.sql` drops. Run against a project with 0007
-// applied it fails at setup, and the failure is correct.
+// WHAT THIS FILE IS FOR, AND WHY NOTHING ELSE CAN DO IT
 //
-// It was deliberately NOT rewritten during #62, and the reason is the same one
-// this file's own header gives for staying out of CI. Discharging #62 AC 9
-// means running `npm run test:rls` green against the live project, and that
-// needs two things that do not exist yet: the live project migrated to 0007
-// (blocked on the Edge Function — pasting it before then locks the household
-// out, see the migration's section 9) and Supabase credentials. Rewriting 574
-// lines that cannot be executed would produce a suite that looks migrated,
-// has never run, and would be trusted on sight — which is precisely the
-// vacuity the paragraph below is about.
+// `src/test/migrations.pglite.test.js` proves the same rules against a real
+// Postgres and is faster, cheaper and runs in CI. What it structurally cannot
+// say is whether SUPABASE agrees: it builds its own database, so it can never
+// see the live project diverge from `supabase/migrations/`. This file is the
+// only instrument in the repo that can. That gap is not hypothetical — #91 is
+// an open, measured instance of it, and the next section says why this suite
+// cannot detect that particular one either.
 //
-// The pglite suite covers the same rules against the new model today, and
-// `src/test/migrations.pglite.test.js` carries the #62 policy proofs. What it
-// structurally cannot say is whether SUPABASE agrees, which is this file's
-// entire reason for existing and why it must be migrated rather than dropped.
+// ── WHAT #88 CHANGED ───────────────────────────────────────────────────────
 //
-// ── original header follows ──
+// This suite used to talk to the model `0007_per_member_auth.sql` retired: a
+// DEVICE signed in anonymously, joined with a shared code, and later proved
+// which person it was acting as. `household_devices` was the row every policy
+// asked about. `join_household`, `claim_member`, `claim_member_with_pin`,
+// `set_member_pin`, `has_pin`, `pin_hash` and `join_code` are all gone, so the
+// old file failed at setup against a migrated project — correctly, and
+// uselessly.
 //
-// AC 6 — "the data layer itself rejects it, asserted by a test that bypasses the
-// client, because a client-side guard is not a guard."
+// Under the new model a PERSON signs in as themselves, `members.claimed_by` is
+// the sole membership predicate, and `public.current_household_ids()` resolves
+// it. The rules did not change; only the answer to "is the caller in this
+// household" did. A test asserts the retired names are gone rather than a reader
+// checking — in `support/retiredVocabulary.test.js`, which CI runs; see *the
+// vocabulary* below for why it is there and not here.
 //
-// This file talks to Supabase over the wire with the anon key, exactly as a
-// stranger with the published bundle would. It imports nothing from src/ except
-// the join-code helper: if it went through the app's own data layer it would be
-// testing the app's manners, not the database's rules.
+// ── ⚠ THIS FILE HAS NEVER BEEN EXECUTED ────────────────────────────────────
 //
-// It is NOT part of `npm test` and therefore not part of CI. That exclusion is
-// deliberate and the reason is written here rather than in a commit message
-// nobody will read: CI has no Supabase credentials, and a suite that silently
-// skips when its configuration is absent passes vacuously — which is the exact
-// failure `docs/ci-gate.md` was written to prevent. Run it with `npm run test:rls`.
+// Stated first because it is the thing most likely to be assumed the other way,
+// and because the version this replaced argued in its own header that a suite
+// which "looks migrated, has never run, and would be trusted on sight" is worse
+// than one that is honestly stale.
 //
-// Cleanup: each run creates one household named `TEST <timestamp>` and three
-// anonymous users, and leaves them. (Three since #61 — the two-devices-one-person
-// test needs a challenger that has claimed nobody, and 0002 claims the organizer
-// for the creating device, so devices A and B are both taken by then.) There is deliberately no client-reachable
-// way to delete a household — see the migration — so tidying is a manual
-// statement in the Supabase SQL editor. `docs/access-model.md` carries it.
+// #88 shipped it unrun, deliberately and with the owner's decision recorded on
+// the issue. Two of the three blockers that header named ARE now discharged —
+// the live project is on `0007` and the Edge Function is deployed, both
+// 2026-08-20 — and the third is not: running this needs a pre-confirmed account
+// that only the project owner can create (see the next section). Every claim
+// below is therefore REASONED FROM THE MIGRATIONS AND THE FUNCTION SOURCE, not
+// measured. Expect the first real run to find things; that is what a first run
+// is for, and it is tracked as its own issue rather than left implied here.
+//
+// What HAS been measured, on 2026-08-21 against the live project, is only what
+// the next section says: the auth settings, the address validation, the send
+// rate limit, and that `0007` is applied (the five retired RPCs answer
+// `PGRST202`, `create_household` resolves at three arguments and not four,
+// `household_devices` answers `PGRST205`).
+//
+// ── WHY THIS SUITE NEEDS A SEEDED ACCOUNT, WHICH IS NEW ────────────────────
+//
+// It cannot create its own organizer, and that is a property of the project
+// rather than an inconvenience. *Measured 2026-08-21* against the live project:
+//
+//     GET /auth/v1/settings  ->  "mailer_autoconfirm": false
+//
+// So a client `signUp()` returns `data.session === null` until somebody opens
+// an inbox and clicks a link. No automated suite can do that, on any machine,
+// for any runner — this is not a limitation of the session that wrote it.
+// `src/lib/household.js` already says the same thing about the app's own signup
+// path: null session, "not something this app can work around".
+//
+// Two smaller measurements from the same probe, both of which would otherwise
+// have been diagnosed as bugs in this file:
+//
+//   - `@example.com` and `@taskr.invalid` are REJECTED by GoTrue's address
+//     validation (`email_address_invalid`). The Edge Function's synthetic
+//     `<id>@taskr.invalid` addresses work only because `auth.admin.createUser`
+//     bypasses that validation — the client path could never mint one.
+//   - a signup that IS accepted answers `over_email_send_rate_limit` on the
+//     free tier's shared SMTP, so even with confirmation off, a suite that
+//     signs up twice per run would throttle itself within a few runs.
+//
+// The design below is immune to both: it sends NO email and calls `signUp` NOT
+// AT ALL. One pre-confirmed account signs in, and every other identity in the
+// run is minted by the Edge Function, which confirms at creation because a
+// synthetic address has no inbox to confirm through.
+//
+// ── THE SHAPE, WHICH IS WHERE THE INTERESTING PART IS ──────────────────────
+//
+// One seeded account, two households, and two provisioned members:
+//
+//     organizer (seeded)  ──creates──>  H1 "inside"   ──provisions──> insider
+//                         ──creates──>  H2 "outside"  ──provisions──> outsider
+//
+// The organizer is in BOTH, so they are the positive control and never the
+// subject of a refusal. `insider` and `outsider` are each in exactly one, so
+// every cross-household claim is tested in BOTH DIRECTIONS by two people who
+// are genuinely signed in — which the old file could only approximate with a
+// device that had not joined yet.
+//
+// It also means the suite never needs a second credential: `outsider` is a
+// stranger to H1 in every way that matters to a policy, and the Edge Function
+// made them.
+//
+// ── WHAT THIS SUITE IS STILL BLIND TO, STATED RATHER THAN DISCOVERED ───────
+//
+// It runs against the live project, so it sees the live project's grants — and
+// #91 is precisely a grant that exists there and in NO migration
+// (`authenticated` has no SELECT on `households`; the hosted project inherited
+// it from a creation-time default that a rebuilt project does not get). Every
+// `households` read below therefore SUCCEEDS here and would fail outright on a
+// database built from `supabase/migrations/`. This file cannot detect that, and
+// neither can the pglite suite, for opposite reasons. #91 owns it.
+//
+// ── COST OF A RUN ─── #88 AC 4 ─────────────────────────────────────────────
+//
+// Each run leaves, on the live project: two households named
+// `TEST 88 <timestamp> …`, four member rows, and TWO auth users (the two
+// provisioned members). The seeded account is reused and never multiplies.
+//
+// They are LEFT rather than cleaned up, and that is the same deliberate choice
+// the previous version documented: there is no client-reachable way to delete a
+// household — see `0001` — so tidying is a manual statement in the Supabase SQL
+// editor, and a suite that could delete households would need a capability the
+// app itself is designed not to have. `docs/access-model.md` carries the
+// statement. Two auth users per run is strictly better than the three anonymous
+// users the old file left, and unlike those they are identifiable: every
+// address is `<members.id>@taskr.invalid` under a household whose name begins
+// `TEST 88`.
+//
+// ── WHY IT IS NOT IN CI ────────────────────────────────────────────────────
+//
+// It needs credentials and a network, which the CI gate deliberately has
+// neither of, and a suite that silently SKIPS when its configuration is absent
+// passes vacuously — the exact failure `docs/ci-gate.md` exists to prevent. So
+// every precondition below is a `throw`, never a skip. Run it with
+// `npm run test:rls`.
 
 import { createClient } from '@supabase/supabase-js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -49,6 +136,8 @@ import { isSecretKey } from '../lib/keyShape.js'
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+const seedEmail = process.env.TASKR_TEST_EMAIL
+const seedPassword = process.env.TASKR_TEST_PASSWORD
 
 // Loud, not skipped. If this file runs at all it must either exercise the
 // policies or fail saying why.
@@ -63,10 +152,10 @@ if (!url || !anonKey) {
 }
 
 // A secret key bypasses RLS, so running this file with one exercises no policy
-// at all. It would still go red — device B would see everything — but it would
-// go red in the shape of "your policies are broken", sending someone to rewrite
-// a migration that is fine. Added 2026-08-05, when exactly this key was found in
-// the project's own hosting configuration.
+// at all. It would still go red — the outsider would see everything — but it
+// would go red in the shape of "your policies are broken", sending someone to
+// rewrite a migration that is fine. Added 2026-08-05, when exactly this key was
+// found in the project's own hosting configuration.
 if (isSecretKey(anonKey)) {
   throw new Error(
     'rls.integration.test.js was given a SECRET key, so it can prove nothing.\n' +
@@ -79,273 +168,442 @@ if (isSecretKey(anonKey)) {
   )
 }
 
-const ORGANIZER_PIN = '4821'
+// #88. The seeded account, and the instruction for making one — because the
+// reason it is needed is not guessable from the failure.
+if (!seedEmail || !seedPassword) {
+  throw new Error(
+    'rls.integration.test.js needs a PRE-CONFIRMED Supabase account to sign in as.\n' +
+      '\n' +
+      'It cannot make one itself: this project has `mailer_autoconfirm: false`, so a\n' +
+      'client signUp() returns a null session until someone clicks a link in an inbox,\n' +
+      'and no automated suite can read an inbox. Measured 2026-08-21 against\n' +
+      'GET /auth/v1/settings.\n' +
+      '\n' +
+      'Make one ONCE, in the Supabase dashboard:\n' +
+      '  Authentication -> Users -> Add user -> Create new user\n' +
+      '  tick "Auto Confirm User"\n' +
+      '\n' +
+      'Then put it in .env.local (gitignored):\n' +
+      '  TASKR_TEST_EMAIL=…\n' +
+      '  TASKR_TEST_PASSWORD=…\n' +
+      '\n' +
+      'Use a throwaway address that belongs to nobody in the household. This account\n' +
+      'becomes the organizer of every TEST household the suite creates, so it must not\n' +
+      'be a real person: it accumulates households that cannot be deleted from a client.',
+  )
+}
 
-// #45. The zone the creating device claims, deliberately NOT the runner's own —
-// a value that happens to match the machine proves nothing about whether the
-// argument arrived. Chosen for the same reason `period_start` below is a real
-// Monday: a fixture that would be right by accident cannot fail.
-const HOUSEHOLD_TZ = 'Pacific/Auckland'
+/** A stamp that sorts, and that a human can find in the dashboard. */
+const RUN = new Date().toISOString().replace(/[:.]/g, '-')
 
 /** A Monday. 0005's check constraint refuses any other weekday outright. */
 const CAPACITY_PERIOD = '2026-08-10'
 
-// Every read of `member_capacity` names its columns, for the reason recorded
-// above MEMBER_COLUMNS and one more: 0005 withholds `household_id` from the
-// select grant, so `select('*')` fails with 42501 for EVERY caller — including a
-// device legitimately in the household. An assertion written against `data ?? []`
-// would then hold whether or not the row-level policy did anything, which is the
-// exact defect #61 found in this file. Kept identical to CAPACITY_COLUMNS in
-// src/lib/capacity.js.
+// The zone the creating account claims, deliberately NOT the runner's own — a
+// value that happens to match the machine proves nothing about whether the
+// argument arrived.
+const HOUSEHOLD_TZ = 'Pacific/Auckland'
+
+// Every read names its columns, and that is load-bearing rather than tidy.
+// 0007 revokes select on `members` wholesale and re-grants per column, so
+// `select('*')` fails with 42501 for EVERY caller — including one legitimately
+// in the household. An assertion written against `data ?? []` would then hold
+// whether or not the row-level policy did anything, which is the defect #61
+// found in the previous version of this file.
+//
+// With the columns named, a refusal by the GRANT is impossible, so an empty
+// array can only mean the ROW-LEVEL POLICY refused — the one thing this file
+// exists to measure. Kept identical to MEMBER_COLUMNS in src/lib/household.js.
+//
+// `household_id` is absent, and its absence is 0007's doing: the column left
+// the readable set so that `select('*')` keeps failing outright once `pin_hash`
+// was dropped. A client learns which household it is in from `households`.
+const MEMBER_COLUMNS = 'id, display_name, weekly_minutes, claimed_by, email, created_at'
 const CAPACITY_COLUMNS = 'id, member_id, period_start, minutes, note, source, created_at'
+const CHORE_COLUMNS =
+  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id'
+const HOUSEHOLD_COLUMNS = 'id, name, timezone, organizer_member_id, created_at'
 
-// Every read of `members` names its columns, and this is load-bearing rather
-// than tidy. Migration 0002 revokes select on the table and re-grants it per
-// column so `pin_hash` can never be read, which means `select('*')` fails with
-// `42501 permission denied` for EVERY caller — including a device that is
-// legitimately in the household.
-//
-// This file used `select('*')` throughout and so could not run at all once 0002
-// was applied (#61). Worse than not running: a `42501` returns `data: null`, and
-// an assertion written as `expect(data ?? []).toEqual([])` then holds whether or
-// not the rule under test did anything.
-//
-// With the columns named, a refusal by the GRANT is impossible here, so an empty
-// array means the ROW-LEVEL POLICY refused — which is the only thing this file
-// exists to measure. Kept identical to MEMBER_COLUMNS in src/lib/household.js;
-// the two are the same statement about what a client may read.
-const MEMBER_COLUMNS = 'id, household_id, display_name, weekly_minutes, claimed_by, has_pin, created_at'
-
-/** A fresh client per device, so the two never share a session. */
-function newDevice() {
+/** A fresh client per person, so no two ever share a session. */
+function newClient() {
   return createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 }
 
-async function signInAnonymously(device, label) {
-  const { error } = await device.auth.signInAnonymously()
-  if (error) {
-    // Named explicitly because cairn memory records this presenting as a bug in
-    // your own code: anonymous sign-in is capped at 30/hour per IP by default,
-    // and a whole household — or a test run loop — shares one home IP.
-    const hint = /rate|limit|429/i.test(error.message)
-      ? ' — this looks like the 30/hour-per-IP anonymous sign-in cap, not a policy failure'
-      : ' — check that Anonymous Sign-Ins are enabled in Supabase → Authentication → Providers'
-    throw new Error(`anonymous sign-in failed for ${label}: ${error.message}${hint}`)
-  }
+/** Fail with the response body, which is where the useful sentence lives. */
+async function describeFunctionError(error) {
+  const body = await error?.context?.json?.().catch(() => null)
+  return body?.error ? `${error.message} :: ${body.error}` : (error?.message ?? 'unknown')
 }
 
-describe('row-level security, exercised over the wire', () => {
-  const deviceA = newDevice()
-  const deviceB = newDevice()
-  let household
-  let memberId
+describe('row-level security under per-member sign-in, exercised over the wire', () => {
+  const organizer = newClient()
+  const insider = newClient()
+  const outsider = newClient()
+
+  /** H1 — the household the refusals below are about. */
+  let inside
+  /** H2 — a household the insider must never see. */
+  let outside
+
+  let organizerInside
+  let insiderMember
+  let outsiderMember
+  let insiderAuthId
+  let outsiderAuthId
   let capacityId
+  let choreId
 
-  beforeAll(async () => {
-    await signInAnonymously(deviceA, 'device A')
-    await signInAnonymously(deviceB, 'device B')
-
-    const { data, error } = await deviceA.rpc('create_household', {
-      household_name: `TEST ${new Date().toISOString()}`,
-      // Migration 0002 creates the organizer in the same statement: a household
-      // that exists for even one round trip without one cannot be administered,
-      // because is_household_organizer() fails closed on a null.
-      organizer_name: 'Placeholder Organizer',
-      organizer_pin: ORGANIZER_PIN,
-      // #45. Migration 0005 takes this signature from three arguments to four,
-      // with a default, and src/lib/household.js now sends it. Passing it here
-      // is what makes this suite exercise the call the app actually makes.
-      //
-      // If 0005 has NOT been applied, PostgREST cannot find a four-argument
-      // create_household and this fails at setup — loudly, and with the right
-      // diagnosis, which is the whole point of #45 AC 1 being an owner action.
-      household_tz: HOUSEHOLD_TZ,
-    })
-    expect(
-      error,
-      `create_household failed: ${error?.message}` +
-        (/function|schema cache|not find/i.test(error?.message ?? '')
-          ? ' — this is the signature 0005 introduces; it looks like migration 0005 has not been pasted into the live project yet (#45 AC 1)'
-          : ''),
-    ).toBeNull()
-    household = data
-
-    const { data: member, error: memberError } = await deviceA
+  /** Add a member and give them a sign-in, exactly as the app does. */
+  async function provision(client, householdId, displayName, password) {
+    const { data: member, error: addError } = await client
       .from('members')
-      .insert({ household_id: household.id, display_name: 'Placeholder', weekly_minutes: 120 })
+      .insert({ household_id: householdId, display_name: displayName })
       .select(MEMBER_COLUMNS)
       .single()
-    expect(memberError, `seeding a member failed: ${memberError?.message}`).toBeNull()
-    memberId = member.id
+    expect(addError, `adding ${displayName} failed: ${addError?.message}`).toBeNull()
 
-    // #45. One capacity override, so the not-joined device below has something
-    // real to fail to see. Seeding it here rather than inside a test keeps the
-    // "device B sees nothing" assertions honest — an empty read against an empty
-    // table is satisfied by a database that never stored anything.
-    const { data: seeded, error: capacityError } = await deviceA
+    // A brand new member row is inert until this call: no `claimed_by`, so
+    // `current_household_ids()` returns nothing for them and every policy
+    // denies. Asserting it here is what makes the sign-in below meaningful.
+    expect(member.claimed_by, 'a new member must have no sign-in yet').toBeNull()
+    expect(member.email, 'a member with no real address keeps email NULL').toBeNull()
+
+    const { data, error } = await client.functions.invoke('provision-member', {
+      body: { action: 'provision', memberId: member.id, password },
+    })
+    if (error) {
+      throw new Error(
+        `provisioning ${displayName} failed: ${await describeFunctionError(error)}\n` +
+          'If this says the function was not reached, it may not be deployed to this ' +
+          'project — `npm run deploy:function`, and see docs/deploy-runbook.md.',
+      )
+    }
+    return { member, provision: data }
+  }
+
+  beforeAll(async () => {
+    // 1. The one account that already exists. `signInWithPassword`, never
+    //    `signUp` — see the header.
+    const { data: session, error: signInError } = await organizer.auth.signInWithPassword({
+      email: seedEmail,
+      password: seedPassword,
+    })
+    if (signInError) {
+      throw new Error(
+        `the seeded account could not sign in: ${signInError.message}\n` +
+          'Check TASKR_TEST_EMAIL / TASKR_TEST_PASSWORD in .env.local. If the message ' +
+          'mentions confirmation, the account was created without "Auto Confirm User".',
+      )
+    }
+    expect(session.user?.id, 'signing in produced no user').toBeTruthy()
+
+    // 2. Two households, both organized by that account.
+    const { data: h1, error: h1Error } = await organizer.rpc('create_household', {
+      household_name: `TEST 88 ${RUN} inside`,
+      organizer_name: 'Placeholder Organizer',
+      household_timezone: HOUSEHOLD_TZ,
+    })
+    expect(
+      h1Error,
+      `create_household failed: ${h1Error?.message}` +
+        (/function|schema cache|not find/i.test(h1Error?.message ?? '')
+          ? ' — 0007 takes this from four arguments to three and drops the PIN. ' +
+            'A "could not find the function" here means the live project is behind 0007.'
+          : ''),
+    ).toBeNull()
+    inside = h1
+
+    const { data: h2, error: h2Error } = await organizer.rpc('create_household', {
+      household_name: `TEST 88 ${RUN} outside`,
+      organizer_name: 'Placeholder Organizer',
+      household_timezone: 'UTC',
+    })
+    expect(h2Error, `creating the second household failed: ${h2Error?.message}`).toBeNull()
+    outside = h2
+
+    // 3. The organizer's own row in H1, which `create_household` claimed for
+    //    them in the same statement.
+    const { data: roster, error: rosterError } = await organizer
+      .from('members')
+      .select(MEMBER_COLUMNS)
+      .eq('claimed_by', session.user.id)
+    expect(rosterError, `reading own rows failed: ${rosterError?.message}`).toBeNull()
+    organizerInside = roster.find((m) => m.id === inside.organizer_member_id)
+    expect(organizerInside, 'the organizer has no member row in the household they made').toBeTruthy()
+
+    // 4. One person in each household, each with a real sign-in.
+    const insiderResult = await provision(organizer, inside.id, 'Placeholder One', `in-${RUN}`)
+    insiderMember = insiderResult.member
+    insiderAuthId = insiderResult.provision.claimedBy
+    expect(
+      insiderResult.provision.email,
+      'the function must derive the synthetic address from members.id',
+    ).toBe(`${insiderMember.id}@taskr.invalid`)
+
+    const outsiderResult = await provision(organizer, outside.id, 'Placeholder Two', `out-${RUN}`)
+    outsiderMember = outsiderResult.member
+    outsiderAuthId = outsiderResult.provision.claimedBy
+
+    // 5. Something real in H1 for the outsider to fail to see. Seeded here
+    //    rather than inside a test, because an empty read against an empty
+    //    table is satisfied by a database that never stored anything.
+    const { data: seededCapacity, error: capacityError } = await organizer
       .from('member_capacity')
       .insert({
-        household_id: household.id,
-        member_id: memberId,
+        household_id: inside.id,
+        member_id: insiderMember.id,
         period_start: CAPACITY_PERIOD,
         minutes: 90,
         note: 'seeded by the live suite',
       })
       .select(CAPACITY_COLUMNS)
       .single()
-    expect(
-      capacityError,
-      `seeding a capacity override failed: ${capacityError?.message}` +
-        (/does not exist|schema cache/i.test(capacityError?.message ?? '')
-          ? ' — member_capacity is created by migration 0005, which looks unapplied (#45 AC 1)'
-          : ''),
-    ).toBeNull()
-    capacityId = seeded.id
-  }, 30_000)
+    expect(capacityError, `seeding a capacity override failed: ${capacityError?.message}`).toBeNull()
+    capacityId = seededCapacity.id
+
+    const { data: seededChore, error: choreError } = await organizer
+      .from('chores')
+      .insert({
+        household_id: inside.id,
+        title: 'Seeded by the live suite',
+        expected_minutes: 30,
+        due_on: CAPACITY_PERIOD,
+      })
+      .select(CHORE_COLUMNS)
+      .single()
+    expect(choreError, `seeding a chore failed: ${choreError?.message}`).toBeNull()
+    choreId = seededChore.id
+
+    // 6. Both provisioned people sign in as themselves, over the wire.
+    const { error: insiderSignIn } = await insider.auth.signInWithPassword({
+      email: insiderResult.provision.email,
+      password: `in-${RUN}`,
+    })
+    expect(insiderSignIn, `the insider could not sign in: ${insiderSignIn?.message}`).toBeNull()
+
+    const { error: outsiderSignIn } = await outsider.auth.signInWithPassword({
+      email: outsiderResult.provision.email,
+      password: `out-${RUN}`,
+    })
+    expect(outsiderSignIn, `the outsider could not sign in: ${outsiderSignIn?.message}`).toBeNull()
+  }, 60_000)
 
   afterAll(async () => {
-    await deviceA.auth.signOut()
-    await deviceB.auth.signOut()
+    await Promise.all([
+      organizer.auth.signOut(),
+      insider.auth.signOut(),
+      outsider.auth.signOut(),
+    ])
   })
 
-  it('device A, which created the household, can see its own roster', () => {
-    // The positive control. Without it, every assertion below is satisfied by a
-    // database that returns nothing to anybody — including a typo in the table
-    // name — and the suite would read as proof of security.
-    expect(household?.id).toBeTruthy()
-    expect(memberId).toBeTruthy()
-  })
+  // ── the positive controls ────────────────────────────────────────────────
+  //
+  // Without these, every refusal below is satisfied by a project that returns
+  // nothing to anybody — a typo in a table name included — and the suite reads
+  // as proof of security.
 
-  describe('a device that has not joined', () => {
-    it('sees no households at all', async () => {
-      const { data, error } = await deviceB.from('households').select('*')
-      expect(error).toBeNull()
-      expect(data).toEqual([])
+  describe('POSITIVE CONTROLS: the household is real and its organizer can see it', () => {
+    it('both households exist and the organizer is in both', async () => {
+      expect(inside?.id).toBeTruthy()
+      expect(outside?.id).toBeTruthy()
+      expect(inside.id).not.toBe(outside.id)
+
+      const { data, error } = await organizer.rpc('current_household_ids')
+      expect(error, `current_household_ids failed: ${error?.message}`).toBeNull()
+      expect(data).toContain(inside.id)
+      expect(data).toContain(outside.id)
     })
 
-    it('sees no members, not even an empty household', async () => {
-      const { data, error } = await deviceB.from('members').select(MEMBER_COLUMNS)
-      // `error` must be null for the empty set to mean anything. A permission
-      // error would also produce no rows, and would prove nothing about RLS.
+    it('the organizer reads the roster, the week and the work', async () => {
+      const [{ data: members }, { data: capacity }, { data: chores }] = await Promise.all([
+        organizer.from('members').select(MEMBER_COLUMNS).eq('id', insiderMember.id),
+        organizer.from('member_capacity').select(CAPACITY_COLUMNS).eq('id', capacityId),
+        organizer.from('chores').select(CHORE_COLUMNS).eq('id', choreId),
+      ])
+      expect(members).toHaveLength(1)
+      expect(capacity).toHaveLength(1)
+      expect(capacity[0].minutes).toBe(90)
+      expect(chores).toHaveLength(1)
+    })
+
+    it('carries the timezone the creating account sent, not the default', async () => {
+      // Asserting against HOUSEHOLD_TZ rather than "is not null" is the point:
+      // the column defaults to 'UTC', so a call whose argument was silently
+      // dropped would still produce a non-null value and read as success.
+      const { data, error } = await organizer
+        .from('households')
+        .select(HOUSEHOLD_COLUMNS)
+        .eq('id', inside.id)
+        .single()
+      expect(error, `reading the household back failed: ${error?.message}`).toBeNull()
+      expect(data.timezone).toBe(HOUSEHOLD_TZ)
+    })
+  })
+
+  // ── the vocabulary ─── #88 AC 2 ─────────────────────────────────────────
+  //
+  // The assertion that this suite no longer names anything 0007 dropped lives
+  // in `support/retiredVocabulary.test.js`, NOT here — deliberately, and the
+  // reason is the same one the header gives for refusing to skip.
+  //
+  // It is a question about SOURCE TEXT. It needs no network, no project and no
+  // credentials, so putting it in this file would make a check that CI can run
+  // depend on credentials CI does not have — and it would then only ever run on
+  // a machine that could already run everything else. A guard is worth what it
+  // is wired into: over there it gates every push, and the failure it catches
+  // (a merge reintroducing a retired call) is one a reviewer would otherwise
+  // meet as a confusing setup error against a live project.
+
+  // ── identity ─── #88 AC 3 ───────────────────────────────────────────────
+
+  describe('a member the Edge Function provisioned is a real person to the database', () => {
+    it('signs in as themselves, and auth.uid() is the id the function wrote', async () => {
+      const { data, error } = await insider.auth.getUser()
+      expect(error, `the insider has no session: ${error?.message}`).toBeNull()
+      // Not "is not null": the claim is that this session IS the identity the
+      // function attached to that member row, and any signed-in user would
+      // satisfy a null check.
+      expect(data.user.id).toBe(insiderAuthId)
+      expect(data.user.email).toBe(`${insiderMember.id}@taskr.invalid`)
+    })
+
+    it('their member row is the one that carries their auth id', async () => {
+      const { data, error } = await insider
+        .from('members')
+        .select(MEMBER_COLUMNS)
+        .eq('claimed_by', insiderAuthId)
+      expect(error, `reading own member row failed: ${error?.message}`).toBeNull()
+      expect(data.map((m) => m.id)).toEqual([insiderMember.id])
+    })
+
+    it('membership resolves to exactly the one household they are in', async () => {
+      const { data, error } = await insider.rpc('current_household_ids')
+      expect(error, `current_household_ids failed: ${error?.message}`).toBeNull()
+      expect(data).toEqual([inside.id])
+    })
+
+    it('and they can do ordinary household work — the definer functions survived 0007', async () => {
+      // `complete_chore` and its three siblings are `security definer` functions
+      // whose bodies used to JOIN `household_devices`. A plpgsql body resolves
+      // its tables when it RUNS, so dropping that table left them syntactically
+      // fine and broken at the first call. 0007 re-points them; nothing but a
+      // real call can say whether the live project got that.
+      const { error } = await insider.rpc('complete_chore', { chore_id: choreId })
+      expect(error, `complete_chore failed: ${error?.message}`).toBeNull()
+
+      const { data } = await insider.from('chores').select(CHORE_COLUMNS).eq('id', choreId).single()
+      expect(data.completed_at).not.toBeNull()
+      // The chore records WHO, resolved through `acting_member` — which reads
+      // `members.claimed_by`, the column this whole story makes stable.
+      expect(data.completed_by_member_id).toBe(insiderMember.id)
+
+      const { error: undoError } = await insider.rpc('uncomplete_chore', { chore_id: choreId })
+      expect(undoError, `uncomplete_chore failed: ${undoError?.message}`).toBeNull()
+    })
+  })
+
+  // ── the refusals, in both directions ─── #88 AC 3 ───────────────────────
+
+  describe('somebody signed in to a DIFFERENT household', () => {
+    it('is genuinely signed in — so an empty read below is a refusal, not a logged-out client', async () => {
+      const { data, error } = await outsider.auth.getUser()
+      expect(error).toBeNull()
+      expect(data.user.id).toBe(outsiderAuthId)
+
+      const { data: own } = await outsider.rpc('current_household_ids')
+      expect(own).toEqual([outside.id])
+    })
+
+    it('sees no household of ours, even knowing its id', async () => {
+      const { data, error } = await outsider
+        .from('households')
+        .select(HOUSEHOLD_COLUMNS)
+        .eq('id', inside.id)
       expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
       expect(data).toEqual([])
     })
 
-    it('cannot read the roster even knowing the household id', async () => {
-      const { data, error } = await deviceB
+    it('sees no members of it', async () => {
+      // `error` must be null for the empty set to mean anything. A permission
+      // error would also produce no rows, and would prove nothing about RLS.
+      const { data, error } = await outsider
         .from('members')
         .select(MEMBER_COLUMNS)
-        .eq('household_id', household.id)
+        .eq('id', insiderMember.id)
       expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
       expect(data).toEqual([])
     })
 
     it('cannot insert a member into a household it knows the id of', async () => {
-      const { error } = await deviceB
+      const { error } = await outsider
         .from('members')
-        .insert({ household_id: household.id, display_name: 'Intruder', weekly_minutes: 60 })
+        .insert({ household_id: inside.id, display_name: 'Intruder', weekly_minutes: 60 })
       expect(error, 'RLS should have refused the insert').not.toBeNull()
-      // Name the MECHANISM, not just "something failed". Measured 2026-08-07:
-      // every refusal in this file is `42501`, so the code alone cannot tell a
-      // row-level policy from a missing column grant — only the message can.
-      // If this refusal ever became a grant refusal instead, the rule this test
-      // is named for would have quietly stopped being exercised.
+      // Name the MECHANISM, not just "something failed". Every refusal in this
+      // file is 42501, so the code alone cannot tell a row-level policy from a
+      // missing column grant — only the message can. If this ever became a
+      // grant refusal instead, the rule this test is named for would have
+      // quietly stopped being exercised.
       expect(error.message).toMatch(/row-level security/i)
     })
 
-    it('cannot forge its own membership row', async () => {
-      const { error } = await deviceB
-        .from('household_devices')
-        .insert({ household_id: household.id })
-      expect(error, 'there is no insert policy on household_devices; this must fail').not.toBeNull()
-      expect(error.message).toMatch(/row-level security/i)
-    })
-
-    it('cannot edit or remove someone else’s member row', async () => {
-      // The subtlety this test was blind to until #61. `weekly_minutes` IS
-      // inside 0002's update grant, so the grant permits this write and the
-      // ROW-LEVEL POLICY is what must refuse it. While the returning read was
-      // `select('*')`, a `42501` from the grant made `data` null, `null ?? []`
-      // made the assertion hold, and the test would have passed unchanged with
-      // the policy dropped — it could not detect the thing it is named for.
-      //
-      // Naming the columns removes the grant as a possible explanation: the
-      // read is permitted, so an empty array can only mean the policy refused.
-      const { data: updated, error: updateError } = await deviceB
+    it('cannot edit or remove somebody else’s member row', async () => {
+      // `weekly_minutes` IS inside 0007's update grant, so the grant permits
+      // this write and the ROW-LEVEL POLICY is what must refuse it. Naming the
+      // columns on the returning read removes the grant as an explanation.
+      const { data: updated, error: updateError } = await outsider
         .from('members')
         .update({ weekly_minutes: 9999 })
-        .eq('id', memberId)
+        .eq('id', insiderMember.id)
         .select(MEMBER_COLUMNS)
       expect(updateError, `expected a permitted read of a refused write, got ${updateError?.code}`)
         .toBeNull()
       expect(updated).toEqual([])
 
-      const { data: deleted, error: deleteError } = await deviceB
+      const { data: deleted, error: deleteError } = await outsider
         .from('members')
         .delete()
-        .eq('id', memberId)
+        .eq('id', insiderMember.id)
         .select(MEMBER_COLUMNS)
       expect(deleteError, `expected a permitted read of a refused delete, got ${deleteError?.code}`)
         .toBeNull()
       expect(deleted).toEqual([])
 
-      // The independent check, and the one a grant cannot fake: read the row as
-      // a device that may read it and confirm nothing moved.
-      const { data: still, error: stillError } = await deviceA
+      // The independent check a grant cannot fake: read the row back as
+      // somebody who may, and confirm nothing moved.
+      const { data: still, error: stillError } = await organizer
         .from('members')
         .select(MEMBER_COLUMNS)
-        .eq('id', memberId)
+        .eq('id', insiderMember.id)
         .single()
       expect(stillError, `reading the row back failed: ${stillError?.message}`).toBeNull()
-      expect(still.weekly_minutes).toBe(120)
+      expect(still.weekly_minutes).toBe(insiderMember.weekly_minutes)
     })
 
-    // #45 AC 2 — capacity overrides, measured against Supabase rather than
-    // pglite. These sit INSIDE the not-joined block deliberately: device B joins
-    // in the next describe, so anything appended to the end of this file would
-    // be asking a member of the household whether it can see the household.
-    it('sees no capacity overrides, though one exists', async () => {
-      const { data, error } = await deviceB.from('member_capacity').select(CAPACITY_COLUMNS)
-      // `error` must be null for the empty set to mean anything — a grant
-      // refusal would also produce no rows and would prove nothing about RLS.
-      expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
-      expect(data).toEqual([])
-    })
-
-    it('cannot read one even knowing the household id', async () => {
-      const { data, error } = await deviceB
+    it('sees no capacity override, though one exists', async () => {
+      const { data, error } = await outsider
         .from('member_capacity')
         .select(CAPACITY_COLUMNS)
-        .eq('member_id', memberId)
+        .eq('id', capacityId)
       expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
       expect(data).toEqual([])
     })
 
     it('cannot file a capacity override into a household it knows the id of', async () => {
-      const { error } = await deviceB.from('member_capacity').insert({
-        household_id: household.id,
-        member_id: memberId,
+      const { error } = await outsider.from('member_capacity').insert({
+        household_id: inside.id,
+        member_id: insiderMember.id,
         period_start: CAPACITY_PERIOD,
         minutes: 5,
       })
       expect(error, 'RLS should have refused the insert').not.toBeNull()
-      // The mechanism, not merely a failure. Every refusal in this file is
-      // 42501, so the code alone cannot tell a row-level policy from a missing
-      // column grant — and `minutes` IS inside 0005's insert grant, so the grant
-      // permits this write and only the policy can refuse it. If this ever
-      // became a grant refusal, the rule under test would have quietly stopped
-      // being exercised.
       expect(error.message).toMatch(/row-level security/i)
     })
 
     it('cannot change or delete somebody else’s week', async () => {
-      // `minutes` and `note` are both inside 0005's update grant, so the grant
-      // permits the write and the row-level policy is what must refuse it. Same
-      // shape as the members test above, and same reason for naming columns on
-      // the returning read.
-      const { data: updated, error: updateError } = await deviceB
+      const { data: updated, error: updateError } = await outsider
         .from('member_capacity')
         .update({ minutes: 1 })
         .eq('id', capacityId)
@@ -354,122 +612,64 @@ describe('row-level security, exercised over the wire', () => {
         .toBeNull()
       expect(updated).toEqual([])
 
-      const { data: deleted, error: deleteError } = await deviceB
-        .from('member_capacity')
-        .delete()
-        .eq('id', capacityId)
-        .select(CAPACITY_COLUMNS)
-      expect(deleteError, `expected a permitted read of a refused delete, got ${deleteError?.code}`)
-        .toBeNull()
-      expect(deleted).toEqual([])
-
-      // The independent check a grant cannot fake: read it back as a device that
-      // may, and confirm nothing moved.
-      const { data: still, error: stillError } = await deviceA
+      const { data: still } = await organizer
         .from('member_capacity')
         .select(CAPACITY_COLUMNS)
         .eq('id', capacityId)
         .single()
-      expect(stillError, `reading the override back failed: ${stillError?.message}`).toBeNull()
       expect(still.minutes).toBe(90)
     })
 
-    it('cannot join with a wrong code, and is not told which part was wrong', async () => {
-      const { error } = await deviceB.rpc('join_household', { code: 'ZZZZZZZZ' })
-      expect(error).not.toBeNull()
-      expect(error.message).toMatch(/no household matches that code/i)
+    it('sees no chore of ours, and cannot complete one', async () => {
+      const { data, error } = await outsider.from('chores').select(CHORE_COLUMNS).eq('id', choreId)
+      expect(error, `expected a clean empty read, got ${error?.code}`).toBeNull()
+      expect(data).toEqual([])
 
-      const { error: malformed } = await deviceB.rpc('join_household', { code: 'nope' })
-      expect(malformed).not.toBeNull()
-      expect(malformed.message).toMatch(/no household matches that code/i)
+      // The definer function refuses on its own predicate, not on RLS, and
+      // deliberately will not say WHICH of "no such chore" or "not your
+      // household" was hit.
+      const { error: completeError } = await outsider.rpc('complete_chore', { chore_id: choreId })
+      expect(completeError, 'completing another household’s chore should be refused').not.toBeNull()
+      expect(completeError.message).toMatch(/no such chore in your household/i)
     })
   })
 
-  describe('once it joins with the real code', () => {
-    it('accepts the code however a parent typed it, and then sees the roster', async () => {
-      const spaced = `${household.join_code.slice(0, 4)}-${household.join_code.slice(4)}`.toLowerCase()
-      const { error } = await deviceB.rpc('join_household', { code: spaced })
-      expect(error, `join_household failed: ${error?.message}`).toBeNull()
+  describe('and the refusal runs the other way too', () => {
+    // The direction the old suite could not test at all: it had one household,
+    // so "a member of A cannot see B" had no B to be a member of.
+    it('the insider sees nothing of the other household', async () => {
+      const { data: households } = await insider
+        .from('households')
+        .select(HOUSEHOLD_COLUMNS)
+        .eq('id', outside.id)
+      expect(households).toEqual([])
 
-      const { data, error: rosterError } = await deviceB.from('members').select(MEMBER_COLUMNS)
-      expect(rosterError, `reading the roster after joining failed: ${rosterError?.message}`).toBeNull()
-      expect(data.map((m) => m.id)).toContain(memberId)
+      const { data: members } = await insider
+        .from('members')
+        .select(MEMBER_COLUMNS)
+        .eq('id', outsiderMember.id)
+      expect(members).toEqual([])
     })
 
-    it('still cannot see any OTHER household', async () => {
-      const { data } = await deviceB.from('households').select('*')
-      expect(data.map((h) => h.id)).toEqual([household.id])
-    })
-
-    it('cannot take an identity by writing claimed_by directly, going around the RPC', async () => {
-      // Measured on 2026-08-06, BEFORE migration 0002: the RPC below refused
-      // device B correctly and this direct update succeeded anyway, 1 row
-      // changed. The guard was real and optional, which is the same as absent.
-      // What refuses it now is a column grant, not a policy — RLS is row-level
-      // and has nothing to say about which columns a client may write.
-      const uidB = (await deviceB.auth.getUser()).data.user.id
-      const { error } = await deviceB.from('members').update({ claimed_by: uidB }).eq('id', memberId)
-      expect(error, 'a client could still write claimed_by directly').not.toBeNull()
-      // Deliberately the GRANT, not a policy — 0002's whole argument is that RLS
-      // is row-level and says nothing about columns. `permission denied` is the
-      // grant refusing; a `row-level security` message here would mean the
-      // column was writable again and something else caught it.
-      expect(error.message).toMatch(/permission denied/i)
-    })
-
-    it('cannot read a PIN hash, so a four-digit PIN cannot be attacked offline', async () => {
-      const { error } = await deviceB.from('members').select('pin_hash').eq('id', memberId)
-      expect(error, 'pin_hash was readable by a household member').not.toBeNull()
-      expect(error.message).toMatch(/permission denied/i)
-    })
-
-    it('will not let two devices claim the same person', async () => {
-      // Restructured for 0002 (#61), and the two constraints that shape it are
-      // both things the old version was not accounting for.
-      //
-      // ONE: the person under test must have NO PIN. `claim_member` is the
-      // PIN-less route and refuses anyone who has a credential *before* it ever
-      // reaches the already-claimed check — "that person has a PIN — use
-      // claim_member_with_pin". 0002's `create_household` gives the organizer a
-      // PIN, so the organizer cannot be the subject here. The seeded placeholder
-      // has none.
-      //
-      // TWO: the challenging device must have claimed nobody, or a refusal could
-      // equally mean "this device is already someone", which is a different
-      // rule. 0002 claims the organizer for the creating device in the same
-      // statement, so device A is taken and device B is about to be — hence a
-      // third device. Under 0001 the household arrived with no organizer at all
-      // and the old two-device shape worked; it fails with `23505` now, which
-      // reads as a broken policy and is really a stale fixture.
-      const { error: ownClaim } = await deviceB.rpc('claim_member', { member_id: memberId })
-      expect(ownClaim, `claiming an unclaimed person should work: ${ownClaim?.message}`).toBeNull()
-
-      const deviceC = newDevice()
-      await signInAnonymously(deviceC, 'device C')
-      const { error: joinError } = await deviceC.rpc('join_household', { code: household.join_code })
-      expect(joinError, `device C could not join: ${joinError?.message}`).toBeNull()
-
-      const { error: secondClaim } = await deviceC.rpc('claim_member', { member_id: memberId })
-      expect(secondClaim, 'the second device should have been refused').not.toBeNull()
-      // Named, not merely non-null: a refusal for the wrong reason — a missing
-      // grant, a PIN check, a device that is already someone — is what this
-      // assertion exists to rule out.
-      expect(secondClaim.message).toMatch(/already claimed/i)
-
-      await deviceC.auth.signOut()
+    it('the insider’s unfiltered reads contain their household and nothing else', async () => {
+      // The strongest form, and the one a per-id filter cannot make: ask for
+      // EVERYTHING and check what comes back. The live project holds real
+      // households belonging to real people, so this is also the assertion that
+      // would notice a policy dropped entirely.
+      const { data, error } = await insider.from('households').select(HOUSEHOLD_COLUMNS)
+      expect(error, `expected a clean read, got ${error?.code}`).toBeNull()
+      expect(data.map((h) => h.id)).toEqual([inside.id])
     })
   })
 
-  // #45 AC 3 — the column grants, measured where they can be measured wrong.
+  // ── the column grants, measured where they can be measured wrong ────────
   //
-  // These use device A, which is legitimately in the household, so row-level
-  // security permits every row touched below. What refuses is the GRANT, and
-  // that distinction is the entire point: 0002 exists because a correct RPC
-  // guard was bypassed by a direct UPDATE against the live project, and that
-  // was found by measuring Supabase rather than a harness. The pglite suite
-  // asserts the same properties, and its own header says the stub is the weak
-  // point — so these are not a duplicate, they are the run against the thing
-  // the stub stands in for.
+  // These use the organizer, who is legitimately in the household, so RLS
+  // permits every row touched. What refuses is the GRANT, and that distinction
+  // is the whole point: 0002 exists because a correct RPC guard was bypassed by
+  // a direct UPDATE against the live project, and that was found by measuring
+  // Supabase rather than a harness.
+
   describe('the column grants hold against Supabase itself', () => {
     /** A grant refusal, not a policy one. 42501 alone cannot tell them apart. */
     function expectGrantRefusal(error, what) {
@@ -483,10 +683,10 @@ describe('row-level security, exercised over the wire', () => {
       ).not.toMatch(/row-level security/i)
     }
 
-    it('POSITIVE CONTROL: a household device CAN correct the minutes and the note', async () => {
+    it('POSITIVE CONTROL: the organizer CAN correct the minutes and the note', async () => {
       // Without this every refusal below is satisfied by a table nobody can
       // write at all, and the suite would read as proof the grants are right.
-      const { data, error } = await deviceA
+      const { data, error } = await organizer
         .from('member_capacity')
         .update({ minutes: 45, note: 'corrected by the live suite' })
         .eq('id', capacityId)
@@ -496,10 +696,41 @@ describe('row-level security, exercised over the wire', () => {
       expect(data.minutes).toBe(45)
     })
 
-    it('cannot backdate a row by writing created_at at insert time', async () => {
-      const { error } = await deviceA.from('member_capacity').insert({
-        household_id: household.id,
-        member_id: memberId,
+    it('claimed_by is not client-writable, so nobody can become somebody else', async () => {
+      // #87 AC 5, asserted against Supabase rather than the harness. This is
+      // the single most consequential grant in the schema under 0007: with it,
+      // any member could attach themselves to any row in their household and
+      // BECOME that person. It is absent from the client update grant on
+      // purpose and written only by the Edge Function running as service_role.
+      const { error } = await organizer
+        .from('members')
+        .update({ claimed_by: outsiderAuthId })
+        .eq('id', insiderMember.id)
+      expectGrantRefusal(error, 'writing claimed_by')
+
+      const { data: still } = await organizer
+        .from('members')
+        .select(MEMBER_COLUMNS)
+        .eq('id', insiderMember.id)
+        .single()
+      expect(still.claimed_by).toBe(insiderAuthId)
+    })
+
+    it('household_id cannot be read on members, so select(*) fails outright', async () => {
+      // The behaviour every MEMBER_COLUMNS read in this file depends on. 0007
+      // withheld `household_id` from the readable set precisely to restore this
+      // property once `pin_hash` was dropped — without it, `select('*')` would
+      // quietly start succeeding and every empty-read assertion above would go
+      // vacuous with nothing failing.
+      const { error } = await organizer.from('members').select('*')
+      expect(error, 'select(*) should be refused by the column grant').not.toBeNull()
+      expect(error.message).toMatch(/permission denied|column/i)
+    })
+
+    it('cannot backdate a capacity row by writing created_at at insert time', async () => {
+      const { error } = await organizer.from('member_capacity').insert({
+        household_id: inside.id,
+        member_id: insiderMember.id,
         period_start: '2026-08-17',
         minutes: 10,
         created_at: '2020-01-01T00:00:00Z',
@@ -507,36 +738,24 @@ describe('row-level security, exercised over the wire', () => {
       expectGrantRefusal(error, 'writing created_at')
     })
 
-    it('cannot move an override to another person', async () => {
-      const { error } = await deviceA
+    it('cannot move an override to another person or another week', async () => {
+      const { error: person } = await organizer
         .from('member_capacity')
-        .update({ member_id: household.organizer_member_id })
+        .update({ member_id: organizerInside.id })
         .eq('id', capacityId)
-      expectGrantRefusal(error, 'writing member_id')
-    })
+      expectGrantRefusal(person, 'writing member_id')
 
-    it('cannot move an override to another week', async () => {
-      const { error } = await deviceA
+      const { error: week } = await organizer
         .from('member_capacity')
         .update({ period_start: '2026-08-03' })
         .eq('id', capacityId)
-      expectGrantRefusal(error, 'writing period_start')
-    })
-
-    it('select(*) fails outright rather than quietly omitting household_id', async () => {
-      // The behaviour every CAPACITY_COLUMNS read in this file depends on. If
-      // this ever started succeeding, the column list would have stopped being
-      // load-bearing and the empty-read assertions above would go vacuous
-      // without anything failing.
-      const { error } = await deviceA.from('member_capacity').select('*')
-      expect(error, 'select(*) should be refused by the column grant').not.toBeNull()
-      expect(error.message).toMatch(/permission denied|column/i)
+      expectGrantRefusal(week, 'writing period_start')
     })
 
     it('refuses a period that is not a Monday', async () => {
-      const { error } = await deviceA.from('member_capacity').insert({
-        household_id: household.id,
-        member_id: memberId,
+      const { error } = await organizer.from('member_capacity').insert({
+        household_id: inside.id,
+        member_id: insiderMember.id,
         period_start: '2026-08-11',
         minutes: 30,
       })
@@ -544,55 +763,116 @@ describe('row-level security, exercised over the wire', () => {
       expect(error.message).toMatch(/period_is_monday|check constraint/i)
     })
 
-    it('carries the timezone the creating device sent, not the default', async () => {
-      // Proves the fourth argument 0005 adds actually arrived. Asserting against
-      // HOUSEHOLD_TZ rather than "is not null" is the point: the column defaults
-      // to 'UTC', so a call whose argument was silently dropped would still
-      // produce a non-null value and read as success.
-      const { data, error } = await deviceA
-        .from('households')
-        .select('id, timezone')
-        .eq('id', household.id)
-        .single()
-      expect(error, `reading the household back failed: ${error?.message}`).toBeNull()
-      expect(data.timezone).toBe(HOUSEHOLD_TZ)
-    })
-
-    it('cannot rewrite the join code or reassign the organizer', async () => {
+    it('cannot reassign the organizer', async () => {
       // 0005 gives households its first UPDATE policy. Without the matching
-      // column grant that policy would let any member invite strangers or make
-      // themselves organizer — 0002's measured hole, reopened.
-      const { error: code } = await deviceA
+      // column grant that policy would let any member make themselves organizer
+      // — 0002's measured hole, reopened.
+      const { error } = await organizer
         .from('households')
-        .update({ join_code: 'AAAAAAAA' })
-        .eq('id', household.id)
-      expectGrantRefusal(code, 'writing join_code')
-
-      const { error: boss } = await deviceA
-        .from('households')
-        .update({ organizer_member_id: memberId })
-        .eq('id', household.id)
-      expectGrantRefusal(boss, 'writing organizer_member_id')
+        .update({ organizer_member_id: insiderMember.id })
+        .eq('id', inside.id)
+      expectGrantRefusal(error, 'writing organizer_member_id')
     })
 
     it('but the household timezone IS correctable by a member', async () => {
-      const { data, error } = await deviceA
+      const { data, error } = await organizer
         .from('households')
         .update({ timezone: 'Europe/London' })
-        .eq('id', household.id)
-        .select('id, timezone')
+        .eq('id', inside.id)
+        .select(HOUSEHOLD_COLUMNS)
         .single()
       expect(error, `the permitted update was refused: ${error?.message}`).toBeNull()
       expect(data.timezone).toBe('Europe/London')
     })
 
     it('and a zone Postgres does not know is refused at write time', async () => {
-      const { error } = await deviceA
+      const { error } = await organizer
         .from('households')
         .update({ timezone: 'Mars/Olympus' })
-        .eq('id', household.id)
+        .eq('id', inside.id)
       expect(error, 'an unknown zone should have been refused').not.toBeNull()
       expect(error.message).toMatch(/not a known timezone/i)
+    })
+  })
+
+  // ── the rule 0007 added, which nothing before it had ────────────────────
+
+  describe('a signed-in member cannot delete themselves out of their own household', () => {
+    // 0007's delete policy carries one clause the others do not, and it is not
+    // a tightening for its own sake. Under device auth, removing your own
+    // member row was survivable because `household_devices` carried membership
+    // independently. With `claimed_by` as the SOLE predicate, "remove me from
+    // the roster" silently became "lock myself out forever" — and
+    // `households.organizer_member_id` is `on delete set null`, so an organizer
+    // doing it leaves the household with no organizer and visible to nobody.
+    // Not recoverable from any client.
+    it('the delete is refused and the row survives', async () => {
+      const { data: deleted, error } = await insider
+        .from('members')
+        .delete()
+        .eq('id', insiderMember.id)
+        .select(MEMBER_COLUMNS)
+      expect(error, `expected a permitted read of a refused delete, got ${error?.code}`).toBeNull()
+      expect(deleted, 'a member deleted their own row — 0007’s guard is not on this project').toEqual([])
+
+      const { data: still } = await organizer
+        .from('members')
+        .select(MEMBER_COLUMNS)
+        .eq('id', insiderMember.id)
+      expect(still).toHaveLength(1)
+    })
+
+    it('POSITIVE CONTROL: but they CAN remove somebody else in the household', async () => {
+      // Without this the assertion above is satisfied by a project where the
+      // delete policy is missing entirely and nobody can delete anything —
+      // which looks identical from outside and is a different, worse bug.
+      const { data: spare, error: addError } = await organizer
+        .from('members')
+        .insert({ household_id: inside.id, display_name: 'Spare' })
+        .select(MEMBER_COLUMNS)
+        .single()
+      expect(addError, `seeding a removable member failed: ${addError?.message}`).toBeNull()
+
+      const { data: removed, error } = await insider
+        .from('members')
+        .delete()
+        .eq('id', spare.id)
+        .select(MEMBER_COLUMNS)
+      expect(error, `the permitted delete was refused: ${error?.message}`).toBeNull()
+      expect(removed.map((m) => m.id)).toEqual([spare.id])
+    })
+  })
+
+  // ── the Edge Function's own authorization, over the wire ────────────────
+
+  describe('provisioning refuses a caller who is not the organizer', () => {
+    it('a member of the household cannot provision anybody', async () => {
+      // The function checks `is_household_organizer` THROUGH THE CALLER, so
+      // this is a database answer rather than one the function decided.
+      const { data: spare, error: addError } = await organizer
+        .from('members')
+        .insert({ household_id: inside.id, display_name: 'Not Yet Provisioned' })
+        .select(MEMBER_COLUMNS)
+        .single()
+      expect(addError, `seeding failed: ${addError?.message}`).toBeNull()
+
+      const { error } = await insider.functions.invoke('provision-member', {
+        body: { action: 'provision', memberId: spare.id, password: `nope-${RUN}` },
+      })
+      expect(error, 'a non-organizer provisioned a sign-in').not.toBeNull()
+      expect(await describeFunctionError(error)).toMatch(/only the household organizer/i)
+    })
+
+    it('and nobody can provision into a household they are not in', async () => {
+      // The caller-scoped read is what refuses this: RLS scopes `members` to
+      // the caller's household, so a member id from anywhere else is simply not
+      // found. The refusal is deliberately indistinguishable from "no such
+      // person", so this endpoint cannot be used to probe for valid ids.
+      const { error } = await outsider.functions.invoke('provision-member', {
+        body: { action: 'provision', memberId: insiderMember.id, password: `nope-${RUN}` },
+      })
+      expect(error, 'a stranger provisioned into our household').not.toBeNull()
+      expect(await describeFunctionError(error)).toMatch(/no such person|not signed in|organizer/i)
     })
   })
 })

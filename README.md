@@ -45,6 +45,12 @@ so the database is now on per-member auth and `npm run check:live` is green at *
 every table, every RPC, and the `provision-member` Edge Function, which was deployed on
 2026-08-20 (#112) with `npm run deploy:function`. No red is expected, so any red is real.
 
+**`0009` is written and has NOT been pasted** ([#127](https://github.com/SailorDave17/Taskr/issues/127)),
+so the repo is one migration ahead of the live project. Nothing above becomes false because of it —
+`check:live` covers tables, columns, RPCs and the Edge Function, and `0009` changes only two
+indexes, so the check is **structurally blind to it** and stays green either way. Do not read that
+green as "the database matches the repo".
+
 **Production serves per-member auth too, since the same day.** `rebuild/v1` was promoted to `release`
 by [#111](https://github.com/SailorDave17/Taskr/pull/111), and Vercel builds production from
 `release`. That split is still the point and still how anything reaches a phone — see *Branches*

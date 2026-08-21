@@ -525,19 +525,18 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
 // #19 — no real household name, and no screenshot, reaches version control.
 //
 // The decision is docs/data-outside-production.md; this is the half a check can
-// see. Two measured facts make it a guard rather than a preference: preview
-// deployments are world-readable today (Vercel Authentication is off
-// project-wide and Hobby has no previews-only setting), and a preview bundle
-// carries the PRODUCTION Supabase host — measured 2026-08-20, the same host
-// production serves. So a name committed here is one build away from a public
-// URL.
+// see. The measured fact that makes it a guard rather than a preference: a
+// preview bundle carries the PRODUCTION Supabase host — measured 2026-08-20, the
+// same host production serves. Previews were world-readable until 2026-08-21,
+// and a name committed here is in git whether or not a URL is gated.
 //
-// #19 decided to gate previews behind a custom domain (#121, not yet applied),
-// and that does NOT retire this guard — it is the reason the guard is worth
-// having rather than the reason it is not. A name in version control is exposed
-// to everyone with repository access, to every future reader, and to whatever
+// #19 decided to gate previews behind a custom domain; #121 applied it on
+// 2026-08-21, and that does NOT retire this guard — it is the reason the
+// guard is worth having rather than the reason it is not. A name in version
+// control is exposed to everyone with repository access, to every future
+// reader, and to whatever
 // the hosting arrangement happens to be on the day; gating one URL changes none
-// of those. Do not delete this block when #121 lands.
+// of those. #121 has landed and this block stays.
 //
 // The obvious design is unavailable. A DENYLIST of the household's real names
 // would put those names in git, which is the exact thing being prevented. So the

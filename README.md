@@ -86,12 +86,14 @@ The 2020 classroom original is preserved at tag `legacy-final` and is not the co
 
 ## Where it runs
 
-**<https://taskr-khaki.vercel.app>**
+**<https://taskr.madcowhq.com>**
 
-That is the assigned production domain, the one to publish and to test against. Vercel also answers
-on a `<project>-<account>` alias, which currently serves the same build — but it is not the assigned
-domain and the two are not guaranteed to stay pointed at the same deployment, so it is deliberately
-not named here.
+That is the custom production domain, added 2026-08-21 by #121, and the one to publish and to test
+against. The assigned `taskr-khaki.vercel.app` still resolves and serves the same build — Standard
+Protection does not gate it, so an install made from it keeps working and nobody has to move in a
+hurry — but the custom domain is the published one. Vercel also answers on a `<project>-<account>`
+alias, which is neither and is deliberately not named here; none of the three is guaranteed to stay
+pointed at the same deployment.
 
 **To confirm which commit the live site is serving, read the page footer.** It ends with
 `build <sha>`, mapped from the host's commit SHA into the bundle at build time. A deployment
@@ -213,7 +215,7 @@ client two acts in an order somebody chooses.
   alternatives, and the free-tier limits later stories must be designed against.
 - [`data-outside-production.md`](docs/data-outside-production.md) — who can see household data in
   the environments *around* production: the decision to gate preview deployments behind a custom
-  domain (**decided, not yet applied — #121**), and the rule that keeps real household names out of
+  domain (**applied 2026-08-21 — #121**), and the rule that keeps real household names out of
   fixtures and screenshots. **Read before writing a fixture or committing an image.**
 - [`allocation-corpus.md`](docs/allocation-corpus.md) — the scenario corpus the allocator is
   judged against, the recorded proportion of household shapes that reach level, and the ones

@@ -634,10 +634,20 @@ Supabase **auth session** locally and nothing else. That session is the credenti
 makes AC 5's "stays joined days later without re-entering the code" true; the household and roster are
 re-read from the server on every load, so a device that merely *remembered* would be indistinguishable
 from one that is genuinely still joined — and AC 3 is precisely the check that would be fooled.
-- **Preview deployments are world-readable** (Vercel Authentication is off project-wide) — and each
-  one carries the PRODUCTION Supabase host, measured 2026-08-20, so a preview is a second front door
-  onto the live database rather than a sandbox. **#19 decided to gate them**, via a custom domain
-  plus Standard Protection; see [`data-outside-production.md`](data-outside-production.md). That
-  change is a dashboard action and is **not yet applied** — tracked as #121 — so the sentence above
-  is still true today. It is the policies on this page that hold the line until it lands, and they
-  remain the defence afterwards.
+- **Preview deployments are login-gated** — Vercel Authentication is set to *Standard Protection*,
+  applied 2026-08-21 by #121. A preview URL now answers `302` to `vercel.com/sso-api` and lands on
+  `vercel.com/login`; an unauthenticated stranger cannot load the app, and cannot fetch its bundle
+  either. Until then previews were world-readable while carrying the PRODUCTION Supabase host, which
+  is what made a preview a second front door onto the live database rather than a sandbox, and is the
+  surface #19 decided to close.
+
+  **What Standard Protection exempts is the production *domains*, not production deployments** —
+  measured 2026-08-21 on uncached paths, in the same second: `taskr.madcowhq.com` and the assigned
+  `taskr-khaki.vercel.app` both reach the app, while **every** per-deployment `*.vercel.app` URL
+  redirects to login, the production deployment's own URL included. #121 was filed expecting the
+  assigned domain to be gated too, on the strength of Vercel's documented wording; it is not. Nobody
+  was locked out and no re-install was forced.
+
+  This gates the client, not the data. It removes an unwatched surface and changes nothing about who
+  can read a row: the policies on this page held the line before it and remain the whole defence
+  after it.

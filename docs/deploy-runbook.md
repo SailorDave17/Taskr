@@ -4,11 +4,13 @@
 - Story: #4
 - Status: **executed.** Vercel and Supabase accounts exist and are owner-controlled; environment
   variables are set. AC 1 and AC 2 verified on a real phone 2026-08-05 (see §3).
-- Production URL: <https://taskr-khaki.vercel.app> — this is the domain Vercel lists under
-  **Settings → Environments → Production → Domains**, and it is the one to publish.
-  <https://taskr-mad-cow1.vercel.app> also resolves and served the same build during setup, but it
-  is the `<project>-<account>` alias rather than the assigned production domain; do not assume the
-  two stay pointed at the same deployment. Confirm with the footer's `build <sha>` stamp.
+- Production URL: <https://taskr.madcowhq.com> — the custom domain added by #121 on 2026-08-21, and
+  the one to publish. The assigned `taskr-khaki.vercel.app` still resolves, still serves the same
+  build, and is **not** gated by Standard Protection (see step 6), so the two coexist; the custom
+  domain is the published one and the assigned domain is the fallback nobody needs to be moved off.
+  <https://taskr-mad-cow1.vercel.app> also resolves, but it is the `<project>-<account>` alias rather
+  than a project domain; do not assume any two stay pointed at the same deployment. Confirm with the
+  footer's `build <sha>` stamp.
 
 The one prerequisite code cannot discharge: hosting and backend accounts must exist and be
 owner-controlled. Free tiers suffice. **Credentials never enter git.**
@@ -91,34 +93,43 @@ wrong.
    (#108), so the first half of the sequence is done and the promotion is what is outstanding. That
    is a **choice with a sequence**, which is the whole point — apply the migration, then promote.
 5. Deploy. Note the assigned `*.vercel.app` URL — that is the URL AC 1 is tested against.
-6. **Turn Vercel Authentication off** — Settings → Deployment Protection → *Require Log In*.
-   **This step was missing from the original runbook and it blocks AC 1 completely.**
+6. **Turn Vercel Authentication on, at *Standard Protection*** — Settings → Deployment Protection →
+   *Require Log In*, then the deployment-type dropdown that appears beside it. Applied 2026-08-21 by
+   #121; the dropdown defaults to *Standard Protection*, which is what is wanted.
 
-   > **This step is scheduled to be reversed, and is deliberately left as-is until it is.** #19
-   > decided (2026-08-20) that previews must be gated once real household data exists — via a custom
-   > domain plus *Standard Protection*, exactly the route the paragraph below prices. The reasoning
-   > is in [`data-outside-production.md`](data-outside-production.md); the dashboard change is
-   > **#121**, and **rewriting this step is #121's job, not a documentation tidy-up** — because until
-   > that change is made, the instructions below are what the project actually does, and a runbook
-   > describing an intention is worse than one describing a state.
+   A new Hobby project ships with Deployment Protection **on**, so every URL redirects to
+   `vercel.com/login` and nobody but the owner can load the app. This project ran with it **off**
+   from 2026-08-05 to 2026-08-21, deliberately: the shell held no data, and #17 scoped that reasoning
+   to exactly that condition. #19 retired it once real household records existed.
 
-   A new Hobby project ships with Deployment Protection **on**, so both the generated deployment URL
-   and the production alias redirect to `vercel.com/login`. Nobody but the project owner can load
-   the app.
+   **What Standard Protection actually protects — measured, because the documented wording misleads.**
+   Vercel describes it as *"protect all except production **Custom Domains** for your project"*, which
+   reads as though the assigned `*.vercel.app` production URL is protected by design. It is not.
+   Measured 2026-08-21, uncached paths, same second:
 
-   The trap is the setting's name. **Standard Protection does not mean "previews only"** — Vercel's
-   own wording is *"Protect all except production **Custom Domains** for your project"*, so the
-   generated `*.vercel.app` production URL is protected under it by design. On Hobby the dropdown
-   offers only *Standard Protection* and *All Deployments* (Pro-gated); there is **no previews-only
-   option**. So the choice is: switch Vercel Authentication off entirely, or add a custom domain.
-   This project switched it off — the shell holds no data, and real access control arrives with the
-   first persisted record in #5 (RLS plus a household join credential), which is why the ordering of
-   those stories matters.
+   | URL | result |
+   |---|---|
+   | `taskr.madcowhq.com` — production custom domain | reaches the app |
+   | `taskr-khaki.vercel.app` — production assigned domain | **reaches the app** |
+   | the production deployment's own `taskr-<hash>-mad-cow1.vercel.app` | `302` to login |
+   | any preview deployment URL | `302` to login |
 
-   Note the save is unreliable and lies convincingly: after toggling, the control showed unchecked
-   and *Save* went disabled — the signature of success — yet a reload showed protection back on. A
-   second identical attempt persisted. **Verify by reloading the page and then loading the public
-   URL, not by the form's own state.**
+   The exemption follows the **domain**, not the deployment: both production domains are exempt and
+   every per-deployment URL is gated, the production deployment's own URL included. On Hobby the
+   dropdown offers *Standard Protection* and *All Deployments* (Pro-gated), so there is still **no
+   previews-only option**; *Deployment Protection Exceptions*, which would let you name domains to
+   exclude, is Pro-only and greyed out.
+
+   **A cached `200` is not evidence.** The first check after the change showed `taskr-khaki.vercel.app`
+   answering `200`, which happens to be the right answer for the wrong reason: the headers read
+   `x-vercel-cache: HIT` with `age: 23841`, a six-hour-old object that predates the change. Probe a
+   path with no cache entry — `/__probe_<random>` — because a protected deployment answers `302` on
+   **every** path, so a `404` from the app is what proves you reached it.
+
+   The save has lied convincingly before: on 2026-08-05 the control showed unchecked and *Save* went
+   disabled — the signature of success — while a reload showed protection back on, and a second
+   identical attempt was needed. It persisted first time on 2026-08-21. **Verify by reloading the
+   page and then probing the URLs, never by the form's own state.**
 
 After this, every push to `rebuild/v1` deploys automatically. That is AC 8's "documented, repeatable
 pipeline" and it needs no further wiring.

@@ -11,30 +11,35 @@ exactly why neither is caught by a check aimed at one of them.
 
 ---
 
-## Decision 1 — preview deployments will be gated, behind a custom domain
+## Decision 1 — preview deployments are gated, behind a custom domain
 
-**Vercel Authentication moves from *off entirely* to *Standard Protection*, and a custom domain is
-added so production stays reachable. Previews become login-gated; the household's own URL does not.**
+**Vercel Authentication moved from *off entirely* to *Standard Protection*, and a custom domain was
+added so production is reachable on a name of our own. Previews are login-gated; the household's URLs
+are not.**
 
-> **Decided, NOT yet applied.** The change is a Vercel dashboard action only the owner can make, and
-> it is tracked as **#121**. Until that lands, every row in the measured table below is still true.
-> Read this section as a decision about where this is going — never as a description of today, and
-> never as evidence that previews are currently gated. `docs/deploy-runbook.md` step 6 still
-> documents the *current* arrangement, deliberately, for the same reason.
+> **Applied 2026-08-21 by #121.** `taskr.madcowhq.com` was registered, attached, and verified serving
+> production *before* protection was turned on. That ordering is recorded in
+> `docs/deploy-runbook.md` step 6, which now describes the arrangement instead of the intention it
+> used to. The table below was **re-measured after the change**, not edited.
 
-### What is actually true, measured 2026-08-20
+### What is actually true, measured 2026-08-21
 
 | | measured |
 |---|---|
-| Preview `taskr-ny8k2wptu-mad-cow1.vercel.app` | `200`, **no redirect** — world-readable |
-| Its bundle `assets/index-Bh52Vlzp.js` | contains `https://oitdjvxtqdvegsrimexn.supabase.co` |
-| Production `taskr-khaki.vercel.app` bundle | the **same** Supabase host |
+| Preview `taskr-ny8k2wptu-mad-cow1.vercel.app` | `302` to `vercel.com/sso-api`, landing on `vercel.com/login` |
+| Its bundle, fetched anonymously | **unreachable** — the response is the login page and names no `assets/` path |
+| `taskr.madcowhq.com` bundle `assets/index-D45Q7VGT.js` | contains `https://oitdjvxtqdvegsrimexn.supabase.co` |
+| `taskr-khaki.vercel.app` bundle | the **same** bundle, the **same** Supabase host |
 | Repository | `PRIVATE` |
 
-The second and third rows are the ones worth reading twice. **A preview deployment is not a
-sandbox.** `VITE_SUPABASE_URL` is scoped to Production *and* Preview, so every preview build is a
-second, world-readable front door onto the **live** database — different bundle, same backend.
-Whatever a preview URL can reach, it reaches in production.
+Read the first two rows against the ones they replace. Before the change that same preview answered
+`200` with no redirect and served a bundle naming the **live** Supabase host, so a preview was a
+second, world-readable front door onto the production database — different bundle, same backend.
+That door is shut to anyone not logged into this Vercel account.
+
+The last two rows are unchanged, deliberately: **both production domains still ship the live Supabase
+host, because that is what production is.** Gating previews did not narrow what a production URL
+reaches and was never meant to.
 
 ### Why gating, and why now
 
@@ -70,16 +75,24 @@ and it is the harder half.
 
 ### What it costs
 
-- **~$12/yr for a domain, plus DNS.** The only recurring cost in this decision.
-- **The assigned `taskr-khaki.vercel.app` production URL becomes login-gated too**, and this is the
-  cost that is easy to miss. Vercel's own wording for Standard Protection is *"protect all except
-  production **Custom Domains** for your project"* — the assigned `*.vercel.app` production URL is
-  protected under it **by design**, which is precisely the trap `docs/deploy-runbook.md` step 6
-  records. So the PWA installed on the family phones stops working until it is re-installed from the
-  new domain. **That is a household-visible outage if it is done without warning anyone**, which is
-  why #121 owns the ordering rather than this document.
-- **Every artefact naming `taskr-khaki.vercel.app` as the URL to publish becomes wrong**, including
-  the README. Those are #121's to correct, at the moment the domain exists.
+- **$10.44/yr for the domain, plus DNS.** The only recurring cost. Two names were registered rather
+  than one — `madcowsailing.com` alongside `madcowhq.com` — taking it to about $21/yr; that was an
+  owner decision at the gate, recorded against #121's cost line rather than left to read as overrun.
+- **No household outage — and this reverses what this document predicted.** The bullet that stood
+  here said the assigned `taskr-khaki.vercel.app` production URL *"becomes login-gated too"*,
+  reasoning from Vercel's own wording — *"protect all except production **Custom Domains** for your
+  project"* — that the assigned `*.vercel.app` URL is protected **by design**. Measured 2026-08-21 on
+  uncached paths, it is not: **both production domains reach the app, while every per-deployment URL
+  is gated, the production deployment's own included.** So no installed PWA broke, no phone was
+  forced to re-install, and the ordering hazard #121 leads with could not have fired. The prediction
+  was derived from documentation and never measured, which is exactly why it survived eight days and
+  drove a purchase.
+- **The domain's justification is therefore weaker than the one argued here.** Protection could have
+  been switched on with no custom domain at all and the household would have kept a working URL. What
+  the domain actually buys is a published name of our own, independent of Vercel's generated one —
+  worth having, and not what it was bought for.
+- **Every artefact naming `taskr-khaki.vercel.app` as the URL to publish became wrong**, the README
+  included. Corrected by #121 in the same change.
 
 ### What would reverse it, and what that costs
 
@@ -100,8 +113,12 @@ exercising a data flow.
 
 ### Revisit when
 
-- **#121 lands** — at which point the measured table above is stale and this section describes the
-  present rather than the destination.
+- **Vercel changes what *Standard Protection* exempts.** This arrangement rests on a measured
+  behaviour that contradicts Vercel's own documented wording: both production domains are exempt, not
+  only the custom one. A vendor is entitled to make its documentation true. If that happens the
+  assigned `taskr-khaki.vercel.app` becomes gated and any install still pointed at it breaks — so
+  re-measure with the uncached probe in `docs/deploy-runbook.md` step 6, rather than re-reading the
+  documentation that was wrong the first time.
 - Household data stops being *this* household's — a second household, or anyone outside it, joins.
 - A migration weakens or removes a policy, rather than adding one.
 - Anything ever reaches the client that RLS does not gate.

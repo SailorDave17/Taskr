@@ -10,25 +10,62 @@
 - Status: **`0001`–`0008` are applied to the live project**, as of 2026-08-20 (#108). `0007` and
   `0008` were pasted together, which is what emptied the expected-red set two bullets below. `0002`
   is verified over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`
-  and `0008` are verified by `npm run check:live`, which is green at 20 of 20 — every table,
-  every RPC, and (since #115) the Edge Function; the rest are verified only by
-  the paste succeeding.
-- **`0009` is written and NOT applied** (#127). It is the head of the paste queue, and until it is
-  pasted the live RLS suite cannot run at all — `create_household` refuses the second household it
-  builds. **`check:live` cannot see this migration**, which is worth stating beside the green above:
-  the check covers tables, columns, RPCs and the Edge Function, and `0009` changes only two
-  indexes. So 20 of 20 is true and is *not* evidence that `0009` has been pasted. That is the one
-  case an empty expected-red set does not cover — the instrument is blind to the migration by
-  construction rather than by accident, so the paste has to be confirmed by running the RLS suite.
+  and `0008` are verified by `npm run check:live`, which read **20 of 20** on 2026-08-20 — every
+  table, every RPC, and (since #115) the Edge Function; the rest are verified only by
+  the paste succeeding. **The denominator moved to 21 on 2026-08-21** when #37 added
+  `chore_exclusions` to `LIVE_SCHEMA`; see the expected-red bullet below.
+- **`0009` and `0010` are written and NOT applied.** The paste queue is two deep and the order is
+  the file order.
+  - **`0009`** (#127) — until it is pasted the live RLS suite cannot run at all, because
+    `create_household` refuses the second household it builds.
+  - **`0010`** (#37) — the exclusions table and the two eligibility functions.
+  - **`check:live` is blind to `0009` and NOT blind to `0010`, and the difference is worth knowing
+    because it is a property of the migrations rather than of the check.** `0009` changes only two
+    indexes, and the check covers tables, columns, RPCs and Edge Functions — so it stays green
+    either way and its green is *not* evidence that `0009` has been pasted; that paste has to be
+    confirmed by running the RLS suite. `0010` creates a TABLE the client reads, so the check can
+    see it and is red on it by design until the paste. One migration ahead of the project is
+    invisible to the instrument and the other is loud, from the same instrument, on the same day.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` is GREEN at 20 of 20, the expected-red set is EMPTY, and therefore ANY red is
-  real.** *Measured 2026-08-20*, immediately after `npm run deploy:function`: the
-  `provision-member` Edge Function answers a browser preflight with `200` and every header
-  supabase-js sends. The entry below cleared on exactly the action it named and on nothing else, as
-  it said it would.
+- **`check:live` has ONE expected red — `chore_exclusions` — and it clears on the `0010` paste.
+  Every OTHER red is new and real.** ***Measured 2026-08-21*** on #37's branch against the live
+  project: **20 of 21**, one failure, and it is the one this bullet names —
+  `chore_exclusions: table does not exist in the live project [PGRST205]`. Every other table, every
+  RPC and the Edge Function stayed green. It becomes 21 of 21 on the paste.
+
+  The run is also the evidence for the blindness claimed one bullet up rather than an assertion of
+  it: `0009` is unpasted too, and **nothing went red for it** — twenty green subjects across a
+  project the repo is two migrations ahead of.
+
+  **The set grew because the check stopped being blind to something, not because anything
+  regressed** — and that reading has been available before, one bullet down, when #115 first gave
+  the check sight of Edge Functions. Here it is one step further out: the check was not blind to
+  Edge Functions and then taught to see them; it is blind to nothing new, and simply now asks about
+  a table that does not exist yet **because this repo is ahead of the project**. Widening an
+  instrument falsifies an N-of-N claim with nothing having broken, and updating every copy of that
+  claim is part of shipping the widening rather than tidying after it.
+
+  **The one excused red, and the single condition that clears it**, stated in the form this page
+  has used twice before so it cannot quietly become permanent:
+
+  | Red | Cleared by | Anything else? |
+  |---|---|---|
+  | `chore_exclusions exists, with every column the app selects` | pasting `supabase/migrations/0010_chore_exclusions.sql` | No. Nothing else touches it. |
+
+  The two eligibility functions `0010` creates are deliberately **not** probed, and their absence
+  from the check is not a gap: `0010` withholds `execute` from `authenticated`, so a probe would
+  report a missing grant on a project that is entirely correct — the `household_devices` mistake
+  with the sign flipped. They arrive in the same paste as the table, so a project with the table has
+  run the whole file.
+
+  *Previously — and this bullet has now been inverted four times:* **GREEN at 20 of 20, the
+  expected-red set EMPTY, therefore ANY red real.** *Measured 2026-08-20*, immediately after
+  `npm run deploy:function`: the `provision-member` Edge Function answers a browser preflight with
+  `200` and every header supabase-js sends. The entry below cleared on exactly the action it named
+  and on nothing else, as it said it would.
 
   **The clearing is worth more than the green, because the check's positive control could not
   discriminate until it happened.** While the function was undeployed, the real test and the
@@ -37,19 +74,26 @@
   reports absent. A control that cannot yet tell two things apart looks identical to one that
   works, which is why that limit was written into the test file rather than left to be noticed.
 
-  *This bullet has now been inverted three times: EMPTY at 17 of 17, then ONE expected red at 19 of
-  20 when #115 gave the check its first sight of Edge Functions, now EMPTY again at 20 of 20.* The
-  middle state is the instructive one. The set did not grow because anything regressed — it grew
+  *The history of this bullet, which is the argument for keeping it in this form: EMPTY at 17 of 17,
+  then ONE expected red at 19 of 20 when #115 gave the check its first sight of Edge Functions, then
+  EMPTY again at 20 of 20, and now ONE again at 20 of 21 with #37's unpasted table.* The non-empty
+  states are the instructive ones. The set did not grow because anything regressed — it grew
   because the check stopped being **blind** to something already broken, which is the outcome a new
   check is supposed to have, and reading it as a regression would have been mistaking the
   instrument for the fault.
 
-  **The hazard the empty-set form names is restated rather than dropped, for the third time.** An
-  authority that is red by design and does not say so is one whose *next* genuine failure gets
-  waved through — the exact way a real outage hid in plain sight on 2026-08-09. There is now **no**
-  red this page excuses, so a red on any table, any RPC, or any Edge Function is new, real, and to
-  be investigated rather than matched against a list. Each subject still has its own named test, so
-  they cannot hide inside one another.
+  **The hazard this form names is restated rather than dropped, for the fourth time.** An authority
+  that is red by design and does not say so is one whose *next* genuine failure gets waved through —
+  the exact way a real outage hid in plain sight on 2026-08-09. This page excuses **exactly one**
+  red, it is named in the table above with the one action that clears it, and everything else is
+  new, real, and to be investigated rather than matched against a list. Each subject still has its
+  own named test, so they cannot hide inside one another.
+
+  *This paragraph said "there is now **no** red this page excuses" until 2026-08-21, and it was
+  true when written. It went false two paragraphs above where it sits, in the same edit that added
+  the excused red — which is the failure mode of a correction that fixes the sentence about the
+  subject and stops there. The repair is the one that costs nothing: after editing prose that
+  states a value, grep the same file for the value.*
 - **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
   Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
   organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since

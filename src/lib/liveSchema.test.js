@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
+import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 import {
   LIVE_EDGE_FUNCTIONS,
@@ -87,10 +88,11 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // Four since #62 dropped `household_devices`. The number is a floor against
-    // a vacuous pass, not a target — it goes DOWN when a table legitimately
-    // leaves, and that edit should be visible in review rather than automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(4)
+    // FIVE since #37 added `chore_exclusions` — four after #62 dropped
+    // `household_devices`. The number is a floor against a vacuous pass, not a
+    // target: it goes DOWN when a table legitimately leaves and UP when one
+    // arrives, and either edit should be visible in review rather than automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(5)
     expect(readTables).toContain('chores')
   })
 
@@ -110,12 +112,18 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the four tables the app still reads', () => {
-    // #78 named five. `household_devices` was the fifth and #62 drops it, so
-    // this list lost an entry rather than gaining one — worth stating, because
-    // a shrinking required-set is exactly the edit that would otherwise look
-    // like someone quietly weakening the check.
-    for (const table of ['households', 'members', 'chores', 'member_capacity']) {
+  it('covers the five tables the app still reads', () => {
+    // #78 named five, of which `household_devices` was one and #62 drops it. The
+    // set went to four and is back at five with #37's `chore_exclusions` — a
+    // different fifth. Both edits are stated, because a required-set that
+    // changes size silently is exactly how somebody quietly weakens a check.
+    for (const table of [
+      'households',
+      'members',
+      'chores',
+      'member_capacity',
+      'chore_exclusions',
+    ]) {
       expect(LIVE_TABLES).toContain(table)
     }
     expect(LIVE_TABLES).not.toContain('household_devices')
@@ -129,6 +137,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.chores).toBe(CHORE_COLUMNS)
     expect(byTable.member_capacity).toBe(CAPACITY_COLUMNS)
     expect(byTable.members).toBe(MEMBER_COLUMNS)
+    expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -137,9 +146,11 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     const chores = readFileSync(resolve(process.cwd(), 'src/lib/chores.js'), 'utf8')
     const capacity = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     const household = readFileSync(resolve(process.cwd(), 'src/lib/household.js'), 'utf8')
+    const exclusions = readFileSync(resolve(process.cwd(), 'src/lib/exclusions.js'), 'utf8')
     expect(chores).toContain('.select(CHORE_COLUMNS)')
     expect(capacity).toContain('.select(CAPACITY_COLUMNS)')
     expect(household).toContain('.select(MEMBER_COLUMNS)')
+    expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
   })
 })
 
@@ -262,6 +273,14 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     // healthy project is the same defect as one that passes on a broken one, and
     // this repo has already shipped it once (`household_devices` in LIVE_SCHEMA).
     for (const fn of ['claim_member', 'claim_member_with_pin', 'set_member_pin', 'join_household']) {
+      expect(LIVE_RPC_NAMES).not.toContain(fn)
+    }
+    // And #37's two, for the SAME reason arriving from the opposite direction:
+    // `0010` creates them and deliberately withholds execute from
+    // `authenticated`, so a probe would report a missing grant on a project that
+    // is entirely correct. They are covered by the `chore_exclusions` entry in
+    // LIVE_SCHEMA — one paste creates all three.
+    for (const fn of ['is_member_eligible', 'eligible_members']) {
       expect(LIVE_RPC_NAMES).not.toContain(fn)
     }
   })

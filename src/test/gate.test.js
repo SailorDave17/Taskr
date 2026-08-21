@@ -657,6 +657,13 @@ describe('#19 — no real household name reaches version control', () => {
     Dishes: 'a chore title in App.test.jsx',
     'Placeholder Chore': 'a chore title',
     'Placeholder Other Chore': 'a chore title',
+    // #37 AC 4's fixture needs four chores in one household. Declared rather
+    // than written in lower case to slip past the shape scan, which would have
+    // worked and would have been the wrong instinct: the point of this
+    // vocabulary is that every name-shaped literal is a line in a diff somebody
+    // can look at.
+    'Placeholder Third Chore': 'a chore title',
+    'Placeholder Fourth Chore': 'a chore title',
     Taskr: 'the application name',
     Monday: 'the week boundary, asserted in capacity.test.js',
     'nothing to do': 'an allocation corpus scenario name',
@@ -784,5 +791,114 @@ describe('#19 — no real household name reaches version control', () => {
     const images = tracked.filter((path) => IMAGE.test(path))
     expect(images).toEqual(expect.arrayContaining(Object.keys(ALLOWED_ASSETS)))
     expect(images.length).toBe(Object.keys(ALLOWED_ASSETS).length)
+  })
+})
+
+// #37 AC 3 — the routes into exclusion-setting, ENUMERATED as a check.
+//
+// The AC asks that when every route in is enumerated, the only one is from a
+// chore already on the list: no capability step in onboarding, no capability
+// section on the roster, no screen laying all chores against all members, and an
+// onboarding step count unchanged from before this story.
+//
+// That is a property of the WIRING, so no behavioural test can see it — a
+// component test renders the screen it was handed and says nothing about which
+// screens exist. It is the same shape as every other guard in this file, and it
+// is the criterion most likely to decay quietly: adding a capability section to
+// the roster later would break nothing, fail nothing, and read as an improvement.
+//
+// #8 asked for exactly that screen — "given a chore's edit screen, when
+// capability is configured" — a per-chore by per-member matrix, a form, in the
+// same window the charter's bet exists to delete forms. This is what refuses it.
+describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else', () => {
+  const read = (relative) => readFileSync(resolve(process.cwd(), relative), 'utf8')
+  const app = read('src/App.jsx')
+  const onboarding = read('src/components/Onboarding.jsx')
+  const roster = read('src/components/Roster.jsx')
+  const chores = read('src/components/Chores.jsx')
+
+  it('POSITIVE CONTROL: the route EXISTS, so the absences below are not an unbuilt feature', () => {
+    // Without this the whole describe passes on a build where nobody can record
+    // an exclusion at all — which satisfies "the only route is from a chore"
+    // vacuously and is option (d), the one that was declined.
+    expect(app).toMatch(/from '\.\/lib\/exclusions\.js'/)
+    expect(app).toMatch(/\bexcludeMember\b/)
+    expect(app).toMatch(/\ballowMember\b/)
+    expect(chores).toMatch(/from '\.\.\/lib\/exclusions\.js'/)
+  })
+
+  it('hands the two writes to the chore screen, and to no other element', () => {
+    // Scoped to the element for the reason the #34 guard records: an unscoped
+    // grep passes on a neighbour. Here the neighbour is the point — the claim is
+    // that the roster does NOT get these props, so an assertion that merely
+    // found them somewhere in the file would be blind to the whole criterion.
+    const choreElement = app.match(/<Chores[\s\S]*?\/>/)
+    const rosterElement = app.match(/<Roster[\s\S]*?\/>/)
+    const onboardingElement = app.match(/<Onboarding[\s\S]*?\/>/)
+
+    expect(choreElement, 'no chore element in App.jsx').not.toBeNull()
+    expect(choreElement[0]).toMatch(/onExclude=\{/)
+    expect(choreElement[0]).toMatch(/onAllow=\{/)
+    expect(choreElement[0]).toMatch(/exclusions=\{/)
+
+    for (const [name, element] of [
+      ['roster', rosterElement],
+      ['onboarding', onboardingElement],
+    ]) {
+      expect(element, `no ${name} element in App.jsx`).not.toBeNull()
+      expect(element[0], `${name} must not be a second route in`).not.toMatch(/onExclude=|onAllow=/)
+    }
+  })
+
+  it('neither onboarding nor the roster knows the exclusion data layer exists', () => {
+    // The strongest available form, and the same argument #36 AC 10's check
+    // makes: a file that cannot reach the module cannot become a route into it,
+    // whatever anybody wires up later.
+    for (const [name, source] of [
+      ['Onboarding.jsx', onboarding],
+      ['Roster.jsx', roster],
+    ]) {
+      expect(source, `${name} imports the exclusion data layer`).not.toMatch(/lib\/exclusions/)
+      expect(source, `${name} names an exclusion write`).not.toMatch(
+        /\bexcludeMember\b|\ballowMember\b/,
+      )
+    }
+  })
+
+  it('the onboarding step count is unchanged from before this story', () => {
+    // TWO cards and TWO forms — create a household, or sign in — which is what
+    // Onboarding carried before #37 and what it carries now. A capability step
+    // would be a third of each, and this is the number that says so.
+    //
+    // The cost of a literal here is real and deliberate: a legitimate rework of
+    // onboarding fails this test and has to change the number in a diff. That is
+    // the same trade every floor in this file makes, and the AC asks for a count.
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(2)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(2)
+  })
+
+  it('no component offers a capability screen, by any of the words one would be called', () => {
+    // Vocabulary rather than structure, because the grid could be built without
+    // ever nesting two maps — and a matrix that called itself something else
+    // would still be the artefact the charter's bet exists to delete. The chore
+    // screen is exempt: it is the one route, and it has to say what it does.
+    const CAPABILITY_VOCABULARY = /capabilit|capability matrix|skills? (grid|matrix)|who can do what/i
+    for (const [name, source] of [
+      ['App.jsx', app],
+      ['Onboarding.jsx', onboarding],
+      ['Roster.jsx', roster],
+    ]) {
+      expect(source, `${name} looks like it offers a capability screen`).not.toMatch(
+        CAPABILITY_VOCABULARY,
+      )
+    }
+  })
+
+  it('POSITIVE CONTROL: that vocabulary scan can actually match something', () => {
+    // Without this the assertion above passes identically against a typo in the
+    // pattern, and an always-empty scan reads exactly like a clean bill of health.
+    const CAPABILITY_VOCABULARY = /capabilit|capability matrix|skills? (grid|matrix)|who can do what/i
+    expect(CAPABILITY_VOCABULARY.test('a capability matrix on the roster')).toBe(true)
+    expect(CAPABILITY_VOCABULARY.test('who can do what, at a glance')).toBe(true)
   })
 })

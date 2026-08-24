@@ -8,14 +8,15 @@
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
 - Status: **`0001`–`0011` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108)
-  and the last three on 2026-08-24. `0007` and `0008` were pasted together, which is what emptied
-  the expected-red set the first time. `0002` is verified over the wire by the live RLS suite
-  (PR #65, 13/13 against the real project); `0007`, `0008`, `0010` and `0011` are verified by
-  `npm run check:live`, which reads **23 of 23** as of 2026-08-24 — every table, every RPC, and
-  (since #115) both Edge Functions; the rest are verified only by the paste succeeding. The
-  denominator moved from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`,
-  and to 23 on 2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge
-  Function.
+  and the last three on 2026-08-24. **`0012` (repeating chores, #53) exists in the repo and has NOT
+  been pasted** — it is the whole of the current expected-red set below. `0007` and `0008` were
+  pasted together, which is what emptied the expected-red set the first time. `0002` is verified
+  over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`, `0008`,
+  `0010` and `0011` are verified by `npm run check:live` — every table, every RPC, and (since #115)
+  both Edge Functions; the rest are verified only by the paste succeeding. The denominator moved
+  from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`, to 23 on
+  2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge Function, and to
+  **24** the same day when #53 added the `catch_up_repeats` RPC.
 - **`0009` landed on 2026-08-21 and `0010` and `0011` on 2026-08-24, and all three are verified over
   the wire — but not by the same instrument, and that is the thing to carry.** `0011` went in first
   of its pair, out of file order and ahead of its own PR merging, which is allowed and is worth
@@ -69,11 +70,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has NO expected reds. The excused set is EMPTY, therefore ANY red is real.**
-  ***Measured 2026-08-24*** against the live project: **23 of 23**, no failures, and all five
-  positive controls firing — a missing table, a missing column, a missing function, a function whose
-  argument names have changed, and a missing Edge Function all still fail and name themselves, so
-  the green is not a vacuous one.
+- **`check:live` has TWO expected reds, and both clear on one action: pasting `0012`.**
+  ***Measured 2026-08-24*** against the live project, with #53's lists in the tree: **22 of 24**,
+  exactly the two reds named below and no others — so a red on anything else is real, and a THIRD
+  red on either of these subjects cannot be told apart from the expected one until the paste lands,
+  which is the loan of authority the paragraph below describes and the reason the queue should be
+  drained rather than lived with.
 
   **The empty set is the state this whole form exists to reach, and it is the state to defend.**
   While a red is excused, the check's authority is on loan: a genuine failure of the excused subject
@@ -86,7 +88,8 @@
 
   | Red | Cleared by | Anything else? |
   |---|---|---|
-  | *(none)* | — | — |
+  | `chores exists, with every column the app selects` — the three repeat columns (`repeat_kind`, `repeat_weekdays`, `generated_from`) are not on the live table | pasting `supabase/migrations/0012_repeating_chores.sql` | Nothing else. The table itself is fine; the red is `42703` on columns only `0012` adds. |
+  | `catch_up_repeats() exists, with the arguments the app passes` | pasting the same file — `0012` creates the function | Nothing else. No deploy is involved this time: unlike `0011`, `0012` ships no Edge Function, so ONE paste clears BOTH rows. Until it lands, every app boot also shows the household an error strip naming `catching up repeats` — the failure is visible in the product, not only here. |
 
   **Both of the rows that stood here on 2026-08-24 cleared on exactly the action they named, and on
   nothing else** — which is the claim this table makes every time, and the reason it is written as a
@@ -117,17 +120,18 @@
   subjects the instrument has**, never about the ones it does not.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted six times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted seven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
-  #95's function undeployed, and now **EMPTY again at 23 of 23** with both actions taken. A THREE
-  was written here first, from arithmetic, and never actually existed: the paste that would have
-  cleared its third entry had already happened. **A predicted state is not a state**, and the
-  register a count is written in — measured or derived — belongs beside it.* The non-empty states
-  are the instructive ones. The set never grew because anything regressed — it grew because the
-  check stopped being **blind** to something already broken, which is the outcome a new check is
-  supposed to have, and reading it as a regression would have been mistaking the instrument for the
-  fault.
+  #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, and now **TWO again
+  at a measured 22 of 24** with #53's `0012` in the repo and unpasted. A THREE was once written here
+  first, from arithmetic, and never actually existed: the paste that would have cleared its third
+  entry had already happened. **A predicted state is not a state**, and the register a count is
+  written in — measured or derived — belongs beside it.* The non-empty states are the instructive
+  ones. The set never grew because anything regressed — it grew because the check stopped being
+  **blind** to something already broken, or, as this time, because the repo moved ahead of the
+  live project on purpose — the window between a merge and a paste is exactly what the table is
+  for, and reading it as a regression would be mistaking the instrument for the fault.
 
   **The clearing is worth more than the green, because the check's positive control could not
   discriminate until it happened.** While `calendar-connect` was undeployed, the real test and the

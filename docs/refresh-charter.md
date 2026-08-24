@@ -357,6 +357,28 @@ New open questions this creates (owed at grooming, not settled here):
   (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
   same Edge Function surface #56 stands up.
 
+## Decision taken 2026-08-24 — the repeat catch-up bound is SEVEN days
+
+Owner decision at the pickup of #53, which required the bound to be "a named tunable constant
+recorded in the decision log". This is that record.
+
+- **`CATCH_UP_BOUND_DAYS = 7`.** When nobody has opened the app for a while, the catch-up pass
+  creates at most the last seven days of missed occurrences; anything older is counted, skipped,
+  and said. The authority is the constant of that name in `catch_up_repeats_at`
+  (`supabase/migrations/0012_repeating_chores.sql`); `src/lib/chores.js` carries the same value for
+  the sentence the UI shows, and `repeats.pglite.test.js` holds the two copies equal.
+- **Why seven**: a week away costs at most a week of chores on return, matching the app's weekly
+  capacity cadence — and #53's own criterion names "a fortnight of stale chores" as the failure, so
+  fourteen would sit exactly on the failure it exists to prevent. Rejected: **14 days** (more
+  forgiving of long gaps, at the cost of the walk-in pile the design direction rules out) and
+  **3 days** (nothing stale ever appears, but a long weekend silently drops a weekly chore's
+  occurrence).
+- **How the household is told** (same gate, same day): a transient notice on the device whose open
+  performed the skip. Rejected: a persisted notice every member sees until dismissed — genuinely
+  household-wide, but it costs a notifications table, RLS, grants and a dismiss flow, a substantial
+  widening of a three-day story for a message whose whole content is "less work appeared than you
+  might have expected".
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

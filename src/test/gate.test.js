@@ -723,6 +723,10 @@ describe('#19 — no real household name reaches version control', () => {
     'Placeholder Fourth Chore': 'a chore title',
     Taskr: 'the application name',
     Monday: 'the week boundary, asserted in capacity.test.js',
+    // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
+    // column takes ISO numbers), and the fixture proving that refusal has to
+    // spell one.
+    Tuesday: 'a weekday, refused by normalizeRepeat in chores.test.js',
     'nothing to do': 'an allocation corpus scenario name',
     'provision-member': 'the Edge Function name',
     FunctionsFetchError: 'a supabase-js error class',

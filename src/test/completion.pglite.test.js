@@ -160,7 +160,10 @@ describe('completing a chore, run against a real Postgres', () => {
         'created_at',
         'due_on',
         'expected_minutes',
+        'generated_from',
         'id',
+        'repeat_kind',
+        'repeat_weekdays',
         'title',
       ])
     })

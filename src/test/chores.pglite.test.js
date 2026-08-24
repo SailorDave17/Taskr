@@ -408,10 +408,14 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
-      // Widened by 0004 (completion) and again by 0006 (assignment), each making
-      // its column READABLE and none of them writable. The update set below is
-      // unchanged across all three, which is the convention working: additive by
-      // column, and no later story revokes a shipped grant.
+      // Widened by 0004 (completion), 0006 (assignment) and 0012 (repeats),
+      // each making its columns READABLE; 0012 is also the first to widen the
+      // INSERT set, because a repeat is DECLARED where the chore is created.
+      // The update set below is unchanged across all four, which is the
+      // convention working: additive by column, and no later story revokes a
+      // shipped grant. `repeat_since`, the watermark and `generated_from` are
+      // absent from insert and update — the trigger and the catch-up pass are
+      // their only authors, and repeats.pglite.test.js proves the refusals.
       expect(await granted('SELECT')).toEqual([
         'assigned_member_id',
         'completed_at',
@@ -419,10 +423,20 @@ describe('chores, run against a real Postgres', () => {
         'created_at',
         'due_on',
         'expected_minutes',
+        'generated_from',
         'id',
+        'repeat_kind',
+        'repeat_weekdays',
         'title',
       ])
-      expect(await granted('INSERT')).toEqual(['due_on', 'expected_minutes', 'household_id', 'title'])
+      expect(await granted('INSERT')).toEqual([
+        'due_on',
+        'expected_minutes',
+        'household_id',
+        'repeat_kind',
+        'repeat_weekdays',
+        'title',
+      ])
       expect(await granted('UPDATE')).toEqual(['due_on', 'expected_minutes', 'title'])
     })
 

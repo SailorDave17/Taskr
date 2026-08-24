@@ -98,6 +98,13 @@ export const LIVE_RPCS = Object.freeze([
     args: Object.freeze(['household_name', 'organizer_name', 'household_timezone']),
   }),
   Object.freeze({ fn: 'complete_chore', args: Object.freeze(['chore_id']) }),
+  // #53, arriving with `0012` — red on purpose until that file is pasted, the
+  // same deliberate window every migration-borne entry here has had. No
+  // arguments: a bare GET resolves a parameter-free function, and PostgREST
+  // serves it in a read-only transaction, so the probe cannot create anything
+  // — the pass either finds nothing to do (an empty household) or is refused
+  // by Postgres with `25006`, and both classify as PRESENT.
+  Object.freeze({ fn: 'catch_up_repeats', args: Object.freeze([]) }),
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),

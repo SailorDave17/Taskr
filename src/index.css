@@ -116,6 +116,19 @@ body {
   color: var(--ink-dim);
 }
 
+/* #53 — the catch-up pass skipped occurrences older than the bound and the
+   household is being told. Informational, not a fault: same dim ink and left
+   rule as .chore__warning, and deliberately not the .error palette — nothing
+   here went wrong, the app declined to pile stale work onto the week. */
+.shell__notice {
+  margin: 0 0 1rem;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -570,6 +583,39 @@ body {
   border-left: 2px solid rgba(255, 255, 255, 0.18);
   font-size: 0.875rem;
   line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+/* #53 — the weekday picker for a weekly repeat. A fieldset so the legend
+   labels the group for assistive tech; the row wraps on a 360px phone rather
+   than shrinking below the 44px touch target the other controls keep. */
+.chore-weekdays {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.chore-weekdays__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.chore-weekdays__day {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* The row's account of its schedule — same dim ink as the due date, because a
+   repeat is a fact about the chore, not a state to be alarmed by. */
+.chore__repeat {
   color: var(--ink-dim);
 }
 

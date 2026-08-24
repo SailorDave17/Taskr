@@ -153,6 +153,9 @@ describe('AC 2 — the form refuses with a sentence, before any request is sent'
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
+      // #53 — the untouched form declares no repeat, explicitly.
+      repeatKind: 'none',
+      repeatWeekdays: [],
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -878,5 +881,97 @@ describe('an excluded person holding the chore anyway — #37 ACs 6, 7', () => {
       exclusions: [{ id: 'x1', chore_id: 'c1', member_id: 'gone' }],
     })
     expect(screen.getByText(/someone not on the roster is marked as unable/i)).toBeInTheDocument()
+  })
+})
+
+describe('#53 — the repeat is set where the chore is created', () => {
+  const kindSelect = () => screen.getByLabelText(/how often this chore repeats/i)
+  const chooseKind = (kind) => fireEvent.change(kindSelect(), { target: { value: kind } })
+
+  it('offers a structured schedule and no free-text field — AC 6 at the form', () => {
+    setup()
+    const options = within(kindSelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+    // Monthly is #103, exceptions are #105 — named follow-ups. Their absence
+    // here is the decision, so it is asserted rather than implied.
+    expect(options).toEqual(['none', 'daily', 'weekly'])
+  })
+
+  it('reveals the weekday picker only for weekly', () => {
+    setup()
+    expect(screen.queryByLabelText(/repeat on mon/i)).not.toBeInTheDocument()
+    chooseKind('weekly')
+    expect(screen.getByLabelText(/repeat on mon/i)).toBeInTheDocument()
+    chooseKind('daily')
+    expect(screen.queryByLabelText(/repeat on mon/i)).not.toBeInTheDocument()
+  })
+
+  it('submits a weekly repeat with the chosen days', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('weekly')
+    fireEvent.click(screen.getByLabelText(/repeat on mon/i))
+    fireEvent.click(screen.getByLabelText(/repeat on thu/i))
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'weekly',
+      repeatWeekdays: [1, 4],
+    })
+  })
+
+  it('refuses weekly with no day chosen, with a sentence, and sends nothing', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('weekly')
+    await submitAdd()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least one weekday/i)
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('drops stale weekday choices when the kind leaves weekly, so they cannot silently re-arm', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('weekly')
+    fireEvent.click(screen.getByLabelText(/repeat on thu/i))
+    chooseKind('none')
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+    })
+  })
+
+  it('a repeating chore says its schedule on the row, and a generated occurrence stays ordinary', () => {
+    setup({
+      chores: [
+        {
+          ...chores[0],
+          repeat_kind: 'weekly',
+          repeat_weekdays: [1, 4],
+        },
+        {
+          ...chores[1],
+          repeat_kind: 'none',
+          repeat_weekdays: null,
+          generated_from: 'c1',
+        },
+      ],
+    })
+    const parent = screen.getByText('Placeholder Chore').closest('li')
+    expect(parent).toHaveTextContent('repeats weekly on Mon, Thu')
+    // AC 7: an occurrence is work like any other — no badge, no second kind of
+    // chore on the screen.
+    const occurrence = screen.getByText('Placeholder Other Chore').closest('li')
+    expect(occurrence).not.toHaveTextContent(/repeats/i)
   })
 })

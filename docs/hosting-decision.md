@@ -48,17 +48,20 @@ the Supabase client will need.
 
 These are the numbers later stories must be designed against, not aspirations.
 
-### Scheduled functions — feeds the recurrence stories (#11)
+### Scheduled functions — feeds the recurrence stories (#11 → #53, shipped that way)
 
-`pg_cron` **is available on the Supabase free plan**, so template instantiation can be scheduled in
-the database rather than needing an external trigger.
+`pg_cron` **is available on the Supabase free plan**, so template instantiation could have been
+scheduled in the database rather than needing an external trigger.
 
 **But the constraint that actually bites is this:** free Supabase projects are **paused after 1 week
 of inactivity**, and a paused project's Postgres instance is stopped — so its cron jobs stop with it.
 For a household app this is a live risk, not a theoretical one: a week away and the schedule silently
-stops. **#11 must not assume the scheduler ran.** Design instantiation to be idempotent and
-catch-up-capable — safe to run late, and safe to run twice — which its own AC already requires for a
-different reason. That AC is now doing double duty and should not be weakened.
+stops. **Instantiation must not assume the scheduler ran.** *(This section said "#11" when it was
+written; #53 superseded #11 and then shipped exactly this design on 2026-08-24 — no pg_cron at all,
+a client-triggered catch-up pass (`catch_up_repeats`, migration `0012`) that is idempotent and
+catch-up-capable, safe to run late and safe to run twice, with the exactly-once rule held by a
+unique index rather than by the code. The analysis above is why; it is cited in #53's own "Why this
+shape".)*
 
 Vercel also offers cron jobs (100 per project on Hobby) as a fallback trigger, which would keep the
 Supabase project warm as a side effect. Note that is a *workaround for the pause*, and calling it

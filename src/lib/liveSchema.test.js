@@ -273,13 +273,14 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     expect(extra, `in LIVE_RPCS but called nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the five the app still calls, and none of the four `0007` drops', () => {
+  it('covers the six the app still calls, and none of the four `0007` drops', () => {
     for (const fn of [
       'create_household',
       'complete_chore',
       'uncomplete_chore',
       'assign_chore',
       'unassign_chore',
+      'catch_up_repeats',
     ]) {
       expect(LIVE_RPC_NAMES).toContain(fn)
     }
@@ -296,6 +297,14 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     // is entirely correct. They are covered by the `chore_exclusions` entry in
     // LIVE_SCHEMA — one paste creates all three.
     for (const fn of ['is_member_eligible', 'eligible_members']) {
+      expect(LIVE_RPC_NAMES).not.toContain(fn)
+    }
+    // And #53's three internals, same reason again: `catch_up_repeats_at`,
+    // `repeat_occurrence_dates` and `set_repeat_since` are granted to no
+    // client role on purpose, so a probe would report a missing grant on a
+    // correct project. The `catch_up_repeats` entry covers their paste — all
+    // four arrive in `0012`.
+    for (const fn of ['catch_up_repeats_at', 'repeat_occurrence_dates', 'set_repeat_since']) {
       expect(LIVE_RPC_NAMES).not.toContain(fn)
     }
   })

@@ -39,20 +39,21 @@ export const LIVE_SCHEMA = Object.freeze([
   Object.freeze({ table: 'members', columns: MEMBER_COLUMNS }),
   Object.freeze({ table: 'chores', columns: CHORE_COLUMNS }),
   Object.freeze({ table: 'member_capacity', columns: CAPACITY_COLUMNS }),
-  // #37. Added with `0010`, which is NOT pasted at merge — so this entry makes
-  // `check:live` red on purpose until it is. That is the entry doing its job:
-  // the check exists precisely because a paste is a human step recorded nowhere,
-  // and an entry withheld until after the paste would leave the window it is
-  // meant to cover uncovered. docs/access-model.md carries it as an expected red
-  // with the single action that clears it.
+  // #37. Added with `0010`, which was NOT pasted at merge — so this entry made
+  // `check:live` red on purpose until the paste landed on 2026-08-24. That is
+  // the entry doing its job: the check exists precisely because a paste is a
+  // human step recorded nowhere, and an entry withheld until after the paste
+  // would leave the window it is meant to cover uncovered. Nothing here changes
+  // now the red has cleared — an entry earns its place by what it asks, not by
+  // what it currently answers.
   Object.freeze({ table: 'chore_exclusions', columns: EXCLUSION_COLUMNS }),
-  // #95, arriving with `0011` and unpasted at merge — so this entry is red on
-  // purpose until somebody pastes it, for the same reason `chore_exclusions`
-  // above is. Note which of `0011`'s two tables is here: `calendar_tokens` is
-  // NOT, and its absence is the check agreeing with the schema rather than an
-  // omission. This list is what the CLIENT reads, and the client is granted
-  // nothing at all on the token table — probing for it would report a missing
-  // grant on a perfectly healthy project.
+  // #95, arriving with `0011` and unpasted at merge — so this entry was red on
+  // purpose until it was pasted on 2026-08-24, for the same reason
+  // `chore_exclusions` above was. Note which of `0011`'s two tables is here:
+  // `calendar_tokens` is NOT, and its absence is the check agreeing with the
+  // schema rather than an omission. This list is what the CLIENT reads, and the
+  // client is granted nothing at all on the token table — probing for it would
+  // report a missing grant on a perfectly healthy project.
   Object.freeze({ table: 'calendar_connections', columns: CALENDAR_CONNECTION_COLUMNS }),
 ])
 

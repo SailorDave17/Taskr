@@ -45,35 +45,43 @@ so the database is now on per-member auth. `npm run check:live` read **20 of 20*
 every table, every RPC, and the `provision-member` Edge Function, which was deployed on
 2026-08-20 (#112) with `npm run deploy:function`.
 
-**`0011` was pasted on 2026-08-24**, ahead of its own PR merging, and the paste is **verified over
-the wire** rather than assumed: `calendar_connections` resolves for an authenticated caller with
-exactly the four granted columns and answers `42501 permission denied` to `anon`, which is the grant
-in `0011` doing what it says. `0009` and `0010` are still written and NOT pasted, so the repo is
-**two** migrations ahead of the live project —
-[#127](https://github.com/SailorDave17/Taskr/issues/127) and
-[#37](https://github.com/SailorDave17/Taskr/issues/37). They behave differently under the check, and
-the difference is a property of the migrations rather than of the check:
+**`0009` was pasted on 2026-08-21, `0010` and `0011` on 2026-08-24**, and all three are verified over
+the wire rather than on the strength of a paste having been reported — by two different instruments,
+because one of them cannot see `0009` at all.
+
+`0011`: `calendar_connections` resolves for an authenticated caller with exactly the four granted
+columns and answers `42501 permission denied` to `anon`, which is the grant in `0011` doing what it
+says. `0010`: `chore_exclusions` answers with its four granted columns, and that assertion was **red
+by design until the paste**. Both are `npm run check:live`. `0009` is confirmed by a **different
+instrument**, and the difference is a property of the migrations rather than of the check:
 
 - `0009` changes only two indexes, and `check:live` covers tables, columns, RPCs and Edge Functions
   — so it is **structurally blind to it** and stays green either way. Do not read that green as
-  "the database matches the repo".
-- `0010` creates a table the client reads, so the check **can** see it and is **red on it by
-  design** until the paste — `chore_exclusions`.
+  "the database matches the repo". What confirms it is **`npm run test:rls`**, which cannot even
+  reach its first assertion unless `0009` is applied: `beforeAll` puts one seeded account in two
+  households, which the pre-`0009` global `members_claimed_by_key` forbids. *Measured 2026-08-24:
+  31 of 31, no skips.* **A suite that fails at setup under the old schema is a stronger presence
+  check than any probe** — it cannot pass for the wrong reason.
+- `0010` creates a table the client reads, so the check **can** see it, and it was **red on it by
+  design** from the merge until the paste.
 - `0011` creates **two** tables and the check asks about **one** of them, deliberately.
-  `calendar_connections` is read by the client, so the check sees it and it is **green since the
-  paste**; `calendar_tokens` holds a Google refresh token, the client is granted nothing on it at
-  all, and probing it would report a missing grant on a perfectly healthy project.
+  `calendar_connections` is read by the client, so the check sees it; `calendar_tokens` holds a
+  Google refresh token, the client is granted nothing on it at all, and probing it would report a
+  missing grant on a perfectly healthy project.
 
-**`calendar-connect`, the Edge Function `0011` exists for, is still undeployed**, and that is a
-second red from a different cause: an Edge Function arrives with `npm run deploy:function` and **no
-migration carries it**, so pasting `0011` does not and cannot clear it. *Measured 2026-08-24*: the
-run reads **21 of 23** with exactly **two** expected reds — `chore_exclusions` and
-`calendar-connect`. The denominator moved from 21 to 23 because the check gained two subjects, not
-because anything regressed.
+**`calendar-connect`, the Edge Function `0011` exists for, has been deployed**, and it needed its
+own action: an Edge Function arrives with `npm run deploy:function` and **no migration carries it**,
+so pasting `0011` did not and could not clear it. That red survived the `0011` paste exactly as
+[`docs/access-model.md`](docs/access-model.md) predicted it would, and cleared on the deploy.
 
-Every other red is new and real. [`docs/access-model.md`](docs/access-model.md) carries the excused
-reds in a table with the single condition that clears each, and the history of the five times that
-set has been inverted.
+*Measured 2026-08-24, after both actions*: the run reads **23 of 23**, and the excused-red set is
+**EMPTY** — so **any** red is now real, including a red on `chore_exclusions` or `calendar-connect`,
+which were excused until today and are not any more.
+
+[`docs/access-model.md`](docs/access-model.md) carries the excused-red table — **empty since
+2026-08-24** — and the history of the six times that set has been inverted, which is the record
+worth keeping: an empty set is the state in which the check is worth the most, and every entry
+added to it is a claim that has to be cleared by a named action.
 
 **Production serves per-member auth too, since the same day.** `rebuild/v1` was promoted to `release`
 by [#111](https://github.com/SailorDave17/Taskr/pull/111), and Vercel builds production from
@@ -154,10 +162,10 @@ Other scripts:
 | `npm run preview` | Serve the built `dist/` locally |
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
-| `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
+| `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it. **It is also the only instrument that can confirm `0009`**, and it does so at *setup* rather than in an assertion: `beforeAll` puts one seeded account in two households, which the pre-`0009` global `members_claimed_by_key` forbids, so the suite cannot reach its first assertion against an unmigrated project. *Measured 2026-08-24 at 31 of 31.* It writes to the live project by design and leaves households behind — there is no client-reachable delete — so run it with that in mind |
 | `npm run test:functions` | **The provisioning Edge Function, against a real stack.** `provision-member` only — `calendar-connect`'s decisions are unit-tested in `npm test` with an injected `fetch`, because its subject is what GOOGLE does and there is no local Google to point a stack at. Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
 | `npm run deploy:function` | **Deploy this repo's Edge Functions to the hosted project** — `provision-member` and, since #95, `calendar-connect`. Both by default, because the safe and complete action should be the one with the least typing; `npm run deploy:function -- <name>` narrows it, and an unknown name is refused here rather than handed to the CLI. Owner-only: it needs a Supabase access token (`npx supabase login`, or `SUPABASE_ACCESS_TOKEN`). The project ref is **derived** from `VITE_SUPABASE_URL` rather than written down, because deploying to the wrong project succeeds, prints success, and leaves the app failing exactly as before — there would be nothing to see. Uses `--use-api`, so **no Docker**. `--dry-run` prints the resolved target and deploys nothing. This exists as a script rather than a documented command because the one-line form is ~90 characters and wrapped in a terminal twice on 2026-08-20, running as two commands and silently deploying nothing. Confirm with `npm run check:live` |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function**. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **TWO reds are expected** — `chore_exclusions` until `0010` is pasted, and `calendar-connect` until it is deployed; *measured 2026-08-24 at 21 of 23*. It read 20 of 20 on 2026-08-20, the denominator became 21 on 2026-08-21 when #37 added a table, and 23 on 2026-08-24 when #95 added a table and a function. Any OTHER red is new and real; [`docs/access-model.md`](docs/access-model.md) names each excused red with the single action that clears it, and carries the history of the five times that set has been inverted |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function** — and occasionally when nothing in the repo has changed, because its subject moves without the file. **NO reds are expected**: the excused set is EMPTY as of 2026-08-24, so **any** red is real; *measured 2026-08-24 at 23 of 23*. It read 20 of 20 on 2026-08-20, the denominator became 21 on 2026-08-21 when #37 added a table, and 23 on 2026-08-24 when #95 added a table and a function. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **It is structurally blind to `0009`**, which changes only indexes, so a green run is not evidence that migration was pasted. [`docs/access-model.md`](docs/access-model.md) carries the excused-red table — empty — and the history of the six times that set has been inverted |
 
 ### The two variables you need
 

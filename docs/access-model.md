@@ -70,12 +70,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has TWO expected reds, and both clear on one action: pasting `0012`.**
-  ***Measured 2026-08-24*** against the live project, with #53's lists in the tree: **22 of 24**,
-  exactly the two reds named below and no others — so a red on anything else is real, and a THIRD
-  red on either of these subjects cannot be told apart from the expected one until the paste lands,
-  which is the loan of authority the paragraph below describes and the reason the queue should be
-  drained rather than lived with.
+- **`check:live` has NO expected reds. The set is EMPTY, so ANY red is real.**
+  ***Measured 2026-08-24*** against the live project, after `0012` was pasted that evening:
+  **24 of 24**. The two reds this bullet carried for part of that day — the `chores` repeat columns
+  and `catch_up_repeats()` — cleared on exactly the one action they named, and on nothing else.
+  Nothing is on loan: the check's authority is whole, and a red on any subject is a real failure
+  rather than a queued paste.
 
   **The empty set is the state this whole form exists to reach, and it is the state to defend.**
   While a red is excused, the check's authority is on loan: a genuine failure of the excused subject
@@ -88,8 +88,15 @@
 
   | Red | Cleared by | Anything else? |
   |---|---|---|
-  | `chores exists, with every column the app selects` — the three repeat columns (`repeat_kind`, `repeat_weekdays`, `generated_from`) are not on the live table | pasting `supabase/migrations/0012_repeating_chores.sql` | Nothing else. The table itself is fine; the red is `42703` on columns only `0012` adds. |
-  | `catch_up_repeats() exists, with the arguments the app passes` | pasting the same file — `0012` creates the function | Nothing else. No deploy is involved this time: unlike `0011`, `0012` ships no Edge Function, so ONE paste clears BOTH rows. Until it lands, every app boot also shows the household an error strip naming `catching up repeats` — the failure is visible in the product, not only here. |
+  | *(none — the set is empty)* | — | — |
+
+  **The queue is drained, and that is a state to read rather than skim past.** The two rows that
+  stood here earlier on 2026-08-24 — the `chores` repeat columns and `catch_up_repeats()` — were
+  both cleared by the single paste of `supabase/migrations/0012_repeating_chores.sql` that evening,
+  *measured* at **24 of 24**. They are recorded in the inversion history below rather than left
+  standing here, because **a drained queue nobody re-reads looks exactly like one that never
+  drained**, and an excused row that outlives its condition is the failure this form exists to
+  prevent.
 
   **Both of the rows that stood here on 2026-08-24 cleared on exactly the action they named, and on
   nothing else** — which is the claim this table makes every time, and the reason it is written as a
@@ -123,8 +130,9 @@
   been inverted seven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
-  #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, and now **TWO again
-  at a measured 22 of 24** with #53's `0012` in the repo and unpasted. A THREE was once written here
+  #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
+  at a measured 22 of 24** with #53's `0012` in the repo and unpasted, and now **EMPTY again at a
+  measured 24 of 24**, `0012` having been pasted the same evening. A THREE was once written here
   first, from arithmetic, and never actually existed: the paste that would have cleared its third
   entry had already happened. **A predicted state is not a state**, and the register a count is
   written in — measured or derived — belongs beside it.* The non-empty states are the instructive

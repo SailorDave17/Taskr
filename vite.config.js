@@ -15,6 +15,15 @@ import { assertPublishableKey } from './src/lib/keyShape.js'
 // the build is the only signal available at the point it can still be stopped.
 assertPublishableKey(process.env.VITE_SUPABASE_ANON_KEY, 'the production build')
 
+// #95 — the same guard over the second value a dashboard now holds. A Google
+// OAuth client ID is public by design and belongs in the bundle; its sibling,
+// the client SECRET, is one line away on the same Google console screen and
+// begins `GOCSPX-`. Pasting the wrong one produces a build that WORKS, and
+// publishes a credential that can mint access to every connected calendar.
+// Nothing else in the pipeline would notice — which is the same argument, and
+// the same measured incident shape, as the line above.
+assertPublishableKey(process.env.VITE_GOOGLE_CLIENT_ID, 'the production build')
+
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent
 // rather than added speculatively; see docs/hosting-decision.md.

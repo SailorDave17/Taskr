@@ -297,6 +297,24 @@ body {
   opacity: 0.75;
 }
 
+/* Connecting a Google Calendar — story #95.
+
+   Quiet, for `.member__access`'s reason one line up: once a member is connected
+   the row says so for the rest of the household's life, and a permanent notice
+   drawn at full weight is one people stop seeing. It appears on the signed-in
+   member's own row only, so it is never repeated down the list.
+
+   Displayed as a block so the control drops below this week's minutes rather
+   than competing with them for the same line — at 360px a name, a baseline, the
+   week's figure, a Change button and this do not fit across, and the minutes are
+   the number the screen is for. */
+.member__calendar {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
 /* This week's capacity — story #46.
 
    Sits directly under the baseline rather than replacing it: the override is

@@ -57,6 +57,25 @@ const exclusionsApi = {
   allowMember: vi.fn(),
 }
 
+// #95 — the same treatment again: only the two IMPURE calendar functions are
+// stubbed. `consentUrl`, `readConsentReturn`, `isRealEmailMember`,
+// `connectionFor` and `startConnect` stay real, because they are pure (or, in
+// `startConnect`'s case, pure over an injected `sessionStorage`) and a stub of
+// them could disagree with the scope, the parameters and the discriminator that
+// `calendar.test.js` asserts. `startConnect` staying real is what makes the
+// consent URL these tests read the one the app would actually send somebody to.
+const calendarApi = {
+  listCalendarConnections: vi.fn(),
+  completeConnect: vi.fn(),
+}
+
+// Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
+// at module scope — the same shape as `supabase.js`. Without it `startConnect`
+// refuses (correctly: an unconfigured build cannot build a consent URL) and the
+// AC 3 test below would assert that nothing happened, which is a true statement
+// about a build nobody ships.
+vi.stubEnv('VITE_GOOGLE_CLIENT_ID', '1234567890-placeholder.apps.googleusercontent.com')
+
 vi.mock('./lib/supabase.js', () => ({
   get hasSupabaseConfig() {
     return backend.hasSupabaseConfig
@@ -79,6 +98,11 @@ vi.mock('./lib/capacity.js', async () => {
 vi.mock('./lib/exclusions.js', async () => {
   const actual = await vi.importActual('./lib/exclusions.js')
   return { ...actual, ...exclusionsApi }
+})
+
+vi.mock('./lib/calendar.js', async () => {
+  const actual = await vi.importActual('./lib/calendar.js')
+  return { ...actual, ...calendarApi }
 })
 
 vi.mock('./lib/household.js', async () => {
@@ -105,6 +129,9 @@ beforeEach(() => {
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
   Object.values(exclusionsApi).forEach((fn) => fn.mockReset())
+  Object.values(calendarApi).forEach((fn) => fn.mockReset())
+  calendarApi.listCalendarConnections.mockResolvedValue([])
+  calendarApi.completeConnect.mockResolvedValue({ ok: true })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -830,5 +857,185 @@ describe('exclusions — the write path and the re-read (#37)', () => {
     await renderApp()
     await screen.findByRole('region', { name: /start a household/i })
     expect(exclusionsApi.listExclusions).not.toHaveBeenCalled()
+  })
+})
+
+// #95 — the calendar connection, at the level only App can answer.
+//
+// The component tests cover what the roster DRAWS. These cover the three things
+// that belong to App and that a component test structurally cannot see:
+//
+//   AC 5 — the connections come from the SERVER on load, through the same
+//          refresh as everything else.
+//   AC 6 — Google fails, and the member is told, on an app that still works.
+//   AC 3 — pressing Connect actually leaves for a Google consent URL asking for
+//          the free/busy scope. `startConnect` is left REAL in this file's mock
+//          precisely so this is the URL the app would really send somebody to,
+//          rather than one a stub agreed to.
+describe('connecting a calendar (#95)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+
+  let assign
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /**
+   * Replace `location` and `history` for one test.
+   *
+   * jsdom's own `location.assign` is unimplemented and its `href` is not
+   * writable, so a real navigation would emit a jsdomError rather than doing
+   * anything — and the query string has to be on the URL BEFORE App boots, which
+   * cannot be arranged with the real one either.
+   */
+  const atUrl = (search = '') => {
+    assign = vi.fn()
+    replaceState = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search, assign },
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    globalThis.sessionStorage?.clear?.()
+    atUrl('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  it('AC 5: reads the connections from the server on load and draws them', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([
+      { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.listCalendarConnections).toHaveBeenCalled()
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+  })
+
+  it('AC 3: pressing Connect leaves for Google, asking for free/busy alone', async () => {
+    // End to end through the REAL `startConnect`, so this is the URL a member
+    // would actually be sent to. A stub here would assert that the app calls a
+    // function, which is a fact about this test file.
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(async () =>
+      void fireEvent.click(inRoster().getByRole('button', { name: /connect google calendar/i })),
+    )
+
+    expect(assign).toHaveBeenCalledTimes(1)
+    const url = new URL(assign.mock.calls[0][0])
+    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+    expect(url.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.freebusy')
+    // Built from where the app is running, so a preview and the custom domain
+    // each ask for themselves rather than for a hard-coded host.
+    expect(url.searchParams.get('redirect_uri')).toBe('https://taskr.example.test/')
+  })
+
+  it('completes the exchange when Google sends the member back, then cleans the URL', async () => {
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atUrl('?code=the-code&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    // A spent code must not survive a reload: exchanging it twice is refused by
+    // Google, and that refusal reads as the connection having failed.
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  it('reads the roster AFTER the exchange, or the screen shows the state it just changed', async () => {
+    // The ordering, asserted rather than implied. `refresh()` is what puts
+    // "Calendar connected" on screen, so completing afterwards would leave a
+    // member who has just connected looking at a Connect button.
+    const order = []
+    calendarApi.completeConnect.mockImplementation(async () => {
+      order.push('exchange')
+      return { ok: true }
+    })
+    calendarApi.listCalendarConnections.mockImplementation(async () => {
+      order.push('read')
+      return []
+    })
+    atUrl('?code=the-code&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(order.indexOf('exchange')).toBeLessThan(order.indexOf('read'))
+  })
+
+  it('AC 6: says so when the exchange fails, on an app that still works', async () => {
+    // The failure state AC 6 asks for. "No token row exists" is the Edge
+    // Function's half and is proven in handler.test.js — nothing this side can
+    // observe a table it is granted nothing on.
+    calendarApi.completeConnect.mockRejectedValue(
+      new Error('Google refused the connection: invalid_grant'),
+    )
+    atUrl('?code=spent&state=the-state')
+    await renderApp()
+
+    // Still loaded: a failed connection is not a failed app, and rendering the
+    // boot-failure card here would hide a working household behind one refused
+    // OAuth code.
+    await screen.findByRole('region', { name: /who is in the household/i })
+    // `getAllByRole` rather than `getByRole`: App passes `error` to both the
+    // roster and the chore card, so a single-element query is ambiguous and
+    // fails with a message about the query rather than about the app.
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /invalid_grant/,
+    )
+    expect(replaceState).toHaveBeenCalled()
+  })
+
+  it('AC 6: treats a refusal at Google as a failure state, without calling the function', async () => {
+    // Pressing Cancel comes back as an error parameter with no code at all.
+    // There is nothing to exchange, so the function must not be called — and the
+    // member must still be told something, or a cancel is indistinguishable from
+    // a button that did nothing.
+    atUrl('?error=access_denied&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /was not connected/i,
+    )
+  })
+
+  it('POSITIVE CONTROL: an ordinary load exchanges nothing and shows no complaint', async () => {
+    // Without this, every assertion above is satisfied by an App that calls
+    // `completeConnect` never — and by one that reports an error on every load.
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(screen.queryAllByRole('alert')).toEqual([])
+    expect(replaceState).not.toHaveBeenCalled()
   })
 })

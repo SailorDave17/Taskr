@@ -1,4 +1,4 @@
-// Deploy the provisioning Edge Function — #112.
+// Deploy this repo's Edge Functions — #112, extended by #95 to a list.
 //
 // WHY THIS IS A SCRIPT AND NOT A LINE IN A RUNBOOK
 //
@@ -36,8 +36,41 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** The Edge Function this deploys. One place, matching `LIVE_EDGE_FUNCTIONS`. */
-export const FUNCTION_NAME = 'provision-member'
+/**
+ * The Edge Functions this deploys. One place, matching `LIVE_EDGE_FUNCTIONS`.
+ *
+ * A LIST since #95 added `calendar-connect`, and deploying all of them by
+ * default is the deliberate choice. The alternative — requiring a name — makes
+ * the safe, complete action the one with more typing, and this script exists
+ * because a command with more typing is a command that gets got wrong. Re-
+ * deploying a function that has not changed costs a few seconds and changes
+ * nothing observable, so there is no reason to make somebody choose.
+ *
+ * `npm run deploy:function -- <name>` narrows it when that is genuinely wanted.
+ */
+export const FUNCTION_NAMES = Object.freeze(['provision-member', 'calendar-connect'])
+
+/**
+ * Which functions this invocation should deploy.
+ *
+ * REFUSES an unknown name rather than passing it to the CLI. A typo would
+ * otherwise reach `supabase functions deploy`, which fails with its own message
+ * about a directory — sending somebody to look at the filesystem rather than at
+ * what they typed.
+ */
+export function functionsToDeploy(argv, known = FUNCTION_NAMES) {
+  const named = argv.filter((arg) => !arg.startsWith('-'))
+  if (named.length === 0) return [...known]
+
+  const unknown = named.filter((name) => !known.includes(name))
+  if (unknown.length) {
+    throw new Error(
+      `No such Edge Function in this repo: ${unknown.join(', ')}.\n` +
+        `Known functions: ${known.join(', ')}.`,
+    )
+  }
+  return named
+}
 
 /**
  * `https://abcdefgh.supabase.co` → `abcdefgh`.
@@ -101,33 +134,58 @@ if (isMain) {
     process.exit(1)
   }
 
-  const args = [
+  let names
+  try {
+    names = functionsToDeploy(process.argv.slice(2))
+  } catch (error) {
+    console.error(`\n${error.message}\n`)
+    process.exit(1)
+  }
+
+  const commandFor = (name) => [
     'supabase',
     'functions',
     'deploy',
-    FUNCTION_NAME,
+    name,
     '--project-ref',
     ref,
     '--use-api',
   ]
 
-  console.log(`\nproject : ${ref}   (derived from VITE_SUPABASE_URL)`)
-  console.log(`command : npx ${args.join(' ')}\n`)
+  console.log(`\nproject   : ${ref}   (derived from VITE_SUPABASE_URL)`)
+  console.log(`functions : ${names.join(', ')}`)
+  for (const name of names) console.log(`command   : npx ${commandFor(name).join(' ')}`)
+  console.log('')
 
   if (process.argv.includes('--dry-run')) {
     console.log('--dry-run: nothing was deployed.\n')
     process.exit(0)
   }
 
+  // ONE AT A TIME, and stopping at the first failure rather than carrying on.
+  // The CLI takes a single function name, and a loop that pressed on would end
+  // with a success line under a failure — the shape this script exists to
+  // prevent, since a deploy that did not happen must never read as one that did.
+  //
   // `shell: true` because `npx` on Windows is a .cmd shim, which cannot be
-  // spawned directly. The arguments are not user input — the only variable is a
-  // project ref already matched against a strict pattern above.
-  const child = spawn('npx', args, { stdio: 'inherit', shell: true })
-  child.on('exit', (code) => {
-    if (code === 0) {
+  // spawned directly. The arguments are not user input — the only variables are
+  // a project ref already matched against a strict pattern above and a name
+  // already checked against the list in this file.
+  const deployNext = (remaining) => {
+    if (remaining.length === 0) {
       console.log('\nDeployed. Confirm with:  npm run check:live')
-      console.log('It reads 19 of 20 before this lands and 20 of 20 after.\n')
+      console.log('Every Edge Function line in it goes green only once that name is deployed.\n')
+      process.exit(0)
     }
-    process.exit(code ?? 1)
-  })
+    const [name, ...rest] = remaining
+    const child = spawn('npx', commandFor(name), { stdio: 'inherit', shell: true })
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        console.error(`\nDeploy of ${name} failed (exit ${code}). Stopping.\n`)
+        process.exit(code ?? 1)
+      }
+      deployNext(rest)
+    })
+  }
+  deployNext(names)
 }

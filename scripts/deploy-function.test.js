@@ -1,7 +1,10 @@
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
-  FUNCTION_NAME,
+  FUNCTION_NAMES,
+  functionsToDeploy,
   parseEnvFile,
   projectRefFrom,
   resolveSupabaseUrl,
@@ -87,11 +90,58 @@ describe('the URL is read from the environment first, then .env.local', () => {
   })
 })
 
-describe('the script deploys the function the checks look for', () => {
-  it('names the same function as LIVE_EDGE_FUNCTIONS', () => {
-    // Two lists of one, in two files, and nothing else would notice them
-    // diverging: the deploy would succeed and check:live would go on reporting
-    // the OTHER name as missing, which reads as a failed deploy.
-    expect(LIVE_EDGE_FUNCTIONS).toContain(FUNCTION_NAME)
+describe('the script deploys the functions the checks look for', () => {
+  it('names exactly the same set as LIVE_EDGE_FUNCTIONS, in both directions', () => {
+    // Two lists in two files, and nothing else would notice them diverging: the
+    // deploy would succeed and check:live would go on reporting the OTHER name
+    // as missing, which reads as a failed deploy.
+    //
+    // BOTH directions since #95 made these lists longer than one. `toContain`
+    // was enough while each held a single entry and is not any more: it passes
+    // happily against a script that deploys one of two functions, which is the
+    // more likely mistake now — a name added to `LIVE_EDGE_FUNCTIONS` (where the
+    // check would go red and prompt you) and forgotten here (where nothing
+    // would).
+    expect([...FUNCTION_NAMES].sort()).toEqual([...LIVE_EDGE_FUNCTIONS].sort())
+  })
+
+  it('POSITIVE CONTROL: there is more than one, so the comparison has work to do', () => {
+    // A set equality between two empty arrays passes. This is what stops the
+    // assertion above reading as healthy if either list is emptied.
+    expect(FUNCTION_NAMES.length).toBeGreaterThan(1)
+  })
+
+  it('every named function has a directory the CLI can deploy', () => {
+    // `functions deploy <name>` reads `supabase/functions/<name>/` relative to
+    // the working directory, so a name in the list with no directory behind it
+    // fails at the CLI with a message about a path — after the other deploys
+    // have already happened.
+    for (const name of FUNCTION_NAMES) {
+      const entry = resolve(process.cwd(), 'supabase/functions', name, 'index.ts')
+      expect(existsSync(entry), `no supabase/functions/${name}/index.ts`).toBe(true)
+    }
+  })
+})
+
+describe('which functions an invocation deploys', () => {
+  it('deploys them all when no name is given — the safe action is the short one', () => {
+    expect(functionsToDeploy([])).toEqual([...FUNCTION_NAMES])
+  })
+
+  it('ignores flags, so --dry-run does not read as a function name', () => {
+    // `process.argv.slice(2)` carries the flags too, and `--dry-run` reaching
+    // the name filter would refuse the very invocation that is meant to be safe.
+    expect(functionsToDeploy(['--dry-run'])).toEqual([...FUNCTION_NAMES])
+  })
+
+  it('narrows to a named function', () => {
+    expect(functionsToDeploy(['calendar-connect'])).toEqual(['calendar-connect'])
+  })
+
+  it('refuses a name this repo does not have, rather than handing it to the CLI', () => {
+    // The CLI would fail with its own message about a missing directory, which
+    // sends somebody to look at the filesystem instead of at what they typed.
+    expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/No such Edge Function/)
+    expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/calendar-connect/)
   })
 })

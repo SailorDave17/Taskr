@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { corsHeaders } from '@supabase/supabase-js/cors'
 
@@ -28,21 +28,25 @@ import { corsHeaders } from '@supabase/supabase-js/cors'
 // a spelling check, because it compares two computed sets and fails when the
 // SDK's set grows.
 
-const SOURCE = readFileSync(
-  resolve(process.cwd(), 'supabase/functions/provision-member/index.ts'),
-  'utf8',
-)
-
-/** The `const CORS = { ... }` literal alone, so prose elsewhere cannot read as config. */
-function corsBlock() {
-  const start = SOURCE.indexOf('const CORS = {')
-  expect(start, 'no `const CORS = {` in the Edge Function').toBeGreaterThan(-1)
-  // No nested braces live inside the CORS literal, so the first closing brace
-  // after it is its own.
-  const end = SOURCE.indexOf('}', start)
-  expect(end, 'the CORS literal is not closed').toBeGreaterThan(start)
-  return SOURCE.slice(start, end)
-}
+// EVERY function directory, not one named file — #95.
+//
+// This test was written for `provision-member` and hard-coded its path, which
+// made it a check on one function rather than on the repo. The second function
+// then arrived with its own hand-written CORS list, in a story whose whole
+// subject is a browser calling it, and nothing here would have looked. That is
+// the shape `a-guard-stays-where-the-hazard-was` describes: the guard stays
+// correct, the hazard moves next door, and no test goes red.
+//
+// The list is read off the FILESYSTEM rather than from `LIVE_EDGE_FUNCTIONS`,
+// deliberately. That constant is derived from the app's `invoke` call sites, so
+// a function that is deployed but not yet called from the client would be absent
+// from it and unchecked here — and the subject of this file is a source file's
+// contents, which is a question about what is in the directory.
+const FUNCTIONS_DIR = resolve(process.cwd(), 'supabase/functions')
+const FUNCTION_NAMES = readdirSync(FUNCTIONS_DIR, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort()
 
 function headerList(value) {
   return value
@@ -51,15 +55,55 @@ function headerList(value) {
     .filter(Boolean)
 }
 
+/** The `const CORS = { ... }` literal alone, so prose elsewhere cannot read as config. */
+function corsBlock(source) {
+  const start = source.indexOf('const CORS = {')
+  expect(start, 'no `const CORS = {` in this Edge Function').toBeGreaterThan(-1)
+  // No nested braces live inside the CORS literal, so the first closing brace
+  // after it is its own.
+  const end = source.indexOf('}', start)
+  expect(end, 'the CORS literal is not closed').toBeGreaterThan(start)
+  return source.slice(start, end)
+}
+
 /** The values of one declared CORS key, lowercased and split. */
-function declared(name) {
+function declaredIn(source, name) {
   const pattern = new RegExp("'" + name + "':[^']*'([^']*)'")
-  const match = corsBlock().match(pattern)
+  const match = corsBlock(source).match(pattern)
   return match ? headerList(match[1]) : []
 }
 
-describe('the Edge Function answers a browser preflight from supabase-js', () => {
+describe('every function directory is actually scanned', () => {
+  it('finds more than one, so a hard-coded path cannot have crept back', () => {
+    // Without this the whole suite below passes vacuously against an empty
+    // directory listing — an absence reading as a clean bill of health, which is
+    // the failure this file already guards against one level down.
+    expect(FUNCTION_NAMES.length).toBeGreaterThan(1)
+    expect(FUNCTION_NAMES).toContain('provision-member')
+    expect(FUNCTION_NAMES).toContain('calendar-connect')
+  })
+})
+
+describe.each(FUNCTION_NAMES)('%s answers a browser preflight from supabase-js', (name) => {
   const sdkHeaders = headerList(corsHeaders['Access-Control-Allow-Headers'])
+
+  // The CORS literal lives in `index.ts` for `provision-member` and in
+  // `handler.ts` for `calendar-connect`, whose decisions were split out so they
+  // could be unit-tested without a Deno runtime. Both files are read and joined
+  // rather than one being guessed at, because which file holds it is a property
+  // of how that function is organised and not something this check should have
+  // an opinion about.
+  const SOURCE = ['index.ts', 'handler.ts']
+    .map((file) => {
+      try {
+        return readFileSync(resolve(FUNCTIONS_DIR, name, file), 'utf8')
+      } catch {
+        return ''
+      }
+    })
+    .join('\n')
+
+  const declared = (key) => declaredIn(SOURCE, key)
 
   it('POSITIVE CONTROL: both sides of the comparison are non-empty', () => {
     // Without this the real assertion below is vacuous in two directions: an SDK

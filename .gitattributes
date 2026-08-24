@@ -18,6 +18,17 @@
 *.svg   text eol=lf
 *.sql   text eol=lf
 
+# `.ts` was missing until #95, and the omission is the shape this repo keeps
+# recording: the rule was written when the tree had no TypeScript in it, stayed
+# correct, and its EXTENSION fell behind. *Measured 2026-08-24*:
+# `supabase/functions/provision-member/index.ts` is `i/lf w/crlf` — LF in the
+# repo, CRLF on disk — which is exactly the state the header above says has
+# already cost this workspace an incident. Nothing is broken in the repo, because
+# `core.autocrlf=true` normalises on the way in; what is missing is the half that
+# governs checkout. #95 adds two more `.ts` files, which is what made the gap
+# visible. Beyond that story's acceptance criteria and inert either way.
+*.ts    text eol=lf
+
 # Binary: never touched, never diffed as text.
 *.png   binary
 *.jpg   binary

@@ -1,4 +1,5 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
+import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -45,6 +46,14 @@ export const LIVE_SCHEMA = Object.freeze([
   // meant to cover uncovered. docs/access-model.md carries it as an expected red
   // with the single action that clears it.
   Object.freeze({ table: 'chore_exclusions', columns: EXCLUSION_COLUMNS }),
+  // #95, arriving with `0011` and unpasted at merge — so this entry is red on
+  // purpose until somebody pastes it, for the same reason `chore_exclusions`
+  // above is. Note which of `0011`'s two tables is here: `calendar_tokens` is
+  // NOT, and its absence is the check agreeing with the schema rather than an
+  // omission. This list is what the CLIENT reads, and the client is granted
+  // nothing at all on the token table — probing for it would report a missing
+  // grant on a perfectly healthy project.
+  Object.freeze({ table: 'calendar_connections', columns: CALENDAR_CONNECTION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -193,7 +202,7 @@ export function describeRpcError(fn, args, error) {
  * set - which would pass vacuously. The scan resolves the const and asserts it
  * resolved.
  */
-export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member'])
+export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member', 'calendar-connect'])
 
 /**
  * The headers a browser names in the preflight before `functions.invoke`.

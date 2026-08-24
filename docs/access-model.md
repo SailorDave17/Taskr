@@ -13,32 +13,63 @@
   and `0008` are verified by `npm run check:live`, which read **20 of 20** on 2026-08-20 — every
   table, every RPC, and (since #115) the Edge Function; the rest are verified only by
   the paste succeeding. **The denominator moved to 21 on 2026-08-21** when #37 added
-  `chore_exclusions` to `LIVE_SCHEMA`; see the expected-red bullet below.
-- **`0009` and `0010` are written and NOT applied.** The paste queue is two deep and the order is
-  the file order.
+  `chore_exclusions` to `LIVE_SCHEMA`, **and to 23 on 2026-08-24** when #95 added
+  `calendar_connections` and the `calendar-connect` Edge Function; see the expected-red bullet below.
+- **`0009`, `0010` and `0011` are written and NOT applied.** The paste queue is three deep and the
+  order is the file order.
   - **`0009`** (#127) — until it is pasted the live RLS suite cannot run at all, because
     `create_household` refuses the second household it builds.
   - **`0010`** (#37) — the exclusions table and the two eligibility functions.
-  - **`check:live` is blind to `0009` and NOT blind to `0010`, and the difference is worth knowing
+  - **`0011`** (#95) — `calendar_connections`, which the client reads, and `calendar_tokens`, which
+    it is granted nothing on. **The first credential this schema holds that belongs to somebody
+    else**: a Google refresh token is a bearer credential for a person's calendar and does not
+    expire on its own. It is a separate table rather than a withheld column on purpose — a column
+    grant is a list somebody edits, and adding a column to the wrong `grant select (...)` line is a
+    one-word diff that reads like the twenty others in these files and fails silently. The
+    equivalent mistake here is a whole new grant statement, which is a thing a reader argues with.
+  - **`0011` also needs a DEPLOY, not only a paste**, and it is the only migration on this page that
+    does: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
+    there. Two actions, two expected reds, and neither clears the other's.
+  - **`check:live` is blind to `0009` and NOT blind to `0010` or `0011`, and the difference is worth
+    knowing
     because it is a property of the migrations rather than of the check.** `0009` changes only two
     indexes, and the check covers tables, columns, RPCs and Edge Functions — so it stays green
     either way and its green is *not* evidence that `0009` has been pasted; that paste has to be
     confirmed by running the RLS suite. `0010` creates a TABLE the client reads, so the check can
     see it and is red on it by design until the paste. One migration ahead of the project is
     invisible to the instrument and the other is loud, from the same instrument, on the same day.
+
+    `0011` is a third case and it is **half visible**, which is the sharpest of the three.
+    `calendar_connections` is read by the client, so the check asks about it and is red until the
+    paste. `calendar_tokens` is **deliberately not in `LIVE_SCHEMA`**, and its absence is the check
+    agreeing with the schema rather than an omission: no client is granted anything on that table,
+    so a probe would report a missing grant on a project that is entirely correct — the
+    `household_devices` mistake with the sign flipped. Both tables arrive in one file, so a project
+    with the connection table has run the whole of it. `liveSchema.test.js` asserts the token table
+    is absent from the list rather than leaving that to be inferred, because an entry left out on
+    purpose and one forgotten look identical.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has ONE expected red — `chore_exclusions` — and it clears on the `0010` paste.
-  Every OTHER red is new and real.** ***Measured 2026-08-21*** on #37's branch against the live
-  project: **20 of 21**, one failure, and it is the one this bullet names —
-  `chore_exclusions: table does not exist in the live project [PGRST205]`. Every other table, every
-  RPC and the Edge Function stayed green. It becomes 21 of 21 on the paste.
+- **`check:live` has THREE expected reds — `chore_exclusions`, `calendar_connections` and
+  `calendar-connect` — and each clears on its own single action. Every OTHER red is new and real.**
+  ***Measured 2026-08-21*** on #37's branch against the live project: **20 of 21**, one failure, and
+  it was `chore_exclusions: table does not exist in the live project [PGRST205]`. Every other table,
+  every RPC and the Edge Function stayed green.
 
-  The run is also the evidence for the blindness claimed one bullet up rather than an assertion of
-  it: `0009` is unpasted too, and **nothing went red for it** — twenty green subjects across a
-  project the repo is two migrations ahead of.
+  **#95 has NOT re-run it, and that is stated rather than glossed.** This checkout has no
+  `.env.local`, and `check:live` refuses rather than passing silently when it is unconfigured —
+  which is correct, and means the live-schema half of the gate is **unrun** for this change rather
+  than green. What the numbers below rest on is arithmetic over the lists the check works from
+  (`LIVE_SCHEMA` gained one table, `LIVE_EDGE_FUNCTIONS` gained one function, each contributing one
+  test), and `liveSchema.test.js` is what holds those lists to the code on every push. **20 of 23
+  is therefore a prediction, not a measurement** — the first run against the project is what settles
+  it, and it should be read as evidence about this paragraph as much as about the project.
+
+  The 2026-08-21 run is also the evidence for the blindness claimed one bullet up rather than an
+  assertion of it: `0009` was unpasted too, and **nothing went red for it** — twenty green subjects
+  across a project the repo was two migrations ahead of.
 
   **The set grew because the check stopped being blind to something, not because anything
   regressed** — and that reading has been available before, one bullet down, when #115 first gave
@@ -48,12 +79,22 @@
   instrument falsifies an N-of-N claim with nothing having broken, and updating every copy of that
   claim is part of shipping the widening rather than tidying after it.
 
-  **The one excused red, and the single condition that clears it**, stated in the form this page
-  has used twice before so it cannot quietly become permanent:
+  **The excused reds, and the single condition that clears each**, stated in the form this page has
+  used three times before so they cannot quietly become permanent:
 
   | Red | Cleared by | Anything else? |
   |---|---|---|
   | `chore_exclusions exists, with every column the app selects` | pasting `supabase/migrations/0010_chore_exclusions.sql` | No. Nothing else touches it. |
+  | `calendar_connections exists, with every column the app selects` | pasting `supabase/migrations/0011_calendar_connection.sql` | No. Nothing else touches it. |
+  | `calendar-connect is deployed, and a browser could actually call it` | `npm run deploy:function` | No — and in particular **the `0011` paste does not clear it**. A migration and a deploy are different actions against different systems, which is the whole reason `LIVE_EDGE_FUNCTIONS` is a separate list. |
+
+  **Three excused reds is the most this page has ever carried, and that is the number to be
+  uncomfortable with rather than the individual entries.** Each one is named, each has exactly one
+  clearing action, and none of them can hide inside another because each has its own test — but a
+  list this long is one step from the state this whole form exists to prevent, where a genuine
+  failure gets waved through because a red was expected. Two of the three clear on owner-only
+  actions that are one sitting's work; if they are still here in a week, the question to ask is why
+  the paste queue is three deep rather than how to word the fourth row.
 
   The two eligibility functions `0010` creates are deliberately **not** probed, and their absence
   from the check is not a gap: `0010` withholds `execute` from `authenticated`, so a probe would
@@ -61,7 +102,7 @@
   with the sign flipped. They arrive in the same paste as the table, so a project with the table has
   run the whole file.
 
-  *Previously — and this bullet has now been inverted four times:* **GREEN at 20 of 20, the
+  *Previously — and this bullet has now been inverted five times:* **GREEN at 20 of 20, the
   expected-red set EMPTY, therefore ANY red real.** *Measured 2026-08-20*, immediately after
   `npm run deploy:function`: the `provision-member` Edge Function answers a browser preflight with
   `200` and every header supabase-js sends. The entry below cleared on exactly the action it named
@@ -76,16 +117,17 @@
 
   *The history of this bullet, which is the argument for keeping it in this form: EMPTY at 17 of 17,
   then ONE expected red at 19 of 20 when #115 gave the check its first sight of Edge Functions, then
-  EMPTY again at 20 of 20, and now ONE again at 20 of 21 with #37's unpasted table.* The non-empty
+  EMPTY again at 20 of 20, then ONE again at 20 of 21 with #37's unpasted table, and now THREE at a
+  predicted 20 of 23 with #95's unpasted table and undeployed function.* The non-empty
   states are the instructive ones. The set did not grow because anything regressed — it grew
   because the check stopped being **blind** to something already broken, which is the outcome a new
   check is supposed to have, and reading it as a regression would have been mistaking the
   instrument for the fault.
 
-  **The hazard this form names is restated rather than dropped, for the fourth time.** An authority
+  **The hazard this form names is restated rather than dropped, for the fifth time.** An authority
   that is red by design and does not say so is one whose *next* genuine failure gets waved through —
-  the exact way a real outage hid in plain sight on 2026-08-09. This page excuses **exactly one**
-  red, it is named in the table above with the one action that clears it, and everything else is
+  the exact way a real outage hid in plain sight on 2026-08-09. This page excuses **exactly three**
+  reds, each named in the table above with the one action that clears it, and everything else is
   new, real, and to be investigated rather than matched against a list. Each subject still has its
   own named test, so they cannot hide inside one another.
 
@@ -94,6 +136,11 @@
   the excused red — which is the failure mode of a correction that fixes the sentence about the
   subject and stops there. The repair is the one that costs nothing: after editing prose that
   states a value, grep the same file for the value.*
+
+  *It said "exactly **one**" until 2026-08-24, and #95 found it by running exactly that repair —
+  grepping this file for the value rather than for the subject. The count sat four screens below the
+  bullet it belongs to, in a paragraph whose own subject is how a stale count gets waved through.
+  Twice now the sentence about the hazard has been the thing carrying it.*
 - **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
   Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
   organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since

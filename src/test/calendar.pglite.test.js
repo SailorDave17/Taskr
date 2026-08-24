@@ -7,9 +7,10 @@
 //
 // What a pass means: "consistent with Postgres, given the Supabase-shaped
 // environment stubbed in support/pgliteSupabase.js". Not "Supabase will accept
-// this" — `0011` has to be pasted, and until it is `npm run check:live` is red
-// on `calendar_connections` by design. docs/access-model.md carries that as an
-// expected red with the action that clears it.
+// this" — a green run here says nothing whatever about the hosted project,
+// because this harness BUILDS the schema it certifies. `0011` was pasted on
+// 2026-08-24 and `npm run check:live` was red on `calendar_connections` by
+// design until it was; that check, not this file, is the authority on live state.
 //
 // ===========================================================================
 // #95 AC 2 SAYS THE HARNESS CANNOT PROVE GRANTS. IT CAN PROVE THE HALF THAT

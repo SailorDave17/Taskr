@@ -16,16 +16,18 @@
   denominator moved from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`,
   and to 23 on 2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge
   Function.
-- **The last three pastes all landed on 2026-08-24, and the evidence for them is not the same
-  strength.** `0011` went in first, out of file order and ahead of its own PR merging — which is
-  allowed and is worth noting rather than tidying away. Nothing in `0011` depends on `0009` or
-  `0010`; it references `households` and `members`, both of which predate all three.
+- **`0009` landed on 2026-08-21 and `0010` and `0011` on 2026-08-24, and all three are verified over
+  the wire — but not by the same instrument, and that is the thing to carry.** `0011` went in first
+  of its pair, out of file order and ahead of its own PR merging, which is allowed and is worth
+  noting rather than tidying away. Nothing in `0011` depends on `0009` or `0010`; it references
+  `households` and `members`, both of which predate all three.
   - **`0009`** (#127) — the two indexes that made membership per-database rather than per-household.
-    **Pasted 2026-08-24, owner-asserted rather than measured**, and no instrument in this repo can
-    settle it either way: see the blindness bullet below. It is `drop index if exists` +
-    `create unique index if not exists` over strictly weaker indexes, so a re-paste is a safe no-op
-    and is the cheapest way to make it certain again. Running the live RLS suite is the other way,
-    and the stronger one, because it fails at setup when these indexes are still global.
+    **Pasted 2026-08-21, confirmed by `npm run test:rls`** and by nothing else, because `check:live`
+    cannot see an index: see the blindness bullet below. That suite cannot reach its first assertion
+    unless `0009` is applied — `beforeAll` puts one seeded account in two households, which the
+    pre-`0009` global `members_claimed_by_key` forbids, and that is exactly how #127 was found.
+    *Re-measured 2026-08-24: 31 of 31, no skips.* **A suite that fails at setup under the old schema
+    is a stronger presence check than any probe**, because it cannot pass for the wrong reason.
   - **`0010`** (#37) — the exclusions table and the two eligibility functions. **Pasted 2026-08-24,
     verified over the wire**: `chore_exclusions` answers with exactly its four granted columns, and
     that assertion had been red by design from the merge until the paste.
@@ -46,11 +48,13 @@
     because it is a property of the migrations rather than of the check.** `0009` changes only two
     indexes, and the check covers tables, columns, RPCs and Edge Functions — so it stays green
     either way and its green is *not* evidence that `0009` has been pasted. **That is not a stale
-    warning now that the paste has happened — it is the reason the paste above is recorded as
-    owner-asserted**: the green read the same on both sides of it. Confirming it takes the RLS
-    suite, or a re-paste. `0010` creates a TABLE the client reads, so the check could see it and
-    was red on it by design until the paste. One migration ahead of the project was invisible to the
-    instrument and the other was loud, from the same instrument, on the same day.
+    warning now that the paste has happened — it is the reason `0009` is confirmed by a different
+    instrument entirely**: this check's green read the same on both sides of that paste, so it
+    carries no information about it in either direction. `npm run test:rls` is what settles it, and
+    it settles it at setup rather than in an assertion. `0010` creates a TABLE the client reads, so
+    the check could see it and was red on it by design until the paste. One migration ahead of the
+    project was invisible to the instrument and the other was loud, from the same instrument, on the
+    same day.
 
     `0011` is a third case and it is **half visible**, which is the sharpest of the three.
     `calendar_connections` is read by the client, so the check asks about it and was red until the
@@ -107,9 +111,10 @@
   **`0009` is the one migration this bullet cannot speak for at all**, and it is worth stating here
   rather than only four bullets up, because an empty excused-red set is easy to read as *the
   database matches the repo* and it does not mean that. The check covers tables, columns, RPCs and
-  Edge Functions; `0009` is two indexes. Its paste is owner-asserted for 2026-08-24 and no
-  instrument here can confirm or refute it. **An empty excused-red set is a claim about the subjects
-  the instrument has**, never about the ones it does not.
+  Edge Functions; `0009` is two indexes, so this bullet would read exactly the same whether that
+  migration had been pasted or not. It has been — `npm run test:rls` confirms it, at setup — but the
+  confirmation comes from somewhere else entirely. **An empty excused-red set is a claim about the
+  subjects the instrument has**, never about the ones it does not.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
   been inverted six times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the

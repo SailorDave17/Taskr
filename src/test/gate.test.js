@@ -1055,3 +1055,67 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
     expect(CAPABILITY_VOCABULARY.test('who can do what, at a glance')).toBe(true)
   })
 })
+
+// #53 — a pglite suite that inherits vitest's 5000ms default testTimeout is a CI
+// failure waiting for a slow runner, and it will not look like one.
+//
+// This is the durable half of that fix. Setting the timeout in the eight files
+// that exist today is a sweep; a sweep is finished the moment somebody adds a
+// ninth. A new pglite file is exactly the file most likely to be heavy, and it
+// would inherit a limit its author never chose and never saw.
+//
+// Same shape as every other guard here: the property is about the ground the
+// tests stand on, and no behavioural test can see it — a suite that times out
+// on the runner passes perfectly on the machine that wrote it.
+describe('every pglite suite chooses its own testTimeout', () => {
+  // Untracked files included, for the reason the #19 corpus above carries: the
+  // file being added right now is the one this needs to see, and `git ls-files`
+  // alone would not show it until it was staged.
+  const pglite = execSync('git ls-files -z --cached --others --exclude-standard', {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter((path) => /^src\/test\/.*\.pglite\.test\.js$/.test(path))
+
+  // Anchored at column 0 with the multiline flag, so a sentence ABOUT the call
+  // cannot satisfy it — every comment line in these files begins with `//`, and
+  // the explanatory paragraph above each of these calls quotes the option name.
+  const DECLARES = /^vi\.setConfig\(\{[^}]*testTimeout:\s*([0-9_]+)/m
+
+  it('POSITIVE CONTROL: there are pglite suites to check, so an empty pass is impossible', () => {
+    expect(pglite.length).toBeGreaterThan(0)
+    expect(pglite).toContain('src/test/repeats.pglite.test.js')
+  })
+
+  it('every one declares a timeout, so none inherits a limit its author never chose', () => {
+    const missing = pglite.filter(
+      (path) => !DECLARES.test(readFileSync(resolve(process.cwd(), path), 'utf8')),
+    )
+    expect(missing, `pglite suites with no testTimeout of their own: ${missing.join(', ')}`).toEqual(
+      [],
+    )
+  })
+
+  it('and the declared value clears the worst time actually measured on the runner', () => {
+    // A floor, not an equality, and derived rather than mirrored: the heaviest
+    // case was observed at 8107ms on ubuntu-latest, so a declaration under ~20s
+    // is not headroom on a loaded runner — it is the same defect with a larger
+    // number. Asserting equality here would just be a second copy of the value.
+    const FLOOR_MS = 20_000
+    const short = pglite
+      .map((path) => [path, readFileSync(resolve(process.cwd(), path), 'utf8').match(DECLARES)])
+      .filter(([, match]) => match && Number(match[1].replace(/_/g, '')) < FLOOR_MS)
+      .map(([path, match]) => `${path} (${match[1]})`)
+    expect(short, `pglite timeouts below the ${FLOOR_MS}ms floor: ${short.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the pattern reads a real declaration and refuses a comment about one', () => {
+    // Both directions, because a pattern that matches nothing and a pattern that
+    // matches everything produce the same green here.
+    expect(DECLARES.test('vi.setConfig({ testTimeout: 30_000 })')).toBe(true)
+    expect('vi.setConfig({ testTimeout: 30_000 })'.match(DECLARES)[1]).toBe('30_000')
+    expect(DECLARES.test('// we could vi.setConfig({ testTimeout: 30_000 }) here')).toBe(false)
+  })
+})

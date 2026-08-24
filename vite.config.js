@@ -104,6 +104,21 @@ export default defineConfig({
     // that actually gates the branch — the same defect shape as a suite with
     // zero tests in it, which is why the pin sits beside passWithNoTests and is
     // asserted by src/test/gate.test.js rather than left to trust.
-    env: { TZ: 'America/New_York' },
+    //
+    // Marquesas rather than America/New_York since #75, for three properties at
+    // once. It is BEHIND UTC, which is the side of UTC where the local-getter
+    // fault shows at all — the issue floated Pacific/Chatham (+12:45), and
+    // measured, UTC midnight in Chatham is 12:45 the SAME day, so the very bug
+    // this pin exists to expose is invisible there. It is 30 minutes off the
+    // hour, which whole-hour zones cannot check. And no developer machine is
+    // plausibly in it, which is the #75 fix itself: the positive control in
+    // gate.test.js compares the process zone against this value, and that
+    // comparison only discriminates when the machine's own zone is something
+    // else. America/New_York was the one zone guaranteed to defeat it here.
+    //
+    // Measured 2026-08-24 (#75): the same normalizeDueDate mutation under this
+    // pin reddens 5 tests (the suite has grown since #34) and the same run
+    // under TZ=UTC still reddens ZERO — the bar the zone change had to clear.
+    env: { TZ: 'Pacific/Marquesas' },
   },
 })

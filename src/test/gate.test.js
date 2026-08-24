@@ -434,10 +434,28 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     })
   }
 
-  // The two spellings that matter: the env var the function reads, and the
-  // prefix of a modern secret key. Legacy JWT secret keys are covered by
-  // keyShape.js at build time, which reads the role claim rather than a prefix.
-  const FORBIDDEN = [/SUPABASE_SERVICE_ROLE_KEY/, /sb_secret_/]
+  // The spellings that matter: the env vars a function reads, and the prefixes
+  // of a modern secret. Legacy JWT secret keys are covered by keyShape.js at
+  // build time, which reads the role claim rather than a prefix.
+  //
+  // The Google pair arrives with #95, and the second Edge Function is why the
+  // list had to grow rather than stay put. `GOOGLE_CLIENT_SECRET` is the name
+  // `calendar-connect` reads from its environment; `GOCSPX-` is the prefix of
+  // the value, and it is here because a NAME is only forbidden where somebody
+  // remembers to use one — a value pasted straight into a `VITE_` line has no
+  // name attached to it at all.
+  //
+  // Note what this does NOT cover, deliberately: a Google refresh token
+  // (`1//…`). It is guarded by `keyShape.js`, which is the right place, and a
+  // two-character prefix is too weak to grep source with — it would match a
+  // protocol-relative URL and a comment about integer division. A guard that
+  // cries wolf gets run with --no-verify.
+  const FORBIDDEN = [
+    /SUPABASE_SERVICE_ROLE_KEY/,
+    /sb_secret_/,
+    /GOOGLE_CLIENT_SECRET/,
+    /GOCSPX-/,
+  ]
 
   // A guard whose subject is SOURCE TEXT cannot tell the hazard from prose
   // about the hazard, so it refuses the very code written to detect it. Measured
@@ -507,6 +525,25 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
       'utf8',
     )
     expect(fn).toMatch(/SUPABASE_SERVICE_ROLE_KEY/)
+  })
+
+  it('POSITIVE CONTROL: every pattern matches something, so none is a dead entry', () => {
+    // #95 doubled the list, and a pattern that matches nothing anywhere is
+    // indistinguishable from one that is working — the scan comes back clean
+    // either way. So each is exercised against a file OUTSIDE `src/` that
+    // genuinely carries it: `calendar-connect` reads the Google secret from its
+    // environment, and its own test plants a `GOCSPX-` fixture. A typo in any of
+    // the four reddens here rather than going quiet in the scan above.
+    const outsideSrc = [
+      'supabase/functions/provision-member/index.ts',
+      'supabase/functions/calendar-connect/handler.ts',
+      'supabase/functions/calendar-connect/handler.test.js',
+    ]
+      .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+      .join('\n')
+
+    const dead = FORBIDDEN.filter((pattern) => !pattern.test(outsideSrc))
+    expect(dead, `these patterns match nothing at all: ${dead.join(', ')}`).toEqual([])
   })
 
   it('the Edge Function is outside src/, so the bundler cannot follow an import', () => {

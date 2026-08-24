@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -88,11 +89,12 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // FIVE since #37 added `chore_exclusions` — four after #62 dropped
-    // `household_devices`. The number is a floor against a vacuous pass, not a
-    // target: it goes DOWN when a table legitimately leaves and UP when one
-    // arrives, and either edit should be visible in review rather than automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(5)
+    // SIX since #95 added `calendar_connections` — five after #37's
+    // `chore_exclusions`, four after #62 dropped `household_devices`. The number
+    // is a floor against a vacuous pass, not a target: it goes DOWN when a table
+    // legitimately leaves and UP when one arrives, and either edit should be
+    // visible in review rather than automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(6)
     expect(readTables).toContain('chores')
   })
 
@@ -112,21 +114,31 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the five tables the app still reads', () => {
+  it('covers the six tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
-    // set went to four and is back at five with #37's `chore_exclusions` — a
-    // different fifth. Both edits are stated, because a required-set that
-    // changes size silently is exactly how somebody quietly weakens a check.
+    // set went to four, back to five with #37's `chore_exclusions` — a different
+    // fifth — and to six with #95's `calendar_connections`. Every edit is
+    // stated, because a required-set that changes size silently is exactly how
+    // somebody quietly weakens a check.
     for (const table of [
       'households',
       'members',
       'chores',
       'member_capacity',
       'chore_exclusions',
+      'calendar_connections',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
     expect(LIVE_TABLES).not.toContain('household_devices')
+
+    // `0011` creates TWO tables and only one is here. The other holds the
+    // refresh token and the client is granted nothing on it, so probing it would
+    // report a missing grant on a perfectly healthy project — the
+    // `household_devices` mistake with the sign flipped. Asserted rather than
+    // left as an omission, because an absent entry and a forgotten one look
+    // identical.
+    expect(LIVE_TABLES).not.toContain('calendar_tokens')
   })
 
   it('takes its column lists from the data layer rather than restating them', () => {
@@ -138,6 +150,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.member_capacity).toBe(CAPACITY_COLUMNS)
     expect(byTable.members).toBe(MEMBER_COLUMNS)
     expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
+    expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -147,10 +160,12 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     const capacity = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     const household = readFileSync(resolve(process.cwd(), 'src/lib/household.js'), 'utf8')
     const exclusions = readFileSync(resolve(process.cwd(), 'src/lib/exclusions.js'), 'utf8')
+    const calendar = readFileSync(resolve(process.cwd(), 'src/lib/calendar.js'), 'utf8')
     expect(chores).toContain('.select(CHORE_COLUMNS)')
     expect(capacity).toContain('.select(CAPACITY_COLUMNS)')
     expect(household).toContain('.select(MEMBER_COLUMNS)')
     expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
+    expect(calendar).toContain('.select(CALENDAR_CONNECTION_COLUMNS)')
   })
 })
 

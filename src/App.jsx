@@ -35,6 +35,12 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import {
+  completeConnect,
+  listCalendarConnections,
+  readConsentReturn,
+  startConnect,
+} from './lib/calendar.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -71,6 +77,11 @@ export default function App() {
   // over the rows where it needs them, so there is one representation and no
   // second copy to fall out of step with the first.
   const [exclusions, setExclusions] = useState([])
+  // #95 — who in this household has connected a Google Calendar. Server state
+  // like everything else here, read through the same refresh. The rows carry no
+  // credential: the refresh token is in `calendar_tokens`, which this client is
+  // granted nothing on, so there is no version of this read that could leak one.
+  const [connections, setConnections] = useState([])
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -100,6 +111,12 @@ export default function App() {
     // another phone recorded is on this screen after the next mutation for the
     // same reason the roster is: there is no cache to be stale.
     setExclusions(found ? await listExclusions() : [])
+    // #95 AC 5 — "Calendar connected" is derived from a SERVER read on every
+    // refresh, exactly like the roster. A locally remembered flag would show
+    // connected on the phone that pressed the button and nothing on the phone
+    // that reloads, which is the shape of "it worked for me" that this app's
+    // whole read-through-the-server discipline exists to avoid.
+    setConnections(found ? await listCalendarConnections() : [])
     setUserId(await currentUserId())
     return found
   }, [])
@@ -132,8 +149,49 @@ export default function App() {
           if (!cancelled) setStatus('onboarding')
           return
         }
+
+        // #95 — Google sends the member back to the app ROOT with `?code=`, so
+        // the return is an ordinary boot that happens to carry two query
+        // parameters. There is no router here and the PWA scope is `/`; a
+        // dedicated path would need a rewrite rule at Vercel and would behave
+        // identically once it got here (owner decision at pickup).
+        //
+        // Handled BEFORE the read, and the ordering is the point: `refresh()`
+        // is what puts "Calendar connected" on the screen, so completing the
+        // exchange afterwards would leave the member looking at the state they
+        // just changed. It is also why the URL is stripped here rather than in
+        // a later effect — a reload holding a spent code would ask Google to
+        // exchange it twice and be refused, which reads as the connection
+        // having failed.
+        const consent = readConsentReturn(globalThis.location?.search)
+        let consentComplaint = null
+        if (consent) {
+          try {
+            if (consent.error) {
+              // Google's own word for it. `access_denied` is the member
+              // pressing Cancel, which is not a fault and must not be reported
+              // as one — but it does have to say SOMETHING, or a cancel looks
+              // exactly like a button that does nothing.
+              throw new Error(
+                consent.error === 'access_denied'
+                  ? 'That calendar was not connected — Google was told no.'
+                  : `Google could not complete that connection: ${consent.error}`,
+              )
+            }
+            await completeConnect(consent)
+          } catch (err) {
+            consentComplaint = err.message
+          }
+          // Whatever happened, the code is spent and must not survive a reload.
+          const { pathname } = globalThis.location
+          globalThis.history?.replaceState?.(null, '', pathname)
+        }
+
         const found = await refresh()
-        if (!cancelled) setStatus(found ? 'joined' : 'onboarding')
+        if (!cancelled) {
+          setStatus(found ? 'joined' : 'onboarding')
+          if (consentComplaint) setError(consentComplaint)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err.message)
@@ -221,6 +279,27 @@ export default function App() {
     [mutate],
   )
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+  // #95 — begin a calendar connection. Deliberately NOT routed through
+  // `mutate()`, unlike every other action on this screen, and the difference is
+  // real rather than an oversight: nothing is written here. The browser leaves
+  // for Google, and the write happens in the Edge Function when it comes back —
+  // so a `mutate()` would set `busy`, re-read the server and clear it, all
+  // describing a change that has not happened yet.
+  //
+  // The failure it CAN have is a build with no `VITE_GOOGLE_CLIENT_ID`, and that
+  // is why the action is offered rather than hidden: a member who is shown
+  // nothing has no way to discover that the household's app is missing a
+  // setting, whereas one who presses it reads the sentence that names the
+  // variable. #95 AC 1 requires the action to be shown to a real-email member,
+  // and says nothing about the app being configured.
+  const handleConnectCalendar = useCallback(() => {
+    setError(null)
+    try {
+      globalThis.location.assign(startConnect())
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.
@@ -380,6 +459,8 @@ export default function App() {
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}
           onClearCapacity={handleClearCapacity}
+          connections={connections}
+          onConnectCalendar={handleConnectCalendar}
         />
       ) : null}
 

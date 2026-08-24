@@ -7,6 +7,7 @@ import {
   effectiveCapacity,
   normalizeCapacityMinutes,
 } from '../lib/capacity.js'
+import { connectionFor, isRealEmailMember } from '../lib/calendar.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
 // change is what every other device shows on next load) and the "pick yourself"
@@ -163,6 +164,58 @@ CapacityControl.propTypes = {
 }
 
 /**
+ * Connect a Google Calendar, or say that one is connected — #95 AC 1 and AC 5.
+ *
+ * WHO SEES IT, WHICH IS THE WHOLE OF AC 1
+ *
+ * Only the signed-in member's OWN row, and only when that member has a real
+ * email address. Both halves matter and they fail differently:
+ *
+ * - Somebody else's row would offer to connect a calendar the person holding the
+ *   phone cannot consent to. Google would sign THEM in and attach THEIR calendar
+ *   to a housemate's roster entry, which is a wrong answer that looks like a
+ *   right one all the way to the end.
+ * - A PIN member — `members.email` null, the discriminator `0007` established —
+ *   has no Google identity to consent with. There is no version of this that
+ *   could work for them, so the control is ABSENT rather than disabled: a
+ *   disabled button is a promise the app cannot keep, and it invites a household
+ *   to go looking for the setting that would enable it.
+ *
+ * The Edge Function refuses a PIN member as well, and that refusal is the real
+ * boundary. This is manners — the same relationship `SignInControl` has to the
+ * organizer check below it.
+ *
+ * Connected state is read from the SERVER (`calendar_connections`, through
+ * App's refresh), never remembered locally, so a second phone shows it too.
+ */
+function CalendarControl({ member, connection, busy, onConnect }) {
+  if (!isRealEmailMember(member)) return null
+
+  if (connection) {
+    return (
+      <span className="member__calendar" data-testid={`calendar-${member.id}`}>
+        Calendar connected
+      </span>
+    )
+  }
+
+  return (
+    <span className="member__calendar" data-testid={`calendar-${member.id}`}>
+      <button className="button button--quiet" type="button" onClick={onConnect} disabled={busy}>
+        Connect Google Calendar
+      </button>
+    </span>
+  )
+}
+
+CalendarControl.propTypes = {
+  member: PropTypes.object.isRequired,
+  connection: PropTypes.object,
+  busy: PropTypes.bool,
+  onConnect: PropTypes.func.isRequired,
+}
+
+/**
  * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6.
  *
  * Organizer-only, because the Edge Function refuses anybody else and a control
@@ -291,6 +344,8 @@ function MemberRow({
   onProvision,
   onSetCapacity,
   onClearCapacity,
+  connection,
+  onConnectCalendar,
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
@@ -392,6 +447,20 @@ function MemberRow({
           onSet={onSetCapacity}
           onClear={onClearCapacity}
         />
+        {/* #95 — the calendar sits directly under this week's minutes, because
+            that is the number it exists to inform (#96 turns the connection into
+            a suggested busy figure here). Own row only, and only for a member
+            who has an address to consent with; the control returns null
+            otherwise, so a PIN member's row is unchanged rather than showing a
+            disabled affordance. */}
+        {isMe && onConnectCalendar ? (
+          <CalendarControl
+            member={member}
+            connection={connection}
+            busy={busy}
+            onConnect={onConnectCalendar}
+          />
+        ) : null}
       </div>
 
       <div className="row row--end row--actions">
@@ -457,6 +526,8 @@ MemberRow.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  connection: PropTypes.object,
+  onConnectCalendar: PropTypes.func,
 }
 
 // `ShareCode` stood here until #62 — a button that copied or sent the household's
@@ -488,6 +559,8 @@ export default function Roster({
   periodStart = null,
   onSetCapacity,
   onClearCapacity,
+  connections = [],
+  onConnectCalendar,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -592,6 +665,14 @@ export default function Roster({
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
+                // #95 — resolved through `connectionFor` rather than by a local
+                // `find`, so the roster and any later consumer agree on what
+                // "connected" means by construction. The unique constraint in
+                // `0011` is what makes at most one row exact rather than a
+                // first-match approximation, the same argument as `overrideFor`
+                // above.
+                connection={connectionFor(connections, member.id)}
+                onConnectCalendar={onConnectCalendar}
               />
             ))}
           </ul>
@@ -676,4 +757,6 @@ Roster.propTypes = {
   periodStart: PropTypes.string,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  connections: PropTypes.array,
+  onConnectCalendar: PropTypes.func,
 }

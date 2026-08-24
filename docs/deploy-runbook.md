@@ -173,6 +173,11 @@ persists anything.
 4. In Vercel → Project Settings → Environment Variables, add:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_GOOGLE_CLIENT_ID` — **since #95, and only once section 3b has produced one.** The client
+     **ID**, which ends `.apps.googleusercontent.com`. Its sibling the client secret begins
+     `GOCSPX-` and must never go here or in any other `VITE_` variable; the build refuses if it
+     sees one, and the refusal names the Google console. Without this variable the app runs and the
+     Connect button says so, which is a deliberate state — see 3b.
 
    Only `VITE_`-prefixed variables reach the browser bundle, which is deliberate — anything without
    the prefix stays server-side and is therefore useless to a static SPA. Do not work around that by
@@ -194,11 +199,17 @@ persists anything.
 5. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
 
-## 3. The provisioning Edge Function
+## 3. The Edge Functions
+
+**Two of them since #95** — `provision-member` and `calendar-connect`. `npm run deploy:function`
+deploys both; `npm run deploy:function -- <name>` narrows it to one, and a name this repo does not
+have is refused by the script rather than handed to the CLI, which would fail with a message about a
+directory and send you to look at the filesystem instead of at what you typed.
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
-and touches nothing here. Until this has run, an organizer who tries to give somebody a sign-in gets a
-failure, and nobody but the organizer can sign in at all.
+and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
+sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
+the Connect Google Calendar button on the capacity screen fails when it is pressed.
 
 **Every command takes the `npx` prefix, and must run from the repo root.** Both halves of that cost a
 round trip on 2026-08-20 and neither is guessable:
@@ -213,7 +224,15 @@ round trip on 2026-08-20 and neither is guessable:
 ```
 cd <the repo>
 npx supabase login
-npx supabase functions deploy provision-member --project-ref <project ref> --use-api
+npm run deploy:function
+```
+
+That script is the supported form and it is what the rest of this section describes; the raw command
+it runs, per function, is below because the flags are worth understanding rather than because you
+should type them.
+
+```
+npx supabase functions deploy <name> --project-ref <project ref> --use-api
 ```
 
 Two flags remove two steps that can go wrong. `--project-ref` on the deploy makes a separate
@@ -233,9 +252,16 @@ export SUPABASE_ACCESS_TOKEN=<token>       POSIX shell
 That is session-scoped, and belongs in no file: a token that can deploy to the project is a
 credential, and `.env.local` is for values the browser is allowed to see.
 
-The function reads its own secrets from the platform - Supabase injects the project URL, the anon key
-and the service-role credential into every function - so there is nothing else to set by hand and
-nothing that could end up in git.
+`provision-member` reads its own secrets from the platform - Supabase injects the project URL, the
+anon key and the service-role credential into every function - so there is nothing to set by hand for
+it and nothing that could end up in git.
+
+**That sentence used to say "the function", full stop, and #95 made it false.** `calendar-connect`
+needs two secrets Supabase does not inject, because they belong to Google rather than to this
+project: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Section 3b is where they come from, and the
+function refuses by name when they are missing rather than saying a bare "not configured" — because
+the three Supabase ones are always there, so an unqualified message would send you to check the
+wrong half.
 
 **Then prove it, because from the app's side the failure is silent and ambiguous.** A deploy that never
 happened, and one that went to a different project, leave the app failing in exactly the same way:
@@ -273,6 +299,58 @@ answers *is a function there and callable* and not *is this the build you just p
 timestamp in the dashboard for that. And the count is deliberately not written here: it moves
 whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
 defect `check:live` exists to catch, one level up.
+
+## 3b. The Google OAuth client, for the calendar connection
+
+Owner-only, and **the one step that cannot be done from a session** — it needs a Google account and a
+Google Cloud project. Until it has run, the Connect Google Calendar button on the capacity screen
+reaches an Edge Function that refuses with *"This function is not configured: GOOGLE_CLIENT_ID,
+GOOGLE_CLIENT_SECRET are not set."* Naming them is deliberate: Supabase injects its own three secrets
+into every function, so a bare "not configured" would send you to check the wrong ones.
+
+1. In [console.cloud.google.com](https://console.cloud.google.com), create a project (or reuse one)
+   and enable the **Google Calendar API**.
+2. Configure the OAuth consent screen. **External**, and it may stay in *Testing* — a household is
+   under the 100-user test-user cap, so there is no verification review to sit through. Add each
+   member who will connect a calendar as a test user; a member who is not listed is refused by
+   Google with a message about the app not being verified.
+3. Create an **OAuth 2.0 Client ID**, type **Web application**, and add both of these as
+   **Authorized redirect URIs** — exactly, with the trailing slash:
+   - `https://taskr.madcowhq.com/`
+   - `https://taskr-khaki.vercel.app/`
+
+   The app builds its redirect address from `location.origin`, so whichever host the member opened
+   is the one Google is asked about. A host that is not on this list is refused **by Google**, on a
+   page naming the address, which is the loud failure worth having.
+4. Copy the two values, and keep them apart — this is the step the build guard exists for:
+
+   | Value | Looks like | Where it goes |
+   |---|---|---|
+   | Client **ID** | `…apps.googleusercontent.com` | Vercel, as `VITE_GOOGLE_CLIENT_ID` (§2 step 4) |
+   | Client **secret** | `GOCSPX-…` | Supabase function secrets, below. **Never** a `VITE_` variable |
+
+   They sit a few lines apart on the same Google console screen and get pasted in the same sitting.
+   Putting the secret in `VITE_GOOGLE_CLIENT_ID` produces a **working build** that publishes a
+   credential to anyone who views source — so `src/lib/keyShape.js` refuses the build outright, and
+   the message names the Google console rather than the Supabase one. *Measured 2026-08-24*: a
+   planted `GOCSPX-` value fails `npm run build` with exit 1; a real client ID builds clean.
+5. Set the function secrets (not `.env.local`, which is for values the browser is allowed to see):
+
+   ```
+   npx supabase secrets set GOOGLE_CLIENT_ID=<the client id> GOOGLE_CLIENT_SECRET=<the secret> --project-ref <project ref>
+   ```
+
+   These are the FIRST hand-set function secrets this project has. `provision-member` needed none,
+   because Supabase injects the project URL, the anon key and the service-role credential into every
+   function — so "the function reads its own secrets from the platform" was true until #95 and is
+   not any more.
+6. Then set `VITE_GOOGLE_CLIENT_ID` in Vercel and **redeploy**. `VITE_` values are inlined at build
+   time, so the variable alone changes nothing about the deployment already live.
+
+**What proves it, and what does not.** `npm run check:live` answers *is `calendar-connect` deployed
+and callable by a browser* — it does not and cannot answer *are its Google secrets set*, because a
+preflight carries no body and invokes nothing. The first real connection is the proof, and it is
+[#100](https://github.com/SailorDave17/Taskr/issues/100)'s job rather than this page's.
 
 ## 4. Verifying AC 1 and AC 2
 

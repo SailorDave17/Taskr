@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 
@@ -615,13 +615,55 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
 // The single-letter household 'H' is the worked example of why both exist: it
 // fails the shape test (one character) and is caught by position alone.
 describe('#19 — no real household name reaches version control', () => {
-  const tracked = execSync('git ls-files -z', {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean)
+  // TRACKED only, and deliberately so: this list is the subject of the image
+  // assertions at the bottom, whose claim is that no image is COMMITTED. An
+  // untracked screenshot has not been committed, so widening this list would
+  // make that test say something it does not mean — and its positive control,
+  // which pins the image count exactly, would fail on any local scratch file.
+  const tracked = ls('git ls-files -z')
+
+  // The name corpus is WIDER: tracked files plus untracked-and-not-ignored
+  // ones. The comment below has always said "scanned the day it lands", and
+  // until #53 that was false — the corpus resolved against the INDEX, so a test
+  // file was scanned the day it was STAGED, not the day it was written.
+  //
+  // Measured, and the measurement is the reason this line changed: 875dd9f
+  // added ten fixture names in a NEW file and a declaration in an OLD one, in
+  // one commit. The guard fired on the old file — `Tuesday` was declared for it
+  // — and was silent on the new one, because it was untracked when the suite
+  // ran locally. So the guard was consulted, answered, and its answer covered
+  // half the change; CI, running on the committed tree, saw all ten. A guard
+  // that is blind to the file you are writing is blind exactly where new
+  // fixtures come from.
+  //
+  // The cost is stated rather than hidden: an untracked scratch file under
+  // src/test/ is now scanned, and it has not reached version control. That is
+  // the intended direction — this refuses a name while deleting it is still
+  // free — but it means the guard can refuse a file you never meant to commit.
+  //
+  // `--exclude-standard` is UNEXERCISED, and saying so is cheaper than letting
+  // the next reader assume otherwise: dropping it reddened 0 of 52, because
+  // nothing this tree ignores matches the corpus filter — node_modules/ and
+  // dist/ are outside `src/`, and supabase/.temp/ is not migrations/ or seed/.
+  // So today it bounds how much `--others` enumerates and nothing more. It
+  // becomes load-bearing the moment anything under src/ is gitignored, which is
+  // exactly when a scratch fixture would otherwise be scanned and refused.
+  function ls(command) {
+    return execSync(command, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+      .split('\0')
+      .filter(Boolean)
+  }
+
+  // Split out from the constant so the positive control below can RE-DERIVE it
+  // after creating an untracked file. A corpus computed once at collection time
+  // cannot be asked whether it would have seen one.
+  function scanCorpus() {
+    return corpusOf(ls('git ls-files -z --cached --others --exclude-standard'))
+  }
 
   // Discovered, never hard-coded: a test file added tomorrow is scanned the day
   // it lands. A hand-maintained corpus list is the drift this file already
@@ -634,14 +676,18 @@ describe('#19 — no real household name reaches version control', () => {
   // REFUSES — so scanning this file would refuse the correct file. The cost is
   // stated rather than hidden: a real name pasted into this file is not caught
   // by these assertions.
-  const corpus = tracked.filter(
-    (path) =>
-      path !== 'src/test/gate.test.js' &&
-      (/^src\/.*\.test\.jsx?$/.test(path) ||
-        /^src\/test\/.*\.jsx?$/.test(path) ||
-        path === 'src/lib/allocation.corpus.js' ||
-        /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
-  )
+  function corpusOf(paths) {
+    return paths.filter(
+      (path) =>
+        path !== 'src/test/gate.test.js' &&
+        (/^src\/.*\.test\.jsx?$/.test(path) ||
+          /^src\/test\/.*\.jsx?$/.test(path) ||
+          path === 'src/lib/allocation.corpus.js' ||
+          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
+    )
+  }
+
+  const corpus = scanCorpus()
 
   // Comments stripped before scanning, per extension. A `--` strip on JavaScript
   // would eat a decrement operator, and a `//` strip on SQL would eat nothing
@@ -701,6 +747,9 @@ describe('#19 — no real household name reaches version control', () => {
     'Intruder', 'Hijacked', 'Smuggled', 'Not Yet Provisioned', 'Kid renamed',
     'Placeholder', 'Placeholder One', 'Placeholder One Renamed', 'Placeholder Two',
     'Placeholder Three', 'Placeholder Child', 'Placeholder Organizer', 'Renamed Placeholder',
+    // #53 — the second member of household A, who exists so an occurrence can
+    // carry an exclusion forward to somebody.
+    'Placeholder Second',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',
@@ -727,6 +776,20 @@ describe('#19 — no real household name reaches version control', () => {
     // column takes ISO numbers), and the fixture proving that refusal has to
     // spell one.
     Tuesday: 'a weekday, refused by normalizeRepeat in chores.test.js',
+    // #53's chore titles, in repeats.pglite.test.js. Each one names what its
+    // fixture is FOR, which is why they are declared rather than renamed to
+    // 'Placeholder Chore': a test that reads `title: 'Forged'` says what it is
+    // proving, and the vocabulary exists to put a name in a diff, not to make
+    // fixtures anonymous.
+    Trash: 'the chore title in the issue’s own weekly scenario',
+    Vague: 'a chore whose free-text repeat is refused by chores_repeat_kind_known',
+    Rent: 'a chore whose `monthly` repeat is refused — #103 is the named follow-up',
+    Shaped: 'a chore title in the repeat_weekdays shape cases',
+    Once: 'a chore with no repeat, whose repeat_since stays null',
+    Forged: 'a chore title in the fixture proving generated_from is not client-writable',
+    Stamped: 'a chore title in the fixture proving repeat_since and the watermark are not client-writable',
+    Crossed: 'a chore title in the fixture proving an occurrence cannot cross households',
+    Daily: 'a daily-repeating chore in the real-clock catch_up_repeats() test',
     'nothing to do': 'an allocation corpus scenario name',
     'provision-member': 'the Edge Function name',
     FunctionsFetchError: 'a supabase-js error class',
@@ -775,6 +838,35 @@ describe('#19 — no real household name reaches version control', () => {
     expect(corpus).toContain('src/App.test.jsx')
     expect(corpus).toContain('src/test/migrations.pglite.test.js')
     expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
+  })
+
+  it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {
+    // The control has to CREATE the condition, because on a clean tree there is
+    // nothing untracked and the widened corpus is byte-identical to the narrow
+    // one. That is what made the original blind spot invisible: the wrong
+    // command and the right command agree on every tree except the one where it
+    // matters, so no assertion over the corpus as it stands can tell them apart.
+    //
+    // End to end on purpose — listed, read, and REFUSED — because listing alone
+    // would pass with a corpus nothing ever opens. The probe carries a name the
+    // vocabulary does not declare, and it is removed in a `finally`: a leftover
+    // would redden the SHAPE assertion above until somebody deleted it, which is
+    // loud and self-explaining, but it should not happen.
+    const probe = 'src/test/.corpus-probe.tmp.js'
+    const absolute = resolve(process.cwd(), probe)
+    writeFileSync(absolute, "const fixture = { title: 'Marguerite' }\n")
+    try {
+      const fresh = scanCorpus()
+      expect(fresh, 'the corpus does not list an untracked file').toContain(probe)
+      expect(
+        fresh.flatMap((path) => shapeOffenders(codeOf(path)).map((value) => `${value} (${path})`)),
+      ).toContain(`Marguerite (${probe})`)
+    } finally {
+      rmSync(absolute, { force: true })
+    }
+    // Prove the cleanup, rather than assuming it: an unremoved probe is a
+    // failure this file would otherwise report against the NEXT person's change.
+    expect(scanCorpus()).not.toContain(probe)
   })
 
   it('SHAPE: every name-shaped literal in the fixture corpus is declared', () => {

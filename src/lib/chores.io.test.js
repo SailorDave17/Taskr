@@ -82,6 +82,7 @@ const {
   CHORE_COLUMNS,
   addChore,
   assignChore,
+  catchUpRepeats,
   completeChore,
   listChores,
   removeChore,
@@ -153,6 +154,10 @@ describe('addChore', () => {
       title: 'Dishes',
       expected_minutes: 20,
       due_on: '2026-08-10',
+      // #53 — a caller that says nothing about repeating writes 'none'
+      // explicitly, so the row's schedule is stated rather than inherited.
+      repeat_kind: 'none',
+      repeat_weekdays: null,
     })
     // Written out rather than derived from the input, so the implementation
     // cannot quietly redefine what "normalized" means.
@@ -339,5 +344,37 @@ describe('assignment goes through the RPC, never an update — #36', () => {
     await expect(unassignChore('c1')).rejects.toThrow(
       /taking the chore off that person: no such chore/i,
     )
+  })
+})
+
+describe('catchUpRepeats — #53', () => {
+  it('calls the RPC with no arguments, so the server owns the clock entirely', async () => {
+    results.catch_up_repeats = { data: [{ created_count: 2, skipped_count: 0 }], error: null }
+    await catchUpRepeats()
+
+    const rpc = calls.find((c) => c.op === 'rpc' && c.name === 'catch_up_repeats')
+    expect(rpc).toBeDefined()
+    // Nothing time-shaped may travel: a phone with the wrong date must not be
+    // able to move an occurrence between days. The instant-taking form exists
+    // and is granted to no client role — 0012's split.
+    expect(rpc.args).toBeUndefined()
+  })
+
+  it('unwraps the single row a table-returning function arrives as', async () => {
+    results.catch_up_repeats = { data: [{ created_count: 3, skipped_count: 28 }], error: null }
+    expect(await catchUpRepeats()).toEqual({ created: 3, skipped: 28 })
+  })
+
+  it('reads an empty answer as nothing to do, not as a crash', async () => {
+    results.catch_up_repeats = { data: [], error: null }
+    expect(await catchUpRepeats()).toEqual({ created: 0, skipped: 0 })
+  })
+
+  it('reports a failure in its own words, so boot can show it beside the work', async () => {
+    results.catch_up_repeats = {
+      data: null,
+      error: { message: 'function public.catch_up_repeats does not exist' },
+    }
+    await expect(catchUpRepeats()).rejects.toThrow(/catching up repeats/)
   })
 })

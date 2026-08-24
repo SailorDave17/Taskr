@@ -20,7 +20,9 @@ import {
 import {
   addChore,
   assignChore,
+  catchUpRepeats,
   completeChore,
+  formatSkippedNotice,
   listChores,
   removeChore,
   unassignChore,
@@ -85,6 +87,12 @@ export default function App() {
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // #53 AC 4 — the catch-up pass skipped occurrences older than the bound and
+  // the household is told rather than left to wonder. Transient and on the
+  // device whose open performed the skip (owner decision, 2026-08-24): the
+  // other phones did not trigger it, and a persistent household-wide notice is
+  // a notifications table this story deliberately does not build.
+  const [notice, setNotice] = useState(null)
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
@@ -187,10 +195,34 @@ export default function App() {
           globalThis.history?.replaceState?.(null, '', pathname)
         }
 
+        // #53 — create any missed occurrences of repeating chores BEFORE the
+        // first read, so the list this person is about to see already carries
+        // them: running it after refresh() would show a week with holes in it
+        // for one load. "Opens the app" is this boot, and the server owns the
+        // clock — the call sends nothing time-shaped.
+        //
+        // A failure here must not cost anyone their household: against a live
+        // project that has not had 0012 pasted yet this call fails on every
+        // open, and the right degradation is the ordinary error strip over a
+        // working app, not the boot-failure card. It is reported rather than
+        // swallowed — a red that nobody can see is how a paste stays forgotten.
+        let catchUpComplaint = null
+        let skippedNotice = null
+        try {
+          const caughtUp = await catchUpRepeats()
+          skippedNotice = formatSkippedNotice(caughtUp.skipped)
+        } catch (err) {
+          catchUpComplaint = err.message
+        }
+
         const found = await refresh()
         if (!cancelled) {
           setStatus(found ? 'joined' : 'onboarding')
+          if (skippedNotice) setNotice(skippedNotice)
+          // The consent complaint wins the strip: it answers the thing the
+          // person just did, where the catch-up is housekeeping they did not.
           if (consentComplaint) setError(consentComplaint)
+          else if (catchUpComplaint) setError(catchUpComplaint)
         }
       } catch (err) {
         if (!cancelled) {
@@ -396,6 +428,15 @@ export default function App() {
         Chores are minutes of work. People are budgets of minutes. The split is
         proportional to what each person actually has.
       </p>
+
+      {/* #53 AC 4 — what the catch-up pass declined to pile onto the week.
+          role="status", never role="alert": nothing is wrong, and the .error
+          palette stays reserved for faults. */}
+      {status === 'joined' && notice ? (
+        <p className="shell__notice" role="status">
+          {notice}
+        </p>
+      ) : null}
 
       {status === 'loading' ? (
         <p className="card__body" role="status">

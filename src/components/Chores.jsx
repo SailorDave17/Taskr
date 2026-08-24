@@ -3,11 +3,14 @@ import PropTypes from 'prop-types'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
+  WEEKDAYS,
   commitmentByMember,
+  describeRepeat,
   formatMinutes,
   isOutstanding,
   normalizeDueDate,
   normalizeExpectedMinutes,
+  normalizeRepeat,
   normalizeTitle,
   outstandingMinutes,
 } from '../lib/chores.js'
@@ -55,11 +58,16 @@ import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
  * sentence" testable: a boolean would let the UI invent its own wording, and
  * then the sentence a person reads would be untested.
  */
-function validate({ title, expectedMinutes, dueOn }) {
+function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
   try {
     normalizeTitle(title)
     normalizeExpectedMinutes(expectedMinutes)
     normalizeDueDate(dueOn)
+    // #53 — the add form's repeat is validated by the same function the data
+    // layer calls, for the reason above: the rules the constraint actually
+    // enforces live in one place. The edit form passes no repeat fields and
+    // gets 'none' back, which is the no-op it means — editing a repeat is #54.
+    normalizeRepeat({ repeatKind, repeatWeekdays })
     return null
   } catch (err) {
     return err.message
@@ -422,6 +430,16 @@ function ChoreRow({
           <span className="chore__cost-human"> ({formatMinutes(chore.expected_minutes)})</span>
           <span aria-hidden="true"> · </span>
           <span className="chore__due">due {chore.due_on}</span>
+          {/* #53 — the schedule, read off the row's own columns, so what the
+              screen says is what the database will do. A generated occurrence
+              says nothing here on purpose: it is ordinary work (AC 7), and a
+              badge would make it read as a different kind of chore. */}
+          {describeRepeat(chore) ? (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span className="chore__repeat">{describeRepeat(chore)}</span>
+            </>
+          ) : null}
         </span>
         <AssigneeSelect
           chore={chore}
@@ -553,6 +571,12 @@ export default function Chores({
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
   const [dueOn, setDueOn] = useState('')
+  // #53 — the repeat is set HERE, where the chore is created, as a property of
+  // the chore. There is deliberately no templates screen and no template
+  // object anywhere: a second place to define the household's work is a second
+  // evening of data entry, which is the universal killer the field scan names.
+  const [repeatKind, setRepeatKind] = useState('none')
+  const [repeatDays, setRepeatDays] = useState([])
   const [complaint, setComplaint] = useState(null)
 
   const outstanding = chores.filter(isOutstanding)
@@ -648,7 +672,13 @@ export default function Chores({
         noValidate
         onSubmit={(e) => {
           e.preventDefault()
-          const problem = validate({ title, expectedMinutes: minutes, dueOn })
+          const problem = validate({
+            title,
+            expectedMinutes: minutes,
+            dueOn,
+            repeatKind,
+            repeatWeekdays: repeatDays,
+          })
           if (problem) {
             // AC 2: the refusal happens here, before onAdd is ever called, so a
             // bad value never becomes a request.
@@ -656,11 +686,13 @@ export default function Chores({
             return
           }
           setComplaint(null)
-          onAdd({ title, expectedMinutes: minutes, dueOn }).then(
+          onAdd({ title, expectedMinutes: minutes, dueOn, repeatKind, repeatWeekdays: repeatDays }).then(
             () => {
               setTitle('')
               setMinutes('')
               setDueOn('')
+              setRepeatKind('none')
+              setRepeatDays([])
             },
             () => {},
           )
@@ -698,6 +730,50 @@ export default function Chores({
             onChange={(e) => setDueOn(e.target.value)}
           />
         </label>
+        <label className="field">
+          <span className="field__label">Repeats</span>
+          {/* Structured on the way in — AC 6: a kind, then weekdays for
+              weekly. Free text has no field to arrive through, and monthly is
+              absent because it is #103, not because it was forgotten. */}
+          <select
+            className="field__input"
+            value={repeatKind}
+            aria-label="How often this chore repeats"
+            onChange={(e) => {
+              const kind = e.target.value
+              setRepeatKind(kind)
+              // Days belong to weekly alone; leaving a stale selection behind
+              // would silently rearm if the person flips back.
+              if (kind !== 'weekly') setRepeatDays([])
+            }}
+          >
+            <option value="none">Does not repeat</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Weekly, on&hellip;</option>
+          </select>
+        </label>
+        {repeatKind === 'weekly' ? (
+          <fieldset className="field chore-weekdays">
+            <legend className="field__label">Which days</legend>
+            <div className="chore-weekdays__row">
+              {WEEKDAYS.map(({ isoDow, label }) => (
+                <label key={isoDow} className="chore-weekdays__day">
+                  <input
+                    type="checkbox"
+                    checked={repeatDays.includes(isoDow)}
+                    aria-label={`Repeat on ${label}`}
+                    onChange={(e) =>
+                      setRepeatDays((days) =>
+                        e.target.checked ? [...days, isoDow] : days.filter((d) => d !== isoDow),
+                      )
+                    }
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         {complaint ? (
           <p className="error" role="alert">
             {complaint}

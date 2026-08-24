@@ -13,7 +13,7 @@
 // will accept this". Proving that against the live project is #45, which is
 // externally gated on an owner-only dashboard paste.
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   asDevice,
   attempt,
@@ -51,6 +51,28 @@ function isoDate(value) {
 /** A Monday, so the period constraint is satisfied by everything that should be. */
 const MONDAY = '2026-08-10'
 const LAST_MONDAY = '2026-08-03'
+
+// A pglite test builds a real Postgres in WebAssembly, so vitest's 5000ms
+// default testTimeout is a number nobody chose for this suite - it is what you
+// get for not setting one. Raised deliberately, and the measurement is why.
+//
+// Measured 2026-08-24 on repeats.pglite.test.js's heaviest case, which runs its
+// whole scenario twice under two pinned session zones and must therefore build
+// TWO more databases inside the test body, on top of the one beforeEach already
+// built: 3460ms on the dev machine, 7800ms and 8107ms on ubuntu-latest, where it
+// timed out. The same test passed in a third CI run, so the runner straddles the
+// default - which is the worst place for a limit to sit, because the suite then
+// fails about two pushes in three and reads as a real defect each time.
+//
+// 30s is ~3.7x the worst time actually observed. A genuine hang still fails; it
+// fails later, and that is the whole cost of this line.
+//
+// hookTimeout is deliberately NOT raised. beforeEach builds exactly one database
+// in all eight pglite files, none has ever timed out, and leaving it at 10s keeps
+// a real signal: a hook over the line means setup got slower, which is a
+// different fact from a test doing more work. If one ever fires, raise it on its
+// own evidence rather than by symmetry with this.
+vi.setConfig({ testTimeout: 30_000 })
 
 describe('weekly capacity, run against a real Postgres', () => {
   let db

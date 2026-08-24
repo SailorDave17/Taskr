@@ -43,11 +43,36 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // belongs to its household, so the value would be a constant the client can
 // already name. 0003 carries the full reasoning.
 export const CHORE_COLUMNS =
-  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id'
+  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
 export const MAX_EXPECTED_MINUTES = 1440
+
+/**
+ * The catch-up bound, in days — #53 AC 4. Owner decision 2026-08-24, recorded
+ * in docs/refresh-charter.md's decision log.
+ *
+ * THE AUTHORITY IS THE MIGRATION: `catch_up_repeats_at` in `0012` carries the
+ * same number, and that copy is the one that decides what exists. This copy
+ * only words the notice, and repeats.pglite.test.js holds the two equal so
+ * they cannot drift apart silently.
+ */
+export const CATCH_UP_BOUND_DAYS = 7
+
+/** The schedule kinds `chores_repeat_kind_known` accepts, in the UI's order. */
+export const REPEAT_KINDS = ['none', 'daily', 'weekly']
+
+/** ISO weekdays as the schema stores them (1 = Monday … 7 = Sunday). */
+export const WEEKDAYS = [
+  { isoDow: 1, label: 'Mon' },
+  { isoDow: 2, label: 'Tue' },
+  { isoDow: 3, label: 'Wed' },
+  { isoDow: 4, label: 'Thu' },
+  { isoDow: 5, label: 'Fri' },
+  { isoDow: 6, label: 'Sat' },
+  { isoDow: 7, label: 'Sun' },
+]
 
 /**
  * Minutes of work a chore is expected to take.
@@ -100,6 +125,42 @@ export function normalizeDueDate(value) {
   return text
 }
 
+/**
+ * A schedule the columns will accept — #53 AC 6: structured, never free text.
+ *
+ * Takes the form's shape (`repeatKind` + `repeatWeekdays`) and returns the two
+ * COLUMN values, so a caller cannot send half a schedule: weekly without days
+ * is refused here with a sentence, and the check constraint
+ * `chores_repeat_weekdays_shape` refuses it again at the database for any
+ * caller that skips this function.
+ *
+ * Weekdays come back sorted and deduplicated. The constraint tolerates a
+ * duplicate (it is harmless to the schedule arithmetic), but a stored
+ * `{5,1,5}` would render back as a different-looking set than was saved.
+ */
+export function normalizeRepeat({ repeatKind, repeatWeekdays } = {}) {
+  const kind = repeatKind === undefined || repeatKind === null ? 'none' : String(repeatKind)
+  if (!REPEAT_KINDS.includes(kind)) {
+    throw new Error('A repeat is daily or weekly — anything fancier is not a schedule yet.')
+  }
+
+  if (kind !== 'weekly') {
+    if (Array.isArray(repeatWeekdays) && repeatWeekdays.length > 0) {
+      throw new Error('Weekdays only make sense on a weekly repeat.')
+    }
+    return { repeat_kind: kind, repeat_weekdays: null }
+  }
+
+  const days = Array.isArray(repeatWeekdays) ? repeatWeekdays.map(Number) : []
+  if (days.length === 0) {
+    throw new Error('A weekly repeat needs at least one weekday.')
+  }
+  if (days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
+    throw new Error('A weekday is 1 (Monday) through 7 (Sunday).')
+  }
+  return { repeat_kind: 'weekly', repeat_weekdays: [...new Set(days)].sort((a, b) => a - b) }
+}
+
 /** A chore title the column will accept. */
 export function normalizeTitle(value) {
   const title = String(value ?? '').trim()
@@ -136,10 +197,14 @@ export async function listChores() {
  * household it writes into: it is read from this device's membership, and the
  * with-check policy in 0003 would refuse any other value anyway.
  */
-export async function addChore({ title, expectedMinutes, dueOn }) {
+export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
   const cleanTitle = normalizeTitle(title)
   const minutes = normalizeExpectedMinutes(expectedMinutes)
   const due = normalizeDueDate(dueOn)
+  // #53 — the repeat is set where the chore is created, as a property of the
+  // chore. There is no templates screen to route through, and callers that say
+  // nothing get 'none', which is the column's own default.
+  const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
 
   const household = await currentHousehold()
   if (!household) throw new Error('You are not signed in to a household.')
@@ -152,6 +217,8 @@ export async function addChore({ title, expectedMinutes, dueOn }) {
         title: cleanTitle,
         expected_minutes: minutes,
         due_on: due,
+        repeat_kind: repeat.repeat_kind,
+        repeat_weekdays: repeat.repeat_weekdays,
       })
       .select(CHORE_COLUMNS)
       .single(),
@@ -196,6 +263,60 @@ export async function uncompleteChore(id) {
     await getSupabase().rpc('uncomplete_chore', { chore_id: id }),
     'putting it back on the list',
   )
+}
+
+/**
+ * Create every missed occurrence of the household's repeating chores — #53.
+ *
+ * Called on app open, before the first read, so the occurrences it creates are
+ * in the list the person is about to see. Through an RPC for BOTH of the
+ * house's reasons at once: the clock (household-local "today" is the server's
+ * `now()` in the household's zone, so a phone with the wrong date cannot move
+ * an occurrence between days) and access (`generated_from` is in no client
+ * grant, so this is the only path that can write an occurrence at all).
+ *
+ * Exactly-once under a double-fire is the DATABASE's unique index, not
+ * anything here — two devices calling this in the same second is the designed
+ * case, not a race to defend against in JavaScript.
+ */
+export async function catchUpRepeats() {
+  const rows = unwrap(await getSupabase().rpc('catch_up_repeats'), 'catching up repeats')
+  // A table-returning function arrives as an array of one row.
+  const pass = Array.isArray(rows) ? rows[0] : rows
+  return {
+    created: pass?.created_count ?? 0,
+    skipped: pass?.skipped_count ?? 0,
+  }
+}
+
+/**
+ * The sentence a household reads when catch-up skipped occurrences older than
+ * the bound — #53 AC 4's "told rather than silent", worded once so every
+ * surface says it the same way. Null when nothing was skipped, so callers can
+ * render nothing rather than an empty notice.
+ */
+export function formatSkippedNotice(skipped) {
+  const n = Number(skipped) || 0
+  if (n <= 0) return null
+  const what = n === 1 ? '1 repeat occurrence' : `${n} repeat occurrences`
+  return (
+    `${what} more than ${CATCH_UP_BOUND_DAYS} days old ` +
+    `${n === 1 ? 'was' : 'were'} skipped rather than piled onto this week.`
+  )
+}
+
+/**
+ * "repeats weekly on Mon, Thu" — the row's one-line account of its schedule,
+ * or null for a chore that does not repeat. Reads the COLUMN values, so what
+ * the screen says is what the database will actually do.
+ */
+export function describeRepeat(chore) {
+  if (!chore || chore.repeat_kind === 'none' || !chore.repeat_kind) return null
+  if (chore.repeat_kind === 'daily') return 'repeats daily'
+  const names = (chore.repeat_weekdays ?? [])
+    .map((d) => WEEKDAYS.find((w) => w.isoDow === Number(d))?.label)
+    .filter(Boolean)
+  return names.length > 0 ? `repeats weekly on ${names.join(', ')}` : 'repeats weekly'
 }
 
 /**

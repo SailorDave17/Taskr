@@ -34,6 +34,10 @@ const choresApi = {
   addChore: vi.fn(),
   updateChore: vi.fn(),
   removeChore: vi.fn(),
+  // #53 — the boot-time catch-up pass. formatSkippedNotice stays REAL
+  // (importActual below): it is pure, has its own tests, and the notice a
+  // person reads should be the sentence the app actually words, not a stub's.
+  catchUpRepeats: vi.fn(),
 }
 
 // #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
@@ -139,6 +143,9 @@ beforeEach(() => {
   capacityApi.setCapacity.mockResolvedValue(undefined)
   capacityApi.clearCapacity.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
+  // Nothing missed and nothing skipped, which is the ordinary open. Tests
+  // about the notice and the failure path override this.
+  choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
   choresApi.addChore.mockResolvedValue(undefined)
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
@@ -445,6 +452,8 @@ describe('chores — the write path and the re-read', () => {
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
     })
     await waitFor(() =>
       expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
@@ -1037,5 +1046,67 @@ describe('connecting a calendar (#95)', () => {
     expect(calendarApi.completeConnect).not.toHaveBeenCalled()
     expect(screen.queryAllByRole('alert')).toEqual([])
     expect(replaceState).not.toHaveBeenCalled()
+  })
+})
+
+describe('#53 — the boot-time catch-up pass', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([])
+  })
+
+  it('runs BEFORE the first read, so a created occurrence is in the first list a person sees', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /what needs doing/i })
+
+    expect(choresApi.catchUpRepeats).toHaveBeenCalledTimes(1)
+    // Order is the claim, not the call: catch-up after the read would show a
+    // week with holes in it until the next mutation happened to refresh.
+    expect(choresApi.catchUpRepeats.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('tells the household when occurrences older than the bound were skipped — AC 4', async () => {
+    choresApi.catchUpRepeats.mockResolvedValue({ created: 2, skipped: 3 })
+    await renderApp()
+
+    // The REAL formatSkippedNotice words this (the mock keeps pure functions
+    // real), so the sentence asserted is the sentence a person reads.
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent(
+      '3 repeat occurrences more than 7 days old were skipped rather than piled onto this week.',
+    )
+    // Told, not alarmed: nothing failed, so the error surface stays empty.
+    expect(screen.queryAllByRole('alert')).toEqual([])
+  })
+
+  it('says nothing when nothing was skipped', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /what needs doing/i })
+    expect(screen.queryByText(/skipped rather than piled/i)).not.toBeInTheDocument()
+  })
+
+  it('a failing pass costs the error strip, never the household', async () => {
+    // The live shape of this failure: 0012 not yet pasted, so the RPC is
+    // unknown to the project. Boot must degrade to a working app with the
+    // failure REPORTED — a red nobody can see is how a paste stays forgotten,
+    // and a boot-failure card would hide a working household behind it.
+    choresApi.catchUpRepeats.mockRejectedValue(
+      new Error('catching up repeats: function public.catch_up_repeats does not exist'),
+    )
+    await renderApp()
+
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /catching up repeats/i,
+    )
   })
 })

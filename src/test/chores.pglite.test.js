@@ -21,7 +21,7 @@
 // this". Proving that against the live project is #38, which is externally
 // gated on an owner-only dashboard action.
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MIGRATIONS,
   asDevice,
@@ -50,6 +50,28 @@ const READABLE = 'id, title, expected_minutes, due_on, created_at'
 const asIsoDate = (value) =>
   value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10)
 
+
+// A pglite test builds a real Postgres in WebAssembly, so vitest's 5000ms
+// default testTimeout is a number nobody chose for this suite - it is what you
+// get for not setting one. Raised deliberately, and the measurement is why.
+//
+// Measured 2026-08-24 on repeats.pglite.test.js's heaviest case, which runs its
+// whole scenario twice under two pinned session zones and must therefore build
+// TWO more databases inside the test body, on top of the one beforeEach already
+// built: 3460ms on the dev machine, 7800ms and 8107ms on ubuntu-latest, where it
+// timed out. The same test passed in a third CI run, so the runner straddles the
+// default - which is the worst place for a limit to sit, because the suite then
+// fails about two pushes in three and reads as a real defect each time.
+//
+// 30s is ~3.7x the worst time actually observed. A genuine hang still fails; it
+// fails later, and that is the whole cost of this line.
+//
+// hookTimeout is deliberately NOT raised. beforeEach builds exactly one database
+// in all eight pglite files, none has ever timed out, and leaving it at 10s keeps
+// a real signal: a hook over the line means setup got slower, which is a
+// different fact from a test doing more work. If one ever fires, raise it on its
+// own evidence rather than by symmetry with this.
+vi.setConfig({ testTimeout: 30_000 })
 
 describe('chores, run against a real Postgres', () => {
   let db
@@ -408,10 +430,14 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
-      // Widened by 0004 (completion) and again by 0006 (assignment), each making
-      // its column READABLE and none of them writable. The update set below is
-      // unchanged across all three, which is the convention working: additive by
-      // column, and no later story revokes a shipped grant.
+      // Widened by 0004 (completion), 0006 (assignment) and 0012 (repeats),
+      // each making its columns READABLE; 0012 is also the first to widen the
+      // INSERT set, because a repeat is DECLARED where the chore is created.
+      // The update set below is unchanged across all four, which is the
+      // convention working: additive by column, and no later story revokes a
+      // shipped grant. `repeat_since`, the watermark and `generated_from` are
+      // absent from insert and update — the trigger and the catch-up pass are
+      // their only authors, and repeats.pglite.test.js proves the refusals.
       expect(await granted('SELECT')).toEqual([
         'assigned_member_id',
         'completed_at',
@@ -419,10 +445,20 @@ describe('chores, run against a real Postgres', () => {
         'created_at',
         'due_on',
         'expected_minutes',
+        'generated_from',
         'id',
+        'repeat_kind',
+        'repeat_weekdays',
         'title',
       ])
-      expect(await granted('INSERT')).toEqual(['due_on', 'expected_minutes', 'household_id', 'title'])
+      expect(await granted('INSERT')).toEqual([
+        'due_on',
+        'expected_minutes',
+        'household_id',
+        'repeat_kind',
+        'repeat_weekdays',
+        'title',
+      ])
       expect(await granted('UPDATE')).toEqual(['due_on', 'expected_minutes', 'title'])
     })
 

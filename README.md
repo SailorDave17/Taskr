@@ -45,10 +45,13 @@ so the database is now on per-member auth. `npm run check:live` read **20 of 20*
 every table, every RPC, and the `provision-member` Edge Function, which was deployed on
 2026-08-20 (#112) with `npm run deploy:function`.
 
-**`0009`, `0010` and `0011` are written and have NOT been pasted**, so the repo is **three**
-migrations ahead of the live project — [#127](https://github.com/SailorDave17/Taskr/issues/127),
-[#37](https://github.com/SailorDave17/Taskr/issues/37) and
-[#95](https://github.com/SailorDave17/Taskr/issues/95). They behave differently under the check, and
+**`0011` was pasted on 2026-08-24**, ahead of its own PR merging, and the paste is **verified over
+the wire** rather than assumed: `calendar_connections` resolves for an authenticated caller with
+exactly the four granted columns and answers `42501 permission denied` to `anon`, which is the grant
+in `0011` doing what it says. `0009` and `0010` are still written and NOT pasted, so the repo is
+**two** migrations ahead of the live project —
+[#127](https://github.com/SailorDave17/Taskr/issues/127) and
+[#37](https://github.com/SailorDave17/Taskr/issues/37). They behave differently under the check, and
 the difference is a property of the migrations rather than of the check:
 
 - `0009` changes only two indexes, and `check:live` covers tables, columns, RPCs and Edge Functions
@@ -57,14 +60,16 @@ the difference is a property of the migrations rather than of the check:
 - `0010` creates a table the client reads, so the check **can** see it and is **red on it by
   design** until the paste — `chore_exclusions`.
 - `0011` creates **two** tables and the check asks about **one** of them, deliberately.
-  `calendar_connections` is read by the client and is red until the paste; `calendar_tokens` holds a
-  Google refresh token, the client is granted nothing on it at all, and probing it would report a
-  missing grant on a perfectly healthy project.
+  `calendar_connections` is read by the client, so the check sees it and it is **green since the
+  paste**; `calendar_tokens` holds a Google refresh token, the client is granted nothing on it at
+  all, and probing it would report a missing grant on a perfectly healthy project.
 
-**`calendar-connect`, the Edge Function `0011` exists for, is also undeployed**, and that is a third
-red from a fourth cause: an Edge Function arrives with `npm run deploy:function` and no migration
-mentions it. So the run reads **20 of 23** with exactly **three** expected reds, and the count moved
-from 21 to 23 because the check gained two subjects rather than because anything regressed.
+**`calendar-connect`, the Edge Function `0011` exists for, is still undeployed**, and that is a
+second red from a different cause: an Edge Function arrives with `npm run deploy:function` and **no
+migration carries it**, so pasting `0011` does not and cannot clear it. *Measured 2026-08-24*: the
+run reads **21 of 23** with exactly **two** expected reds — `chore_exclusions` and
+`calendar-connect`. The denominator moved from 21 to 23 because the check gained two subjects, not
+because anything regressed.
 
 Every other red is new and real. [`docs/access-model.md`](docs/access-model.md) carries the excused
 reds in a table with the single condition that clears each, and the history of the five times that
@@ -152,7 +157,7 @@ Other scripts:
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
 | `npm run test:functions` | **The provisioning Edge Function, against a real stack.** `provision-member` only — `calendar-connect`'s decisions are unit-tested in `npm test` with an injected `fetch`, because its subject is what GOOGLE does and there is no local Google to point a stack at. Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
 | `npm run deploy:function` | **Deploy this repo's Edge Functions to the hosted project** — `provision-member` and, since #95, `calendar-connect`. Both by default, because the safe and complete action should be the one with the least typing; `npm run deploy:function -- <name>` narrows it, and an unknown name is refused here rather than handed to the CLI. Owner-only: it needs a Supabase access token (`npx supabase login`, or `SUPABASE_ACCESS_TOKEN`). The project ref is **derived** from `VITE_SUPABASE_URL` rather than written down, because deploying to the wrong project succeeds, prints success, and leaves the app failing exactly as before — there would be nothing to see. Uses `--use-api`, so **no Docker**. `--dry-run` prints the resolved target and deploys nothing. This exists as a script rather than a documented command because the one-line form is ~90 characters and wrapped in a terminal twice on 2026-08-20, running as two commands and silently deploying nothing. Confirm with `npm run check:live` |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function**. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **THREE reds are expected** — `chore_exclusions` until `0010` is pasted, `calendar_connections` until `0011` is, and `calendar-connect` until it is deployed; it read 20 of 20 on 2026-08-20, the denominator became 21 on 2026-08-21 when #37 added a table, and 23 on 2026-08-24 when #95 added a table and a function. Any OTHER red is new and real; [`docs/access-model.md`](docs/access-model.md) names each excused red with the single action that clears it, and carries the history of the five times that set has been inverted |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function**. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **TWO reds are expected** — `chore_exclusions` until `0010` is pasted, and `calendar-connect` until it is deployed; *measured 2026-08-24 at 21 of 23*. It read 20 of 20 on 2026-08-20, the denominator became 21 on 2026-08-21 when #37 added a table, and 23 on 2026-08-24 when #95 added a table and a function. Any OTHER red is new and real; [`docs/access-model.md`](docs/access-model.md) names each excused red with the single action that clears it, and carries the history of the five times that set has been inverted |
 
 ### The two variables you need
 

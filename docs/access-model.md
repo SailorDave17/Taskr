@@ -15,8 +15,11 @@
   the paste succeeding. **The denominator moved to 21 on 2026-08-21** when #37 added
   `chore_exclusions` to `LIVE_SCHEMA`, **and to 23 on 2026-08-24** when #95 added
   `calendar_connections` and the `calendar-connect` Edge Function; see the expected-red bullet below.
-- **`0009`, `0010` and `0011` are written and NOT applied.** The paste queue is three deep and the
-  order is the file order.
+- **`0009` and `0010` are written and NOT applied. `0011` WAS applied on 2026-08-24**, out of file
+  order and ahead of its own PR merging — which is allowed and is worth noting rather than tidying
+  away, because it means the live project now carries a table two earlier migrations do not know
+  about. Nothing in `0011` depends on `0009` or `0010`; it references `households` and `members`,
+  both of which predate all three. The paste queue is two deep and the order is the file order.
   - **`0009`** (#127) — until it is pasted the live RLS suite cannot run at all, because
     `create_household` refuses the second household it builds.
   - **`0010`** (#37) — the exclusions table and the two eligibility functions.
@@ -52,20 +55,28 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has THREE expected reds — `chore_exclusions`, `calendar_connections` and
-  `calendar-connect` — and each clears on its own single action. Every OTHER red is new and real.**
-  ***Measured 2026-08-21*** on #37's branch against the live project: **20 of 21**, one failure, and
-  it was `chore_exclusions: table does not exist in the live project [PGRST205]`. Every other table,
-  every RPC and the Edge Function stayed green.
+- **`check:live` has TWO expected reds — `chore_exclusions` and `calendar-connect` — and each clears
+  on its own single action. Every OTHER red is new and real.** ***Measured 2026-08-24*** against the
+  live project: **21 of 23**, two failures, and they are the two this bullet names.
 
-  **#95 has NOT re-run it, and that is stated rather than glossed.** This checkout has no
-  `.env.local`, and `check:live` refuses rather than passing silently when it is unconfigured —
-  which is correct, and means the live-schema half of the gate is **unrun** for this change rather
-  than green. What the numbers below rest on is arithmetic over the lists the check works from
-  (`LIVE_SCHEMA` gained one table, `LIVE_EDGE_FUNCTIONS` gained one function, each contributing one
-  test), and `liveSchema.test.js` is what holds those lists to the code on every push. **20 of 23
-  is therefore a prediction, not a measurement** — the first run against the project is what settles
-  it, and it should be read as evidence about this paragraph as much as about the project.
+  **This bullet said THREE, at a predicted 20 of 23, for about an hour on 2026-08-24, and the
+  correction is worth keeping because of how it was reached.** #95's session wrote the prediction
+  under a stated caveat — that `check:live` could not run here for want of `.env.local`, so the
+  count was arithmetic over the lists rather than a measurement. **The caveat was false**: the file
+  exists, and had existed throughout. It was carried forward from a cairn note dated 2026-08-21
+  without being checked, which is the ordinary way a status claim outlives its subject — *the note
+  was accurate when written, and nothing about it announced that it had stopped being so*.
+
+  Running it moved two things at once. It turned the count into a measurement, and it revealed that
+  **`0011` had been pasted** while the session was working — `calendar_connections` resolves for an
+  authenticated caller with exactly the four granted columns and answers `42501 permission denied`
+  to `anon`, which is `0011`'s grant doing precisely what it says. So the migration is verified over
+  the wire rather than on the strength of a paste having been reported, and that is stronger
+  evidence than this page has usually had for a paste.
+
+  The general lesson is the cheap one: **a claim that an instrument cannot be run is a claim about
+  the environment, and it expires exactly like a claim about the project.** The whole cost of
+  checking it was one command.
 
   The 2026-08-21 run is also the evidence for the blindness claimed one bullet up rather than an
   assertion of it: `0009` was unpasted too, and **nothing went red for it** — twenty green subjects
@@ -85,16 +96,20 @@
   | Red | Cleared by | Anything else? |
   |---|---|---|
   | `chore_exclusions exists, with every column the app selects` | pasting `supabase/migrations/0010_chore_exclusions.sql` | No. Nothing else touches it. |
-  | `calendar_connections exists, with every column the app selects` | pasting `supabase/migrations/0011_calendar_connection.sql` | No. Nothing else touches it. |
-  | `calendar-connect is deployed, and a browser could actually call it` | `npm run deploy:function` | No — and in particular **the `0011` paste does not clear it**. A migration and a deploy are different actions against different systems, which is the whole reason `LIVE_EDGE_FUNCTIONS` is a separate list. |
+  | `calendar-connect is deployed, and a browser could actually call it` | `npm run deploy:function` | No — and in particular **the `0011` paste did not clear it**, which is not a prediction any more: `0011` was pasted on 2026-08-24 and this red survived it, exactly as this row said it would. A migration and a deploy are different actions against different systems, which is the whole reason `LIVE_EDGE_FUNCTIONS` is a separate list. |
 
-  **Three excused reds is the most this page has ever carried, and that is the number to be
-  uncomfortable with rather than the individual entries.** Each one is named, each has exactly one
-  clearing action, and none of them can hide inside another because each has its own test — but a
-  list this long is one step from the state this whole form exists to prevent, where a genuine
-  failure gets waved through because a red was expected. Two of the three clear on owner-only
-  actions that are one sitting's work; if they are still here in a week, the question to ask is why
-  the paste queue is three deep rather than how to word the fourth row.
+  *A third row stood here for about an hour on 2026-08-24 — `calendar_connections`, awaiting the
+  `0011` paste — and cleared on exactly the action it named, like every entry before it. It is
+  removed rather than struck, because the table above is a live list of what is excused today and a
+  cleared row left in it is the thing this form exists to prevent.*
+
+  **Two excused reds is one short of the most this page has ever carried, and the number is the
+  thing to be uncomfortable with rather than the individual entries.** Each is named, each has
+  exactly one clearing action, and neither can hide inside the other because each has its own test —
+  but a list of this length is one step from the state this whole form exists to prevent, where a
+  genuine failure gets waved through because a red was expected. Both clear on owner-only actions
+  that are minutes of work; if they are still here in a week, the question to ask is why the queue
+  is not moving rather than how to word the third row.
 
   The two eligibility functions `0010` creates are deliberately **not** probed, and their absence
   from the check is not a gap: `0010` withholds `execute` from `authenticated`, so a probe would
@@ -117,8 +132,11 @@
 
   *The history of this bullet, which is the argument for keeping it in this form: EMPTY at 17 of 17,
   then ONE expected red at 19 of 20 when #115 gave the check its first sight of Edge Functions, then
-  EMPTY again at 20 of 20, then ONE again at 20 of 21 with #37's unpasted table, and now THREE at a
-  predicted 20 of 23 with #95's unpasted table and undeployed function.* The non-empty
+  EMPTY again at 20 of 20, then ONE again at 20 of 21 with #37's unpasted table, and now TWO at a
+  **measured** 21 of 23 with #37's table still unpasted and #95's function undeployed. A THREE was
+  written here first, from arithmetic, and never actually existed: the paste that would have cleared
+  its third entry had already happened. **A predicted state is not a state**, and the register a
+  count is written in — measured or derived — belongs beside it.* The non-empty
   states are the instructive ones. The set did not grow because anything regressed — it grew
   because the check stopped being **blind** to something already broken, which is the outcome a new
   check is supposed to have, and reading it as a regression would have been mistaking the
@@ -126,7 +144,7 @@
 
   **The hazard this form names is restated rather than dropped, for the fifth time.** An authority
   that is red by design and does not say so is one whose *next* genuine failure gets waved through —
-  the exact way a real outage hid in plain sight on 2026-08-09. This page excuses **exactly three**
+  the exact way a real outage hid in plain sight on 2026-08-09. This page excuses **exactly two**
   reds, each named in the table above with the one action that clears it, and everything else is
   new, real, and to be investigated rather than matched against a list. Each subject still has its
   own named test, so they cannot hide inside one another.
@@ -141,6 +159,13 @@
   grepping this file for the value rather than for the subject. The count sat four screens below the
   bullet it belongs to, in a paragraph whose own subject is how a stale count gets waved through.
   Twice now the sentence about the hazard has been the thing carrying it.*
+
+  *And it said "exactly **three**" for about an hour later the same day, which is the shortest-lived
+  version yet. The value-grep worked again and is not the lesson; the lesson is that the grep was
+  run against a count nobody had measured. **A correction sweep propagates whatever it is given** —
+  it makes every copy agree, and says nothing about whether the agreed value is true. Running the
+  instrument is a different act from synchronising the prose about it, and only one of them was done
+  first.*
 - **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
   Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
   organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since

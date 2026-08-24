@@ -181,7 +181,27 @@ describe('the suite runs in a zone where a date bug can show', () => {
 
   it('POSITIVE CONTROL: the pin actually reaches the running process', () => {
     // Asserting the config text alone would pass if vitest ignored the setting.
-    expect(new Date('2026-08-10').getTimezoneOffset()).not.toBe(0)
+    //
+    // #75: the first form of this control asserted only "the offset is not
+    // zero", which passes on any machine whose own zone is non-UTC — including
+    // the machine the suite was written on, which sat in the pinned zone. It
+    // could discriminate on a UTC runner and nowhere else, i.e. in CI and never
+    // on the laptop where vite.config.js actually gets edited.
+    //
+    // Two assertions against the value read out of the config, with different
+    // blind spots. env.TZ proves vitest APPLIED the setting — and still fails
+    // on pin deletion when the machine's default zone happens to equal the
+    // pinned one, because a machine default arrives from the OS, not through
+    // the TZ variable. The resolved zone proves Node HONOURED it — measured on
+    // Windows, a TZ set at process start and one set at runtime both move
+    // Intl and Date together, so this reads the same clock the date tests use.
+    // The residual blind spot is a developer who exports TZ=<the pinned zone>
+    // in their own shell; the zone below is chosen so that nobody plausibly
+    // does.
+    const pinned = config.match(/TZ:\s*'([^']+)'/)
+    expect(pinned, 'no TZ value found in vite.config.js').not.toBeNull()
+    expect(process.env.TZ).toBe(pinned[1])
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(pinned[1])
   })
 })
 

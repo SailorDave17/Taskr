@@ -267,7 +267,7 @@ describe('eligibleMembers — the screen’s mirror of eligible_members', () => 
   })
 
   it('is in ROSTER order, never an order derived from the exclusions', () => {
-    // `commitmentByMember`'s rule: any other order is a ranking, and a household
+    // the split surface's rule: any other order is a ranking, and a household
     // must not be able to read "who is most eligible" off a list that was only
     // ever meant to say who is allowed. Asserted against a fixture whose
     // exclusion names the LAST member, so a filter that appended survivors in

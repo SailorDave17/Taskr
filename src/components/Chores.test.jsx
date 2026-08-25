@@ -138,7 +138,10 @@ describe('the list — AC 1, a chore is a titled unit of minutes', () => {
     setup()
     const section = screen.getByRole('region', { name: /what needs doing/i })
     expect(section).toHaveTextContent(/still to do/i)
-    expect(section).toHaveTextContent(/committed/i)
+    // The per-person figure this asserted moved to the split surface in #47,
+    // so the household aggregate above is the only figure left on this screen.
+    // What the fence was ALWAYS about is the line below, and it is unchanged:
+    // nothing here ranks anybody, on either screen.
     expect(section).not.toHaveTextContent(/streak|rank|score|points|leaderboard/i)
   })
 })
@@ -526,104 +529,32 @@ describe('assignment — #36 AC 1, 4', () => {
   })
 })
 
-describe('the load figures — #36 AC 5, 6, 9', () => {
-  const held = (chore, member) => ({ ...chore, assigned_member_id: member })
-
-  const renderLoad = (list) =>
-    render(
-      <Chores
-        chores={list}
-        members={members}
-        capacities={capacities}
-        exclusions={[]}
-        onAdd={vi.fn()}
-        onSave={vi.fn()}
-        onRemove={vi.fn()}
-        onComplete={vi.fn()}
-        onUncomplete={vi.fn()}
-        onAssign={vi.fn()}
-        onUnassign={vi.fn()}
-        onExclude={vi.fn()}
-        onAllow={vi.fn()}
-      />,
-    )
-
-  it('AC 5: says what each person is carrying and what is left, in plain minutes', () => {
-    setup({ chores: [held(chores[0], 'm1'), held(chores[1], 'm2')] })
-
-    // Placeholder One: 120 minutes of capacity, holding the 20-minute chore.
-    expect(screen.getByTestId('load-m1')).toHaveTextContent('20 min committed')
-    expect(screen.getByTestId('load-m1')).toHaveTextContent('100 min left')
-    // Placeholder Two: 60 minutes, holding the 90-minute one.
-    expect(screen.getByTestId('load-m2')).toHaveTextContent('90 min committed')
-  })
-
-  it('AC 5: it is MINUTES, not a count of chores', () => {
-    // Two chores of 20 and 90 on one person. A count would read "2".
-    setup({ chores: [held(chores[0], 'm1'), held(chores[1], 'm1')] })
-    expect(screen.getByTestId('load-m1')).toHaveTextContent('110 min committed')
-    expect(screen.getByTestId('load-m1')).not.toHaveTextContent(/\b2 chores?\b/)
-  })
-
-  it('AC 6: an over-committed person reads "over", not "0 min left"', () => {
-    // 90 minutes on a 60-minute budget. formatMinutes clamps at zero, so this is
-    // the assertion that catches the remainder being routed through it.
-    setup({ chores: [held(chores[1], 'm2')] })
-    expect(screen.getByTestId('load-m2')).toHaveTextContent('30 min over')
-    expect(screen.getByTestId('load-m2')).not.toHaveTextContent('0 min left')
-  })
-
-  it('AC 6: a person holding nothing still appears, at zero', () => {
-    setup({ chores: [held(chores[0], 'm1')] })
-    expect(screen.getByTestId('load-m2')).toHaveTextContent('0 min committed')
-    expect(screen.getByTestId('load-m2')).toHaveTextContent('60 min left')
-  })
-
-  it('AC 5: completed work leaves the figure — commitment is OUTSTANDING minutes', () => {
-    const finished = { ...chores[1], assigned_member_id: 'm1', completed_at: '2026-08-08T10:00:00Z' }
-    setup({ chores: [held(chores[0], 'm1'), finished] })
-    expect(screen.getByTestId('load-m1')).toHaveTextContent('20 min committed')
-    expect(screen.getByTestId('load-m1')).not.toHaveTextContent('110 min committed')
-  })
-
-  it('AC 9: people are in ROSTER order even when the load says otherwise', () => {
-    // m2 carries 90 and m1 carries 20, so a sort-by-load would invert these.
-    setup({ chores: [held(chores[0], 'm1'), held(chores[1], 'm2')] })
-    const names = screen
-      .getAllByRole('listitem')
-      .filter((li) => li.className.includes('chore-load__row'))
-      .map((li) => li.textContent)
-    expect(names[0]).toMatch(/Placeholder One/)
-    expect(names[1]).toMatch(/Placeholder Two/)
-  })
-
-  it('AC 9: no bar, no rank, no percentage — the presentation is #47, not this story', () => {
-    const { container } = renderLoad([held(chores[0], 'm1'), held(chores[1], 'm2')])
-    const load = container.querySelector('.chore-load')
-
-    expect(load).not.toHaveTextContent(/%|percent/i)
-    expect(load).not.toHaveTextContent(/streak|rank|score|points|leaderboard|worst/i)
-    // A bar is an element, not a word, so the text assertions above cannot see
-    // one. These are the three ways it would actually arrive.
-    expect(load.querySelector('progress'), 'a progress element is a bar').toBeNull()
-    expect(load.querySelector('meter'), 'a meter element is a bar').toBeNull()
-    expect(
-      load.querySelector('[style*="width"]'),
-      'an inline width is how a hand-rolled bar is drawn',
-    ).toBeNull()
-  })
-
-  it('POSITIVE CONTROL: the load section is on screen, so the absences above are not an empty query', () => {
-    const { container } = renderLoad([held(chores[0], 'm1')])
-    expect(container.querySelector('.chore-load')).not.toBeNull()
-    expect(screen.getByRole('region', { name: /who is carrying what/i })).toBeInTheDocument()
-  })
-
-  it('shows nothing at all when the roster is empty, rather than an empty heading', () => {
-    setup({ members: [], capacities: [] })
-    expect(screen.queryByRole('region', { name: /who is carrying what/i })).not.toBeInTheDocument()
-  })
-})
+// The load figures moved to the split surface — #47.
+//
+// This describe held eight tests about `Commitment`, which #36 shipped here as
+// deliberately the ugliest honest form and whose own comment said #47 owned the
+// presentation and would replace it. It has. Every claim in it survives, and it
+// is worth saying WHERE, because a describe that simply disappears reads later
+// as coverage dropped:
+//
+//   per-person committed minutes, and what is left ...... Split.test.jsx, c.1/c.7
+//   minutes rather than a count of chores ............... Split.test.jsx, c.3
+//   an over-committed person reads "over", not 0 left ... Split.test.jsx, c.7
+//   a person holding nothing still appears, at zero ..... Split.test.jsx, c.7
+//   roster order even when the load says otherwise ...... Split.test.jsx, c.6
+//   nothing that ranks anybody ......................... Split.test.jsx, c.6
+//
+// TWO of the eight are SUPERSEDED rather than moved, and both were #36 saying
+// what it was not doing yet:
+//
+//   "completed work LEAVES the figure" — #47 criterion 7 makes done work a
+//   distinct segment INSIDE the bar rather than absent from it, so the claim is
+//   now the opposite one and Split.test.jsx asserts it in that form.
+//
+//   "no bar, no rank, no percentage — the presentation is #47, not this story"
+//   — there is a bar now, and a percentage in the bar's accessible name. The
+//   half of that test which was never about timing (nothing ranks) is what
+//   survives, on the surface that draws them.
 
 // ---------------------------------------------------------------------------
 // #37 — who cannot do a chore

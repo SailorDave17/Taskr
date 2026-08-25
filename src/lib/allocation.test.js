@@ -1,7 +1,16 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { allocate, fairShare, isLevel, spreadOf, LEVEL_TOLERANCE } from './allocation.js'
+import {
+  allocate,
+  assess,
+  fairShare,
+  isLevel,
+  minutesOf,
+  offLevelOf,
+  spreadOf,
+  LEVEL_TOLERANCE,
+} from './allocation.js'
 import { SCENARIOS } from './allocation.corpus.js'
 
 // #40 — the allocator, and the honesty half of it.
@@ -291,7 +300,12 @@ describe('AC 7 — eligibility, an impossible chore, and a member with no minute
         { id: 'z2', expectedMinutes: 20 },
       ],
     })
-    expect(result.noCapacity).toEqual([{ memberId: 'away', assignedMinutes: 0 }])
+    // Spelled in full rather than relaxed to toMatchObject: #47 gave every load
+    // entry a done/open split, and an exact assertion that is widened to an
+    // inexact one to accommodate a change stops being able to see the next one.
+    expect(result.noCapacity).toEqual([
+      { memberId: 'away', assignedMinutes: 0, doneMinutes: 0, openMinutes: 0 },
+    ])
     expect(result.load.map((l) => l.memberId)).toEqual(['home'])
     for (const entry of result.load) {
       expect(Number.isFinite(entry.share)).toBe(true)
@@ -351,7 +365,19 @@ describe('AC 8 — a human placement is never moved', () => {
 
 describe('AC 9 — one definition of fair share, one of level', () => {
   it('exports exactly one implementation of each, across the whole of src/', () => {
-    const definitions = { fairShare: [], isLevel: [] }
+    // #47 criterion 5 added the last three. The criterion is that the household
+    // surface takes fair share, off-level and levelness FROM HERE rather than
+    // computing them again — because two copies of the level rule would let the
+    // screen say "level" while the verdict beside it disagreed, which the
+    // charter names as the fastest way to destroy trust in the number the whole
+    // product rests on.
+    const definitions = {
+      fairShare: [],
+      isLevel: [],
+      offLevelOf: [],
+      assess: [],
+      minutesOf: [],
+    }
     for (const file of sourceFiles()) {
       if (/\.test\.jsx?$/.test(file)) continue
       const text = codeOf(readFileSync(file, 'utf8'))
@@ -363,10 +389,10 @@ describe('AC 9 — one definition of fair share, one of level', () => {
         for (let i = 0; i < found.length; i += 1) definitions[name].push(file)
       }
     }
-    expect(definitions.fairShare).toHaveLength(1)
-    expect(definitions.isLevel).toHaveLength(1)
-    expect(definitions.fairShare[0]).toMatch(/allocation\.js$/)
-    expect(definitions.isLevel[0]).toMatch(/allocation\.js$/)
+    for (const [name, files] of Object.entries(definitions)) {
+      expect(files, `${name} is defined in: ${files.join(', ')}`).toHaveLength(1)
+      expect(files[0], `${name} is not defined in allocation.js`).toMatch(/allocation\.js$/)
+    }
   })
 
   it('POSITIVE CONTROL: the definition scan can find a definition when there is one', () => {
@@ -376,6 +402,39 @@ describe('AC 9 — one definition of fair share, one of level', () => {
     const text = readFileSync(resolve(process.cwd(), 'src/lib/allocation.js'), 'utf8')
     expect(text).toMatch(/export function fairShare\b/)
     expect(text).toMatch(/export function isLevel\b/)
+    expect(text).toMatch(/export function offLevelOf\b/)
+    expect(text).toMatch(/export function assess\b/)
+    expect(text).toMatch(/export function minutesOf\b/)
+  })
+
+  it('#47 criterion 5: the household surface takes them from here, and defines none', () => {
+    // The consumer side of the rule above, and it is a different claim: the
+    // scan proves there is one implementation, this proves the surface uses it.
+    // A screen that imported nothing and computed its own numbers would satisfy
+    // the first and fail the product.
+    //
+    // Asserted against the SOURCE because there is nothing else to assert it
+    // against: a surface with its own copy would render the same numbers today
+    // and drift the first time either rule changed, so no rendering can tell
+    // the two apart. Same reasoning, same shape, as capacity.test.js's
+    // allowlist for `weekly_minutes`.
+    const surface = readFileSync(resolve(process.cwd(), 'src/components/Split.jsx'), 'utf8')
+    expect(surface).toMatch(/from '\.\.\/lib\/allocation\.js'/)
+    const imported = surface.match(/import \{([^}]*)\} from '\.\.\/lib\/allocation\.js'/)
+    expect(imported, 'the split surface imports nothing from allocation.js').not.toBeNull()
+    for (const name of ['assess', 'allocate']) {
+      expect(imported[1], `the split surface does not import ${name}`).toMatch(
+        new RegExp(`\\b${name}\\b`),
+      )
+    }
+  })
+
+  it('POSITIVE CONTROL: the import scan sees the imports that are there', () => {
+    // Without this the assertion above passes the moment the regex stops
+    // matching, which is how an empty result reads as a clean bill of health —
+    // the same control App.test.jsx keeps for its own import scans.
+    const surface = readFileSync(resolve(process.cwd(), 'src/components/Split.jsx'), 'utf8')
+    expect([...surface.matchAll(/from '([^']+)'/g)].length).toBeGreaterThan(2)
   })
 
   it('derives the verdict from isLevel, over every scenario in the corpus', () => {
@@ -516,5 +575,254 @@ describe('AC 2 — the scenario corpus, every expectation written by hand', () =
       const counted = scenario.members.filter((m) => m.capacityMinutes > 0).length
       expect(scenario.workingMembers, `workingMembers wrong for "${scenario.name}"`).toBe(counted)
     }
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// #47 — the arithmetic the household surface shares with the allocator.
+// ---------------------------------------------------------------------------
+
+describe('#47 criterion 7 — what one chore contributes', () => {
+  it('open work contributes its ESTIMATE', () => {
+    expect(minutesOf({ expectedMinutes: 20, actualMinutes: 80, done: false })).toBe(20)
+  })
+
+  it('done work contributes what it ACTUALLY took', () => {
+    expect(minutesOf({ expectedMinutes: 20, actualMinutes: 80, done: true })).toBe(80)
+  })
+
+  it('falls back to the estimate when nothing was recorded — which is every chore today', () => {
+    expect(minutesOf({ expectedMinutes: 20, done: true })).toBe(20)
+    expect(minutesOf({ expectedMinutes: 20, actualMinutes: null, done: true })).toBe(20)
+  })
+
+  it('a chore genuinely recorded at ZERO contributes zero, not its estimate', () => {
+    // The fallback is on absence, not on falsiness. `actual || expected` reads
+    // identically and silently substitutes the estimate for exactly the
+    // completion that most contradicts it — a job somebody found took no time
+    // at all, which is the single most useful datum #12 will collect.
+    expect(minutesOf({ expectedMinutes: 20, actualMinutes: 0, done: true })).toBe(0)
+  })
+})
+
+describe('#47 criterion 5 — off level, in minutes', () => {
+  const load = (memberId, assignedMinutes, fairShareMinutes) => ({
+    memberId,
+    assignedMinutes,
+    fairShareMinutes,
+  })
+
+  it('is the largest overshoot past a fair share, and names whose', () => {
+    expect(offLevelOf([load('a', 240, 210), load('b', 12, 42)])).toEqual({
+      memberId: 'a',
+      minutes: 30,
+    })
+  })
+
+  it('names the person furthest ABOVE their share, never the one furthest below', () => {
+    // A product decision rather than an arithmetic one. "Carrying 40 minutes
+    // more than their share" is the sentence the household is arguing about;
+    // its mirror points at a person as the problem, and red is for work.
+    expect(offLevelOf([load('a', 100, 60), load('b', 20, 60)]).memberId).toBe('a')
+  })
+
+  it('is null when nobody is over — a household exactly on its shares', () => {
+    expect(offLevelOf([load('a', 60, 60), load('b', 40, 40)])).toBeNull()
+  })
+
+  it('is null when there is nobody to be uneven with', () => {
+    expect(offLevelOf([load('a', 100, 40)])).toBeNull()
+    expect(offLevelOf([])).toBeNull()
+  })
+})
+
+describe('#47 criterion 5 — the surface and the allocator cannot disagree', () => {
+  // A scenario chosen so that the plausible WRONG implementations are visibly
+  // wrong on it, rather than one where every method happens to agree:
+  //
+  //   - capacities are unequal (300 / 100 / 40), so "everybody carries the same
+  //     minutes" and "everybody carries the same share" give different answers;
+  //   - one member has NO capacity, so a fair share computed over the whole
+  //     roster differs from one computed over the people who can carry work;
+  //   - one chore is impossible for everybody, so counting it in the total
+  //     inflates every fair share.
+  const members = [
+    { id: 'a', capacityMinutes: 300 },
+    { id: 'b', capacityMinutes: 100 },
+    { id: 'c', capacityMinutes: 40 },
+    { id: 'away', capacityMinutes: 0 },
+  ]
+  const chores = [
+    { id: 'big', expectedMinutes: 90 },
+    { id: 'mid', expectedMinutes: 60 },
+    { id: 'small', expectedMinutes: 20 },
+    { id: 'tiny', expectedMinutes: 10 },
+    { id: 'impossible', expectedMinutes: 45 },
+  ]
+  const isEligible = (chore) => chore.id !== 'impossible'
+
+  const allocated = allocate({ members, chores, isEligible })
+
+  /**
+   * The allocator's answer, re-derived the way the SURFACE derives it: from the
+   * assignments as they now stand, with no knowledge of how they got there.
+   * This is the same call `Split.jsx` makes, on the same module.
+   */
+  const placed = new Map(allocated.assignments.map((a) => [a.choreId, a.memberId]))
+  const reassessed = assess({
+    members,
+    chores: chores.map((c) => ({
+      id: c.id,
+      expectedMinutes: c.expectedMinutes,
+      assignedMemberId: placed.get(c.id) ?? null,
+    })),
+  })
+
+  it('POSITIVE CONTROL: the scenario is one where the answer is not trivially anything', () => {
+    // Every assertion below is vacuous on a household that is level with
+    // nothing assigned. This pins that work was placed, that somebody was left
+    // out for having no minutes, and that a chore was genuinely impossible.
+    expect(allocated.assignments.length).toBe(4)
+    expect(allocated.unassignable).toEqual(['impossible'])
+    expect(allocated.noCapacity.map((n) => n.memberId)).toEqual(['away'])
+    expect(allocated.load.length).toBe(3)
+  })
+
+  it('agrees on levelness', () => {
+    expect(reassessed.level).toBe(allocated.level)
+  })
+
+  it('agrees on the spread, to the last bit', () => {
+    expect(reassessed.spread).toBe(allocated.spread)
+  })
+
+  it('agrees on every fair share, in minutes', () => {
+    const shares = (result) =>
+      Object.fromEntries(result.load.map((e) => [e.memberId, e.fairShareMinutes]))
+    expect(shares(reassessed)).toEqual(shares(allocated))
+  })
+
+  it('agrees on how far off level the household is', () => {
+    expect(reassessed.offLevel).toEqual(allocated.offLevel)
+  })
+
+  it('agrees on who is holding what', () => {
+    const carried = (result) =>
+      Object.fromEntries(result.load.map((e) => [e.memberId, e.assignedMinutes]))
+    expect(carried(reassessed)).toEqual(carried(allocated))
+  })
+
+  it('agrees that the impossible chore is nobody’s, and excludes it from both totals', () => {
+    // The rule that would be easiest to re-implement differently, and the one
+    // with the most misleading failure: counting the orphan chore inflates
+    // every fair share against work no split of this household can carry, and
+    // then reports everybody underloaded for it.
+    expect(reassessed.unassigned).toEqual(allocated.unassignable)
+    const fairTotal = reassessed.load.reduce((sum, e) => sum + e.fairShareMinutes, 0)
+    expect(Math.round(fairTotal)).toBe(90 + 60 + 20 + 10)
+  })
+
+  it('POSITIVE CONTROL: a plausible re-implementation really would differ here', () => {
+    // Equal MINUTES each, rather than equal shares — the rule the charter says
+    // every competitor gets wrong, and the one a second implementation would
+    // most likely reach for. If it agreed with the real answer on this
+    // scenario, the six assertions above would prove nothing.
+    const equalMinutes = 180 / 3
+    for (const entry of allocated.load) {
+      expect(entry.fairShareMinutes).not.toBe(equalMinutes)
+    }
+  })
+})
+
+describe('#47 — assess, over the assignments a human made', () => {
+  const members = [
+    { id: 'a', capacityMinutes: 300 },
+    { id: 'b', capacityMinutes: 60 },
+  ]
+
+  const chore = (id, expectedMinutes, assignedMemberId, extra = {}) => ({
+    id,
+    expectedMinutes,
+    assignedMemberId,
+    ...extra,
+  })
+
+  it('divides each person’s minutes by their OWN capacity', () => {
+    const result = assess({ members, chores: [chore('x', 150, 'a'), chore('y', 30, 'b')] })
+    expect(result.load.map((e) => e.share)).toEqual([0.5, 0.5])
+    expect(result.level).toBe(true)
+  })
+
+  it('splits what each person carries into done and outstanding', () => {
+    const result = assess({
+      members,
+      chores: [chore('x', 90, 'a'), chore('y', 60, 'a', { done: true })],
+    })
+    expect(result.load[0]).toMatchObject({
+      assignedMinutes: 150,
+      openMinutes: 90,
+      doneMinutes: 60,
+    })
+  })
+
+  it('returns work nobody holds separately, and keeps it out of the arithmetic', () => {
+    const result = assess({
+      members,
+      chores: [chore('x', 150, 'a'), chore('y', 30, 'b'), chore('orphan', 150, null)],
+    })
+    expect(result.unassigned).toEqual(['orphan'])
+    // 180 minutes of held work over 360 of capacity: 150 and 30 are exactly the
+    // fair shares. Counting the orphan would make them 300 and 60.
+    expect(result.load.map((e) => e.fairShareMinutes)).toEqual([150, 30])
+  })
+
+  it('does not treat FINISHED work nobody holds as outstanding', () => {
+    const result = assess({
+      members,
+      chores: [chore('orphan', 30, null, { done: true })],
+    })
+    expect(result.unassigned).toEqual([])
+  })
+
+  it('holds a zero-capacity member out of the split and names what they carry', () => {
+    const result = assess({
+      members: [...members, { id: 'away', capacityMinutes: 0 }],
+      chores: [chore('x', 45, 'away')],
+    })
+    expect(result.load.map((e) => e.memberId)).toEqual(['a', 'b'])
+    expect(result.noCapacity).toEqual([
+      { memberId: 'away', assignedMinutes: 45, doneMinutes: 0, openMinutes: 45 },
+    ])
+    for (const entry of result.load) {
+      expect(Number.isFinite(entry.share)).toBe(true)
+    }
+  })
+
+  it('says when level was not a real question', () => {
+    // `isLevel` is true for fewer than two shares, correctly — a set that small
+    // has no spread. `contested` is what lets a caller tell that apart from a
+    // household that actually reached level, which is the difference between an
+    // honest screen and one that scores full marks for an empty house.
+    expect(assess({ members: [], chores: [] }).contested).toBe(false)
+    expect(assess({ members: [members[0]], chores: [] }).contested).toBe(false)
+    expect(assess({ members, chores: [] }).contested).toBe(true)
+    expect(assess({ members: [], chores: [] }).level).toBe(true)
+  })
+
+  it('cannot be told a capacity through the member row, any more than allocate can', () => {
+    // #44 AC 7's rule, inherited rather than restated: capacity is an argument.
+    expect(() => assess({ members: [{ id: 'a', weekly_minutes: 300 }], chores: [] })).toThrow(
+      /capacityMinutes/,
+    )
+  })
+
+  it('is not moved by the order its inputs arrive in', () => {
+    const forwards = assess({ members, chores: [chore('x', 150, 'a'), chore('y', 30, 'b')] })
+    const backwards = assess({
+      members: [...members].reverse(),
+      chores: [chore('y', 30, 'b'), chore('x', 150, 'a')],
+    })
+    expect(backwards).toEqual(forwards)
   })
 })

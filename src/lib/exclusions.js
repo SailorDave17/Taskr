@@ -133,7 +133,7 @@ export async function allowMember(choreId, memberId) {
  *
  * An absent member id returns FALSE — not excluded — rather than matching a row
  * whose `member_id` is null. The caller asks with a null on every render, because
- * an unassigned chore has no assignee; `committedMinutes` guards the same shape
+ * an unassigned chore has no assignee; `assess` guards the same shape
  * for the same reason, that the wrong answer would be a plausible boolean rather
  * than a crash and would therefore survive being read.
  *
@@ -161,7 +161,7 @@ export function excludedMemberIds(exclusions, choreId) {
 /**
  * The members who may do a chore — the mirror of `eligible_members`.
  *
- * In ROSTER order, for `commitmentByMember`'s reason: any other order is a
+ * In ROSTER order, for the split surface's reason: any other order is a
  * ranking, and a household must not be able to read "who is most eligible" off a
  * list that was only ever meant to say who is allowed.
  *

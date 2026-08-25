@@ -125,7 +125,24 @@ const { default: App } = await import('./App.jsx')
  * to show, so every render resolves at least one promise. Asserting before that
  * lands would be testing the loading state by accident.
  */
-const renderApp = () => act(async () => void render(<App />))
+/**
+ * Render the app and, since #47, optionally walk to the surface under test.
+ *
+ * The split surface opens by default (the charter's decision of 2026-08-06), so
+ * a test whose subject is the roster or the chore screen needs one tap to reach
+ * it. Passing the tab's label rather than reaching into state is deliberate: the
+ * navigation is itself criterion 11, so a helper that set the view directly
+ * would quietly stop covering the thing every one of these tests walks past.
+ *
+ * Nothing else about the tests below changed. Where one of them now reads
+ * `renderApp('Who')`, the assertion underneath it is the one it always had.
+ */
+const renderApp = async (surface) => {
+  await act(async () => void render(<App />))
+  if (surface) {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: surface })))
+  }
+}
 
 beforeEach(() => {
   backend.hasSupabaseConfig = true
@@ -344,7 +361,7 @@ describe('when the signed-in person belongs to a household', () => {
   const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
 
   it('shows the roster rather than the sign-in screen', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(inRoster().getByText('Placeholder One')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
@@ -354,7 +371,7 @@ describe('when the signed-in person belongs to a household', () => {
   // locally, a passing "survives a restart" check would be indistinguishable
   // from a device that merely remembered.
   it('reads the household from the server on every load, not from storage', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     expect(api.currentHousehold).toHaveBeenCalled()
@@ -364,12 +381,12 @@ describe('when the signed-in person belongs to a household', () => {
   })
 
   it('marks the person signed in on this phone, from the live auth id', async () => {
-    await renderApp()
+    await renderApp('Who')
     expect(await screen.findByText(/· you/)).toBeInTheDocument()
   })
 
   it('re-reads from the server after a change, rather than patching what it has', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     const readsBefore = api.listMembers.mock.calls.length
@@ -442,7 +459,7 @@ describe('chores — the write path and the re-read', () => {
   })
 
   it('AC 6: re-reads the chores from the server after an add, rather than patching local state', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByText('Placeholder Chore')
 
     const readsBefore = choresApi.listChores.mock.calls.length
@@ -466,7 +483,7 @@ describe('chores — the write path and the re-read', () => {
   })
 
   it('AC 6: re-reads after an edit', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByText('Placeholder Chore')
 
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /edit placeholder chore/i })))
@@ -484,7 +501,7 @@ describe('chores — the write path and the re-read', () => {
   })
 
   it('AC 6: re-reads after a delete', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByText('Placeholder Chore')
 
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /remove placeholder chore/i })))
@@ -502,7 +519,7 @@ describe('chores — the write path and the re-read', () => {
     // The supabase.js mock at the top of this file throws if App reaches it, so
     // a component calling the client directly fails here rather than silently
     // working. This asserts the positive half: the data layer WAS used.
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByText('Placeholder Chore')
     await addChoreThroughTheForm()
 
@@ -510,7 +527,7 @@ describe('chores — the write path and the re-read', () => {
   })
 
   it('does not go to the server at all when the form value is one the database would refuse', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByText('Placeholder Chore')
 
     fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
@@ -533,6 +550,160 @@ describe('chores — the write path and the re-read', () => {
 // The write path and the re-read, from App's side. What the CONTROL looks like
 // is Roster.test.jsx's; what the data layer sends is capacity.io.test.js's.
 // ---------------------------------------------------------------------------
+
+// #47 criterion 11 — the three surfaces, and moving between them.
+//
+// At the level only App can answer. The component tests cover what each surface
+// DRAWS; these cover the three things that are App's alone:
+//
+//   which surface opens, the re-read on arrival, and that a round trip costs
+//   neither a page load nor a re-authentication.
+//
+// The route ENUMERATION — that every view the state machine can hold is offered
+// by the tab strip — is in gate.test.js, which can see the file this one has
+// mocked away.
+describe('moving between surfaces — #47 criterion 11', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+      { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60 },
+    ])
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  /**
+   * jsdom's own `location.assign` is unimplemented, so calling it emits a
+   * jsdomError rather than doing anything — which means "was the browser
+   * navigated?" cannot be asked of the real one. Replaced for this describe,
+   * and restored after, exactly as the calendar describe does.
+   */
+  let realLocation
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', assign: vi.fn() },
+    })
+  })
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+  })
+
+  it('opens on the split — the charter decision of 2026-08-06', async () => {
+    // "The load surface opens by default, with the roster reachable from it."
+    // The thing judged at arm's length has to be the thing on screen.
+    await renderApp()
+    expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /who is in the household/i })).not.toBeInTheDocument()
+  })
+
+  it('reaches the roster from the split, and the split from the roster', async () => {
+    await renderApp()
+    await tab('Who')
+    expect(screen.getByRole('region', { name: /who is in the household/i })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /the split/i })).not.toBeInTheDocument()
+
+    await tab('Split')
+    expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
+  })
+
+  it('re-reads the household from the server on arrival, rather than showing what it cached', async () => {
+    // The criterion, in the form that would actually bite: another phone edits
+    // the roster while this one is looking at the split. Arriving on the roster
+    // must show the edit, and it only can if arrival performs a read.
+    api.listMembers.mockResolvedValueOnce([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+    ])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+      { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60 },
+    ])
+
+    await renderApp()
+    await tab('Who')
+
+    expect(screen.getByText('Placeholder Two')).toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: the second person is genuinely absent from the first read', async () => {
+    // Without this the assertion above passes against an app that never
+    // re-reads, provided the fixture happened to contain both people all along
+    // — which is what an unarmed mock would do.
+    api.listMembers.mockResolvedValueOnce([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+    ])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
+      { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60 },
+    ])
+
+    await renderApp()
+    expect(screen.queryByText('Placeholder Two')).not.toBeInTheDocument()
+  })
+
+  it('reads every surface’s data on arrival, not only the roster', async () => {
+    // The split divides capacity and the chore screen lists chores, so a read
+    // that fetched members alone would leave two of the three surfaces stale.
+    // `refresh()` is one call for all of it, and this pins that arrival uses it
+    // rather than something narrower.
+    await renderApp()
+    const before = {
+      members: api.listMembers.mock.calls.length,
+      chores: choresApi.listChores.mock.calls.length,
+      capacity: capacityApi.listCapacity.mock.calls.length,
+    }
+
+    await tab('Chores')
+
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(before.members)
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before.chores)
+    expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(before.capacity)
+  })
+
+  it('costs no page load and no re-authentication', async () => {
+    // "without a full page reload and without re-entering a join code". There
+    // is no join code any more — #62 replaced it with per-person sign-in — so
+    // the surviving claim is that a round trip never returns anybody to the
+    // onboarding screen, and never navigates the browser.
+    await renderApp()
+    await tab('Who')
+    await tab('Chores')
+    await tab('Split')
+
+    expect(globalThis.location.assign).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /sign in/i })).not.toBeInTheDocument()
+    expect(api.signIn).not.toHaveBeenCalled()
+    expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
+  })
+
+  it('marks the surface you are on, so the tabs are not three identical buttons', async () => {
+    await renderApp()
+    expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
+
+    await tab('Who')
+    expect(screen.getByRole('button', { name: 'Who' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Split' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('offers no surfaces at all until there is a household to look at', async () => {
+    // A tab strip above the sign-in screen is three buttons that lead nowhere.
+    api.currentHousehold.mockResolvedValue(null)
+    await renderApp()
+    expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument()
+  })
+})
 
 describe('capacity — this week, set by hand (#46)', () => {
   const household = {
@@ -581,7 +752,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   }
 
   it('reads this week’s overrides from the server on load', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(capacityApi.listCapacity).toHaveBeenCalled()
     // The period is a MONDAY, derived from the household's own zone. A period
@@ -593,7 +764,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   })
 
   it('AC 4: re-reads from the SERVER after the write, rather than patching local state', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     const readsBefore = capacityApi.listCapacity.mock.calls.length
@@ -614,7 +785,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   })
 
   it('AC 4: the write names the same period the screen was showing', async () => {
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     const readPeriod = capacityApi.listCapacity.mock.calls[0][0]
 
@@ -629,7 +800,7 @@ describe('capacity — this week, set by hand (#46)', () => {
 
   it('clearing an override goes through the data layer and re-reads too', async () => {
     overrideThisWeek(120)
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     const readsBefore = capacityApi.listCapacity.mock.calls.length
@@ -649,7 +820,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   it('AC 6: the write goes through lib/capacity.js, never the Supabase client directly', async () => {
     // getSupabase throws in this file's mock, so reaching for it is a failure
     // rather than a silent bypass. The flow completing is the assertion.
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     await openTheWeekEditor()
     await saveMinutes('120')
@@ -688,30 +859,33 @@ describe('capacity — this week, set by hand (#46)', () => {
   // written a different way rather than a wrong way.
   // -------------------------------------------------------------------------
 
-  it('the chore screen’s load figures follow THIS WEEK, not the baseline', async () => {
+  it('the split surface’s figures follow THIS WEEK, not the baseline', async () => {
+    // The subject of this test moved from the chore screen to the split surface
+    // in #47. The CLAIM is unchanged and is the one #46 exists for: what gets
+    // divided is this week's capacity, not the stored baseline.
     overrideThisWeek(120)
     await renderApp()
-    await screen.findByRole('region', { name: /who is carrying what/i })
+    await screen.findByRole('region', { name: /the split/i })
 
     // Baseline 300, this week 120, nothing assigned. "180 min left" would mean
     // the override reached the roster and not the allocator's input — which is
     // precisely the half-wired state this story exists to end.
-    const row = screen.getByTestId('load-m1')
-    expect(row).toHaveTextContent('0 min committed')
+    const row = screen.getByTestId('split-m1')
+    expect(row).toHaveTextContent('0 of 120 min')
     expect(row).toHaveTextContent('120 min left')
-    expect(row, 'the baseline must not be what the load surface divides').not.toHaveTextContent(
+    expect(row, 'the baseline must not be what the split divides').not.toHaveTextContent(
       '300 min left',
     )
   })
 
   it('POSITIVE CONTROL: with no override the same screen shows the baseline', async () => {
-    // Without this, the assertion above passes identically if the load figures
-    // were broken in some other way that happened to yield 120 — and it pins
-    // that the difference is the OVERRIDE rather than anything else on screen.
+    // Without this, the assertion above passes identically if the figures were
+    // broken in some other way that happened to yield 120 — and it pins that
+    // the difference is the OVERRIDE rather than anything else on screen.
     capacityApi.listCapacity.mockResolvedValue([])
     await renderApp()
-    await screen.findByRole('region', { name: /who is carrying what/i })
-    expect(screen.getByTestId('load-m1')).toHaveTextContent('300 min left')
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('split-m1')).toHaveTextContent('300 min left')
   })
 
   it('AC 6: POSITIVE CONTROL — the import scan sees the imports that are there', () => {
@@ -772,13 +946,13 @@ describe('exclusions — the write path and the re-read (#37)', () => {
   }
 
   it('AC 9: reads the exclusions from the server on load', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
     expect(exclusionsApi.listExclusions).toHaveBeenCalled()
   })
 
   it('AC 9: re-reads from the SERVER after a write, rather than patching local state', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
 
     const readsBefore = exclusionsApi.listExclusions.mock.calls.length
@@ -795,14 +969,21 @@ describe('exclusions — the write path and the re-read (#37)', () => {
     // did not write arrives anyway, because the state is the server's. Asserted
     // through the RENDERED sentence, not through the mock, since a call count
     // says nothing about whether the answer reached the screen.
-    exclusionsApi.listExclusions
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([{ id: 'x1', chore_id: 'c1', member_id: 'm1' }])
+    // Armed by CHANGING the mock between the two assertions rather than by
+    // `mockResolvedValueOnce`. The "once" form counted reads implicitly, and
+    // #47 added one — arriving on a surface re-reads — so it landed on the
+    // wrong read and the row was on screen before the write. This form says
+    // what it means: nothing, then another device records something, then the
+    // next read this device performs must show it.
+    exclusionsApi.listExclusions.mockResolvedValue([])
 
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
     expect(screen.queryByText(/placeholder one cannot do this/i)).not.toBeInTheDocument()
 
+    exclusionsApi.listExclusions.mockResolvedValue([
+      { id: 'x1', chore_id: 'c1', member_id: 'm1' },
+    ])
     await markUnable('m2')
     await waitFor(() =>
       expect(screen.getByText(/placeholder one cannot do this/i)).toBeInTheDocument(),
@@ -813,7 +994,7 @@ describe('exclusions — the write path and the re-read (#37)', () => {
     exclusionsApi.listExclusions.mockResolvedValue([
       { id: 'x1', chore_id: 'c1', member_id: 'm2' },
     ])
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
 
     const readsBefore = exclusionsApi.listExclusions.mock.calls.length
@@ -834,7 +1015,7 @@ describe('exclusions — the write path and the re-read (#37)', () => {
   it('the write goes through lib/exclusions.js, never the Supabase client directly', async () => {
     // getSupabase() throws in this file's mock, so a component reaching past the
     // data layer fails loudly here rather than shipping.
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
     await markUnable('m2')
     expect(screen.queryByText(/must not reach the client directly/i)).not.toBeInTheDocument()
@@ -844,7 +1025,7 @@ describe('exclusions — the write path and the re-read (#37)', () => {
     exclusionsApi.excludeMember.mockRejectedValue(
       new Error('That person is already marked as unable to do this chore.'),
     )
-    await renderApp()
+    await renderApp('Chores')
     await onScreen()
     await markUnable('m2')
 
@@ -939,7 +1120,7 @@ describe('connecting a calendar (#95)', () => {
     calendarApi.listCalendarConnections.mockResolvedValue([
       { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' },
     ])
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(calendarApi.listCalendarConnections).toHaveBeenCalled()
     expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
@@ -949,7 +1130,7 @@ describe('connecting a calendar (#95)', () => {
     // End to end through the REAL `startConnect`, so this is the URL a member
     // would actually be sent to. A stub here would assert that the app calls a
     // function, which is a fact about this test file.
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     await act(async () =>
       void fireEvent.click(inRoster().getByRole('button', { name: /connect google calendar/i })),
@@ -967,7 +1148,7 @@ describe('connecting a calendar (#95)', () => {
   it('completes the exchange when Google sends the member back, then cleans the URL', async () => {
     calendarApi.completeConnect.mockResolvedValue({ ok: true })
     atUrl('?code=the-code&state=the-state')
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     expect(calendarApi.completeConnect).toHaveBeenCalledWith({
@@ -994,7 +1175,7 @@ describe('connecting a calendar (#95)', () => {
       return []
     })
     atUrl('?code=the-code&state=the-state')
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
     expect(order.indexOf('exchange')).toBeLessThan(order.indexOf('read'))
@@ -1013,10 +1194,12 @@ describe('connecting a calendar (#95)', () => {
     // Still loaded: a failed connection is not a failed app, and rendering the
     // boot-failure card here would hide a working household behind one refused
     // OAuth code.
-    await screen.findByRole('region', { name: /who is in the household/i })
-    // `getAllByRole` rather than `getByRole`: App passes `error` to both the
-    // roster and the chore card, so a single-element query is ambiguous and
-    // fails with a message about the query rather than about the app.
+    //
+    // Asserted on the surface the person LANDS on, which since #47 is the split
+    // rather than the roster. Deliberately not navigated: arriving on another
+    // surface performs a successful re-read, and `mutate` clears the error strip
+    // when it does — correct behaviour, and it would take the evidence with it.
+    await screen.findByRole('region', { name: /the split/i })
     expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
       /invalid_grant/,
     )
@@ -1030,7 +1213,7 @@ describe('connecting a calendar (#95)', () => {
     // a button that did nothing.
     atUrl('?error=access_denied&state=the-state')
     await renderApp()
-    await screen.findByRole('region', { name: /who is in the household/i })
+    await screen.findByRole('region', { name: /the split/i })
 
     expect(calendarApi.completeConnect).not.toHaveBeenCalled()
     expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
@@ -1041,7 +1224,7 @@ describe('connecting a calendar (#95)', () => {
   it('POSITIVE CONTROL: an ordinary load exchanges nothing and shows no complaint', async () => {
     // Without this, every assertion above is satisfied by an App that calls
     // `completeConnect` never — and by one that reports an error on every load.
-    await renderApp()
+    await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(calendarApi.completeConnect).not.toHaveBeenCalled()
     expect(screen.queryAllByRole('alert')).toEqual([])
@@ -1063,7 +1246,7 @@ describe('#53 — the boot-time catch-up pass', () => {
   })
 
   it('runs BEFORE the first read, so a created occurrence is in the first list a person sees', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByRole('region', { name: /what needs doing/i })
 
     expect(choresApi.catchUpRepeats).toHaveBeenCalledTimes(1)
@@ -1089,7 +1272,7 @@ describe('#53 — the boot-time catch-up pass', () => {
   })
 
   it('says nothing when nothing was skipped', async () => {
-    await renderApp()
+    await renderApp('Chores')
     await screen.findByRole('region', { name: /what needs doing/i })
     expect(screen.queryByText(/skipped rather than piled/i)).not.toBeInTheDocument()
   })
@@ -1104,7 +1287,10 @@ describe('#53 — the boot-time catch-up pass', () => {
     )
     await renderApp()
 
-    await screen.findByRole('region', { name: /who is in the household/i })
+    // The split surface, for the reason the calendar failure above records: a
+    // person lands here, and navigating elsewhere would re-read successfully
+    // and clear the strip this test is about.
+    await screen.findByRole('region', { name: /the split/i })
     expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
       /catching up repeats/i,
     )

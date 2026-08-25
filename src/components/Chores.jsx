@@ -4,7 +4,6 @@ import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   WEEKDAYS,
-  commitmentByMember,
   describeRepeat,
   formatMinutes,
   isOutstanding,
@@ -254,53 +253,6 @@ function ExcludedAssigneeNote({ chore, members }) {
 ExcludedAssigneeNote.propTypes = {
   chore: PropTypes.object.isRequired,
   members: PropTypes.array.isRequired,
-}
-
-/**
- * What each person is carrying, and what is left of their week — #36 AC 5, 6, 9.
- *
- * Deliberately the ugliest honest form: plain minutes, in roster order, with no
- * bar, no rank, no percentage and no sort-by-load. The charter says outright
- * that a proposal satisfiable by a screenshot of the 2020 all-users view has
- * collapsed, and every one of those four would be that screenshot. #47 owns the
- * presentation — share of each person's OWN capacity, which is the number that
- * actually means something — and replaces this. Replacing plain text is cheap;
- * un-shipping a leaderboard is not.
- *
- * An over-committed person reads "40m over" rather than "0m left". AC 6 asks for
- * exactly that, and `formatMinutes` clamps at zero, so the sign is decided here
- * and only the magnitude is handed to the formatter.
- */
-function Commitment({ members, chores, capacities }) {
-  const rows = commitmentByMember(members, chores, capacities)
-
-  return (
-    <section className="chore-load" aria-labelledby="load-heading">
-      <h3 id="load-heading" className="card__subheading">
-        Who is carrying what
-      </h3>
-      <ul className="chore-load__list">
-        {rows.map(({ member, committedMinutes, remainingMinutes }) => (
-          <li className="chore-load__row" key={member.id} data-testid={`load-${member.id}`}>
-            <span className="chore-load__name">{member.display_name}</span>
-            <span className="chore-load__figures">
-              {committedMinutes} min committed
-              <span aria-hidden="true"> · </span>
-              {remainingMinutes < 0
-                ? `${Math.abs(remainingMinutes)} min over`
-                : `${remainingMinutes} min left`}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-Commitment.propTypes = {
-  members: PropTypes.array.isRequired,
-  chores: PropTypes.array.isRequired,
-  capacities: PropTypes.array.isRequired,
 }
 
 function ChoreRow({
@@ -554,7 +506,6 @@ ChoreRow.propTypes = {
 export default function Chores({
   chores,
   members,
-  capacities,
   exclusions,
   busy,
   error,
@@ -628,12 +579,14 @@ export default function Chores({
         </>
       ) : null}
 
-      {/* Keyed on the ROSTER, not on the chore list, so a person carrying
-          nothing still appears — AC 6. Hiding the empty-handed is how a load
-          view stops being a fairness view. */}
-      {members.length > 0 ? (
-        <Commitment members={members} chores={chores} capacities={capacities} />
-      ) : null}
+      {/* The per-person load figures lived here until #47. They have not been
+          dropped — they moved to the Split surface, which draws each person's
+          load as a share of THEIR OWN capacity, which is the number that
+          actually means something. #36 shipped them here in deliberately the
+          ugliest honest form and its own comment said #47 owned the
+          presentation and would replace this. Leaving both would put two
+          answers to one question on two screens, which is the fault
+          capacity.js's docstring calls invisible. */}
 
       {done.length > 0 ? (
         <section className="chore-done" aria-labelledby="done-heading">
@@ -804,7 +757,6 @@ export default function Chores({
 Chores.propTypes = {
   chores: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
-  capacities: PropTypes.array.isRequired,
   exclusions: PropTypes.array.isRequired,
   busy: PropTypes.bool,
   error: PropTypes.string,

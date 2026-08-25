@@ -84,6 +84,168 @@ export function isLevel(shares) {
 }
 
 /**
+ * How far past their fair share the most over-committed person is, in minutes.
+ *
+ * THE single definition of "off level" — #47 criterion 5, and the third member
+ * of the family `fairShare` and `isLevel` already belong to. The surface states
+ * this number and the allocator's own corpus report could; two implementations
+ * would let a screen say "30 minutes off" while the verdict beside it disagreed,
+ * which is the charter's named trust-killer.
+ *
+ * MINUTES, never a count of chores — the prototype's third finding, and the one
+ * that read as broken when it was violated.
+ *
+ * The member named is the one furthest ABOVE their share rather than the one
+ * furthest from it in either direction, and that is a product decision rather
+ * than an arithmetic one: "carrying 30 minutes more than their share" is the
+ * sentence the household is arguing about, and its mirror ("carrying 30 minutes
+ * less") points at a person as the problem. Red is for work, never for people.
+ *
+ * Null when there is nobody to be uneven with, and null when nobody is over —
+ * a household that is exactly on its shares has no number to state, and
+ * fabricating a zero would put "0 minutes off level" on a screen.
+ */
+export function offLevelOf(load) {
+  if (load.length < 2) return null
+  let worst = null
+  for (const entry of load) {
+    const over = entry.assignedMinutes - entry.fairShareMinutes
+    if (worst === null || over > worst.over + EPSILON) {
+      worst = { memberId: entry.memberId, over }
+    }
+  }
+  if (worst === null || worst.over <= EPSILON) return null
+  return { memberId: worst.memberId, minutes: Math.round(worst.over) }
+}
+
+/**
+ * The minutes one chore contributes to the person holding it.
+ *
+ * OPEN work contributes its ESTIMATE and DONE work contributes what it actually
+ * took — #47 criterion 7, which supersedes #12's AC 6 and settles the open
+ * decision that AC carried (its option (a), recommended there and taken here).
+ *
+ * `actualMinutes` is the field #12 will fill; nothing writes it yet, so the
+ * fallback is what runs today and the preference is what runs the moment that
+ * column exists. That ordering is deliberate: the alternative is a change to
+ * this line inside #12, which is a coupling nobody would be looking for.
+ *
+ * The fallback is on ABSENCE, not on falsiness. A chore genuinely recorded at
+ * zero actual minutes must contribute zero, and `actual || expected` would
+ * silently substitute the estimate for exactly the completion that most
+ * contradicts it.
+ */
+export function minutesOf(chore) {
+  if (!chore.done) return chore.expectedMinutes
+  return chore.actualMinutes == null ? chore.expectedMinutes : chore.actualMinutes
+}
+
+/**
+ * The fairness verdict over a set of loads people are ALREADY carrying.
+ *
+ * THE single implementation — #47 criterion 5. `allocate` below ends by calling
+ * this on the assignments it just made, and the household surface calls it on
+ * the assignments a human made, so the screen and the allocator cannot reach two
+ * different answers about one household. A test asserts they agree on a scenario
+ * a plausible re-implementation would get wrong.
+ *
+ * @param {object} input
+ * @param {Array<{id: string, capacityMinutes: number}>} input.members
+ *   Capacity is an ARGUMENT here for the same reason it is an argument to
+ *   `allocate`: this module must never learn to read `members.weekly_minutes`.
+ * @param {Array<{id, expectedMinutes, actualMinutes?, assignedMemberId?, done?}>} input.chores
+ *
+ * Work nobody holds is EXCLUDED from the arithmetic and returned separately.
+ * Counting it would inflate every fair share against work no member has taken
+ * on, and then report the whole household underloaded for it — the same
+ * reasoning `allocate` gives for excluding what nobody is eligible for, and the
+ * same rule, because after allocation those are the same chores.
+ */
+export function assess({ members, chores }) {
+  assertMembers(members)
+  assertChores(chores)
+
+  // Sorted, so input order cannot reach the result — the property `allocate`
+  // states as AC 6 and which this inherits by construction rather than by a
+  // second copy of the sort.
+  const roster = [...members].sort(byId)
+  const byMemberId = new Map(roster.map((m) => [m.id, m]))
+
+  // Zero capacity is not a small capacity. A share is minutes over capacity, so
+  // dividing here is a division by zero and reporting the result reads as the
+  // most overloaded person in the house. They are held out of the split and
+  // named separately — #47 criterion 8, and #40 AC 7 before it.
+  const working = roster.filter((m) => m.capacityMinutes > 0)
+  const noCapacity = roster.filter((m) => m.capacityMinutes <= 0)
+
+  const doneMinutes = new Map(roster.map((m) => [m.id, 0]))
+  const openMinutes = new Map(roster.map((m) => [m.id, 0]))
+  const unassigned = []
+  let totalWorkMinutes = 0
+
+  for (const chore of chores) {
+    const holder = chore.assignedMemberId
+    if (holder == null || !byMemberId.has(holder)) {
+      // Only OUTSTANDING work is unassigned work. A finished chore nobody was
+      // ever given is history, not something the household has to act on, and
+      // putting it in a needs-attention area would make that area permanent.
+      if (!chore.done) unassigned.push(chore.id)
+      continue
+    }
+    const minutes = minutesOf(chore)
+    totalWorkMinutes += minutes
+    const bucket = chore.done ? doneMinutes : openMinutes
+    bucket.set(holder, bucket.get(holder) + minutes)
+  }
+
+  const totalCapacityMinutes = working.reduce((sum, m) => sum + m.capacityMinutes, 0)
+
+  const carrying = (member) => {
+    const done = doneMinutes.get(member.id)
+    const open = openMinutes.get(member.id)
+    return { memberId: member.id, assignedMinutes: done + open, doneMinutes: done, openMinutes: open }
+  }
+
+  const load = working.map((member) => {
+    const entry = carrying(member)
+    return {
+      ...entry,
+      // Carried on the entry rather than left for a caller to look up again.
+      // A screen that re-resolved capacity from its own props could divide by a
+      // number this function never saw — and the failure would be a NaN width
+      // rather than an error, which is the shape that reaches a household.
+      capacityMinutes: member.capacityMinutes,
+      share: entry.assignedMinutes / member.capacityMinutes,
+      fairShareMinutes: fairShare(member.capacityMinutes, totalWorkMinutes, totalCapacityMinutes),
+    }
+  })
+
+  const shares = load.map((entry) => entry.share)
+
+  return {
+    load,
+    // Named, never given a share.
+    noCapacity: noCapacity.map(carrying),
+    unassigned: [...unassigned].sort(),
+    // Whether level was a REAL question. Fewer than two people with capacity is
+    // level because a set that small has no spread, not because anything was
+    // achieved — and `scripts/allocation-corpus-report.mjs` already refuses to
+    // fold those into one headline for exactly that reason. A surface that
+    // announced "the split is level" over an empty household would be the same
+    // vacuous claim with a person reading it.
+    contested: shares.length >= 2,
+    level: isLevel(shares),
+    spread: spreadOf(shares),
+    // Reported whether or not the household is level, because a household
+    // inside the tolerance can still have somebody a few minutes over and the
+    // surface, not this function, decides which sentence to say.
+    offLevel: offLevelOf(load),
+    totalWorkMinutes,
+    totalCapacityMinutes,
+  }
+}
+
+/**
  * Divide the household's chores by capacity.
  *
  * @param {object} input
@@ -112,8 +274,12 @@ export function allocate({ members, chores, isEligible = () => true }) {
   // capacity, so giving work to someone with no minutes is a division by zero,
   // and reporting them at Infinity% reads as the most overloaded person in the
   // house. They are held out of the split and named separately.
+  //
+  // Only the working half is needed HERE, to decide who may be given a chore.
+  // Naming the other half is `assess`'s job now, and there is deliberately no
+  // second `capacityMinutes <= 0` filter in this function: two copies of the
+  // zero-capacity rule are two places for it to be relaxed by one character.
   const working = roster.filter((m) => m.capacityMinutes > 0)
-  const noCapacity = roster.filter((m) => m.capacityMinutes <= 0)
 
   const minutesByMember = new Map(roster.map((m) => [m.id, 0]))
   const assignments = []
@@ -176,42 +342,48 @@ export function allocate({ members, chores, isEligible = () => true }) {
     minutesByMember.set(best.id, minutesByMember.get(best.id) + chore.expectedMinutes)
   }
 
-  // The fairness arithmetic runs over the work that actually landed on someone.
+  // The fairness arithmetic runs over the work that actually landed on someone,
+  // and it is `assess` above that runs it — #47 criterion 5. There is exactly
+  // one implementation of fair share, levelness and off-level in this repo, and
+  // the household surface reaches it through the same door.
+  //
   // A chore nobody is eligible for is excluded on purpose: counting it would
   // inflate every person's fair share against work no split of this household
-  // can carry, and then report everybody underloaded for it.
-  const unassignableIds = new Set(unassignable)
-  const allocatable = chores.filter((c) => !unassignableIds.has(c.id))
-  const totalWorkMinutes = allocatable.reduce((sum, c) => sum + c.expectedMinutes, 0)
-  const totalCapacityMinutes = working.reduce((sum, m) => sum + m.capacityMinutes, 0)
-
-  const load = working.map((member) => ({
-    memberId: member.id,
-    assignedMinutes: minutesByMember.get(member.id),
-    share: minutesByMember.get(member.id) / member.capacityMinutes,
-    fairShareMinutes: fairShare(member.capacityMinutes, totalWorkMinutes, totalCapacityMinutes),
+  // can carry, and then report everybody underloaded for it. That exclusion is
+  // not restated here — `assess` drops work nobody holds, and after allocation
+  // the work nobody holds is exactly the work nobody was eligible for. Handing
+  // it the placed assignments rather than the raw input is what makes those the
+  // same set instead of two rules that happen to agree today.
+  const placedBy = new Map(assignments.map((a) => [a.choreId, a.memberId]))
+  const placed = chores.map((chore) => ({
+    id: chore.id,
+    expectedMinutes: chore.expectedMinutes,
+    assignedMemberId: placedBy.get(chore.id) ?? null,
   }))
-
-  const shares = load.map((entry) => entry.share)
-  const level = isLevel(shares)
+  const verdict = assess({ members: roster, chores: placed })
+  const allocatable = chores.filter((c) => placedBy.has(c.id))
 
   return {
     assignments: [...assignments].sort(byChoreId),
     unassignable: [...unassignable].sort(),
-    load,
+    load: verdict.load,
     // Named, never given a share. AC 7: "reported as having no capacity rather
     // than as infinitely loaded".
-    noCapacity: noCapacity.map((member) => ({
-      memberId: member.id,
-      assignedMinutes: minutesByMember.get(member.id),
-    })),
-    level,
-    spread: spreadOf(shares),
+    noCapacity: verdict.noCapacity,
+    contested: verdict.contested,
+    level: verdict.level,
+    spread: verdict.spread,
+    offLevel: verdict.offLevel,
     // Present only when level is unreachable — AC 5. A notice that fires on a
     // healthy household is an absent notice, and it takes the real one with it.
-    reason: level
+    reason: verdict.level
       ? null
-      : unreachableReason(load, allocatable, totalWorkMinutes, totalCapacityMinutes),
+      : unreachableReason(
+          verdict.load,
+          allocatable,
+          verdict.totalWorkMinutes,
+          verdict.totalCapacityMinutes,
+        ),
   }
 }
 

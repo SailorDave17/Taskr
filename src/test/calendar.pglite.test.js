@@ -73,11 +73,14 @@ const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
 // 30s is ~3.7x the worst time actually observed. A genuine hang still fails; it
 // fails later, and that is the whole cost of this line.
 //
-// hookTimeout is deliberately NOT raised. beforeEach builds exactly one database
-// in all eight pglite files, none has ever timed out, and leaving it at 10s keeps
-// a real signal: a hook over the line means setup got slower, which is a
-// different fact from a test doing more work. If one ever fires, raise it on its
-// own evidence rather than by symmetry with this.
+// hookTimeout is NOT set here. It is set once, for every pglite suite, in
+// src/test/support/pgliteSupabase.js — which this file imports — and the
+// measurement behind the value is in that file's comment. #145.
+//
+// It used to be seven copies of a paragraph explaining why the 10s default was
+// deliberate. Two suites then timed out on it, the correction reached one copy,
+// and six went on asserting the opposite of what the code did. A value with one
+// home has no copy-set to keep in step.
 vi.setConfig({ testTimeout: 30_000 })
 
 describe('connecting a calendar, run against a real Postgres', () => {

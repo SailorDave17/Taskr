@@ -51,8 +51,9 @@ import { LIVE_SCHEMA } from '../lib/liveSchema.js'
 // 30s matches the eight siblings rather than being derived separately — this
 // suite builds ONE database in beforeAll and its whole run is under 3s locally,
 // so it is nowhere near the limit and the value is about CI's variance, not
-// about this file's work. hookTimeout is deliberately left alone for the reason
-// assignment.pglite.test.js gives.
+// about this file's work. hookTimeout is not set here either: it comes from
+// src/test/support/pgliteSupabase.js, which this file imports, and #145's
+// measurement is in that file's comment.
 vi.setConfig({ testTimeout: 30_000 })
 
 // Exactly what `src/lib/*.js` issues, one row per call site, as SQL.

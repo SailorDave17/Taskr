@@ -495,16 +495,18 @@ body {
   text-decoration: line-through;
 }
 
-/* Assignment and the load figures — story #36.
+/* Assignment — story #36.
 
    The select sits inside .chore__identity rather than in the button row: it is
    part of what the chore IS this week, not an action taken on it, and putting it
    among Done/Edit/Remove would make giving somebody two hours of work look like
    the same weight of gesture as renaming a chore.
 
-   The load list is deliberately plain. No bar, no percentage, no ordering by
-   load — see the block comment above. It is styled to be READ, not scanned for a
-   winner: one weight, one colour, roster order. */
+   The `.chore-load*` rules that lived here went with #47. They styled the plain
+   per-person figures on this screen — no bar, no percentage, roster order — and
+   that presentation moved to `.split*` below, which draws the same people as a
+   share of their own capacity. The palette rule they carried moved with them:
+   an over-committed person is never painted red, because red is for work. */
 
 .chore__assignee {
   display: flex;
@@ -520,43 +522,6 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 44px;
-}
-
-.chore-load {
-  margin-top: 1rem;
-}
-
-.chore-load__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.chore-load__row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.25rem 0.75rem;
-  padding: 0.5rem 0.625rem;
-  background: var(--bg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.5rem;
-}
-
-.chore-load__name {
-  font-weight: 600;
-}
-
-.chore-load__figures {
-  /* One colour for both figures, and it is not the accent. An over-committed
-     person must not be painted red: red is for work, never for people — the same
-     rule the completed-work block states. The sentence says "over"; the styling
-     does not shout it. */
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Who cannot do a chore — story #37.
@@ -661,4 +626,216 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   The three surfaces, and the way between them — story #47, criterion 11.
+
+   Buttons rather than links, so they inherit nothing from `.button`: a tab is
+   not an action, and giving it the accent would make three call-to-actions sit
+   above every screen.
+
+   `flex-wrap` is load-bearing at 360px rather than defensive. Three tabs fit
+   comfortably today; a fourth surface, or a longer word than "Chores" in some
+   future wording, would otherwise push the row wider than the viewport — and a
+   nav that overflows horizontally takes the whole page with it. Wrapping costs
+   a line of height and cannot overflow.
+   --------------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.5rem;
+}
+
+.tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tab:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Styled off the attribute a screen reader already reads, rather than off a
+   second class name that would have to be kept in step with it. One state, one
+   spelling. */
+.tab[aria-current='page'] {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   The split — story #47.
+
+   The charter's design idea: each person's load as a share of THEIR OWN
+   capacity, so fair means every bar is level however different the people are.
+
+   Two palette rules are constraints rather than taste, and both are stated
+   elsewhere in this file for other elements:
+
+     RED IS FOR WORK, NEVER FOR PEOPLE. An over-committed member is drawn in
+     exactly the same colours as everybody else; the figures beside the bar say
+     "40 min over" and the styling does not shout it. There is no
+     `.split__row--over`, deliberately — the moment one exists, somebody will
+     colour it.
+
+     NOTHING RANKS. Rows are identical, in roster order, with no position
+     number, no medal and no emphasis on the fullest bar. A smaller fair share
+     must look correct rather than like losing.
+   --------------------------------------------------------------------------- */
+
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* The one sentence the household came to read, so it sits above the bars and
+   carries the accent — the only accent on the surface. */
+.split__verdict {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.split__verdict--level {
+  color: var(--accent);
+  filter: brightness(1.6);
+}
+
+.split__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  /* A column, always. A row of bars would be a comparison between people laid
+     out side by side, and on a 360px phone with six members it would also be
+     the horizontal scroll criterion 10 forbids. */
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.split__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.split__identity {
+  display: flex;
+  /* Wraps rather than shrinking: at 360px a long name beside a long figure
+     would otherwise squeeze one of them below legibility, or push the row wider
+     than the screen. */
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.125rem 0.5rem;
+  min-width: 0;
+}
+
+.split__name {
+  font-weight: 600;
+  min-width: 0;
+  /* A name with no space in it has no wrap opportunity, and a 30-character one
+     would otherwise set the width of the whole page. Same rule, same reason, as
+     `.button` carries for #83. */
+  overflow-wrap: anywhere;
+}
+
+.split__figures {
+  color: var(--ink-dim);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The track. `overflow: hidden` is what makes the fills unable to leave it —
+   a member at 140% of their capacity gets a full bar rather than one that grows
+   past the viewport, and the number beside it is what says how far over they
+   are. */
+.split__bar {
+  display: flex;
+  width: 100%;
+  height: 0.75rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.split__fill {
+  display: block;
+  height: 100%;
+}
+
+/* Done and outstanding are one hue at two weights — criterion 7 asks that they
+   be visually distinct, not that they be different colours. Two hues would
+   invite reading one of them as a warning, which is the palette rule above. */
+.split__fill--done {
+  background: var(--accent);
+  filter: brightness(1.5);
+}
+
+.split__fill--open {
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.split__breakdown {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Work nobody holds — criterion 9. Quiet, because it is a fact about the week
+   rather than a fault, and it is on the same screen as the bars precisely so it
+   cannot be missed. */
+.split__attention {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.split__attention-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.125rem 0.5rem;
+  min-width: 0;
+}
+
+.split__attention-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.split__attention-cost {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
 }

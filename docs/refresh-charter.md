@@ -379,6 +379,41 @@ recorded in the decision log". This is that record.
   widening of a three-day story for a message whose whole content is "less work appeared than you
   might have expected".
 
+## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
+
+Owner decision at the pickup of #47, whose criterion 11 required "the navigation approach chosen is
+recorded in the decision log". This is that record.
+
+- **Three surfaces — Split, Chores, Who — as a tab strip in `App.jsx`, with the current view held in
+  `useState`.** The split opens by default, which is not a new decision: the grooming section above
+  settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
+  What #47 settled is the *mechanism*.
+- **Why not a router.** `react-router` would be the largest dependency in the repo, added to move
+  between three views of one household. It also wants the URL, and the URL is already spoken for:
+  Google returns a calendar consent to the app **root** with a `?code=` (#95), the PWA's scope is
+  `/`, and a path-based route would need a rewrite rule at Vercel to behave the way the root already
+  does. Rejected on cost, not on principle — the moment a surface needs to be linkable from outside
+  the app, this decision is the one to reopen.
+- **Why not a state library.** There is no state to share: `App.jsx` holds every read and hands the
+  results down. A library here would be ceremony around one string.
+- **Why not keep the surfaces stacked on one page**, which is what the app did until this story and
+  is the smallest possible change. Criterion 11 asks that the household be "re-read from the server
+  on arrival", and a stacked page has no arrival — so the criterion is unsatisfiable by construction
+  rather than merely unmet. The deeper reason is the charter's: the split is the thing judged at
+  arm's length, and a thesis that has to be scrolled to is not the thing on screen.
+- **Arrival performs a full re-read**, through the same `mutate` every write goes through, so
+  arriving and mutating cannot drift into two ideas of what "current" means. It costs one round trip
+  per tap. That is deliberate and it is the criterion: another phone's edit has to be on this screen
+  when you get there, and a view swap over state this device already holds would show what it held
+  when it booted.
+- **The current tab is marked with `aria-current`** and styled off that attribute rather than off a
+  second class name — one state, in the place a screen reader already reads it.
+
+Consequence recorded here because it is easy to read later as work dropped: the per-person load
+figures **left the chore screen**. #36 shipped them there in deliberately the ugliest honest form,
+with a comment saying #47 owned the presentation and would replace it. It has. Two answers to one
+question on two screens is the fault `src/lib/capacity.js`'s own docstring calls invisible.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

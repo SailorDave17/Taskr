@@ -360,80 +360,49 @@ export function outstandingMinutes(chores) {
 }
 
 /**
- * Minutes this person is still carrying - #36 AC 5.
+ * Chore rows as the allocation module wants them — #47.
  *
- * Computed at READ TIME by summing `expected_minutes` over that member's chores
- * with no completion, and there is deliberately no stored counterpart. A
- * `members.committed_minutes` column would be two sources for one quantity, and
- * they would disagree the first time a chore was completed on another phone;
- * 0006's comment carries the full argument and the pglite suite asserts the
- * absence of any such column rather than only the presence of this sum.
+ * The boundary between "a row from Postgres" and "the shape the fairness
+ * arithmetic reasons about". `src/lib/allocation.js` is deliberately pure and
+ * knows nothing about column names; this is the only place the two vocabularies
+ * meet, so a column rename has one call site rather than one per screen.
  *
- * Outstanding only, for the reason `outstandingMinutes` gives: a figure that
- * counts finished work can only grow, so it drifts upward all week and any
- * re-balance derived from it is computed over work already done.
+ * `done` is derived through `isOutstanding` rather than by testing
+ * `completed_at` again here. That is the same one-definition rule the rest of
+ * this module keeps, and it matters more than it looks: the surface's completed
+ * segment and the chore list's Done section must agree about which chores are
+ * finished, or a household sees work in one place and not the other.
+ *
+ * `actualMinutes` is passed through UNCHANGED, including when the column does
+ * not exist — it is `undefined` today and `allocation.minutesOf` falls back to
+ * the estimate. #12 adds the column and this line already carries it. Reading a
+ * column that is not in `CHORE_COLUMNS` yet is not a bug: PostgREST returns the
+ * columns it was asked for, so the property is simply absent and the fallback
+ * is the whole point.
  */
-export function committedMinutes(chores, memberId) {
-  // An absent member id returns zero rather than matching every UNASSIGNED
-  // chore, which is what a bare `=== memberId` does: `assigned_member_id` is
-  // null exactly when nobody holds the chore, so asking about "the null person"
-  // silently returns the size of the unassigned pile. Nothing calls it that way
-  // today - `commitmentByMember` always passes a real `member.id` - and it is
-  // guarded here because the wrong answer is a plausible number rather than a
-  // crash, which is how it would survive being read.
-  if (memberId === null || memberId === undefined) return 0
-  return chores
-    .filter((c) => c.assigned_member_id === memberId && isOutstanding(c))
-    .reduce((sum, c) => sum + (c.expected_minutes || 0), 0)
+export function toAllocatorChores(chores) {
+  return chores.map((chore) => ({
+    id: chore.id,
+    expectedMinutes: chore.expected_minutes || 0,
+    actualMinutes: chore.actual_minutes ?? null,
+    assignedMemberId: chore.assigned_member_id ?? null,
+    done: !isOutstanding(chore),
+  }))
 }
 
-/**
- * Every member with what they are carrying and what is left - #36 AC 5, 6.
- *
- * CAPACITY ARRIVES AS AN ARGUMENT and this module never reads
- * `members.weekly_minutes`. That is #44 AC 7's rule, and it is enforced: a test
- * in capacity.test.js allowlists the three files permitted to name the column,
- * and its comment says the allowlist edit is where somebody should ask whether
- * the new reader ought to be calling `effectiveCapacity` instead. It ought to.
- * Reading the baseline here would have hard-coded capacity-as-constant into the
- * first screen that shows a fairness number - the exact thing the charter says
- * every competitor gets wrong.
- *
- * So `capacities` is the allocator's own shape, `{id, capacityMinutes}`, which
- * is what `capacitiesFor` returns. Today the caller builds it from baselines
- * because no override can exist yet; #46 changes that call site and nothing
- * here.
- *
- * In ROSTER order, because any other order is a ranking. AC 9 forbids
- * sort-by-load on the screen, and a sorted derivation would put a leaderboard
- * there through a function whose name says nothing about order.
- *
- * `remainingMinutes` GOES NEGATIVE and is not clamped. That is the whole point
- * of AC 6: the household must be able to see the fairness claim failing, and a
- * figure that stops at zero says "exactly full" for someone three hours over.
- * Note `formatMinutes` DOES clamp at zero, so a negative remainder must never be
- * handed to it - the screen decides the sign and passes only the magnitude.
- *
- * A member with no chores appears with committed 0 rather than being absent: the
- * person carrying nothing is the most important row on a fairness screen.
- */
-export function commitmentByMember(members, chores, capacities) {
-  const capacityOf = new Map(capacities.map((c) => [c.id, c.capacityMinutes]))
-  return members.map((member) => {
-    const committed = committedMinutes(chores, member.id)
-    // A member absent from `capacities` is a caller bug, not a person with no
-    // time - but this runs inside a render, where throwing replaces the screen
-    // with nothing. `capacitiesFor` returns one entry per member and a test
-    // pins that, which is where the gap is caught instead.
-    const capacity = capacityOf.get(member.id) ?? 0
-    return {
-      member,
-      capacityMinutes: capacity,
-      committedMinutes: committed,
-      remainingMinutes: capacity - committed,
-    }
-  })
-}
+// `committedMinutes` and `commitmentByMember` lived here until #47.
+//
+// #36 built them for the per-person load figures on the chore screen, and #47
+// moved that presentation to the split surface, which derives the same people
+// from `allocation.assess` — done and outstanding minutes separately, each
+// person's share of their own capacity, and the fair share the household is
+// measured against. Nothing called these two afterwards but their own tests.
+//
+// They are DELETED rather than left exported, and the reason is the one this
+// module already argues for `members.committed_minutes`: two implementations of
+// "what is this person carrying" would disagree the first time either changed,
+// and the second one would be the one nobody was looking at. The claims they
+// held are in src/components/Split.test.jsx under "inherited from #36".
 
 /** Remove a chore — AC 6. */
 export async function removeChore(id) {

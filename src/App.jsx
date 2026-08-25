@@ -46,6 +46,7 @@ import {
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
+import Split from './components/Split.jsx'
 
 // Story #5: the household roster, on family phones.
 //
@@ -62,6 +63,20 @@ import Roster from './components/Roster.jsx'
 // minted on boot so the app always had one, with a separate step to say which
 // person the device was acting as. Now it is the person: one identity, acquired
 // deliberately, and no state in which somebody is signed in as nobody.
+
+/**
+ * The three surfaces, in the order they are offered — #47 criterion 11.
+ *
+ * The split is FIRST and is the default view, per the charter's grooming
+ * decision of 2026-08-06. `Who` rather than `Roster` because that is the
+ * question a person is asking; the heading behind it still reads "Who is in the
+ * household".
+ */
+const SURFACES = [
+  { key: 'split', label: 'Split' },
+  { key: 'chores', label: 'Chores' },
+  { key: 'who', label: 'Who' },
+]
 
 export default function App() {
   const [status, setStatus] = useState('loading')
@@ -93,6 +108,17 @@ export default function App() {
   // other phones did not trigger it, and a persistent household-wide notice is
   // a notifications table this story deliberately does not build.
   const [notice, setNotice] = useState(null)
+  // #47 criterion 11 — which surface is on screen. `useState`, not a router and
+  // not a state library: this app has neither, adding one to move between three
+  // views would be the largest dependency in the repo, and the URL is already
+  // spoken for — Google returns a calendar consent to the app ROOT with a
+  // `?code=`, and the PWA's scope is `/`.
+  //
+  // THE SPLIT OPENS BY DEFAULT. That is the charter's grooming decision of
+  // 2026-08-06 ("the load surface opens by default, with the roster reachable
+  // from it"), and it is the whole reason the tabs exist rather than a stack:
+  // the thing judged at arm's length has to be the thing on screen.
+  const [view, setView] = useState('split')
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
@@ -311,6 +337,29 @@ export default function App() {
     [mutate],
   )
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+  /**
+   * Move to another surface — #47 criterion 11.
+   *
+   * The re-read is the criterion, not a nicety: "the household is re-read from
+   * the server on arrival rather than passed as cached state". Arriving on the
+   * roster from the split has to show what another phone did in between, and a
+   * view swap over state this device already holds would show what it held when
+   * it booted. It is the same `mutate` every write goes through, so arrival and
+   * mutation cannot drift into two different ideas of what "current" means.
+   *
+   * The view changes FIRST and the read follows. A person who taps Who must not
+   * wait on a round trip to see the tab respond, and if the read fails they get
+   * the error strip over the surface they asked for rather than being held on
+   * the one they were leaving. The rejection is swallowed here for that reason
+   * alone: `mutate` has already put the message on screen.
+   */
+  const goTo = useCallback(
+    (next) => {
+      setView(next)
+      handleRefresh().catch(() => {})
+    },
+    [handleRefresh],
+  )
   // #95 — begin a calendar connection. Deliberately NOT routed through
   // `mutate()`, unlike every other action on this screen, and the difference is
   // real rather than an oversight: nothing is written here. The browser leaves
@@ -482,7 +531,44 @@ export default function App() {
         />
       ) : null}
 
+      {/* #47 criterion 11 — the three surfaces, and the only way between them.
+          A `nav` with buttons rather than links, because there is nothing to
+          link TO: one document, no router, and an anchor with no href is worse
+          for assistive tech than a button that says what it does.
+
+          The current tab is marked with `aria-current` and styled off that
+          attribute rather than off a second class name. One state, in the place
+          a screen reader already reads it — and gate.test.js's stylesheet check
+          only sees static `className` strings, so a conditional class here
+          would be a class nothing checks. */}
       {status === 'joined' && household ? (
+        <nav className="tabs" aria-label="Household surfaces">
+          {SURFACES.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              className="tab"
+              aria-current={view === key ? 'page' : undefined}
+              onClick={() => goTo(key)}
+              disabled={busy}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      {status === 'joined' && household && view === 'split' ? (
+        <Split
+          members={members}
+          chores={chores}
+          capacities={capacities}
+          exclusions={exclusions}
+          error={error}
+        />
+      ) : null}
+
+      {status === 'joined' && household && view === 'who' ? (
         <Roster
           household={household}
           members={members}
@@ -505,11 +591,10 @@ export default function App() {
         />
       ) : null}
 
-      {status === 'joined' && household ? (
+      {status === 'joined' && household && view === 'chores' ? (
         <Chores
           chores={chores}
           members={members}
-          capacities={capacities}
           exclusions={exclusions}
           busy={busy}
           error={error}

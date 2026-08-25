@@ -23,9 +23,17 @@ from this file.
 their weekly available minutes, each person signs in on their own phone with an organizer-set PIN,
 and the household's chores are recorded as titled units of expected minutes with a due date. Chores can be marked done and
 un-done, with the completion moment stamped by the database's clock rather than the phone's, so a
-phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**,
-and the screen says what every member is carrying and what is left of their week — in plain minutes,
-in roster order, derived at read time rather than stored. It
+phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**.
+
+The app opens on **the split**: each member's load drawn as a share of *their own* capacity, so
+level bars mean a fair division whatever the capacities are — a parent at 150 of 300 minutes and a
+child at 30 of 60 are level, and it is visible without reading a number. Above the bars is the
+verdict in minutes: level, or how many minutes off it the household is, or — when the smallest job
+is too big for the smallest budget — that level cannot be reached this week and why. Work nobody
+holds sits in its own needs-attention area rather than vanishing from the arithmetic. Members are in
+roster order, never sorted by load: **ranking people by output is the exact inversion of the
+thesis**. The roster and the chore list are two taps away, and everything is derived at read time
+rather than stored. It
 persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in a
 hosted database rather than on the device.
 

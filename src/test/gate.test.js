@@ -676,13 +676,27 @@ describe('#19 — no real household name reaches version control', () => {
   // REFUSES — so scanning this file would refuse the correct file. The cost is
   // stated rather than hidden: a real name pasted into this file is not caught
   // by these assertions.
+  //
+  // The `*.corpus.js` clause was `path === 'src/lib/allocation.corpus.js'` until
+  // #42, a one-subject exception written when there was one corpus. #42 added a
+  // second, and a check whose population does not contain the file being added
+  // is a check that answers about somebody else's work — the same repair as the
+  // deploy script and the CORS test in #95, both one-subject checks that had
+  // become one-of-two. It is a pattern now, so a third corpus is scanned the day
+  // it lands rather than the day somebody remembers this line.
+  //
+  // The widening is NOT sufficient for #42 and the corpus file says so: the
+  // SHAPE scan below matches a literal only when the WHOLE literal is
+  // name-shaped, so it sees `'Alex'` as an object key and is blind to a name
+  // inside a sentence. A corpus whose content IS sentences needs the prose
+  // assertions in src/lib/extraction.test.js as well as this one.
   function corpusOf(paths) {
     return paths.filter(
       (path) =>
         path !== 'src/test/gate.test.js' &&
         (/^src\/.*\.test\.jsx?$/.test(path) ||
           /^src\/test\/.*\.jsx?$/.test(path) ||
-          path === 'src/lib/allocation.corpus.js' ||
+          /^src\/lib\/[^/]*\.corpus\.js$/.test(path) ||
           /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
     )
   }
@@ -776,6 +790,16 @@ describe('#19 — no real household name reaches version control', () => {
     // column takes ISO numbers), and the fixture proving that refusal has to
     // spell one.
     Tuesday: 'a weekday, refused by normalizeRepeat in chores.test.js',
+    // #42 completes the week. The extraction corpus writes its descriptions in
+    // lower case EXCEPT the cast names and the weekdays, which is what makes a
+    // capitalised word in that file's prose a name candidate by construction —
+    // so `WEEKDAY_WORDS` has to spell all seven, and five of them had never had
+    // a reason to appear here before.
+    Wednesday: 'a weekday named in the extraction corpus',
+    Thursday: 'a weekday named in the extraction corpus',
+    Friday: 'a weekday named in the extraction corpus',
+    Saturday: 'a weekday named in the extraction corpus',
+    Sunday: 'a weekday named in the extraction corpus',
     // #53's chore titles, in repeats.pglite.test.js. Each one names what its
     // fixture is FOR, which is why they are declared rather than renamed to
     // 'Placeholder Chore': a test that reads `title: 'Forged'` says what it is
@@ -794,6 +818,7 @@ describe('#19 — no real household name reaches version control', () => {
     'provision-member': 'the Edge Function name',
     FunctionsFetchError: 'a supabase-js error class',
     FunctionsHttpError: 'a supabase-js error class',
+    WebSocket: 'a browser API, in the scan that proves the extraction grader makes no network call',
     'Access-Control-Allow-Origin': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
@@ -838,6 +863,11 @@ describe('#19 — no real household name reaches version control', () => {
     expect(corpus).toContain('src/App.test.jsx')
     expect(corpus).toContain('src/test/migrations.pglite.test.js')
     expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
+    // BOTH corpora, named individually. The `*.corpus.js` clause replaced a
+    // hard-coded path in #42, and a pattern that matched only the file it
+    // replaced would read exactly like a working generalisation.
+    expect(corpus).toContain('src/lib/allocation.corpus.js')
+    expect(corpus).toContain('src/lib/extraction.corpus.js')
   })
 
   it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {

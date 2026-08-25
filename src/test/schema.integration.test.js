@@ -34,6 +34,39 @@
 // assignment in the app failed. The RPC half is at the foot of this file, and
 // it probes with a GET rather than the POST `.rpc()` normally issues — which is
 // what makes calling a function that writes safe to do against production.
+//
+// #91 — WHAT THIS FILE CAN AND CANNOT SAY ABOUT GRANTS, which is a narrower
+// answer than it looks and is stated here because #91 asked the question
+// directly.
+//
+// It CAN see a missing SELECT grant, and does so for free. Every table probe
+// below is `select(<columns>).limit(0)` signed in as `authenticated`, and a
+// column this role cannot read is answered `42501 permission denied` rather
+// than with an empty page. That is not reasoned — it is the measurement in the
+// sign-in docblock above: probing as `anon` returned exactly that code for
+// `members`, `chores` and `member_capacity` against a completely healthy
+// project. `describeSchemaError` already classifies it, and
+// `liveSchema.test.js` asserts that it reports a grant failure rather than
+// treating it as success.
+//
+// It CANNOT see a missing INSERT, UPDATE or DELETE grant, and that gap is
+// deliberate rather than pending. Seeing one means ISSUING one: there is no
+// read-only way to ask PostgREST whether you may delete, the way a GET on an
+// RPC asks whether you may call it. A `.delete()` with a filter that matches
+// nothing would answer the question and would also make this check — the one
+// thing in the repo whose whole job is to be safe to run against production at
+// any moment — a check that writes. Its safety would then rest on a filter
+// being right rather than on the operation being read-only, and a filter is a
+// thing somebody edits. #91 put that to the owner and the answer was no.
+//
+// So the DELETE and INSERT grants are covered in `src/test/grants.pglite.test.js`
+// instead, which drives all seventeen client operations against a database built
+// from `supabase/migrations/` with the platform's real default ACL. That runs in
+// CI and answers a different question from this file: it asks whether the FILES
+// grant what the client needs, where this file asks whether the PROJECT has what
+// the files describe. Both are needed and neither substitutes for the other —
+// #91 was three missing grants that were present on the live project and absent
+// from every file, so this check was green throughout and correct to be.
 
 import { createClient } from '@supabase/supabase-js'
 import { beforeAll, describe, expect, it } from 'vitest'

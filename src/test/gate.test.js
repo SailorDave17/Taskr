@@ -110,16 +110,81 @@ describe('the chore flow is reachable from the app, not just exported', () => {
     expect(element[0]).toMatch(/onRemove=\{/)
     expect(element[0]).toMatch(/onAssign=\{/)
     expect(element[0]).toMatch(/onUnassign=\{/)
-    // The load figures are derived from these two, so a <Chores> that renders
-    // without them shows every person carrying nothing — a plausible screen
-    // rather than a broken one, which is why it is pinned here.
+    // The assignee picker is drawn from these, so a <Chores> that renders
+    // without them offers nobody to give a chore to — a plausible screen rather
+    // than a broken one, which is why it is pinned here.
     expect(element[0]).toMatch(/members=\{/)
-    expect(element[0]).toMatch(/capacities=\{/)
+    // `capacities` was pinned here too until #47, when the load figures left
+    // this screen for the split surface. The claim MOVED rather than being
+    // dropped — see the <Split> element below — because a surface that draws
+    // every person's share against a capacity it was never handed shows a
+    // household at zero, which is exactly the plausible-not-broken failure this
+    // whole describe exists for.
   })
 
   it('imports the assignment writes, so the RPCs are not dead exports', () => {
     expect(app).toMatch(/\bassignChore\b/)
     expect(app).toMatch(/\bunassignChore\b/)
+  })
+})
+
+// #47 — the split surface, and the same reachability question the describes
+// around it ask. It matters more here than anywhere else in this file: every
+// number on that screen is derived at render time from props, so a surface
+// handed the wrong ones does not fail — it draws a household in which nobody is
+// carrying anything and announces that the split is level.
+describe('the split surface is reachable from the app, and handed what it divides', () => {
+  const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+
+  it('renders the split screen, which is the only place a person can reach it', () => {
+    expect(app).toMatch(/<Split\b/)
+  })
+
+  it('is the surface that opens by default — the charter decision of 2026-08-06', () => {
+    // A default that is a literal in one place, so "the load surface opens by
+    // default, with the roster reachable from it" is checkable rather than a
+    // sentence in a document. Changing it is then a diff somebody argues with.
+    expect(app).toMatch(/useState\('split'\)/)
+  })
+
+  it('wires the four inputs ON THE SPLIT ELEMENT, not merely somewhere in the file', () => {
+    // Scoped for the reason the chore version records: <Roster> and <Chores>
+    // between them carry members, chores and exclusions, so an unscoped grep
+    // would pass on a neighbour with the whole <Split /> render deleted.
+    const element = app.match(/<Split[\s\S]*?\/>/)
+    expect(element, 'no <Split .../> element in App.jsx').not.toBeNull()
+    expect(element[0]).toMatch(/members=\{/)
+    expect(element[0]).toMatch(/chores=\{/)
+    // The one that makes the bars mean anything. Without it every share is
+    // minutes over zero, which the surface reports as "no minutes this week"
+    // for the whole household — a screen that looks deliberate.
+    expect(element[0]).toMatch(/capacities=\{/)
+    // Without it the reachability probe hands work to people barred from it and
+    // reports level as reachable when it is not.
+    expect(element[0]).toMatch(/exclusions=\{/)
+  })
+
+  it('re-reads from the server on arrival, rather than swapping the view over cached state', () => {
+    // Criterion 11. `setView` alone is a screen change; the criterion is that
+    // arriving on a surface shows what another phone did in between. Pinned as
+    // a CALL inside the navigation handler rather than as an identifier
+    // anywhere in the file, for the reason the capacity guard above records:
+    // the import line satisfies a bare name grep on its own.
+    const handler = app.match(/const goTo = useCallback\([\s\S]*?\n {2}\)/)
+    expect(handler, 'no goTo handler in App.jsx').not.toBeNull()
+    expect(handler[0]).toMatch(/setView\(/)
+    expect(handler[0]).toMatch(/handleRefresh\(\)/)
+  })
+
+  it('offers every surface a person can be on, so none is unreachable', () => {
+    // A view the state machine can hold and the tab strip cannot reach is a
+    // screen nobody can get back to. Both sides are DERIVED from the render
+    // rather than compared against a hand-kept list, which is the drift this
+    // file already guards against for the README and the migrations array.
+    const surfaces = [...app.matchAll(/view === '([a-z]+)'/g)].map((m) => m[1])
+    const offered = [...app.matchAll(/\{ key: '([a-z]+)', label:/g)].map((m) => m[1])
+    expect(surfaces.length, 'no view branches found — has the render changed shape?').toBeGreaterThan(1)
+    expect([...new Set(surfaces)].sort()).toEqual([...new Set(offered)].sort())
   })
 })
 
@@ -215,7 +280,21 @@ describe('the suite runs in a zone where a date bug can show', () => {
 // whether or not a single rule exists.
 describe('every class name a component emits has a rule in the stylesheet', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
-  const components = ['src/App.jsx', 'src/components/Chores.jsx', 'src/components/Roster.jsx', 'src/components/Onboarding.jsx']
+
+  // DISCOVERED, not listed. This was a hard-coded array of four paths until
+  // #47, written when there were four components — and a check whose population
+  // does not contain the file being added is a check that answers about
+  // somebody else's work. `Split.jsx` would have been unscanned on the day it
+  // landed, with every one of its class names unchecked and the describe still
+  // green. That is the same repair the `*.corpus.js` clause below got in #42
+  // and the deploy script got in #95: a one-subject list that had become
+  // one-of-N.
+  const components = [
+    'src/App.jsx',
+    ...readdirSync(resolve(process.cwd(), 'src/components'))
+      .filter((f) => f.endsWith('.jsx') && !f.endsWith('.test.jsx'))
+      .map((f) => `src/components/${f}`),
+  ]
 
   const emitted = new Set()
   for (const file of components) {
@@ -232,9 +311,43 @@ describe('every class name a component emits has a rule in the stylesheet', () =
     expect(emitted).toContain('chore')
   })
 
+  it('POSITIVE CONTROL: the discovery reaches every component on disk', () => {
+    // The list above is only as good as what it finds. Named individually
+    // because a glob that matched nothing would leave `emitted` populated by
+    // App.jsx alone and the assertion above would still pass.
+    expect(components).toContain('src/components/Split.jsx')
+    expect(components).toContain('src/components/Roster.jsx')
+    expect(components).toContain('src/components/Chores.jsx')
+    expect(components).toContain('src/components/Onboarding.jsx')
+    expect(emitted).toContain('split__bar')
+  })
+
   it('has a rule for each one', () => {
-    const missing = [...emitted].filter((name) => !css.includes(`.${name}`)).sort()
+    // Matched to a CLASS BOUNDARY, not by substring. `css.includes('.tab')` is
+    // satisfied by a rule for `.tabs`, and #47 emits both — so the loose form
+    // could not answer the question it was asked. MEASURED while proving these
+    // tests: deleting the whole `.tab` rule reddened this assertion ZERO times.
+    // It was caught, but only by the criterion 10 checks below, which happen to
+    // name `.tab` in a precise regex — and no other class has a second reader.
+    //
+    // No escaping, because every name is asserted below to be plain.
+    const missing = [...emitted]
+      .filter((name) => !new RegExp(`\\.${name}(?![\\w-])`).test(css))
+      .sort()
     expect(missing, `no CSS rule for: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the boundary match is safe to build unescaped', () => {
+    // The assertion above interpolates a class name straight into a regex. That
+    // is correct only while class names are plain, and this is what says so —
+    // a name carrying a `.` or a `(` would silently change what is matched
+    // rather than failing, which is the worst way for a guard to go wrong.
+    const odd = [...emitted].filter((name) => !/^[A-Za-z][\w-]*$/.test(name))
+    expect(odd, `class names that would need escaping: ${odd.join(', ')}`).toEqual([])
+    // And that the boundary really does reject a longer neighbour, which is the
+    // whole reason this stopped being `includes`.
+    expect(/\.tab(?![\w-])/.test('.tabs { }')).toBe(false)
+    expect(/\.tab(?![\w-])/.test('.tab { }')).toBe(true)
   })
 })
 
@@ -280,6 +393,70 @@ describe('the phone-width action row keeps its buttons together', () => {
 
   it('#83: a label with no wrap opportunity breaks instead of overflowing the row', () => {
     expect(css).toMatch(/\.button\s*\{[^}]*overflow-wrap:\s*anywhere/)
+  })
+})
+
+// #47 criterion 10 — a 360px viewport with six members, reachable by vertical
+// scroll alone with no horizontal scrolling.
+//
+// Asserted against the STYLESHEET, for the reason the two describes above give
+// and which is worth restating because this criterion names a viewport and so
+// reads like something a render test could answer: jsdom applies no stylesheet
+// and computes no layout, so `scrollWidth` there is a fact about nothing. A
+// component test for this criterion would pass identically with every rule
+// below deleted.
+//
+// What the stylesheet CAN be asked is whether the four things that would cause
+// horizontal overflow are ruled out. Six members is a vertical quantity — the
+// list is a column — so the number of members is not what these check; what
+// they check is that no single ROW can be wider than the screen.
+//
+// The composed page was also measured in a real browser at 360x800 with six
+// members. That measurement is on the issue, and it is not repeatable in CI,
+// which is exactly why these rules are here as well.
+describe('#47 criterion 10 — nothing on the split surface can overflow a 360px phone', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('POSITIVE CONTROL: the split rules are in the stylesheet at all', () => {
+    // Without this every assertion below passes the moment the surface is
+    // renamed, which is the shape of empty pass this file keeps finding.
+    expect(css).toMatch(/\.split__bar\s*\{/)
+    expect(css).toMatch(/\.split__row\s*\{/)
+  })
+
+  it('stacks the members vertically, so six of them cost height and never width', () => {
+    expect(css).toMatch(/\.split__list\s*\{[^}]*flex-direction:\s*column/)
+  })
+
+  it('wraps the name-and-figures row rather than letting it set the page width', () => {
+    expect(css).toMatch(/\.split__identity\s*\{[^}]*flex-wrap:\s*wrap/)
+    expect(css).toMatch(/\.split__attention-row\s*\{[^}]*flex-wrap:\s*wrap/)
+  })
+
+  it('breaks a name with no wrap opportunity instead of overflowing — #83’s rule, applied', () => {
+    // A 30-character single-word name is the case: without this it sets the
+    // width of the whole document, and every other rule here is powerless.
+    expect(css).toMatch(/\.split__name\s*\{[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.split__attention-title\s*\{[^}]*overflow-wrap:\s*anywhere/)
+  })
+
+  it('keeps a bar inside its track however over-committed the person is', () => {
+    // The fills are widths in per cent of a person's own capacity, and somebody
+    // at 400% would otherwise draw four screens wide. Belt and braces on
+    // purpose: the component clamps the width AND the track hides the overflow,
+    // because either alone is one arithmetic slip from a page that scrolls
+    // sideways.
+    expect(css).toMatch(/\.split__bar\s*\{[^}]*width:\s*100%/)
+    expect(css).toMatch(/\.split__bar\s*\{[^}]*overflow:\s*hidden/)
+  })
+
+  it('wraps the tab strip, so a fourth surface cannot push the nav off the screen', () => {
+    expect(css).toMatch(/\.tabs\s*\{[^}]*flex-wrap:\s*wrap/)
+    expect(css).toMatch(/\.tab\s*\{[^}]*min-width:\s*0/)
+  })
+
+  it('keeps the 44px touch target every other control on the phone uses', () => {
+    expect(css).toMatch(/\.tab\s*\{[^}]*min-height:\s*44px/)
   })
 })
 
@@ -676,13 +853,27 @@ describe('#19 — no real household name reaches version control', () => {
   // REFUSES — so scanning this file would refuse the correct file. The cost is
   // stated rather than hidden: a real name pasted into this file is not caught
   // by these assertions.
+  //
+  // The `*.corpus.js` clause was `path === 'src/lib/allocation.corpus.js'` until
+  // #42, a one-subject exception written when there was one corpus. #42 added a
+  // second, and a check whose population does not contain the file being added
+  // is a check that answers about somebody else's work — the same repair as the
+  // deploy script and the CORS test in #95, both one-subject checks that had
+  // become one-of-two. It is a pattern now, so a third corpus is scanned the day
+  // it lands rather than the day somebody remembers this line.
+  //
+  // The widening is NOT sufficient for #42 and the corpus file says so: the
+  // SHAPE scan below matches a literal only when the WHOLE literal is
+  // name-shaped, so it sees `'Alex'` as an object key and is blind to a name
+  // inside a sentence. A corpus whose content IS sentences needs the prose
+  // assertions in src/lib/extraction.test.js as well as this one.
   function corpusOf(paths) {
     return paths.filter(
       (path) =>
         path !== 'src/test/gate.test.js' &&
         (/^src\/.*\.test\.jsx?$/.test(path) ||
           /^src\/test\/.*\.jsx?$/.test(path) ||
-          path === 'src/lib/allocation.corpus.js' ||
+          /^src\/lib\/[^/]*\.corpus\.js$/.test(path) ||
           /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
     )
   }
@@ -771,11 +962,31 @@ describe('#19 — no real household name reaches version control', () => {
     'Placeholder Third Chore': 'a chore title',
     'Placeholder Fourth Chore': 'a chore title',
     Taskr: 'the application name',
+    // #47 — the three tab labels. They are literals in App.test.jsx because
+    // the tests click the real control by its accessible name, which is the
+    // point: a helper that set the view directly would walk past the
+    // navigation criterion 11 is about. Declared rather than lower-cased,
+    // because a button label is a capitalised word by design and hiding it
+    // from the scan would be the wrong instinct — the vocabulary exists to
+    // put every name-shaped literal in a diff somebody can look at.
+    Split: 'a tab label — the split surface',
+    Chores: 'a tab label — the chore surface',
+    Who: 'a tab label — the roster surface',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to
     // spell one.
     Tuesday: 'a weekday, refused by normalizeRepeat in chores.test.js',
+    // #42 completes the week. The extraction corpus writes its descriptions in
+    // lower case EXCEPT the cast names and the weekdays, which is what makes a
+    // capitalised word in that file's prose a name candidate by construction —
+    // so `WEEKDAY_WORDS` has to spell all seven, and five of them had never had
+    // a reason to appear here before.
+    Wednesday: 'a weekday named in the extraction corpus',
+    Thursday: 'a weekday named in the extraction corpus',
+    Friday: 'a weekday named in the extraction corpus',
+    Saturday: 'a weekday named in the extraction corpus',
+    Sunday: 'a weekday named in the extraction corpus',
     // #53's chore titles, in repeats.pglite.test.js. Each one names what its
     // fixture is FOR, which is why they are declared rather than renamed to
     // 'Placeholder Chore': a test that reads `title: 'Forged'` says what it is
@@ -794,6 +1005,7 @@ describe('#19 — no real household name reaches version control', () => {
     'provision-member': 'the Edge Function name',
     FunctionsFetchError: 'a supabase-js error class',
     FunctionsHttpError: 'a supabase-js error class',
+    WebSocket: 'a browser API, in the scan that proves the extraction grader makes no network call',
     'Access-Control-Allow-Origin': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
@@ -838,6 +1050,11 @@ describe('#19 — no real household name reaches version control', () => {
     expect(corpus).toContain('src/App.test.jsx')
     expect(corpus).toContain('src/test/migrations.pglite.test.js')
     expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
+    // BOTH corpora, named individually. The `*.corpus.js` clause replaced a
+    // hard-coded path in #42, and a pattern that matched only the file it
+    // replaced would read exactly like a working generalisation.
+    expect(corpus).toContain('src/lib/allocation.corpus.js')
+    expect(corpus).toContain('src/lib/extraction.corpus.js')
   })
 
   it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {

@@ -7,16 +7,26 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0011` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108)
-  and the last three on 2026-08-24. **`0012` (repeating chores, #53) exists in the repo and has NOT
-  been pasted** — it is the whole of the current expected-red set below. `0007` and `0008` were
+- Status: **`0001`–`0012` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108),
+  `0009` on 2026-08-21, and `0010`–`0012` on 2026-08-24. **`0013` (the inherited grants, #91) exists
+  in the repo and has NOT been pasted** — and unlike every previous entry in that sentence, it does
+  **not** appear in the expected-red set below, because `check:live` is structurally blind to it.
+  See the *two* migrations that bullet cannot speak for. `0007` and `0008` were
   pasted together, which is what emptied the expected-red set the first time. `0002` is verified
   over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`, `0008`,
   `0010` and `0011` are verified by `npm run check:live` — every table, every RPC, and (since #115)
   both Edge Functions; the rest are verified only by the paste succeeding. The denominator moved
   from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`, to 23 on
   2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge Function, and to
-  **24** the same day when #53 added the `catch_up_repeats` RPC.
+  **24** the same day when #53 added the `catch_up_repeats` RPC. `0013` does not move it, and that
+  is the point of the bullet above rather than an oversight.
+
+  *This Status line said `0012` had NOT been pasted until 2026-08-24, while the expected-red bullet
+  twelve lines below had recorded it pasted and measured at 24 of 24 since the same evening. PR #139
+  corrected the bullet and stopped there — the edit was framed as fixing the paragraph about the
+  paste, not as correcting a fact that this page states in two places. Found and fixed by #91, which
+  had to edit this header for an unrelated reason. Noted rather than quietly repaired, because the
+  next reader's question is which of the two copies was wrong, and it was this one.*
 - **`0009` landed on 2026-08-21 and `0010` and `0011` on 2026-08-24, and all three are verified over
   the wire — but not by the same instrument, and that is the thing to carry.** `0011` went in first
   of its pair, out of file order and ahead of its own PR merging, which is allowed and is worth
@@ -66,6 +76,25 @@
     with the connection table has run the whole of it. `liveSchema.test.js` asserts the token table
     is absent from the list rather than leaving that to be inferred, because an entry left out on
     purpose and one forgotten look identical.
+- **`0013` (#91) is the odd one out: it grants privileges the live project already has.** Supabase's
+  default ACL for tables created by `postgres` in `public` used to be `arwdDxtm` and is now `Dxtm` —
+  truncate, references, trigger, maintain, and no DML at all. Every migration up to `0012` that
+  wanted to keep a privilege wrote a NARROW revoke and let the rest ride on that default, which
+  works only while the default is generous. *Measured 2026-08-24* against a database built from
+  `supabase/migrations/` alone, three of the seventeen operations the client issues were refused:
+  `households` `select('*')` (the app cannot load past the shell), `members` delete and `chores`
+  delete (removing a person, removing a chore). All four DELETE policies already existed and were
+  correct — only the grants were missing, which is why `0013` contains no policy.
+
+  The pattern predicts where a fourth instance would be. `member_capacity` (`0005`) and
+  `chore_exclusions` (`0010`) each write `grant delete` explicitly and are fine; `members` (`0002`,
+  `0007`) and `chores` (`0003`) narrow their revoke and inherit the rest, and both were broken.
+  `0003` even says so in prose at line 161 — *"DELETE stays granted to `authenticated`"* — which was
+  true of the platform it was written against and has not been true since. **Nothing executes a
+  comment**, so it went on reading as a decision.
+
+  Paste it when convenient rather than urgently: on the live project it changes nothing observable,
+  and on a rebuilt one it is the difference between an app that loads and an app that does not.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
@@ -118,13 +147,31 @@
   with the sign flipped. They arrive in the same paste as the table, so a project with the table has
   run the whole file.
 
-  **`0009` is the one migration this bullet cannot speak for at all**, and it is worth stating here
-  rather than only four bullets up, because an empty excused-red set is easy to read as *the
-  database matches the repo* and it does not mean that. The check covers tables, columns, RPCs and
-  Edge Functions; `0009` is two indexes, so this bullet would read exactly the same whether that
-  migration had been pasted or not. It has been — `npm run test:rls` confirms it, at setup — but the
-  confirmation comes from somewhere else entirely. **An empty excused-red set is a claim about the
-  subjects the instrument has**, never about the ones it does not.
+  **`0009` and `0013` are the two migrations this bullet cannot speak for at all**, and it is worth
+  stating here rather than only four bullets up, because an empty excused-red set is easy to read as
+  *the database matches the repo* and it does not mean that. The check covers tables, columns, RPCs
+  and Edge Functions.
+
+  - **`0009`** is two indexes, so this bullet would read exactly the same whether that migration had
+    been pasted or not. It has been — `npm run test:rls` confirms it, at setup — but the
+    confirmation comes from somewhere else entirely.
+  - **`0013`** (#91) is three grants, and it is blind in a way `0009` is not: `0009` is invisible
+    because the check has no index probe, while `0013` is invisible because **the live project
+    already holds all three privileges by inheritance**. The check signs in as `authenticated` and
+    reads `households` with `select('*')`; that succeeded before `0013` existed and succeeds after
+    it is pasted. There is no reading of `check:live`, and no reading of any instrument reachable
+    over PostgREST, that differs across that paste — `information_schema` is not exposed, and the
+    only difference `0013` makes on the live project is a catalog entry nobody can query.
+
+    So `0013` is the first migration here whose paste is **unobservable by design rather than by
+    omission**, and that is the same fact as its being a no-op on the live project (#91 AC 5). What
+    it changes is a project rebuilt from these files, where those privileges do not exist at all and
+    the app cannot load past its first screen. The instrument that covers it is
+    `src/test/grants.pglite.test.js`, which runs in CI against the migrations rather than against
+    the project, and there is no way to move that coverage over the wire.
+
+  **An empty excused-red set is a claim about the subjects the instrument has**, never about the
+  ones it does not — and with `0013` the gap is now two migrations wide rather than one.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
   been inverted seven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the

@@ -20,12 +20,22 @@ This is a **rebuild in progress**, tracked by epic
 from this file.
 
 **What is live today**: an installable page where a household is created, people are added with
-their weekly available minutes, each person signs in on their own phone with an organizer-set PIN,
+their weekly available minutes, each person signs in on their own phone with their own email and
+an organizer-set password — a member carried over from before #62 has a PIN, typed into the same
+password box,
 and the household's chores are recorded as titled units of expected minutes with a due date. Chores can be marked done and
 un-done, with the completion moment stamped by the database's clock rather than the phone's, so a
-phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**,
-and the screen says what every member is carrying and what is left of their week — in plain minutes,
-in roster order, derived at read time rather than stored. It
+phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**.
+
+The app opens on **the split**: each member's load drawn as a share of *their own* capacity, so
+level bars mean a fair division whatever the capacities are — a parent at 150 of 300 minutes and a
+child at 30 of 60 are level, and it is visible without reading a number. Above the bars is the
+verdict in minutes: level, or how many minutes off it the household is, or — when the smallest job
+is too big for the smallest budget — that level cannot be reached this week and why. Work nobody
+holds sits in its own needs-attention area rather than vanishing from the arithmetic. Members are in
+roster order, never sorted by load: **ranking people by output is the exact inversion of the
+thesis**. The roster and the chore list are two taps away, and everything is derived at read time
+rather than stored. It
 persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in a
 hosted database rather than on the device.
 
@@ -34,11 +44,6 @@ hosted database rather than on the device.
 and the reasoning — including the honest statement of what the access model does *not* protect
 against — is [`docs/access-model.md`](docs/access-model.md). Read that before touching the data
 layer.
-
-**The PIN sentence above is about the LIVE app, and the code has already moved past it.**
-[#62](https://github.com/SailorDave17/Taskr/issues/62) replaces the organizer-set PIN and the shared
-join code with real per-member sign-in — each person has their own account, and `auth.uid()`
-identifies a person rather than a phone.
 
 **`0007` and `0008` were pasted to the live project on 2026-08-20** ([#108](https://github.com/SailorDave17/Taskr/issues/108)),
 so the database is now on per-member auth. `npm run check:live` read **20 of 20** that day —
@@ -117,14 +122,18 @@ project.
 level is unreachable, judged against a 13-shape corpus; per-week capacity (#44) makes a person's
 minutes a fact about *this* week rather than a standing number. #36 connected the first of the two:
 the load figures resolve capacity through `capacity.js`, so a week override changes the numbers on
-screen the moment #46 can write one. **The allocator still has no caller** — nothing on a phone
-divides the work automatically, which is the thing the app is ultimately for.
+screen as soon as a week override is set, which #46 does. **The allocator has a reader but no
+writer** — #47's split screen calls `allocate` to ask whether level is reachable at all, and it is
+the first screen a joined household sees, but nothing on a phone divides the work automatically:
+no code path assigns a chore from the allocator's answer, which is the thing the app is ultimately
+for (#49). #41's `reallocate` has no caller at all yet.
 
-That is where the next work goes: setting a week's capacity by hand is #46, showing the split as a
-share of each person's own capacity is #47, and re-assigning from current capacity is #49. The
-figures #36 puts on screen are deliberately the ugliest honest form — plain minutes, no bar, no
-percentage, no ordering by load — because the charter's test is that a proposal satisfiable by a
-screenshot of the 2020 all-users view has collapsed. #47 owns the presentation.
+That is where the next work goes: re-assigning the household's open chores from current capacity is
+#49. Setting a week's capacity by hand shipped as #46 on 2026-08-09, and showing the split as a share
+of each person's own capacity shipped as #47 on 2026-08-25 — the split screen described above is
+#47's. What it replaced was `Commitment` on the chore screen, which #36 had shipped deliberately as
+the ugliest honest form, plain minutes with no bar and no percentage, because the charter's test is
+that a proposal satisfiable by a screenshot of the 2020 all-users view has collapsed.
 
 The 2020 classroom original is preserved at tag `legacy-final` and is not the code in this branch.
 
@@ -164,10 +173,12 @@ Other scripts:
 | `npm run preview` | Serve the built `dist/` locally |
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
+| `npm run extraction:corpus` | Re-derive the extraction corpus figures recorded in [`docs/extraction-corpus.md`](docs/extraction-corpus.md) — the shape of the sixty plain-language descriptions, and the floor and ceiling the two control extractors reach. Grades the controls only: there is no real extractor yet, so what it prints is the SCALE a later score is read against. No network call, no API key, no provider account |
+| `npm run rebalance:corpus` | Re-derive the churn figures recorded in [`docs/rebalance-churn.md`](docs/rebalance-churn.md) — how much of a household’s list a re-balance moves with no stability rule at all, and the table of change budget against minutes moved against levelness reached that set `CHANGE_BUDGET_MINUTES`. Pure arithmetic over the committed corpus: no network, no database |
 | `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it. **It is also the only instrument that can confirm `0009`**, and it does so at *setup* rather than in an assertion: `beforeAll` puts one seeded account in two households, which the pre-`0009` global `members_claimed_by_key` forbids, so the suite cannot reach its first assertion against an unmigrated project. *Measured 2026-08-24 at 31 of 31.* It writes to the live project by design and leaves households behind — there is no client-reachable delete — so run it with that in mind |
 | `npm run test:functions` | **The provisioning Edge Function, against a real stack.** `provision-member` only — `calendar-connect`'s decisions are unit-tested in `npm test` with an injected `fetch`, because its subject is what GOOGLE does and there is no local Google to point a stack at. Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
 | `npm run deploy:function` | **Deploy this repo's Edge Functions to the hosted project** — `provision-member` and, since #95, `calendar-connect`. Both by default, because the safe and complete action should be the one with the least typing; `npm run deploy:function -- <name>` narrows it, and an unknown name is refused here rather than handed to the CLI. Owner-only: it needs a Supabase access token (`npx supabase login`, or `SUPABASE_ACCESS_TOKEN`). The project ref is **derived** from `VITE_SUPABASE_URL` rather than written down, because deploying to the wrong project succeeds, prints success, and leaves the app failing exactly as before — there would be nothing to see. Uses `--use-api`, so **no Docker**. `--dry-run` prints the resolved target and deploys nothing. This exists as a script rather than a documented command because the one-line form is ~90 characters and wrapped in a terminal twice on 2026-08-20, running as two commands and silently deploying nothing. Confirm with `npm run check:live` |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function** — and occasionally when nothing in the repo has changed, because its subject moves without the file. **The expected-red set is EMPTY** — `0012` was pasted on 2026-08-24 and both its reds cleared on exactly that action; *measured the same evening at 24 of 24*. **Any red, on any subject, is real.** It read 20 of 20 on 2026-08-20; the denominator became 21 on 2026-08-21 when #37 added a table, 23 on 2026-08-24 when #95 added a table and a function, and 24 the same day when #53 added an RPC. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **It is structurally blind to `0009`**, which changes only indexes, so a green run is not evidence that migration was pasted. [`docs/access-model.md`](docs/access-model.md) carries the excused-red table — now empty — and the history of the eight times that set has been inverted |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function** — and occasionally when nothing in the repo has changed, because its subject moves without the file. **The expected-red set is EMPTY** — `0012` was pasted on 2026-08-24 and both its reds cleared on exactly that action; *measured the same evening at 24 of 24*. **Any red, on any subject, is real.** It read 20 of 20 on 2026-08-20; the denominator became 21 on 2026-08-21 when #37 added a table, 23 on 2026-08-24 when #95 added a table and a function, and 24 the same day when #53 added an RPC. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **It is structurally blind to `0009` and `0013`** — `0009` changes only indexes, and `0013` grants privileges the live project already holds by inheritance, so it reads the same either side of the paste. A green run is not evidence that either migration was applied. [`docs/access-model.md`](docs/access-model.md) carries the excused-red table — now empty — and the history of the eight times that set has been inverted |
 
 ### The two variables you need
 
@@ -272,6 +283,14 @@ client two acts in an order somebody chooses.
 - [`allocation-corpus.md`](docs/allocation-corpus.md) — the scenario corpus the allocator is
   judged against, the recorded proportion of household shapes that reach level, and the ones
   that arithmetically cannot.
+- [`rebalance-churn.md`](docs/rebalance-churn.md) — what staying stable costs: the churn a
+  re-balance causes with no stability rule at all, and the measured table of change budget against
+  minutes moved against levelness reached that set `CHANGE_BUDGET_MINUTES`. **Read before changing
+  the tie-break or the change budget.**
+- [`extraction-corpus.md`](docs/extraction-corpus.md) — the sixty plain-language
+  descriptions the AI bet's accuracy is scored against, what the grader measures and what it
+  deliberately does not, and the floor and ceiling the two control extractors reach. **Read
+  before touching the extraction corpus or grader.**
 - [`capacity-model.md`](docs/capacity-model.md) — baseline versus this week’s override, why the week
   begins on Monday, and the access rules on `member_capacity`. **Read before touching capacity or
   the week boundary.**

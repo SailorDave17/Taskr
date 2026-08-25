@@ -34,6 +34,10 @@ const choresApi = {
   addChore: vi.fn(),
   updateChore: vi.fn(),
   removeChore: vi.fn(),
+  // #53 — the boot-time catch-up pass. formatSkippedNotice stays REAL
+  // (importActual below): it is pure, has its own tests, and the notice a
+  // person reads should be the sentence the app actually words, not a stub's.
+  catchUpRepeats: vi.fn(),
 }
 
 // #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
@@ -46,6 +50,35 @@ const capacityApi = {
   setCapacity: vi.fn(),
   clearCapacity: vi.fn(),
 }
+
+// #37 — only the three IMPURE exclusion functions are stubbed. `isExcluded`,
+// `excludedMemberIds` and `eligibleMembers` stay real for the reason the
+// capacity mock gives: they are pure, they have their own tests, and a stub of
+// them could disagree with the single implementation those tests assert.
+const exclusionsApi = {
+  listExclusions: vi.fn(),
+  excludeMember: vi.fn(),
+  allowMember: vi.fn(),
+}
+
+// #95 — the same treatment again: only the two IMPURE calendar functions are
+// stubbed. `consentUrl`, `readConsentReturn`, `isRealEmailMember`,
+// `connectionFor` and `startConnect` stay real, because they are pure (or, in
+// `startConnect`'s case, pure over an injected `sessionStorage`) and a stub of
+// them could disagree with the scope, the parameters and the discriminator that
+// `calendar.test.js` asserts. `startConnect` staying real is what makes the
+// consent URL these tests read the one the app would actually send somebody to.
+const calendarApi = {
+  listCalendarConnections: vi.fn(),
+  completeConnect: vi.fn(),
+}
+
+// Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
+// at module scope — the same shape as `supabase.js`. Without it `startConnect`
+// refuses (correctly: an unconfigured build cannot build a consent URL) and the
+// AC 3 test below would assert that nothing happened, which is a true statement
+// about a build nobody ships.
+vi.stubEnv('VITE_GOOGLE_CLIENT_ID', '1234567890-placeholder.apps.googleusercontent.com')
 
 vi.mock('./lib/supabase.js', () => ({
   get hasSupabaseConfig() {
@@ -64,6 +97,16 @@ vi.mock('./lib/chores.js', async () => {
 vi.mock('./lib/capacity.js', async () => {
   const actual = await vi.importActual('./lib/capacity.js')
   return { ...actual, ...capacityApi }
+})
+
+vi.mock('./lib/exclusions.js', async () => {
+  const actual = await vi.importActual('./lib/exclusions.js')
+  return { ...actual, ...exclusionsApi }
+})
+
+vi.mock('./lib/calendar.js', async () => {
+  const actual = await vi.importActual('./lib/calendar.js')
+  return { ...actual, ...calendarApi }
 })
 
 vi.mock('./lib/household.js', async () => {
@@ -89,10 +132,20 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
+  Object.values(exclusionsApi).forEach((fn) => fn.mockReset())
+  Object.values(calendarApi).forEach((fn) => fn.mockReset())
+  calendarApi.listCalendarConnections.mockResolvedValue([])
+  calendarApi.completeConnect.mockResolvedValue({ ok: true })
+  exclusionsApi.listExclusions.mockResolvedValue([])
+  exclusionsApi.excludeMember.mockResolvedValue(undefined)
+  exclusionsApi.allowMember.mockResolvedValue(undefined)
   capacityApi.listCapacity.mockResolvedValue([])
   capacityApi.setCapacity.mockResolvedValue(undefined)
   capacityApi.clearCapacity.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
+  // Nothing missed and nothing skipped, which is the ordinary open. Tests
+  // about the notice and the failure path override this.
+  choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
   choresApi.addChore.mockResolvedValue(undefined)
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
@@ -399,6 +452,8 @@ describe('chores — the write path and the re-read', () => {
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
     })
     await waitFor(() =>
       expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
@@ -664,5 +719,394 @@ describe('capacity — this week, set by hand (#46)', () => {
     // matching, which is how an empty result reads as a clean bill of health.
     const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(1)
+  })
+})
+
+// #37 — who cannot do a chore, at the level only App can answer.
+//
+// The component tests cover what the screen DRAWS; these cover the two things
+// that are App's alone and that a component test cannot see, because the
+// component only calls the handler it is given:
+//
+//   AC 9 — the exclusions come from the SERVER on every refresh, and a write is
+//          followed by a re-read rather than by patching what is already here.
+//   AC 3 — the write path exists at all, and reaches a person through the chore
+//          screen. The route ENUMERATION is in gate.test.js, which can see the
+//          files this one has mocked away.
+describe('exclusions — the write path and the re-read (#37)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  const members = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null },
+  ]
+
+  const chore = {
+    id: 'c1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
+    assigned_member_id: null,
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(members)
+    choresApi.listChores.mockResolvedValue([chore])
+  })
+
+  const onScreen = () => screen.findByRole('region', { name: /what needs doing/i })
+
+  const markUnable = async (memberId) => {
+    fireEvent.change(screen.getByLabelText(/mark someone as unable to do placeholder chore/i), {
+      target: { value: memberId },
+    })
+    await act(async () => {})
+  }
+
+  it('AC 9: reads the exclusions from the server on load', async () => {
+    await renderApp()
+    await onScreen()
+    expect(exclusionsApi.listExclusions).toHaveBeenCalled()
+  })
+
+  it('AC 9: re-reads from the SERVER after a write, rather than patching local state', async () => {
+    await renderApp()
+    await onScreen()
+
+    const readsBefore = exclusionsApi.listExclusions.mock.calls.length
+    await markUnable('m2')
+
+    expect(exclusionsApi.excludeMember).toHaveBeenCalledWith('c1', 'm2')
+    await waitFor(() =>
+      expect(exclusionsApi.listExclusions.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 9: what another device recorded is on this screen after the re-read', async () => {
+    // The whole point of re-reading rather than patching: the row this device
+    // did not write arrives anyway, because the state is the server's. Asserted
+    // through the RENDERED sentence, not through the mock, since a call count
+    // says nothing about whether the answer reached the screen.
+    exclusionsApi.listExclusions
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 'x1', chore_id: 'c1', member_id: 'm1' }])
+
+    await renderApp()
+    await onScreen()
+    expect(screen.queryByText(/placeholder one cannot do this/i)).not.toBeInTheDocument()
+
+    await markUnable('m2')
+    await waitFor(() =>
+      expect(screen.getByText(/placeholder one cannot do this/i)).toBeInTheDocument(),
+    )
+  })
+
+  it('undoing one goes through the data layer and re-reads too', async () => {
+    exclusionsApi.listExclusions.mockResolvedValue([
+      { id: 'x1', chore_id: 'c1', member_id: 'm2' },
+    ])
+    await renderApp()
+    await onScreen()
+
+    const readsBefore = exclusionsApi.listExclusions.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(
+        screen.getByRole('button', {
+          name: /let placeholder two do placeholder chore again/i,
+        }),
+      ),
+    )
+
+    expect(exclusionsApi.allowMember).toHaveBeenCalledWith('c1', 'm2')
+    await waitFor(() =>
+      expect(exclusionsApi.listExclusions.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('the write goes through lib/exclusions.js, never the Supabase client directly', async () => {
+    // getSupabase() throws in this file's mock, so a component reaching past the
+    // data layer fails loudly here rather than shipping.
+    await renderApp()
+    await onScreen()
+    await markUnable('m2')
+    expect(screen.queryByText(/must not reach the client directly/i)).not.toBeInTheDocument()
+  })
+
+  it('a failed write reports itself and leaves the screen usable', async () => {
+    exclusionsApi.excludeMember.mockRejectedValue(
+      new Error('That person is already marked as unable to do this chore.'),
+    )
+    await renderApp()
+    await onScreen()
+    await markUnable('m2')
+
+    // Scoped to the chore card. App hands the same `error` to the roster too, so
+    // an unscoped query finds two nodes and fails on the count rather than on
+    // the claim — and the claim is that the message lands BESIDE the control
+    // that caused it, which is the repair #34 made for exactly this.
+    const card = await onScreen()
+    expect(await within(card).findByText(/already marked as unable/i)).toBeInTheDocument()
+    // And the control is not left disabled — `mutate` clears busy in a finally,
+    // so a refusal must not end with a screen nobody can use.
+    expect(
+      screen.getByLabelText(/mark someone as unable to do placeholder chore/i),
+    ).not.toBeDisabled()
+  })
+
+  it('reads nothing when there is no household, rather than asking for another one’s rows', async () => {
+    api.currentHousehold.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('region', { name: /start a household/i })
+    expect(exclusionsApi.listExclusions).not.toHaveBeenCalled()
+  })
+})
+
+// #95 — the calendar connection, at the level only App can answer.
+//
+// The component tests cover what the roster DRAWS. These cover the three things
+// that belong to App and that a component test structurally cannot see:
+//
+//   AC 5 — the connections come from the SERVER on load, through the same
+//          refresh as everything else.
+//   AC 6 — Google fails, and the member is told, on an app that still works.
+//   AC 3 — pressing Connect actually leaves for a Google consent URL asking for
+//          the free/busy scope. `startConnect` is left REAL in this file's mock
+//          precisely so this is the URL the app would really send somebody to,
+//          rather than one a stub agreed to.
+describe('connecting a calendar (#95)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+
+  let assign
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /**
+   * Replace `location` and `history` for one test.
+   *
+   * jsdom's own `location.assign` is unimplemented and its `href` is not
+   * writable, so a real navigation would emit a jsdomError rather than doing
+   * anything — and the query string has to be on the URL BEFORE App boots, which
+   * cannot be arranged with the real one either.
+   */
+  const atUrl = (search = '') => {
+    assign = vi.fn()
+    replaceState = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search, assign },
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    globalThis.sessionStorage?.clear?.()
+    atUrl('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  it('AC 5: reads the connections from the server on load and draws them', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([
+      { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.listCalendarConnections).toHaveBeenCalled()
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+  })
+
+  it('AC 3: pressing Connect leaves for Google, asking for free/busy alone', async () => {
+    // End to end through the REAL `startConnect`, so this is the URL a member
+    // would actually be sent to. A stub here would assert that the app calls a
+    // function, which is a fact about this test file.
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(async () =>
+      void fireEvent.click(inRoster().getByRole('button', { name: /connect google calendar/i })),
+    )
+
+    expect(assign).toHaveBeenCalledTimes(1)
+    const url = new URL(assign.mock.calls[0][0])
+    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+    expect(url.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.freebusy')
+    // Built from where the app is running, so a preview and the custom domain
+    // each ask for themselves rather than for a hard-coded host.
+    expect(url.searchParams.get('redirect_uri')).toBe('https://taskr.example.test/')
+  })
+
+  it('completes the exchange when Google sends the member back, then cleans the URL', async () => {
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atUrl('?code=the-code&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    // A spent code must not survive a reload: exchanging it twice is refused by
+    // Google, and that refusal reads as the connection having failed.
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  it('reads the roster AFTER the exchange, or the screen shows the state it just changed', async () => {
+    // The ordering, asserted rather than implied. `refresh()` is what puts
+    // "Calendar connected" on screen, so completing afterwards would leave a
+    // member who has just connected looking at a Connect button.
+    const order = []
+    calendarApi.completeConnect.mockImplementation(async () => {
+      order.push('exchange')
+      return { ok: true }
+    })
+    calendarApi.listCalendarConnections.mockImplementation(async () => {
+      order.push('read')
+      return []
+    })
+    atUrl('?code=the-code&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(order.indexOf('exchange')).toBeLessThan(order.indexOf('read'))
+  })
+
+  it('AC 6: says so when the exchange fails, on an app that still works', async () => {
+    // The failure state AC 6 asks for. "No token row exists" is the Edge
+    // Function's half and is proven in handler.test.js — nothing this side can
+    // observe a table it is granted nothing on.
+    calendarApi.completeConnect.mockRejectedValue(
+      new Error('Google refused the connection: invalid_grant'),
+    )
+    atUrl('?code=spent&state=the-state')
+    await renderApp()
+
+    // Still loaded: a failed connection is not a failed app, and rendering the
+    // boot-failure card here would hide a working household behind one refused
+    // OAuth code.
+    await screen.findByRole('region', { name: /who is in the household/i })
+    // `getAllByRole` rather than `getByRole`: App passes `error` to both the
+    // roster and the chore card, so a single-element query is ambiguous and
+    // fails with a message about the query rather than about the app.
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /invalid_grant/,
+    )
+    expect(replaceState).toHaveBeenCalled()
+  })
+
+  it('AC 6: treats a refusal at Google as a failure state, without calling the function', async () => {
+    // Pressing Cancel comes back as an error parameter with no code at all.
+    // There is nothing to exchange, so the function must not be called — and the
+    // member must still be told something, or a cancel is indistinguishable from
+    // a button that did nothing.
+    atUrl('?error=access_denied&state=the-state')
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /was not connected/i,
+    )
+  })
+
+  it('POSITIVE CONTROL: an ordinary load exchanges nothing and shows no complaint', async () => {
+    // Without this, every assertion above is satisfied by an App that calls
+    // `completeConnect` never — and by one that reports an error on every load.
+    await renderApp()
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(screen.queryAllByRole('alert')).toEqual([])
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+})
+
+describe('#53 — the boot-time catch-up pass', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([])
+  })
+
+  it('runs BEFORE the first read, so a created occurrence is in the first list a person sees', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /what needs doing/i })
+
+    expect(choresApi.catchUpRepeats).toHaveBeenCalledTimes(1)
+    // Order is the claim, not the call: catch-up after the read would show a
+    // week with holes in it until the next mutation happened to refresh.
+    expect(choresApi.catchUpRepeats.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('tells the household when occurrences older than the bound were skipped — AC 4', async () => {
+    choresApi.catchUpRepeats.mockResolvedValue({ created: 2, skipped: 3 })
+    await renderApp()
+
+    // The REAL formatSkippedNotice words this (the mock keeps pure functions
+    // real), so the sentence asserted is the sentence a person reads.
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent(
+      '3 repeat occurrences more than 7 days old were skipped rather than piled onto this week.',
+    )
+    // Told, not alarmed: nothing failed, so the error surface stays empty.
+    expect(screen.queryAllByRole('alert')).toEqual([])
+  })
+
+  it('says nothing when nothing was skipped', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /what needs doing/i })
+    expect(screen.queryByText(/skipped rather than piled/i)).not.toBeInTheDocument()
+  })
+
+  it('a failing pass costs the error strip, never the household', async () => {
+    // The live shape of this failure: 0012 not yet pasted, so the RPC is
+    // unknown to the project. Boot must degrade to a working app with the
+    // failure REPORTED — a red nobody can see is how a paste stays forgotten,
+    // and a boot-failure card would hide a working household behind it.
+    choresApi.catchUpRepeats.mockRejectedValue(
+      new Error('catching up repeats: function public.catch_up_repeats does not exist'),
+    )
+    await renderApp()
+
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
+      /catching up repeats/i,
+    )
   })
 })

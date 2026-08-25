@@ -27,8 +27,24 @@ should not receive the same chore count.
 
 1. **Fairness = time-budget allocation.** Proportional to capacity (total → remaining available
    time), never equal counts.
-2. **Capability constraints.** A task only goes to someone who can do it (the legacy
-   `usersWhoCanDoThisTask` set on a template).
+2. **Capability constraints.** A task only goes to someone who can do it — expressed as an
+   **exclusion** set: everyone can do everything until somebody says otherwise (the legacy
+   `usersWhoCannotDoThisTask` set on a template).
+
+   *Corrected in band 2026-08-21 by story #37, and the correction matters because it inverts the
+   polarity.* This line cited `usersWhoCanDoThisTask`, a positive capability set. **Measured**:
+   `git grep usersWhoCanDoThisTask legacy-final` returns **nothing** — no such identifier exists
+   anywhere in the 2020 tree. The field is `usersWhoCannotDoThisTask`
+   (`back-end/src/main/java/com/taskr/core/model/TaskTemplate.java:22`, 15 references), and
+   `ResourceManager.allocateSingleTask` filters on it hard:
+   `if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user))`.
+
+   The constraint is unchanged and still ratified; what was wrong was the *shape* it was recorded
+   in. It is worth stating rather than fixing quietly, because a positive capability set would have
+   been ruled out anyway by *"being set up is not a project"* below: it means a fresh household
+   allocates **nothing** until somebody has configured every person against every chore, which is
+   the setup burden the field scan measures at 70% abandonment within 100 days. The two arguments
+   agree, and only one of them needed the legacy code to be read correctly.
 3. **Visibility.** Every member's load and progress on one screen (the legacy all-users view with
    progress bars).
 4. **Recurring chores as templates**, instantiated into dated concrete tasks (`TaskTemplate` → `Task`).
@@ -340,6 +356,28 @@ New open questions this creates (owed at grooming, not settled here):
 - **Where the read runs** — the Google credential must never reach the client bundle
   (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
   same Edge Function surface #56 stands up.
+
+## Decision taken 2026-08-24 — the repeat catch-up bound is SEVEN days
+
+Owner decision at the pickup of #53, which required the bound to be "a named tunable constant
+recorded in the decision log". This is that record.
+
+- **`CATCH_UP_BOUND_DAYS = 7`.** When nobody has opened the app for a while, the catch-up pass
+  creates at most the last seven days of missed occurrences; anything older is counted, skipped,
+  and said. The authority is the constant of that name in `catch_up_repeats_at`
+  (`supabase/migrations/0012_repeating_chores.sql`); `src/lib/chores.js` carries the same value for
+  the sentence the UI shows, and `repeats.pglite.test.js` holds the two copies equal.
+- **Why seven**: a week away costs at most a week of chores on return, matching the app's weekly
+  capacity cadence — and #53's own criterion names "a fortnight of stale chores" as the failure, so
+  fourteen would sit exactly on the failure it exists to prevent. Rejected: **14 days** (more
+  forgiving of long gaps, at the cost of the walk-in pile the design direction rules out) and
+  **3 days** (nothing stale ever appears, but a long weekend silently drops a weekly chore's
+  occurrence).
+- **How the household is told** (same gate, same day): a transient notice on the device whose open
+  performed the skip. Rejected: a persisted notice every member sees until dismissed — genuinely
+  household-wide, but it costs a notifications table, RLS, grants and a dismiss flow, a substantial
+  widening of a three-day story for a message whose whole content is "less work appeared than you
+  might have expected".
 
 ## Open decisions (still owed)
 

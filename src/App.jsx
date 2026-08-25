@@ -20,7 +20,9 @@ import {
 import {
   addChore,
   assignChore,
+  catchUpRepeats,
   completeChore,
+  formatSkippedNotice,
   listChores,
   removeChore,
   unassignChore,
@@ -34,6 +36,13 @@ import {
   periodStartFor,
   setCapacity,
 } from './lib/capacity.js'
+import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import {
+  completeConnect,
+  listCalendarConnections,
+  readConsentReturn,
+  startConnect,
+} from './lib/calendar.js'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -65,9 +74,25 @@ export default function App() {
   // and the overrides are a server read like every other.
   const [overrides, setOverrides] = useState([])
   const [periodStart, setPeriodStart] = useState(null)
+  // #37 — who cannot do what. Server state like everything else here, and
+  // deliberately NOT derived into a per-chore map in this file: the screen folds
+  // over the rows where it needs them, so there is one representation and no
+  // second copy to fall out of step with the first.
+  const [exclusions, setExclusions] = useState([])
+  // #95 — who in this household has connected a Google Calendar. Server state
+  // like everything else here, read through the same refresh. The rows carry no
+  // credential: the refresh token is in `calendar_tokens`, which this client is
+  // granted nothing on, so there is no version of this read that could leak one.
+  const [connections, setConnections] = useState([])
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // #53 AC 4 — the catch-up pass skipped occurrences older than the bound and
+  // the household is told rather than left to wonder. Transient and on the
+  // device whose open performed the skip (owner decision, 2026-08-24): the
+  // other phones did not trigger it, and a persistent household-wide notice is
+  // a notifications table this story deliberately does not build.
+  const [notice, setNotice] = useState(null)
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
@@ -89,6 +114,17 @@ export default function App() {
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
     setOverrides(period ? await listCapacity(period) : [])
+    // #37 AC 9 — read from the server on every refresh, through the same path as
+    // everything else, so a device holds no exclusion state of its own. What
+    // another phone recorded is on this screen after the next mutation for the
+    // same reason the roster is: there is no cache to be stale.
+    setExclusions(found ? await listExclusions() : [])
+    // #95 AC 5 — "Calendar connected" is derived from a SERVER read on every
+    // refresh, exactly like the roster. A locally remembered flag would show
+    // connected on the phone that pressed the button and nothing on the phone
+    // that reloads, which is the shape of "it worked for me" that this app's
+    // whole read-through-the-server discipline exists to avoid.
+    setConnections(found ? await listCalendarConnections() : [])
     setUserId(await currentUserId())
     return found
   }, [])
@@ -121,8 +157,73 @@ export default function App() {
           if (!cancelled) setStatus('onboarding')
           return
         }
+
+        // #95 — Google sends the member back to the app ROOT with `?code=`, so
+        // the return is an ordinary boot that happens to carry two query
+        // parameters. There is no router here and the PWA scope is `/`; a
+        // dedicated path would need a rewrite rule at Vercel and would behave
+        // identically once it got here (owner decision at pickup).
+        //
+        // Handled BEFORE the read, and the ordering is the point: `refresh()`
+        // is what puts "Calendar connected" on the screen, so completing the
+        // exchange afterwards would leave the member looking at the state they
+        // just changed. It is also why the URL is stripped here rather than in
+        // a later effect — a reload holding a spent code would ask Google to
+        // exchange it twice and be refused, which reads as the connection
+        // having failed.
+        const consent = readConsentReturn(globalThis.location?.search)
+        let consentComplaint = null
+        if (consent) {
+          try {
+            if (consent.error) {
+              // Google's own word for it. `access_denied` is the member
+              // pressing Cancel, which is not a fault and must not be reported
+              // as one — but it does have to say SOMETHING, or a cancel looks
+              // exactly like a button that does nothing.
+              throw new Error(
+                consent.error === 'access_denied'
+                  ? 'That calendar was not connected — Google was told no.'
+                  : `Google could not complete that connection: ${consent.error}`,
+              )
+            }
+            await completeConnect(consent)
+          } catch (err) {
+            consentComplaint = err.message
+          }
+          // Whatever happened, the code is spent and must not survive a reload.
+          const { pathname } = globalThis.location
+          globalThis.history?.replaceState?.(null, '', pathname)
+        }
+
+        // #53 — create any missed occurrences of repeating chores BEFORE the
+        // first read, so the list this person is about to see already carries
+        // them: running it after refresh() would show a week with holes in it
+        // for one load. "Opens the app" is this boot, and the server owns the
+        // clock — the call sends nothing time-shaped.
+        //
+        // A failure here must not cost anyone their household: against a live
+        // project that has not had 0012 pasted yet this call fails on every
+        // open, and the right degradation is the ordinary error strip over a
+        // working app, not the boot-failure card. It is reported rather than
+        // swallowed — a red that nobody can see is how a paste stays forgotten.
+        let catchUpComplaint = null
+        let skippedNotice = null
+        try {
+          const caughtUp = await catchUpRepeats()
+          skippedNotice = formatSkippedNotice(caughtUp.skipped)
+        } catch (err) {
+          catchUpComplaint = err.message
+        }
+
         const found = await refresh()
-        if (!cancelled) setStatus(found ? 'joined' : 'onboarding')
+        if (!cancelled) {
+          setStatus(found ? 'joined' : 'onboarding')
+          if (skippedNotice) setNotice(skippedNotice)
+          // The consent complaint wins the strip: it answers the thing the
+          // person just did, where the catch-up is housekeeping they did not.
+          if (consentComplaint) setError(consentComplaint)
+          else if (catchUpComplaint) setError(catchUpComplaint)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err.message)
@@ -210,6 +311,27 @@ export default function App() {
     [mutate],
   )
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+  // #95 — begin a calendar connection. Deliberately NOT routed through
+  // `mutate()`, unlike every other action on this screen, and the difference is
+  // real rather than an oversight: nothing is written here. The browser leaves
+  // for Google, and the write happens in the Edge Function when it comes back —
+  // so a `mutate()` would set `busy`, re-read the server and clear it, all
+  // describing a change that has not happened yet.
+  //
+  // The failure it CAN have is a build with no `VITE_GOOGLE_CLIENT_ID`, and that
+  // is why the action is offered rather than hidden: a member who is shown
+  // nothing has no way to discover that the household's app is missing a
+  // setting, whereas one who presses it reads the sentence that names the
+  // variable. #95 AC 1 requires the action to be shown to a real-email member,
+  // and says nothing about the app being configured.
+  const handleConnectCalendar = useCallback(() => {
+    setError(null)
+    try {
+      globalThis.location.assign(startConnect())
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.
@@ -231,6 +353,32 @@ export default function App() {
     [mutate],
   )
   const handleUnassignChore = useCallback((id) => mutate(() => unassignChore(id)), [mutate])
+  // #37 — the two exclusion writes, and they are handed to the chore screen and
+  // to nothing else. That is AC 3 as a wiring decision rather than a promise: a
+  // household reaches this from a chore already on the list and from nowhere
+  // else, so there is no route to hand to onboarding or to the roster in the
+  // first place. gate.test.js checks it rather than trusting this paragraph.
+  //
+  // The chore element is named here in words only, with no angle brackets and
+  // no quoted pattern. gate.test.js finds that element by matching its opening
+  // tag through to the first self-closing tag after it, over the RAW SOURCE with
+  // comments left in — so any comment that spells the tag hijacks the match and
+  // the guard then inspects whatever element comes next.
+  //
+  // Measured twice while writing this story: first by a comment naming the tag,
+  // then by the comment written to warn about it, which quoted the pattern and
+  // so contained the tag again. That is cairn's
+  // `a-guard-that-reads-source-must-survive-its-own-docs`, arriving from a note
+  // about the hazard rather than from the hazard — and the second time is the
+  // one worth recording, because knowing the rule is what produced the breach.
+  const handleExcludeMember = useCallback(
+    (choreId, memberId) => mutate(() => excludeMember(choreId, memberId)),
+    [mutate],
+  )
+  const handleAllowMember = useCallback(
+    (choreId, memberId) => mutate(() => allowMember(choreId, memberId)),
+    [mutate],
+  )
   // #46 — set or clear THIS period's capacity. Both take the period from state
   // rather than recomputing it, so the write lands in the same week the screen
   // is showing even if midnight passes mid-session.
@@ -280,6 +428,15 @@ export default function App() {
         Chores are minutes of work. People are budgets of minutes. The split is
         proportional to what each person actually has.
       </p>
+
+      {/* #53 AC 4 — what the catch-up pass declined to pile onto the week.
+          role="status", never role="alert": nothing is wrong, and the .error
+          palette stays reserved for faults. */}
+      {status === 'joined' && notice ? (
+        <p className="shell__notice" role="status">
+          {notice}
+        </p>
+      ) : null}
 
       {status === 'loading' ? (
         <p className="card__body" role="status">
@@ -343,6 +500,8 @@ export default function App() {
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}
           onClearCapacity={handleClearCapacity}
+          connections={connections}
+          onConnectCalendar={handleConnectCalendar}
         />
       ) : null}
 
@@ -351,6 +510,7 @@ export default function App() {
           chores={chores}
           members={members}
           capacities={capacities}
+          exclusions={exclusions}
           busy={busy}
           error={error}
           onAdd={handleAddChore}
@@ -360,6 +520,8 @@ export default function App() {
           onUncomplete={handleUncompleteChore}
           onAssign={handleAssignChore}
           onUnassign={handleUnassignChore}
+          onExclude={handleExcludeMember}
+          onAllow={handleAllowMember}
         />
       ) : null}
 

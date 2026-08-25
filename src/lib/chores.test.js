@@ -2,15 +2,19 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  CATCH_UP_BOUND_DAYS,
   CHORE_COLUMNS,
   commitmentByMember,
   committedMinutes,
+  describeRepeat,
+  formatSkippedNotice,
   isOutstanding,
   outstandingMinutes,
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   normalizeDueDate,
   normalizeExpectedMinutes,
+  normalizeRepeat,
   normalizeTitle,
 } from './chores.js'
 
@@ -142,9 +146,10 @@ describe('the readable column list', () => {
   it('matches the select grant exactly, so select(*) is never needed', () => {
     // A column grant makes `select('*')` fail outright rather than quietly
     // returning a narrower row, so this list is load-bearing rather than tidy.
-    // 0004 added the two completion columns as readable and 0006 added
-    // assigned_member_id; if this list and the grant ever disagree, every read
-    // fails with a permission error.
+    // 0004 added the two completion columns as readable, 0006 added
+    // assigned_member_id, and 0012 the three repeat columns a screen renders;
+    // if this list and the grant ever disagree, every read fails with a
+    // permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
       'assigned_member_id',
       'completed_at',
@@ -152,7 +157,10 @@ describe('the readable column list', () => {
       'created_at',
       'due_on',
       'expected_minutes',
+      'generated_from',
       'id',
+      'repeat_kind',
+      'repeat_weekdays',
       'title',
     ])
   })
@@ -312,5 +320,98 @@ describe('commitmentByMember — #36 AC 5, 6, 9', () => {
   it('treats a member missing from the capacity list as zero rather than crashing a render', () => {
     const rows = commitmentByMember(members, [held('a', 10, 'm1')], [{ id: 'm1', capacityMinutes: 120 }])
     expect(rows[1]).toMatchObject({ capacityMinutes: 0, committedMinutes: 0, remainingMinutes: 0 })
+  })
+})
+
+describe('#53 — a schedule the columns will accept', () => {
+  it('accepts the three kinds, defaulting an unstated one to none', () => {
+    expect(normalizeRepeat({})).toEqual({ repeat_kind: 'none', repeat_weekdays: null })
+    expect(normalizeRepeat(undefined)).toEqual({ repeat_kind: 'none', repeat_weekdays: null })
+    expect(normalizeRepeat({ repeatKind: 'daily' })).toEqual({
+      repeat_kind: 'daily',
+      repeat_weekdays: null,
+    })
+    expect(normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [3] })).toEqual({
+      repeat_kind: 'weekly',
+      repeat_weekdays: [3],
+    })
+  })
+
+  it('refuses anything outside the structured kinds — AC 6, worded for a person', () => {
+    for (const repeatKind of ['monthly', 'every other thursday', 'WEEKLY', 42]) {
+      expect(() => normalizeRepeat({ repeatKind })).toThrow(/daily or weekly/i)
+    }
+  })
+
+  it('requires at least one weekday for weekly, and refuses days elsewhere', () => {
+    expect(() => normalizeRepeat({ repeatKind: 'weekly' })).toThrow(/at least one weekday/i)
+    expect(() => normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [] })).toThrow(
+      /at least one weekday/i,
+    )
+    expect(() => normalizeRepeat({ repeatKind: 'daily', repeatWeekdays: [1] })).toThrow(
+      /only make sense on a weekly repeat/i,
+    )
+    expect(() => normalizeRepeat({ repeatKind: 'none', repeatWeekdays: [1] })).toThrow(
+      /only make sense on a weekly repeat/i,
+    )
+  })
+
+  it('holds weekdays to ISO 1..7', () => {
+    for (const day of [0, 8, 1.5, 'Tuesday', NaN]) {
+      expect(() => normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [day] })).toThrow(
+        /1 \(Monday\) through 7 \(Sunday\)/,
+      )
+    }
+  })
+
+  it('sorts and deduplicates the days, so what renders back is what was meant', () => {
+    expect(normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [5, 1, 5, 3] })).toEqual({
+      repeat_kind: 'weekly',
+      repeat_weekdays: [1, 3, 5],
+    })
+  })
+})
+
+describe("#53 — the row's account of its schedule", () => {
+  it('says nothing for a chore that does not repeat, whatever shape it arrives in', () => {
+    expect(describeRepeat({ repeat_kind: 'none' })).toBeNull()
+    // Rows read before 0012 is pasted carry no repeat columns at all; the
+    // screen must not invent a schedule for them.
+    expect(describeRepeat({})).toBeNull()
+    expect(describeRepeat(null)).toBeNull()
+  })
+
+  it('names the days for weekly and the cadence for daily', () => {
+    expect(describeRepeat({ repeat_kind: 'daily' })).toBe('repeats daily')
+    expect(describeRepeat({ repeat_kind: 'weekly', repeat_weekdays: [1, 4] })).toBe(
+      'repeats weekly on Mon, Thu',
+    )
+    expect(describeRepeat({ repeat_kind: 'weekly', repeat_weekdays: [7] })).toBe(
+      'repeats weekly on Sun',
+    )
+  })
+})
+
+describe('#53 AC 4 — the skipped-occurrences sentence', () => {
+  it('is null when nothing was skipped, so no surface renders an empty notice', () => {
+    expect(formatSkippedNotice(0)).toBeNull()
+    expect(formatSkippedNotice(undefined)).toBeNull()
+    expect(formatSkippedNotice(-1)).toBeNull()
+  })
+
+  it('names the count and the bound, in days a person can check', () => {
+    expect(formatSkippedNotice(1)).toBe(
+      `1 repeat occurrence more than ${CATCH_UP_BOUND_DAYS} days old was skipped rather than piled onto this week.`,
+    )
+    expect(formatSkippedNotice(3)).toBe(
+      `3 repeat occurrences more than ${CATCH_UP_BOUND_DAYS} days old were skipped rather than piled onto this week.`,
+    )
+  })
+
+  it('the bound the sentence names is the owner-decided seven days', () => {
+    // The migration's copy is the authority; repeats.pglite.test.js holds the
+    // two equal. This pins the JS copy to the DECISION, so a drive-by edit
+    // here reddens something even with the pglite suite filtered out.
+    expect(CATCH_UP_BOUND_DAYS).toBe(7)
   })
 })

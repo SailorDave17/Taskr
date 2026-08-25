@@ -15,6 +15,15 @@ import { assertPublishableKey } from './src/lib/keyShape.js'
 // the build is the only signal available at the point it can still be stopped.
 assertPublishableKey(process.env.VITE_SUPABASE_ANON_KEY, 'the production build')
 
+// #95 — the same guard over the second value a dashboard now holds. A Google
+// OAuth client ID is public by design and belongs in the bundle; its sibling,
+// the client SECRET, is one line away on the same Google console screen and
+// begins `GOCSPX-`. Pasting the wrong one produces a build that WORKS, and
+// publishes a credential that can mint access to every connected calendar.
+// Nothing else in the pipeline would notice — which is the same argument, and
+// the same measured incident shape, as the line above.
+assertPublishableKey(process.env.VITE_GOOGLE_CLIENT_ID, 'the production build')
+
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent
 // rather than added speculatively; see docs/hosting-decision.md.
@@ -95,6 +104,21 @@ export default defineConfig({
     // that actually gates the branch — the same defect shape as a suite with
     // zero tests in it, which is why the pin sits beside passWithNoTests and is
     // asserted by src/test/gate.test.js rather than left to trust.
-    env: { TZ: 'America/New_York' },
+    //
+    // Marquesas rather than America/New_York since #75, for three properties at
+    // once. It is BEHIND UTC, which is the side of UTC where the local-getter
+    // fault shows at all — the issue floated Pacific/Chatham (+12:45), and
+    // measured, UTC midnight in Chatham is 12:45 the SAME day, so the very bug
+    // this pin exists to expose is invisible there. It is 30 minutes off the
+    // hour, which whole-hour zones cannot check. And no developer machine is
+    // plausibly in it, which is the #75 fix itself: the positive control in
+    // gate.test.js compares the process zone against this value, and that
+    // comparison only discriminates when the machine's own zone is something
+    // else. America/New_York was the one zone guaranteed to defeat it here.
+    //
+    // Measured 2026-08-24 (#75): the same normalizeDueDate mutation under this
+    // pin reddens 5 tests (the suite has grown since #34) and the same run
+    // under TZ=UTC still reddens ZERO — the bar the zone change had to clear.
+    env: { TZ: 'Pacific/Marquesas' },
   },
 })

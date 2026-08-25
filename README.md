@@ -41,15 +41,49 @@ join code with real per-member sign-in — each person has their own account, an
 identifies a person rather than a phone.
 
 **`0007` and `0008` were pasted to the live project on 2026-08-20** ([#108](https://github.com/SailorDave17/Taskr/issues/108)),
-so the database is now on per-member auth and `npm run check:live` is green at **20 of 20** —
+so the database is now on per-member auth. `npm run check:live` read **20 of 20** that day —
 every table, every RPC, and the `provision-member` Edge Function, which was deployed on
-2026-08-20 (#112) with `npm run deploy:function`. No red is expected, so any red is real.
+2026-08-20 (#112) with `npm run deploy:function`.
 
-**`0009` is written and has NOT been pasted** ([#127](https://github.com/SailorDave17/Taskr/issues/127)),
-so the repo is one migration ahead of the live project. Nothing above becomes false because of it —
-`check:live` covers tables, columns, RPCs and the Edge Function, and `0009` changes only two
-indexes, so the check is **structurally blind to it** and stays green either way. Do not read that
-green as "the database matches the repo".
+**`0009` was pasted on 2026-08-21, `0010` and `0011` on 2026-08-24**, and all three are verified over
+the wire rather than on the strength of a paste having been reported — by two different instruments,
+because one of them cannot see `0009` at all.
+
+`0011`: `calendar_connections` resolves for an authenticated caller with exactly the four granted
+columns and answers `42501 permission denied` to `anon`, which is the grant in `0011` doing what it
+says. `0010`: `chore_exclusions` answers with its four granted columns, and that assertion was **red
+by design until the paste**. Both are `npm run check:live`. `0009` is confirmed by a **different
+instrument**, and the difference is a property of the migrations rather than of the check:
+
+- `0009` changes only two indexes, and `check:live` covers tables, columns, RPCs and Edge Functions
+  — so it is **structurally blind to it** and stays green either way. Do not read that green as
+  "the database matches the repo". What confirms it is **`npm run test:rls`**, which cannot even
+  reach its first assertion unless `0009` is applied: `beforeAll` puts one seeded account in two
+  households, which the pre-`0009` global `members_claimed_by_key` forbids. *Measured 2026-08-24:
+  31 of 31, no skips.* **A suite that fails at setup under the old schema is a stronger presence
+  check than any probe** — it cannot pass for the wrong reason.
+- `0010` creates a table the client reads, so the check **can** see it, and it was **red on it by
+  design** from the merge until the paste.
+- `0011` creates **two** tables and the check asks about **one** of them, deliberately.
+  `calendar_connections` is read by the client, so the check sees it; `calendar_tokens` holds a
+  Google refresh token, the client is granted nothing on it at all, and probing it would report a
+  missing grant on a perfectly healthy project.
+
+**`calendar-connect`, the Edge Function `0011` exists for, has been deployed**, and it needed its
+own action: an Edge Function arrives with `npm run deploy:function` and **no migration carries it**,
+so pasting `0011` did not and could not clear it. That red survived the `0011` paste exactly as
+[`docs/access-model.md`](docs/access-model.md) predicted it would, and cleared on the deploy.
+
+*Measured 2026-08-24, after both actions*: the run read **23 of 23** with the excused-red set
+**EMPTY**. Later the same day #53 put `0012` (repeating chores) into the repo, taking the run to a
+measured **22 of 24** with two expected reds — and ***`0012` was pasted that same evening***, so the
+run reads a *measured* **24 of 24** and **the excused-red set is EMPTY again**. Both reds cleared on
+exactly the action they named and on nothing else. **Any red, on any subject, is now real.**
+
+[`docs/access-model.md`](docs/access-model.md) carries the excused-red table — now empty — and the
+history of the eight times that set has been inverted, which is the
+record worth keeping: an empty set is the state in which the check is worth the most, and every
+entry added to it is a claim that has to be cleared by a named action.
 
 **Production serves per-member auth too, since the same day.** `rebuild/v1` was promoted to `release`
 by [#111](https://github.com/SailorDave17/Taskr/pull/111), and Vercel builds production from
@@ -130,10 +164,10 @@ Other scripts:
 | `npm run preview` | Serve the built `dist/` locally |
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |
 | `npm run allocation:corpus` | Re-derive the allocation corpus figures recorded in [`docs/allocation-corpus.md`](docs/allocation-corpus.md) — how many household shapes reach level, and how many cannot |
-| `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it |
-| `npm run test:functions` | **The provisioning Edge Function, against a real stack.** Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
-| `npm run deploy:function` | **Deploy the provisioning Edge Function to the hosted project.** Owner-only: it needs a Supabase access token (`npx supabase login`, or `SUPABASE_ACCESS_TOKEN`). The project ref is **derived** from `VITE_SUPABASE_URL` rather than written down, because deploying to the wrong project succeeds, prints success, and leaves the app failing exactly as before — there would be nothing to see. Uses `--use-api`, so **no Docker**. `--dry-run` prints the resolved target and deploys nothing. This exists as a script rather than a documented command because the one-line form is ~90 characters and wrapped in a terminal twice on 2026-08-20, running as two commands and silently deploying nothing. Confirm with `npm run check:live` |
-| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function**. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **No red is expected** — it returns 20 of 20 as of 2026-08-20, so any red is new and real; [`docs/access-model.md`](docs/access-model.md) carries the history, including why the set was briefly non-empty |
+| `npm run test:rls` | The live row-level-security suite. Goes over the wire to the real Supabase project, so it needs `.env.local` and the migrations applied. **Not run by CI** — it is excluded there deliberately, because a security test that quietly passes when unconfigured is the same defect as a gate with no tests in it. **It is also the only instrument that can confirm `0009`**, and it does so at *setup* rather than in an assertion: `beforeAll` puts one seeded account in two households, which the pre-`0009` global `members_claimed_by_key` forbids, so the suite cannot reach its first assertion against an unmigrated project. *Measured 2026-08-24 at 31 of 31.* It writes to the live project by design and leaves households behind — there is no client-reachable delete — so run it with that in mind |
+| `npm run test:functions` | **The provisioning Edge Function, against a real stack.** `provision-member` only — `calendar-connect`'s decisions are unit-tested in `npm test` with an injected `fetch`, because its subject is what GOOGLE does and there is no local Google to point a stack at. Needs Docker: `npx supabase start` and `npx supabase functions serve --no-verify-jwt`. **Not run by CI** — it needs Postgres, GoTrue and a `service_role` key, and it targets the LOCAL stack, never the hosted project, because provisioning creates auth users. Loud rather than skipped: it fails with instructions when the stack is down |
+| `npm run deploy:function` | **Deploy this repo's Edge Functions to the hosted project** — `provision-member` and, since #95, `calendar-connect`. Both by default, because the safe and complete action should be the one with the least typing; `npm run deploy:function -- <name>` narrows it, and an unknown name is refused here rather than handed to the CLI. Owner-only: it needs a Supabase access token (`npx supabase login`, or `SUPABASE_ACCESS_TOKEN`). The project ref is **derived** from `VITE_SUPABASE_URL` rather than written down, because deploying to the wrong project succeeds, prints success, and leaves the app failing exactly as before — there would be nothing to see. Uses `--use-api`, so **no Docker**. `--dry-run` prints the resolved target and deploys nothing. This exists as a script rather than a documented command because the one-line form is ~90 characters and wrapped in a terminal twice on 2026-08-20, running as two commands and silently deploying nothing. Confirm with `npm run check:live` |
+| `npm run check:live` | **Does the live project have what the client asks for?** Probes every table and column in `src/lib/liveSchema.js` with `limit(0)`, every RPC in the same file with a GET — which PostgREST serves in a read-only transaction, so a function that writes cannot write — and, since #115, every **Edge Function** the app invokes, with the CORS preflight a browser sends before `functions.invoke`. A preflight is not the call, so nothing is invoked. It reads schema and never data. Run it after pasting a migration **and after deploying a function** — and occasionally when nothing in the repo has changed, because its subject moves without the file. **The expected-red set is EMPTY** — `0012` was pasted on 2026-08-24 and both its reds cleared on exactly that action; *measured the same evening at 24 of 24*. **Any red, on any subject, is real.** It read 20 of 20 on 2026-08-20; the denominator became 21 on 2026-08-21 when #37 added a table, 23 on 2026-08-24 when #95 added a table and a function, and 24 the same day when #53 added an RPC. **Not run by CI** for the same reason as `test:rls`, and loud rather than skipped when unconfigured — the lists it works from *are* checked by CI, in `src/lib/liveSchema.test.js`. **It is structurally blind to `0009`**, which changes only indexes, so a green run is not evidence that migration was pasted. [`docs/access-model.md`](docs/access-model.md) carries the excused-red table — now empty — and the history of the eight times that set has been inverted |
 
 ### The two variables you need
 
@@ -144,6 +178,7 @@ dashboard:
 |---|---|
 | `VITE_SUPABASE_URL` | Supabase → Project Settings → Data API |
 | `VITE_SUPABASE_ANON_KEY` | the **publishable** key, never the secret one |
+| `VITE_GOOGLE_CLIENT_ID` | *optional, #95* — Google Cloud console → Credentials. The client **ID** (`…apps.googleusercontent.com`), never the `GOCSPX-…` secret |
 
 `.env.local` is already covered by `.gitignore`, and credentials never enter git.
 
@@ -155,6 +190,13 @@ nothing happening", so it is written here rather than left to be rediscovered.
 for the publishable key *only* because row-level security is on. The `service_role` key bypasses RLS
 entirely and must never reach any `VITE_` variable; the build refuses outright if it does
 (`src/lib/keyShape.js`), which exists because it happened once.
+
+Since #95 the same guard covers the Google pair, and a test asserts it is asked about **every**
+`VITE_` variable the build reads rather than the two somebody remembered — a new one is covered by
+being added, or that test goes red. A Google client **ID** belongs in the bundle; a `GOCSPX-…`
+client **secret** and a `1//…` refresh token do not, and neither can reach a browser: the secret
+lives in the Edge Function's environment and the token in `calendar_tokens`, which no client is
+granted anything on.
 
 ## Branching — read this before you cut a branch
 

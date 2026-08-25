@@ -3,14 +3,18 @@ import PropTypes from 'prop-types'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
+  WEEKDAYS,
   commitmentByMember,
+  describeRepeat,
   formatMinutes,
   isOutstanding,
   normalizeDueDate,
   normalizeExpectedMinutes,
+  normalizeRepeat,
   normalizeTitle,
   outstandingMinutes,
 } from '../lib/chores.js'
+import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
 
 // The chore list — story #34.
 //
@@ -37,6 +41,15 @@ import {
 // The assignee control and the per-person figures arrived with #36. What stays
 // deliberately absent is the RANKING — no bar, no percentage, no ordering by
 // load. See the note at the foot of src/lib/chores.js, and `Commitment` below.
+//
+// #37 adds the only route in the whole app for saying somebody cannot do a
+// chore, and WHERE it lives is the story's central decision (owner, 2026-08-21,
+// option (a)). It is on the chore row, entered at the moment the case actually
+// bites. There is deliberately NO capability step in onboarding, NO capability
+// section on the roster, and NO screen anywhere laying all chores against all
+// members — that grid is what #8 asked for, and it is a form, in the same window
+// the charter's bet exists to delete forms. `src/test/gate.test.js` enumerates
+// the routes as a check rather than leaving this paragraph to be believed.
 
 /**
  * Run the data layer's own validators and return the first complaint, or null.
@@ -45,11 +58,16 @@ import {
  * sentence" testable: a boolean would let the UI invent its own wording, and
  * then the sentence a person reads would be untested.
  */
-function validate({ title, expectedMinutes, dueOn }) {
+function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
   try {
     normalizeTitle(title)
     normalizeExpectedMinutes(expectedMinutes)
     normalizeDueDate(dueOn)
+    // #53 — the add form's repeat is validated by the same function the data
+    // layer calls, for the reason above: the rules the constraint actually
+    // enforces live in one place. The edit form passes no repeat fields and
+    // gets 'none' back, which is the no-op it means — editing a repeat is #54.
+    normalizeRepeat({ repeatKind, repeatWeekdays })
     return null
   } catch (err) {
     return err.message
@@ -113,6 +131,132 @@ AssigneeSelect.propTypes = {
 }
 
 /**
+ * The one route into an exclusion — #37 ACs 2 and 3.
+ *
+ * A `<select>` of the people not already excluded, sitting on the chore itself.
+ * Choosing somebody records the pair; there is no Save, for the same reason the
+ * assignee control has none — this is one fact, and a form around one fact is
+ * the ceremony the bet exists to remove.
+ *
+ * The control is CONTROLLED AT THE EMPTY VALUE and never shows a selection. It
+ * is an action rather than a state: the state is the list above it, which is
+ * read back from the database on the next refresh. A select that kept the last
+ * choice would read as "this is who cannot do it" while actually meaning "this
+ * is who I last added", and those diverge the moment a second person is added.
+ *
+ * Nothing is offered when every member is already excluded — the alternative is
+ * a control whose only option is the placeholder. That state is legitimate and
+ * has a name: `eligible_members` returns the empty set, and #40 is where a
+ * household is told a chore nobody may do cannot be allocated. It is not this
+ * screen's job to invent a second sentence about it.
+ */
+function ExclusionControl({ chore, members, excludedIds, busy, onExclude, onAllow }) {
+  const excluded = members.filter((m) => excludedIds.includes(m.id))
+  const available = members.filter((m) => !excludedIds.includes(m.id))
+
+  return (
+    <div className="chore__exclusions" data-testid={`exclusions-${chore.id}`}>
+      {excluded.length > 0 ? (
+        <ul className="chore__exclusion-list">
+          {excluded.map((m) => (
+            <li className="chore__exclusion" key={m.id}>
+              <span className="chore__exclusion-name">{m.display_name} cannot do this</span>
+              <button
+                className="button button--quiet"
+                type="button"
+                disabled={busy}
+                aria-label={`Let ${m.display_name} do ${chore.title} again`}
+                // Two-arm, for the reason the remove button gives: onAllow routes
+                // through App's mutate(), which RETHROWS after recording the
+                // message, so a bare call escapes as an unhandled rejection.
+                onClick={() => onAllow(chore.id, m.id).then(() => {}, () => {})}
+              >
+                Undo
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {available.length > 0 ? (
+        <label className="chore__exclusion-add">
+          <span className="field__label">Cannot do this</span>
+          <select
+            className="field__input"
+            value=""
+            disabled={busy}
+            aria-label={`Mark someone as unable to do ${chore.title}`}
+            onChange={(e) => {
+              const chosen = e.target.value
+              if (!chosen) return
+              onExclude(chore.id, chosen).then(() => {}, () => {})
+            }}
+          >
+            <option value="">Everyone can</option>
+            {available.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+    </div>
+  )
+}
+
+ExclusionControl.propTypes = {
+  chore: PropTypes.object.isRequired,
+  members: PropTypes.array.isRequired,
+  excludedIds: PropTypes.array.isRequired,
+  busy: PropTypes.bool,
+  onExclude: PropTypes.func.isRequired,
+  onAllow: PropTypes.func.isRequired,
+}
+
+/**
+ * The chore is held by somebody marked as unable to do it — #37 ACs 6 and 7.
+ *
+ * ONE surface for two criteria, and that is a finding rather than a shortcut.
+ * AC 6 describes assigning an excluded person; AC 7 describes excluding the
+ * person already assigned. They are the same rendered state reached by two
+ * orders of events, so building two would put two different sentences on screen
+ * for one situation — and the household would have no way to tell which they had
+ * caused.
+ *
+ * It is a STATEMENT, not a demand. #8's answer was a conflict flag in the task
+ * list and in the household screen's attention area, and that was recommended
+ * against: a flag asking a human to go and fix something is precisely the
+ * negotiation the signature moment exists to remove, the same reasoning that
+ * already ruled out an explicit re-balance button. So this names the person, says
+ * what is true, and offers nothing to click.
+ *
+ * `role="status"` rather than `role="alert"`, and no `.error` class anywhere near
+ * it. An alert interrupts a screen reader for something the person just did on
+ * purpose, and the error palette is red — which this file's own stylesheet block
+ * reserves for work, never for people.
+ */
+function ExcludedAssigneeNote({ chore, members }) {
+  const holder = members.find((m) => m.id === chore.assigned_member_id)
+  // A name this device cannot see, for `AssigneeSelect`'s reason: between another
+  // phone removing a person and this one refreshing, the id names nobody. The
+  // note still belongs on screen — the pairing is what is wrong, not the label —
+  // so it degrades to the same wording that control uses rather than vanishing.
+  const name = holder ? holder.display_name : 'Someone not on the roster'
+
+  return (
+    <p className="chore__warning" role="status">
+      {name} is marked as unable to do this, and has it anyway.
+    </p>
+  )
+}
+
+ExcludedAssigneeNote.propTypes = {
+  chore: PropTypes.object.isRequired,
+  members: PropTypes.array.isRequired,
+}
+
+/**
  * What each person is carrying, and what is left of their week — #36 AC 5, 6, 9.
  *
  * Deliberately the ugliest honest form: plain minutes, in roster order, with no
@@ -159,7 +303,20 @@ Commitment.propTypes = {
   capacities: PropTypes.array.isRequired,
 }
 
-function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomplete, onAssign, onUnassign }) {
+function ChoreRow({
+  chore,
+  members,
+  exclusions,
+  busy,
+  onSave,
+  onRemove,
+  onComplete,
+  onUncomplete,
+  onAssign,
+  onUnassign,
+  onExclude,
+  onAllow,
+}) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(chore.title)
   const [minutes, setMinutes] = useState(String(chore.expected_minutes))
@@ -273,6 +430,16 @@ function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomp
           <span className="chore__cost-human"> ({formatMinutes(chore.expected_minutes)})</span>
           <span aria-hidden="true"> · </span>
           <span className="chore__due">due {chore.due_on}</span>
+          {/* #53 — the schedule, read off the row's own columns, so what the
+              screen says is what the database will do. A generated occurrence
+              says nothing here on purpose: it is ordinary work (AC 7), and a
+              badge would make it read as a different kind of chore. */}
+          {describeRepeat(chore) ? (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span className="chore__repeat">{describeRepeat(chore)}</span>
+            </>
+          ) : null}
         </span>
         <AssigneeSelect
           chore={chore}
@@ -280,6 +447,22 @@ function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomp
           busy={busy}
           onAssign={onAssign}
           onUnassign={onUnassign}
+        />
+        {/* #37 — the note sits directly under the control that causes it, so the
+            two halves of the same fact are read together. The database refuses
+            neither the assignment nor the exclusion: warn-and-allow is a rule
+            about this screen, and `exclusions.pglite.test.js` asserts that the
+            write succeeds so nobody later "fixes" it into a block. */}
+        {isExcluded(exclusions, chore.id, chore.assigned_member_id) ? (
+          <ExcludedAssigneeNote chore={chore} members={members} />
+        ) : null}
+        <ExclusionControl
+          chore={chore}
+          members={members}
+          excludedIds={excludedMemberIds(exclusions, chore.id)}
+          busy={busy}
+          onExclude={onExclude}
+          onAllow={onAllow}
         />
       </div>
 
@@ -356,6 +539,7 @@ function ChoreRow({ chore, members, busy, onSave, onRemove, onComplete, onUncomp
 ChoreRow.propTypes = {
   chore: PropTypes.object.isRequired,
   members: PropTypes.array.isRequired,
+  exclusions: PropTypes.array.isRequired,
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
@@ -363,12 +547,15 @@ ChoreRow.propTypes = {
   onUncomplete: PropTypes.func.isRequired,
   onAssign: PropTypes.func.isRequired,
   onUnassign: PropTypes.func.isRequired,
+  onExclude: PropTypes.func.isRequired,
+  onAllow: PropTypes.func.isRequired,
 }
 
 export default function Chores({
   chores,
   members,
   capacities,
+  exclusions,
   busy,
   error,
   onAdd,
@@ -378,10 +565,18 @@ export default function Chores({
   onUncomplete,
   onAssign,
   onUnassign,
+  onExclude,
+  onAllow,
 }) {
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
   const [dueOn, setDueOn] = useState('')
+  // #53 — the repeat is set HERE, where the chore is created, as a property of
+  // the chore. There is deliberately no templates screen and no template
+  // object anywhere: a second place to define the household's work is a second
+  // evening of data entry, which is the universal killer the field scan names.
+  const [repeatKind, setRepeatKind] = useState('none')
+  const [repeatDays, setRepeatDays] = useState([])
   const [complaint, setComplaint] = useState(null)
 
   const outstanding = chores.filter(isOutstanding)
@@ -409,6 +604,7 @@ export default function Chores({
                 key={chore.id}
                 chore={chore}
                 members={members}
+                exclusions={exclusions}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
@@ -416,6 +612,8 @@ export default function Chores({
                 onUncomplete={onUncomplete}
                 onAssign={onAssign}
                 onUnassign={onUnassign}
+                onExclude={onExclude}
+                onAllow={onAllow}
               />
             ))}
           </ul>
@@ -453,6 +651,7 @@ export default function Chores({
                 key={chore.id}
                 chore={chore}
                 members={members}
+                exclusions={exclusions}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
@@ -460,6 +659,8 @@ export default function Chores({
                 onUncomplete={onUncomplete}
                 onAssign={onAssign}
                 onUnassign={onUnassign}
+                onExclude={onExclude}
+                onAllow={onAllow}
               />
             ))}
           </ul>
@@ -471,7 +672,13 @@ export default function Chores({
         noValidate
         onSubmit={(e) => {
           e.preventDefault()
-          const problem = validate({ title, expectedMinutes: minutes, dueOn })
+          const problem = validate({
+            title,
+            expectedMinutes: minutes,
+            dueOn,
+            repeatKind,
+            repeatWeekdays: repeatDays,
+          })
           if (problem) {
             // AC 2: the refusal happens here, before onAdd is ever called, so a
             // bad value never becomes a request.
@@ -479,11 +686,13 @@ export default function Chores({
             return
           }
           setComplaint(null)
-          onAdd({ title, expectedMinutes: minutes, dueOn }).then(
+          onAdd({ title, expectedMinutes: minutes, dueOn, repeatKind, repeatWeekdays: repeatDays }).then(
             () => {
               setTitle('')
               setMinutes('')
               setDueOn('')
+              setRepeatKind('none')
+              setRepeatDays([])
             },
             () => {},
           )
@@ -521,6 +730,50 @@ export default function Chores({
             onChange={(e) => setDueOn(e.target.value)}
           />
         </label>
+        <label className="field">
+          <span className="field__label">Repeats</span>
+          {/* Structured on the way in — AC 6: a kind, then weekdays for
+              weekly. Free text has no field to arrive through, and monthly is
+              absent because it is #103, not because it was forgotten. */}
+          <select
+            className="field__input"
+            value={repeatKind}
+            aria-label="How often this chore repeats"
+            onChange={(e) => {
+              const kind = e.target.value
+              setRepeatKind(kind)
+              // Days belong to weekly alone; leaving a stale selection behind
+              // would silently rearm if the person flips back.
+              if (kind !== 'weekly') setRepeatDays([])
+            }}
+          >
+            <option value="none">Does not repeat</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Weekly, on&hellip;</option>
+          </select>
+        </label>
+        {repeatKind === 'weekly' ? (
+          <fieldset className="field chore-weekdays">
+            <legend className="field__label">Which days</legend>
+            <div className="chore-weekdays__row">
+              {WEEKDAYS.map(({ isoDow, label }) => (
+                <label key={isoDow} className="chore-weekdays__day">
+                  <input
+                    type="checkbox"
+                    checked={repeatDays.includes(isoDow)}
+                    aria-label={`Repeat on ${label}`}
+                    onChange={(e) =>
+                      setRepeatDays((days) =>
+                        e.target.checked ? [...days, isoDow] : days.filter((d) => d !== isoDow),
+                      )
+                    }
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         {complaint ? (
           <p className="error" role="alert">
             {complaint}
@@ -552,6 +805,7 @@ Chores.propTypes = {
   chores: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
   capacities: PropTypes.array.isRequired,
+  exclusions: PropTypes.array.isRequired,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
@@ -561,4 +815,6 @@ Chores.propTypes = {
   onUncomplete: PropTypes.func.isRequired,
   onAssign: PropTypes.func.isRequired,
   onUnassign: PropTypes.func.isRequired,
+  onExclude: PropTypes.func.isRequired,
+  onAllow: PropTypes.func.isRequired,
 }

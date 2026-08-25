@@ -2,8 +2,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
+import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 import {
   LIVE_EDGE_FUNCTIONS,
@@ -87,10 +89,12 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // Four since #62 dropped `household_devices`. The number is a floor against
-    // a vacuous pass, not a target — it goes DOWN when a table legitimately
-    // leaves, and that edit should be visible in review rather than automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(4)
+    // SIX since #95 added `calendar_connections` — five after #37's
+    // `chore_exclusions`, four after #62 dropped `household_devices`. The number
+    // is a floor against a vacuous pass, not a target: it goes DOWN when a table
+    // legitimately leaves and UP when one arrives, and either edit should be
+    // visible in review rather than automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(6)
     expect(readTables).toContain('chores')
   })
 
@@ -110,15 +114,31 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the four tables the app still reads', () => {
-    // #78 named five. `household_devices` was the fifth and #62 drops it, so
-    // this list lost an entry rather than gaining one — worth stating, because
-    // a shrinking required-set is exactly the edit that would otherwise look
-    // like someone quietly weakening the check.
-    for (const table of ['households', 'members', 'chores', 'member_capacity']) {
+  it('covers the six tables the app still reads', () => {
+    // #78 named five, of which `household_devices` was one and #62 drops it. The
+    // set went to four, back to five with #37's `chore_exclusions` — a different
+    // fifth — and to six with #95's `calendar_connections`. Every edit is
+    // stated, because a required-set that changes size silently is exactly how
+    // somebody quietly weakens a check.
+    for (const table of [
+      'households',
+      'members',
+      'chores',
+      'member_capacity',
+      'chore_exclusions',
+      'calendar_connections',
+    ]) {
       expect(LIVE_TABLES).toContain(table)
     }
     expect(LIVE_TABLES).not.toContain('household_devices')
+
+    // `0011` creates TWO tables and only one is here. The other holds the
+    // refresh token and the client is granted nothing on it, so probing it would
+    // report a missing grant on a perfectly healthy project — the
+    // `household_devices` mistake with the sign flipped. Asserted rather than
+    // left as an omission, because an absent entry and a forgotten one look
+    // identical.
+    expect(LIVE_TABLES).not.toContain('calendar_tokens')
   })
 
   it('takes its column lists from the data layer rather than restating them', () => {
@@ -129,6 +149,8 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.chores).toBe(CHORE_COLUMNS)
     expect(byTable.member_capacity).toBe(CAPACITY_COLUMNS)
     expect(byTable.members).toBe(MEMBER_COLUMNS)
+    expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
+    expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -137,9 +159,13 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     const chores = readFileSync(resolve(process.cwd(), 'src/lib/chores.js'), 'utf8')
     const capacity = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     const household = readFileSync(resolve(process.cwd(), 'src/lib/household.js'), 'utf8')
+    const exclusions = readFileSync(resolve(process.cwd(), 'src/lib/exclusions.js'), 'utf8')
+    const calendar = readFileSync(resolve(process.cwd(), 'src/lib/calendar.js'), 'utf8')
     expect(chores).toContain('.select(CHORE_COLUMNS)')
     expect(capacity).toContain('.select(CAPACITY_COLUMNS)')
     expect(household).toContain('.select(MEMBER_COLUMNS)')
+    expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
+    expect(calendar).toContain('.select(CALENDAR_CONNECTION_COLUMNS)')
   })
 })
 
@@ -247,13 +273,14 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     expect(extra, `in LIVE_RPCS but called nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the five the app still calls, and none of the four `0007` drops', () => {
+  it('covers the six the app still calls, and none of the four `0007` drops', () => {
     for (const fn of [
       'create_household',
       'complete_chore',
       'uncomplete_chore',
       'assign_chore',
       'unassign_chore',
+      'catch_up_repeats',
     ]) {
       expect(LIVE_RPC_NAMES).toContain(fn)
     }
@@ -262,6 +289,22 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     // healthy project is the same defect as one that passes on a broken one, and
     // this repo has already shipped it once (`household_devices` in LIVE_SCHEMA).
     for (const fn of ['claim_member', 'claim_member_with_pin', 'set_member_pin', 'join_household']) {
+      expect(LIVE_RPC_NAMES).not.toContain(fn)
+    }
+    // And #37's two, for the SAME reason arriving from the opposite direction:
+    // `0010` creates them and deliberately withholds execute from
+    // `authenticated`, so a probe would report a missing grant on a project that
+    // is entirely correct. They are covered by the `chore_exclusions` entry in
+    // LIVE_SCHEMA — one paste creates all three.
+    for (const fn of ['is_member_eligible', 'eligible_members']) {
+      expect(LIVE_RPC_NAMES).not.toContain(fn)
+    }
+    // And #53's three internals, same reason again: `catch_up_repeats_at`,
+    // `repeat_occurrence_dates` and `set_repeat_since` are granted to no
+    // client role on purpose, so a probe would report a missing grant on a
+    // correct project. The `catch_up_repeats` entry covers their paste — all
+    // four arrive in `0012`.
+    for (const fn of ['catch_up_repeats_at', 'repeat_occurrence_dates', 'set_repeat_since']) {
       expect(LIVE_RPC_NAMES).not.toContain(fn)
     }
   })

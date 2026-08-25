@@ -1,6 +1,8 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
+import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
+import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 
 /**
@@ -37,6 +39,22 @@ export const LIVE_SCHEMA = Object.freeze([
   Object.freeze({ table: 'members', columns: MEMBER_COLUMNS }),
   Object.freeze({ table: 'chores', columns: CHORE_COLUMNS }),
   Object.freeze({ table: 'member_capacity', columns: CAPACITY_COLUMNS }),
+  // #37. Added with `0010`, which was NOT pasted at merge — so this entry made
+  // `check:live` red on purpose until the paste landed on 2026-08-24. That is
+  // the entry doing its job: the check exists precisely because a paste is a
+  // human step recorded nowhere, and an entry withheld until after the paste
+  // would leave the window it is meant to cover uncovered. Nothing here changes
+  // now the red has cleared — an entry earns its place by what it asks, not by
+  // what it currently answers.
+  Object.freeze({ table: 'chore_exclusions', columns: EXCLUSION_COLUMNS }),
+  // #95, arriving with `0011` and unpasted at merge — so this entry was red on
+  // purpose until it was pasted on 2026-08-24, for the same reason
+  // `chore_exclusions` above was. Note which of `0011`'s two tables is here:
+  // `calendar_tokens` is NOT, and its absence is the check agreeing with the
+  // schema rather than an omission. This list is what the CLIENT reads, and the
+  // client is granted nothing at all on the token table — probing for it would
+  // report a missing grant on a perfectly healthy project.
+  Object.freeze({ table: 'calendar_connections', columns: CALENDAR_CONNECTION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -65,12 +83,28 @@ export const LIVE_TABLES = Object.freeze(LIVE_SCHEMA.map((entry) => entry.table)
  * list is derived from the call sites, and `liveSchema.test.js` fails if it ever
  * stops matching them in either direction.
  */
+// #37's `is_member_eligible` and `eligible_members` are deliberately NOT here,
+// and the reason is the list's own rule rather than an omission: this list is
+// derived from the CALL SITES, and the client calls neither. `0010` withholds
+// execute from `authenticated` on purpose (a definer predicate a client could
+// call would answer about other households), so probing for them would report a
+// missing execute grant on a healthy project — the `household_devices` mistake
+// with the sign flipped. What covers their paste is the `chore_exclusions` entry
+// above: both functions and the table arrive in one file, so a project with the
+// table has run the whole of it.
 export const LIVE_RPCS = Object.freeze([
   Object.freeze({
     fn: 'create_household',
     args: Object.freeze(['household_name', 'organizer_name', 'household_timezone']),
   }),
   Object.freeze({ fn: 'complete_chore', args: Object.freeze(['chore_id']) }),
+  // #53, arriving with `0012` — red on purpose until that file is pasted, the
+  // same deliberate window every migration-borne entry here has had. No
+  // arguments: a bare GET resolves a parameter-free function, and PostgREST
+  // serves it in a read-only transaction, so the probe cannot create anything
+  // — the pass either finds nothing to do (an empty household) or is refused
+  // by Postgres with `25006`, and both classify as PRESENT.
+  Object.freeze({ fn: 'catch_up_repeats', args: Object.freeze([]) }),
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
@@ -176,7 +210,7 @@ export function describeRpcError(fn, args, error) {
  * set - which would pass vacuously. The scan resolves the const and asserts it
  * resolved.
  */
-export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member'])
+export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member', 'calendar-connect'])
 
 /**
  * The headers a browser names in the preflight before `functions.invoke`.

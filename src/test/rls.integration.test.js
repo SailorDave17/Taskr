@@ -262,8 +262,11 @@ const HOUSEHOLD_TZ = 'Pacific/Auckland'
 // was dropped. A client learns which household it is in from `households`.
 const MEMBER_COLUMNS = 'id, display_name, weekly_minutes, claimed_by, email, created_at'
 const CAPACITY_COLUMNS = 'id, member_id, period_start, minutes, note, source, created_at'
+// Widened by 0012 (#53): the three repeat columns joined the readable set, so
+// this suite is RED against the live project until 0012 is pasted — the same
+// deliberate window docs/access-model.md records for every migration.
 const CHORE_COLUMNS =
-  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id'
+  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
 const HOUSEHOLD_COLUMNS = 'id, name, timezone, organizer_member_id, created_at'
 
 /** A fresh client per person, so no two ever share a session. */

@@ -636,3 +636,164 @@ describe('#87 — giving somebody a sign-in', () => {
     ).toBeInTheDocument()
   })
 })
+
+// #95 — connecting a Google Calendar, from the capacity screen.
+//
+// The whole of AC 1 is a ROUTING question — who is shown the action — and it has
+// two independent halves that fail differently, so each gets its own assertion
+// rather than one test that happens to cover both.
+//
+// What this file cannot see, and does not claim to: whether the Edge Function
+// would accept the call. It refuses a PIN member on the server as well, and that
+// refusal is the real boundary; this is manners, the same relationship
+// `SignInControl` has to the organizer check. The server half is proven in
+// supabase/functions/calendar-connect/handler.test.js.
+describe('#95 AC 1 — who is offered a calendar connection', () => {
+  const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+  const pinMember = { ...roster[0], email: null }
+
+  // The housemate has a REAL ADDRESS TOO, and that is the whole reason this
+  // fixture is written out rather than reusing `roster[1]`.
+  //
+  // Found by a mutation pass, round 1, and it is the most expensive thing the
+  // pass caught. `roster[1]` carries no `email`, so with it as the housemate the
+  // "not on somebody else's row" test below was satisfied by the REAL-EMAIL
+  // check inside `CalendarControl` and never exercised the `isMe` guard at all.
+  // *Measured*: deleting `isMe` from Roster.jsx reddened ZERO against a
+  // predicted 1 — every row in the household would have offered to connect a
+  // calendar to whoever was holding the phone, and the suite stayed green.
+  //
+  // Two guards producing one observable are one guard with a spare, and the
+  // spare is what keeps it green. Giving the housemate an address leaves `isMe`
+  // as the only thing that can be doing the work.
+  const housemateWithEmail = { ...roster[1], email: 'placeholder.two@example.test' }
+  const connectHandlers = { onConnectCalendar: vi.fn() }
+
+  const renderRoster = (props) =>
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: withEmail,
+      ...connectHandlers,
+      ...props,
+    })
+
+  it('offers it to a signed-in member with a real address, on their own row', () => {
+    renderRoster()
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('does NOT offer it on somebody else’s row, even when they COULD connect one', () => {
+    // Google would sign in whoever is holding the phone and attach THEIR
+    // calendar to a housemate's roster entry — a wrong answer that looks like a
+    // right one all the way to the end.
+    //
+    // The housemate has a real address on purpose (see the fixture above), so
+    // the only thing that can be keeping the control off their row is `isMe`.
+    renderRoster()
+    expect(
+      within(rowFor('Placeholder Two')).queryByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).not.toBeInTheDocument()
+    expect(within(rowFor('Placeholder Two')).queryByTestId('calendar-m2')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: that same housemate IS offered it on their own device', () => {
+    // Which is what makes the absence above a fact about WHOSE row it is rather
+    // than a fact about that person. Without it the assertion passes just as
+    // happily against a fixture the control could never render for.
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: housemateWithEmail,
+      ...connectHandlers,
+    })
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('does NOT offer it to a PIN member — the action is ABSENT, not disabled', () => {
+    // `members.email` null is `0007`'s discriminator, and there is no Google
+    // identity behind an address with no mailbox. A disabled button is a promise
+    // the app cannot keep and sends a household looking for the setting that
+    // would enable it, so the control renders nothing at all.
+    //
+    // `me` IS this member, so `isMe` is true and the real-email check is the
+    // only guard left that can refuse — the mirror of the pairing above.
+    setup({ members: [pinMember, housemateWithEmail], me: pinMember, ...connectHandlers })
+    const row = rowFor('Placeholder One')
+    expect(row.textContent).not.toMatch(/google calendar/i)
+    expect(within(row).queryByTestId('calendar-m1')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: the same fixture DOES offer it once the address is there', () => {
+    // Without this, the absence above is satisfied by a control that never
+    // renders — a prop threaded wrong, a typo in a name — and the assertion
+    // would report the routing as correct while the feature was simply missing.
+    renderRoster()
+    expect(within(rowFor('Placeholder One')).getByTestId('calendar-m1')).toBeInTheDocument()
+  })
+
+  it('hands the press straight to App, which is what leaves for Google', () => {
+    // A fresh spy rather than the shared one above: `setup` returns only the
+    // handlers it made itself, so reading the shared `connectHandlers` would
+    // also carry every click from every earlier test in this describe.
+    const onConnectCalendar = vi.fn()
+    renderRoster({ onConnectCalendar })
+    fireEvent.click(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /connect google calendar/i }),
+    )
+    expect(onConnectCalendar).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('#95 AC 5 — a connected member sees so on reload', () => {
+  const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+  const connection = {
+    id: 'conn-1',
+    member_id: 'm1',
+    scope: 'https://www.googleapis.com/auth/calendar.freebusy',
+    connected_at: '2026-08-24T10:00:00Z',
+  }
+
+  it('says Calendar connected, from a row the SERVER supplied', () => {
+    // Not from anything this device remembers. A locally held flag would show
+    // connected on the phone that pressed the button and nothing on the phone
+    // that reloads — which is the state AC 5 is written against.
+    setup({
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      connections: [connection],
+      onConnectCalendar: vi.fn(),
+    })
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(
+      within(row).queryByRole('button', { name: /connect google calendar/i }),
+      'an already-connected member should not be asked again',
+    ).not.toBeInTheDocument()
+  })
+
+  it('ignores a connection belonging to somebody else', () => {
+    // The rows arrive as a household-wide list, so matching on the person is the
+    // whole of what makes this right. Matching on nothing — taking the first row
+    // — would light up the wrong member the moment two people connect.
+    setup({
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      connections: [{ ...connection, member_id: 'm2' }],
+      onConnectCalendar: vi.fn(),
+    })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
+  })
+})

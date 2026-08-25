@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 
@@ -181,7 +181,27 @@ describe('the suite runs in a zone where a date bug can show', () => {
 
   it('POSITIVE CONTROL: the pin actually reaches the running process', () => {
     // Asserting the config text alone would pass if vitest ignored the setting.
-    expect(new Date('2026-08-10').getTimezoneOffset()).not.toBe(0)
+    //
+    // #75: the first form of this control asserted only "the offset is not
+    // zero", which passes on any machine whose own zone is non-UTC — including
+    // the machine the suite was written on, which sat in the pinned zone. It
+    // could discriminate on a UTC runner and nowhere else, i.e. in CI and never
+    // on the laptop where vite.config.js actually gets edited.
+    //
+    // Two assertions against the value read out of the config, with different
+    // blind spots. env.TZ proves vitest APPLIED the setting — and still fails
+    // on pin deletion when the machine's default zone happens to equal the
+    // pinned one, because a machine default arrives from the OS, not through
+    // the TZ variable. The resolved zone proves Node HONOURED it — measured on
+    // Windows, a TZ set at process start and one set at runtime both move
+    // Intl and Date together, so this reads the same clock the date tests use.
+    // The residual blind spot is a developer who exports TZ=<the pinned zone>
+    // in their own shell; the zone below is chosen so that nobody plausibly
+    // does.
+    const pinned = config.match(/TZ:\s*'([^']+)'/)
+    expect(pinned, 'no TZ value found in vite.config.js').not.toBeNull()
+    expect(process.env.TZ).toBe(pinned[1])
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(pinned[1])
   })
 })
 
@@ -434,10 +454,28 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     })
   }
 
-  // The two spellings that matter: the env var the function reads, and the
-  // prefix of a modern secret key. Legacy JWT secret keys are covered by
-  // keyShape.js at build time, which reads the role claim rather than a prefix.
-  const FORBIDDEN = [/SUPABASE_SERVICE_ROLE_KEY/, /sb_secret_/]
+  // The spellings that matter: the env vars a function reads, and the prefixes
+  // of a modern secret. Legacy JWT secret keys are covered by keyShape.js at
+  // build time, which reads the role claim rather than a prefix.
+  //
+  // The Google pair arrives with #95, and the second Edge Function is why the
+  // list had to grow rather than stay put. `GOOGLE_CLIENT_SECRET` is the name
+  // `calendar-connect` reads from its environment; `GOCSPX-` is the prefix of
+  // the value, and it is here because a NAME is only forbidden where somebody
+  // remembers to use one — a value pasted straight into a `VITE_` line has no
+  // name attached to it at all.
+  //
+  // Note what this does NOT cover, deliberately: a Google refresh token
+  // (`1//…`). It is guarded by `keyShape.js`, which is the right place, and a
+  // two-character prefix is too weak to grep source with — it would match a
+  // protocol-relative URL and a comment about integer division. A guard that
+  // cries wolf gets run with --no-verify.
+  const FORBIDDEN = [
+    /SUPABASE_SERVICE_ROLE_KEY/,
+    /sb_secret_/,
+    /GOOGLE_CLIENT_SECRET/,
+    /GOCSPX-/,
+  ]
 
   // A guard whose subject is SOURCE TEXT cannot tell the hazard from prose
   // about the hazard, so it refuses the very code written to detect it. Measured
@@ -509,6 +547,25 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     expect(fn).toMatch(/SUPABASE_SERVICE_ROLE_KEY/)
   })
 
+  it('POSITIVE CONTROL: every pattern matches something, so none is a dead entry', () => {
+    // #95 doubled the list, and a pattern that matches nothing anywhere is
+    // indistinguishable from one that is working — the scan comes back clean
+    // either way. So each is exercised against a file OUTSIDE `src/` that
+    // genuinely carries it: `calendar-connect` reads the Google secret from its
+    // environment, and its own test plants a `GOCSPX-` fixture. A typo in any of
+    // the four reddens here rather than going quiet in the scan above.
+    const outsideSrc = [
+      'supabase/functions/provision-member/index.ts',
+      'supabase/functions/calendar-connect/handler.ts',
+      'supabase/functions/calendar-connect/handler.test.js',
+    ]
+      .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+      .join('\n')
+
+    const dead = FORBIDDEN.filter((pattern) => !pattern.test(outsideSrc))
+    expect(dead, `these patterns match nothing at all: ${dead.join(', ')}`).toEqual([])
+  })
+
   it('the Edge Function is outside src/, so the bundler cannot follow an import', () => {
     const offenders = []
     for (const file of filesUnder(srcDir)) {
@@ -558,13 +615,55 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
 // The single-letter household 'H' is the worked example of why both exist: it
 // fails the shape test (one character) and is caught by position alone.
 describe('#19 — no real household name reaches version control', () => {
-  const tracked = execSync('git ls-files -z', {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean)
+  // TRACKED only, and deliberately so: this list is the subject of the image
+  // assertions at the bottom, whose claim is that no image is COMMITTED. An
+  // untracked screenshot has not been committed, so widening this list would
+  // make that test say something it does not mean — and its positive control,
+  // which pins the image count exactly, would fail on any local scratch file.
+  const tracked = ls('git ls-files -z')
+
+  // The name corpus is WIDER: tracked files plus untracked-and-not-ignored
+  // ones. The comment below has always said "scanned the day it lands", and
+  // until #53 that was false — the corpus resolved against the INDEX, so a test
+  // file was scanned the day it was STAGED, not the day it was written.
+  //
+  // Measured, and the measurement is the reason this line changed: 875dd9f
+  // added ten fixture names in a NEW file and a declaration in an OLD one, in
+  // one commit. The guard fired on the old file — `Tuesday` was declared for it
+  // — and was silent on the new one, because it was untracked when the suite
+  // ran locally. So the guard was consulted, answered, and its answer covered
+  // half the change; CI, running on the committed tree, saw all ten. A guard
+  // that is blind to the file you are writing is blind exactly where new
+  // fixtures come from.
+  //
+  // The cost is stated rather than hidden: an untracked scratch file under
+  // src/test/ is now scanned, and it has not reached version control. That is
+  // the intended direction — this refuses a name while deleting it is still
+  // free — but it means the guard can refuse a file you never meant to commit.
+  //
+  // `--exclude-standard` is UNEXERCISED, and saying so is cheaper than letting
+  // the next reader assume otherwise: dropping it reddened 0 of 52, because
+  // nothing this tree ignores matches the corpus filter — node_modules/ and
+  // dist/ are outside `src/`, and supabase/.temp/ is not migrations/ or seed/.
+  // So today it bounds how much `--others` enumerates and nothing more. It
+  // becomes load-bearing the moment anything under src/ is gitignored, which is
+  // exactly when a scratch fixture would otherwise be scanned and refused.
+  function ls(command) {
+    return execSync(command, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+      .split('\0')
+      .filter(Boolean)
+  }
+
+  // Split out from the constant so the positive control below can RE-DERIVE it
+  // after creating an untracked file. A corpus computed once at collection time
+  // cannot be asked whether it would have seen one.
+  function scanCorpus() {
+    return corpusOf(ls('git ls-files -z --cached --others --exclude-standard'))
+  }
 
   // Discovered, never hard-coded: a test file added tomorrow is scanned the day
   // it lands. A hand-maintained corpus list is the drift this file already
@@ -577,14 +676,18 @@ describe('#19 — no real household name reaches version control', () => {
   // REFUSES — so scanning this file would refuse the correct file. The cost is
   // stated rather than hidden: a real name pasted into this file is not caught
   // by these assertions.
-  const corpus = tracked.filter(
-    (path) =>
-      path !== 'src/test/gate.test.js' &&
-      (/^src\/.*\.test\.jsx?$/.test(path) ||
-        /^src\/test\/.*\.jsx?$/.test(path) ||
-        path === 'src/lib/allocation.corpus.js' ||
-        /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
-  )
+  function corpusOf(paths) {
+    return paths.filter(
+      (path) =>
+        path !== 'src/test/gate.test.js' &&
+        (/^src\/.*\.test\.jsx?$/.test(path) ||
+          /^src\/test\/.*\.jsx?$/.test(path) ||
+          path === 'src/lib/allocation.corpus.js' ||
+          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
+    )
+  }
+
+  const corpus = scanCorpus()
 
   // Comments stripped before scanning, per extension. A `--` strip on JavaScript
   // would eat a decrement operator, and a `//` strip on SQL would eat nothing
@@ -644,6 +747,9 @@ describe('#19 — no real household name reaches version control', () => {
     'Intruder', 'Hijacked', 'Smuggled', 'Not Yet Provisioned', 'Kid renamed',
     'Placeholder', 'Placeholder One', 'Placeholder One Renamed', 'Placeholder Two',
     'Placeholder Three', 'Placeholder Child', 'Placeholder Organizer', 'Renamed Placeholder',
+    // #53 — the second member of household A, who exists so an occurrence can
+    // carry an exclusion forward to somebody.
+    'Placeholder Second',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',
@@ -657,8 +763,33 @@ describe('#19 — no real household name reaches version control', () => {
     Dishes: 'a chore title in App.test.jsx',
     'Placeholder Chore': 'a chore title',
     'Placeholder Other Chore': 'a chore title',
+    // #37 AC 4's fixture needs four chores in one household. Declared rather
+    // than written in lower case to slip past the shape scan, which would have
+    // worked and would have been the wrong instinct: the point of this
+    // vocabulary is that every name-shaped literal is a line in a diff somebody
+    // can look at.
+    'Placeholder Third Chore': 'a chore title',
+    'Placeholder Fourth Chore': 'a chore title',
     Taskr: 'the application name',
     Monday: 'the week boundary, asserted in capacity.test.js',
+    // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
+    // column takes ISO numbers), and the fixture proving that refusal has to
+    // spell one.
+    Tuesday: 'a weekday, refused by normalizeRepeat in chores.test.js',
+    // #53's chore titles, in repeats.pglite.test.js. Each one names what its
+    // fixture is FOR, which is why they are declared rather than renamed to
+    // 'Placeholder Chore': a test that reads `title: 'Forged'` says what it is
+    // proving, and the vocabulary exists to put a name in a diff, not to make
+    // fixtures anonymous.
+    Trash: 'the chore title in the issue’s own weekly scenario',
+    Vague: 'a chore whose free-text repeat is refused by chores_repeat_kind_known',
+    Rent: 'a chore whose `monthly` repeat is refused — #103 is the named follow-up',
+    Shaped: 'a chore title in the repeat_weekdays shape cases',
+    Once: 'a chore with no repeat, whose repeat_since stays null',
+    Forged: 'a chore title in the fixture proving generated_from is not client-writable',
+    Stamped: 'a chore title in the fixture proving repeat_since and the watermark are not client-writable',
+    Crossed: 'a chore title in the fixture proving an occurrence cannot cross households',
+    Daily: 'a daily-repeating chore in the real-clock catch_up_repeats() test',
     'nothing to do': 'an allocation corpus scenario name',
     'provision-member': 'the Edge Function name',
     FunctionsFetchError: 'a supabase-js error class',
@@ -707,6 +838,35 @@ describe('#19 — no real household name reaches version control', () => {
     expect(corpus).toContain('src/App.test.jsx')
     expect(corpus).toContain('src/test/migrations.pglite.test.js')
     expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
+  })
+
+  it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {
+    // The control has to CREATE the condition, because on a clean tree there is
+    // nothing untracked and the widened corpus is byte-identical to the narrow
+    // one. That is what made the original blind spot invisible: the wrong
+    // command and the right command agree on every tree except the one where it
+    // matters, so no assertion over the corpus as it stands can tell them apart.
+    //
+    // End to end on purpose — listed, read, and REFUSED — because listing alone
+    // would pass with a corpus nothing ever opens. The probe carries a name the
+    // vocabulary does not declare, and it is removed in a `finally`: a leftover
+    // would redden the SHAPE assertion above until somebody deleted it, which is
+    // loud and self-explaining, but it should not happen.
+    const probe = 'src/test/.corpus-probe.tmp.js'
+    const absolute = resolve(process.cwd(), probe)
+    writeFileSync(absolute, "const fixture = { title: 'Marguerite' }\n")
+    try {
+      const fresh = scanCorpus()
+      expect(fresh, 'the corpus does not list an untracked file').toContain(probe)
+      expect(
+        fresh.flatMap((path) => shapeOffenders(codeOf(path)).map((value) => `${value} (${path})`)),
+      ).toContain(`Marguerite (${probe})`)
+    } finally {
+      rmSync(absolute, { force: true })
+    }
+    // Prove the cleanup, rather than assuming it: an unremoved probe is a
+    // failure this file would otherwise report against the NEXT person's change.
+    expect(scanCorpus()).not.toContain(probe)
   })
 
   it('SHAPE: every name-shaped literal in the fixture corpus is declared', () => {
@@ -784,5 +944,178 @@ describe('#19 — no real household name reaches version control', () => {
     const images = tracked.filter((path) => IMAGE.test(path))
     expect(images).toEqual(expect.arrayContaining(Object.keys(ALLOWED_ASSETS)))
     expect(images.length).toBe(Object.keys(ALLOWED_ASSETS).length)
+  })
+})
+
+// #37 AC 3 — the routes into exclusion-setting, ENUMERATED as a check.
+//
+// The AC asks that when every route in is enumerated, the only one is from a
+// chore already on the list: no capability step in onboarding, no capability
+// section on the roster, no screen laying all chores against all members, and an
+// onboarding step count unchanged from before this story.
+//
+// That is a property of the WIRING, so no behavioural test can see it — a
+// component test renders the screen it was handed and says nothing about which
+// screens exist. It is the same shape as every other guard in this file, and it
+// is the criterion most likely to decay quietly: adding a capability section to
+// the roster later would break nothing, fail nothing, and read as an improvement.
+//
+// #8 asked for exactly that screen — "given a chore's edit screen, when
+// capability is configured" — a per-chore by per-member matrix, a form, in the
+// same window the charter's bet exists to delete forms. This is what refuses it.
+describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else', () => {
+  const read = (relative) => readFileSync(resolve(process.cwd(), relative), 'utf8')
+  const app = read('src/App.jsx')
+  const onboarding = read('src/components/Onboarding.jsx')
+  const roster = read('src/components/Roster.jsx')
+  const chores = read('src/components/Chores.jsx')
+
+  it('POSITIVE CONTROL: the route EXISTS, so the absences below are not an unbuilt feature', () => {
+    // Without this the whole describe passes on a build where nobody can record
+    // an exclusion at all — which satisfies "the only route is from a chore"
+    // vacuously and is option (d), the one that was declined.
+    expect(app).toMatch(/from '\.\/lib\/exclusions\.js'/)
+    expect(app).toMatch(/\bexcludeMember\b/)
+    expect(app).toMatch(/\ballowMember\b/)
+    expect(chores).toMatch(/from '\.\.\/lib\/exclusions\.js'/)
+  })
+
+  it('hands the two writes to the chore screen, and to no other element', () => {
+    // Scoped to the element for the reason the #34 guard records: an unscoped
+    // grep passes on a neighbour. Here the neighbour is the point — the claim is
+    // that the roster does NOT get these props, so an assertion that merely
+    // found them somewhere in the file would be blind to the whole criterion.
+    const choreElement = app.match(/<Chores[\s\S]*?\/>/)
+    const rosterElement = app.match(/<Roster[\s\S]*?\/>/)
+    const onboardingElement = app.match(/<Onboarding[\s\S]*?\/>/)
+
+    expect(choreElement, 'no chore element in App.jsx').not.toBeNull()
+    expect(choreElement[0]).toMatch(/onExclude=\{/)
+    expect(choreElement[0]).toMatch(/onAllow=\{/)
+    expect(choreElement[0]).toMatch(/exclusions=\{/)
+
+    for (const [name, element] of [
+      ['roster', rosterElement],
+      ['onboarding', onboardingElement],
+    ]) {
+      expect(element, `no ${name} element in App.jsx`).not.toBeNull()
+      expect(element[0], `${name} must not be a second route in`).not.toMatch(/onExclude=|onAllow=/)
+    }
+  })
+
+  it('neither onboarding nor the roster knows the exclusion data layer exists', () => {
+    // The strongest available form, and the same argument #36 AC 10's check
+    // makes: a file that cannot reach the module cannot become a route into it,
+    // whatever anybody wires up later.
+    for (const [name, source] of [
+      ['Onboarding.jsx', onboarding],
+      ['Roster.jsx', roster],
+    ]) {
+      expect(source, `${name} imports the exclusion data layer`).not.toMatch(/lib\/exclusions/)
+      expect(source, `${name} names an exclusion write`).not.toMatch(
+        /\bexcludeMember\b|\ballowMember\b/,
+      )
+    }
+  })
+
+  it('the onboarding step count is unchanged from before this story', () => {
+    // TWO cards and TWO forms — create a household, or sign in — which is what
+    // Onboarding carried before #37 and what it carries now. A capability step
+    // would be a third of each, and this is the number that says so.
+    //
+    // The cost of a literal here is real and deliberate: a legitimate rework of
+    // onboarding fails this test and has to change the number in a diff. That is
+    // the same trade every floor in this file makes, and the AC asks for a count.
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(2)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(2)
+  })
+
+  it('no component offers a capability screen, by any of the words one would be called', () => {
+    // Vocabulary rather than structure, because the grid could be built without
+    // ever nesting two maps — and a matrix that called itself something else
+    // would still be the artefact the charter's bet exists to delete. The chore
+    // screen is exempt: it is the one route, and it has to say what it does.
+    const CAPABILITY_VOCABULARY = /capabilit|capability matrix|skills? (grid|matrix)|who can do what/i
+    for (const [name, source] of [
+      ['App.jsx', app],
+      ['Onboarding.jsx', onboarding],
+      ['Roster.jsx', roster],
+    ]) {
+      expect(source, `${name} looks like it offers a capability screen`).not.toMatch(
+        CAPABILITY_VOCABULARY,
+      )
+    }
+  })
+
+  it('POSITIVE CONTROL: that vocabulary scan can actually match something', () => {
+    // Without this the assertion above passes identically against a typo in the
+    // pattern, and an always-empty scan reads exactly like a clean bill of health.
+    const CAPABILITY_VOCABULARY = /capabilit|capability matrix|skills? (grid|matrix)|who can do what/i
+    expect(CAPABILITY_VOCABULARY.test('a capability matrix on the roster')).toBe(true)
+    expect(CAPABILITY_VOCABULARY.test('who can do what, at a glance')).toBe(true)
+  })
+})
+
+// #53 — a pglite suite that inherits vitest's 5000ms default testTimeout is a CI
+// failure waiting for a slow runner, and it will not look like one.
+//
+// This is the durable half of that fix. Setting the timeout in the eight files
+// that exist today is a sweep; a sweep is finished the moment somebody adds a
+// ninth. A new pglite file is exactly the file most likely to be heavy, and it
+// would inherit a limit its author never chose and never saw.
+//
+// Same shape as every other guard here: the property is about the ground the
+// tests stand on, and no behavioural test can see it — a suite that times out
+// on the runner passes perfectly on the machine that wrote it.
+describe('every pglite suite chooses its own testTimeout', () => {
+  // Untracked files included, for the reason the #19 corpus above carries: the
+  // file being added right now is the one this needs to see, and `git ls-files`
+  // alone would not show it until it was staged.
+  const pglite = execSync('git ls-files -z --cached --others --exclude-standard', {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter((path) => /^src\/test\/.*\.pglite\.test\.js$/.test(path))
+
+  // Anchored at column 0 with the multiline flag, so a sentence ABOUT the call
+  // cannot satisfy it — every comment line in these files begins with `//`, and
+  // the explanatory paragraph above each of these calls quotes the option name.
+  const DECLARES = /^vi\.setConfig\(\{[^}]*testTimeout:\s*([0-9_]+)/m
+
+  it('POSITIVE CONTROL: there are pglite suites to check, so an empty pass is impossible', () => {
+    expect(pglite.length).toBeGreaterThan(0)
+    expect(pglite).toContain('src/test/repeats.pglite.test.js')
+  })
+
+  it('every one declares a timeout, so none inherits a limit its author never chose', () => {
+    const missing = pglite.filter(
+      (path) => !DECLARES.test(readFileSync(resolve(process.cwd(), path), 'utf8')),
+    )
+    expect(missing, `pglite suites with no testTimeout of their own: ${missing.join(', ')}`).toEqual(
+      [],
+    )
+  })
+
+  it('and the declared value clears the worst time actually measured on the runner', () => {
+    // A floor, not an equality, and derived rather than mirrored: the heaviest
+    // case was observed at 8107ms on ubuntu-latest, so a declaration under ~20s
+    // is not headroom on a loaded runner — it is the same defect with a larger
+    // number. Asserting equality here would just be a second copy of the value.
+    const FLOOR_MS = 20_000
+    const short = pglite
+      .map((path) => [path, readFileSync(resolve(process.cwd(), path), 'utf8').match(DECLARES)])
+      .filter(([, match]) => match && Number(match[1].replace(/_/g, '')) < FLOOR_MS)
+      .map(([path, match]) => `${path} (${match[1]})`)
+    expect(short, `pglite timeouts below the ${FLOOR_MS}ms floor: ${short.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the pattern reads a real declaration and refuses a comment about one', () => {
+    // Both directions, because a pattern that matches nothing and a pattern that
+    // matches everything produce the same green here.
+    expect(DECLARES.test('vi.setConfig({ testTimeout: 30_000 })')).toBe(true)
+    expect('vi.setConfig({ testTimeout: 30_000 })'.match(DECLARES)[1]).toBe('30_000')
+    expect(DECLARES.test('// we could vi.setConfig({ testTimeout: 30_000 }) here')).toBe(false)
   })
 })

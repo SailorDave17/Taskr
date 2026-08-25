@@ -17,6 +17,7 @@
     "deploy:function": "node scripts/deploy-function.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs",
+    "rebalance:corpus": "node scripts/rebalance-churn-report.mjs",
     "extraction:corpus": "node scripts/extraction-corpus-report.mjs"
   },
   "dependencies": {

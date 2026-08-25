@@ -49,12 +49,25 @@ import { vi } from 'vitest'
  *
  * WHY 45s. ~3.9x the worst time actually observed, which is the same discipline
  * the `testTimeout: 30_000` comment in assignment.pglite.test.js applies (~3.7x
- * its worst). The extra headroom is for the runner rather than for this machine:
- * #53 measured the same class of work at 3460ms locally against 7800ms and
- * 8107ms on `ubuntu-latest`, roughly 2.3x — and 11471ms x 2.3 is ~26s, which a
- * 30s limit would sit almost on top of. Symmetry with `testTimeout` would have
- * been the wrong reason to pick 30s, and that is exactly what the old comment
- * warned against.
+ * its worst). The headroom is for CONTENTION: the spread between the median
+ * (5923ms) and the max (11471ms) is the whole story here, and what decides a run
+ * is what else the machine is doing while nine pglite files start in parallel.
+ *
+ * It is NOT for "CI is slower", and that correction is kept because it is how
+ * this number was almost justified wrongly. The first version of this comment
+ * argued from #53, which measured a test BODY at 3460ms locally against
+ * 7800-8107ms on `ubuntu-latest`, and extrapolated 11471 x 2.3 = ~26s. A
+ * same-day measurement in a sibling repo asked the question directly and found
+ * the opposite for pglite BOOT: `ubuntu-latest` 5819ms against a local idle max
+ * of 6232ms, i.e. no slower. See cairn's
+ * `reference/pglite-and-vitest-harness-facts-2026-08-25.md`, which also records
+ * that the boot dominates and does not grow as migrations accumulate, so this
+ * cost is per FILE rather than per migration.
+ *
+ * The value does not change; the reason does. 45s is ~4.4x the worst that note
+ * measured under full CPU saturation (10134ms) and ~3.9x the worst measured
+ * here, so it is comfortable on both sets of numbers - which is the point of
+ * recording which of them it rests on.
  *
  * THE COST, stated rather than discovered: a genuine hang still fails, and it
  * now takes 45s to do it instead of 10s. Proven — a `beforeEach` made to sleep

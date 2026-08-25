@@ -17,6 +17,53 @@
 // The stub is the weak point and it is deliberately small and readable, so the
 // gap between it and the real platform is inspectable rather than assumed.
 
+import { vi } from 'vitest'
+
+/**
+ * How long one pglite `beforeEach` may take — #145, measured rather than
+ * inherited.
+ *
+ * Set HERE because every pglite suite imports this module, so the limit is one
+ * line rather than nine that can drift apart. `vi.setConfig` from an imported
+ * module applies to the file that imported it, and a mutation proved it reaches
+ * all nine: dropped to 1ms, every pglite file goes red.
+ *
+ * WHY IT WAS RAISED. `assignment.pglite.test.js` used to say `hookTimeout` was
+ * deliberately left at vitest's 10s default, because "beforeEach builds exactly
+ * one database in all eight pglite files, none has ever timed out". Two of them
+ * then did, in two full-suite runs out of four on the dev machine — and both
+ * passed 18/18 and 29/29 in isolation moments later, so the failing thing was
+ * the limit, not either suite.
+ *
+ * WHAT WAS MEASURED. `freshDatabase` — the dominant term, a Postgres built in
+ * WASM with every migration applied — timed on every call across two full
+ * `npm test` runs on the dev machine, 448 samples:
+ *
+ *     median 5923ms   p90 6497ms   p99 10718ms   max 11471ms
+ *     over 10000ms: 12 of 448, spread across seven of the nine files
+ *
+ * So the hook's dominant term alone exceeded the old limit about 3% of the
+ * time, which is why the failure moved from file to file and looked like a
+ * different defect each run. The rest of a `beforeEach` is a handful of queries
+ * against an already-built database and is sub-second.
+ *
+ * WHY 45s. ~3.9x the worst time actually observed, which is the same discipline
+ * the `testTimeout: 30_000` comment in assignment.pglite.test.js applies (~3.7x
+ * its worst). The extra headroom is for the runner rather than for this machine:
+ * #53 measured the same class of work at 3460ms locally against 7800ms and
+ * 8107ms on `ubuntu-latest`, roughly 2.3x — and 11471ms x 2.3 is ~26s, which a
+ * 30s limit would sit almost on top of. Symmetry with `testTimeout` would have
+ * been the wrong reason to pick 30s, and that is exactly what the old comment
+ * warned against.
+ *
+ * THE COST, stated rather than discovered: a genuine hang still fails, and it
+ * now takes 45s to do it instead of 10s. Proven — a `beforeEach` made to sleep
+ * past the limit fails with `Hook timed out in 45000ms`.
+ */
+export const PGLITE_HOOK_TIMEOUT_MS = 45_000
+
+vi.setConfig({ hookTimeout: PGLITE_HOOK_TIMEOUT_MS })
+
 import { PGlite } from '@electric-sql/pglite'
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto'
 import { readdirSync, readFileSync } from 'node:fs'

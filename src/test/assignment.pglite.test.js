@@ -43,11 +43,20 @@ import {
 // 30s is ~3.7x the worst time actually observed. A genuine hang still fails; it
 // fails later, and that is the whole cost of this line.
 //
-// hookTimeout is deliberately NOT raised. beforeEach builds exactly one database
-// in all eight pglite files, none has ever timed out, and leaving it at 10s keeps
-// a real signal: a hook over the line means setup got slower, which is a
-// different fact from a test doing more work. If one ever fires, raise it on its
-// own evidence rather than by symmetry with this.
+// hookTimeout WAS deliberately left at 10s here, on the reasoning that beforeEach
+// builds exactly one database and none had ever timed out - so the default kept a
+// real signal, and the paragraph ended "if one ever fires, raise it on its own
+// evidence rather than by symmetry with this".
+//
+// Two fired, and the count was wrong as well: there are NINE pglite files, not
+// eight. #145 raised it on the evidence that comment asked for - 448 timed calls
+// across two full runs, worst 11471ms for the database build alone against a
+// 10000ms limit - and the limit now lives in src/test/support/pgliteSupabase.js,
+// which all nine import, so it is one line rather than nine that can drift.
+//
+// The rest of this paragraph stands: a hook over the line still means setup got
+// slower, which is a different fact from a test doing more work. What changed is
+// where the line is.
 vi.setConfig({ testTimeout: 30_000 })
 
 describe('assigning a chore, run against a real Postgres', () => {

@@ -39,6 +39,7 @@ export const MIGRATIONS = [
   '0010_chore_exclusions.sql',
   '0011_calendar_connection.sql',
   '0012_repeating_chores.sql',
+  '0013_grants_the_platform_no_longer_infers.sql',
 ]
 
 export function migrationSql(name) {
@@ -64,28 +65,35 @@ export function migrationFilesOnDisk() {
 // about the real platform; they are listed rather than bundled so a wrong one is
 // findable.
 //
-// The default privileges matter more than they look. This stub grants ALL on
-// every table in `public`, which is why row-level security alone was not enough
-// in 0001 and why 0002 has to revoke and re-grant per column. Stubbing it
-// wrongly — by granting nothing — would make 0002's central fix untestable and,
-// worse, make it look unnecessary.
+// The default privileges matter more than they look, and this line USED TO
+// overstate the platform on purpose. #91 narrowed it, and the reason is the
+// whole point of that story.
 //
-// ⚠ THIS PARTICULAR LINE IS KNOWN TO OVERSTATE THE CURRENT PLATFORM, and it is
-// left that way deliberately. *Measured 2026-08-13* against `supabase start`
-// (CLI 2.114.0): the default ACL for tables created by `postgres` in `public`
-// is `anon=Dxtm authenticated=Dxtm service_role=Dxtm` — TRUNCATE, REFERENCES,
-// TRIGGER, MAINTAIN and no SELECT/INSERT/UPDATE/DELETE at all. Newer stacks
-// tightened it; the hosted project predates that and still has the permissive
-// form, which is the only reason the live app can read `households` (no
-// migration grants that, and a rebuilt project cannot).
+// *Measured 2026-08-13* against `supabase start` (CLI 2.114.0), and re-measured
+// here: the default ACL for tables created by `postgres` in `public` is
+// `anon=Dxtm authenticated=Dxtm service_role=Dxtm` — TRUNCATE, REFERENCES,
+// TRIGGER, MAINTAIN, and NO select/insert/update/delete at all. Supabase
+// historically granted `arwdDxtm` there and newer stacks tightened it. The
+// hosted project predates the change, so it still carries the permissive form —
+// which is the only reason the live app could ever read `households`, because
+// until 0013 no migration granted that.
 //
-// Keeping the permissive stub means this suite tests what 0002 was WRITTEN
-// against, and cannot see a missing grant. That blindness is real and is
-// exactly the shape of "a harness that builds its own environment cannot tell
-// you the environment is wrong" — the households gap was found by running the
-// app against a real stack, not here. Narrowing it to match is a change with
-// its own blast radius across every pglite file and belongs in the story that
-// fixes the grants, not in #87.
+// What the old permissive stub cost, stated because it is the finding: a suite
+// that grants ALL by default cannot see a MISSING grant, so 886 green tests, a
+// mutation pass and a full read of every migration all went over three of them
+// (`households` select, `members` delete, `chores` delete). Two of the three had
+// a migration comment asserting the privilege was held. A harness that builds
+// its own environment cannot report that the environment is wrong.
+//
+// The direction of the disagreement is what matters, not its size. A stub MORE
+// permissive than production makes a negative assertion strong (`holds nothing`
+// can only pass if a revoke is really there) and a positive one vacuous (`may
+// read this` passes whether or not anything granted it). Narrowing it here
+// flips that: positive grant assertions became real, and `grants.pglite.test.js`
+// is the file that now asserts them. Understating is the safer error of the two
+// — it fails loudly at the harness, where overstating fails silently in
+// production — which is why the four privileges below are the platform's exact
+// set rather than nothing at all.
 const SUPABASE_ENV = `
   create schema if not exists auth;
   create schema if not exists extensions;
@@ -102,7 +110,13 @@ const SUPABASE_ENV = `
   grant usage on schema public     to anon, authenticated, service_role;
   grant usage on schema extensions to anon, authenticated, service_role;
 
-  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  -- The platform's real default, not a convenience. See the docblock above:
+  -- these four and no DML. MAINTAIN is Postgres 17+, which PGlite 0.5 (PG 18)
+  -- has; if that ever fails to parse, the stub has outrun the engine and the
+  -- fix is here rather than in a migration.
+  alter default privileges in schema public
+    grant truncate, references, trigger, maintain on tables
+    to anon, authenticated, service_role;
 
   -- email is a real column on Supabase's auth.users, and 0007 reads it: the
   -- organizer's address is copied onto their member row from here rather than

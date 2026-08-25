@@ -18,9 +18,16 @@ import { MEMBER_COLUMNS } from './household.js'
  * One entry has no constant because the data layer has no constant for it:
  *
  * - `households` is read with `select('*')` (`household.js`, loading the
- *   household), so `*` is genuinely what the client asks for. Unlike `members`
- *   and `chores`, its grants were never narrowed to a column list, and a check
- *   that demanded a specific list here would assert something the app does not.
+ *   household), so `*` is genuinely what the client asks for, and a check that
+ *   demanded a specific list here would assert something the app does not.
+ *
+ *   That reason is unchanged; the sentence that used to carry it is not. It read
+ *   "unlike `members` and `chores`, its grants were never narrowed to a column
+ *   list", and #91 narrowed them — `0013` grants `authenticated` select on every
+ *   column of `households` by name. `*` still works precisely because the list is
+ *   every column, so this entry is unaffected. Corrected rather than deleted,
+ *   because the old sentence gave the right answer for a reason that has expired
+ *   and the next reader would have had no way to tell.
  *
  * `household_devices` was the second such entry and left with #62, which drops
  * the table. Removing it here is not bookkeeping: the check runs against the

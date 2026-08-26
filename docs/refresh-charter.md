@@ -388,12 +388,14 @@ recorded in the decision log". This is that record.
   `useState`.** The split opens by default, which is not a new decision: the grooming section above
   settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
   What #47 settled is the *mechanism*.
-- **Why not a router.** `react-router` would be the largest dependency in the repo, added to move
+- ~~**Why not a router.** `react-router` would be the largest dependency in the repo, added to move
   between three views of one household. It also wants the URL, and the URL is already spoken for:
   Google returns a calendar consent to the app **root** with a `?code=` (#95), the PWA's scope is
   `/`, and a path-based route would need a rewrite rule at Vercel to behave the way the root already
   does. Rejected on cost, not on principle — the moment a surface needs to be linkable from outside
-  the app, this decision is the one to reopen.
+  the app, this decision is the one to reopen.~~ **Superseded 2026-08-26 — see the decision section
+  below.** The stated condition fired exactly as written: an invitation has to be openable from an
+  email, which is a surface linkable from outside the app. The rest of this section stands.
 - **Why not a state library.** There is no state to share: `App.jsx` holds every read and hands the
   results down. A library here would be ceremony around one string.
 - **Why not keep the surfaces stacked on one page**, which is what the app did until this story and
@@ -413,6 +415,88 @@ Consequence recorded here because it is easy to read later as work dropped: the 
 figures **left the chore screen**. #36 shipped them there in deliberately the ugliest honest form,
 with a comment saying #47 owned the presentation and would replace it. It has. Two answers to one
 question on two screens is the fault `src/lib/capacity.js`'s own docstring calls invisible.
+
+## Decision taken 2026-08-26 — a person may belong to more than one household
+
+Owner decisions taken at the routing and grooming gates of the auth/household-separation goal. This
+section supersedes the router bullet above and the admission record in
+[`access-model.md`](access-model.md); it is the charter-level statement that the product's model
+changed.
+
+**The model.** A person may belong to more than one household. Until now that was implicit — it is
+worth being precise that it was never written down anywhere in this file, so this is an *addition*
+rather than a correction. What made it urgent is that the schema stopped forbidding it on
+2026-08-21: migration `0009` rescoped two global unique indexes to per-household and said in its own
+header that it "does not make the app support a person in two households; it stops the SCHEMA
+forbidding it". The client never caught up, and `create_household` guards nothing — so the state was
+reachable and every household-scoped read would have merged two households silently. The alternative
+considered and rejected was to guard `create_household` and stay single-household, which is cheaper
+and closes the gap just as well; it was rejected because the household this app is built for has
+members who belong to a second one.
+
+**Admission changes for the third time, and this is the reversal.** `access-model.md` records the
+chain: 2026-08-05 → 2026-08-06 → 2026-08-11 (#62, *"The join code is gone. Not repurposed —
+dropped"*). Admission is now **an invitation**: a code an organizer creates and can withdraw, and an
+emailed invitation carrying the same thing as a link. Two things are deliberately *not* reinstated:
+
+- **The shared household secret is not coming back.** #62's objection was that a code anybody could
+  repeat admitted anybody who overheard it. An invitation is created for a purpose, is withdrawable,
+  and is spent once — so the objection is answered by the mechanism rather than waived.
+- **The retired vocabulary stays retired.** `join_code`, `join_household`, `generate_join_code` and
+  the seven other names in `src/test/support/retiredVocabulary.js` are not reused. A resurrected
+  identifier meaning something different from what it meant before #62 makes every old comment and
+  migration header ambiguous rather than wrong, and no grep finds that. The guard is *widened* to
+  `src/`, `supabase/migrations/` and `supabase/functions/` before any admission code is written —
+  today it scans two test files, so the rule it enforces would not have reached the code that needed
+  it.
+
+**Request-to-join was considered and dropped.** An organizer already knows who lives in the house, so
+an approval queue and a pending state buy little for a household of four and cost a state machine
+this app has no precedent for. Reversible: nothing in the invitation schema forecloses it.
+
+**`react-router` is adopted, and this supersedes the 2026-08-25 rejection.** That rejection named its
+own kill condition — *"the moment a surface needs to be linkable from outside the app"* — and an
+emailed invitation is exactly that. The costs it named have not gone away and are accepted rather
+than disputed: it becomes the largest dependency in the repo, it needs a rewrite rule at Vercel, and
+it has to share `/` with the calendar consent return (`?code=`, #95) at a PWA scope of `/`. Two
+existing guards in `gate.test.js` pin the `useState` shape it replaces and must be rewritten and
+shown to redden rather than merely going green. The routing work is deliberately sequenced **last**
+in the backlog, and nothing before it depends on a URL, so the block lifts out whole if the emailed
+half turns out not to be worth its days.
+
+**Smaller decisions, recorded because each has a defensible opposite.**
+
+- **The active household is remembered in `localStorage`**, validated against the membership set on
+  load. This sits against `App.jsx`'s stated discipline that data is never held locally — that
+  discipline distinguishes the *credential*, which is held locally and correctly, from the *data*,
+  which never is. A UI preference is on the credential side of that line. The reasoning belongs at
+  the call site, because a future reader will otherwise read it as a violation.
+- **The default underneath it is the oldest household** by `households.created_at`. Stable across
+  devices and across re-provisioning, where "most recently joined" is not — a re-provisioned member
+  row changes the answer and two devices then disagree permanently. Wrong at most once per device,
+  and remembered after one tap.
+- **Leaving deletes the member row** and lets the existing foreign keys cascade as they stand. This
+  was reaffirmed after the consequences were measured rather than assumed, and they are a mixture
+  that accumulated across six migrations: completions and assignments are `set null` (the work
+  survives, the attribution does not), while capacity, exclusions and calendar rows cascade away.
+  Closing a household nobody is left in **deletes** it, for consistency with that and because this
+  app has no undo anywhere else.
+- **Only the organizer may remove a member.** Today every member can remove every other, including
+  the organizer — and `households.organizer_member_id` is `on delete set null` while
+  `create_household` is the only thing that ever writes it, so the household permanently loses the
+  ability to provision anyone. Filed as its own issue ahead of this work because it depends on none
+  of it.
+- **One Google account connected in two households means two consents and two tokens** — what the
+  composite foreign keys were already built for, asserted explicitly rather than inherited from an
+  `onConflict` target by accident.
+- **Leaving does not revoke the Google grant**, because #99 owns the revoke. The screen says so
+  plainly and names it; the alternative coupled an irreversible household action to a calendar
+  story's schedule.
+
+**What is not decided here.** How the client scopes a read to one household is deliberately left to a
+measurement story — `members` and `chores` both withhold `household_id` from the client select
+grant, and whether a PostgREST embed can filter without a grant change is unmeasured. Deciding it now
+would commit to a migration and an owner paste that may not be needed.
 
 ## Open decisions (still owed)
 

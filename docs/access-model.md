@@ -99,7 +99,13 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has NO expected reds. The set is EMPTY, so ANY red is real.**
+- **`check:live` has TWO expected reds, and both clear on a single paste.**
+  ***Measured 2026-08-26*** against the live project, on the #159 branch before
+  the paste: **22 of 24**, with `members` and `chores` each answering
+  `42501 permission denied` because the client now asks for `household_id` and
+  the live project has not granted it. That is the check working, not a fault -
+  and unlike `0013` it is a red that could not have been faked, because the
+  column has never been readable by `authenticated` on any project.
   ***Measured 2026-08-24*** against the live project, after `0012` was pasted that evening:
   **24 of 24**. The two reds this bullet carried for part of that day — the `chores` repeat columns
   and `catch_up_repeats()` — cleared on exactly the one action they named, and on nothing else.
@@ -117,9 +123,24 @@
 
   | Red | Cleared by | Anything else? |
   |---|---|---|
-  | *(none — the set is empty)* | — | — |
+  | `members` refuses `household_id` (`42501`) | Pasting `supabase/migrations/0014_scope_reads_to_one_household.sql` | **No.** Not a deploy, not a promotion to `release`, not another migration. `0014` is two `grant` statements and nothing else. |
+  | `chores` refuses `household_id` (`42501`) | The same paste — the file grants both tables in one go | **No.** Both rows clear together or neither does; there is no state where one is granted and the other is not. |
 
-  **The queue is drained, and that is a state to read rather than skim past.** The two rows that
+  **The queue is NOT drained — #159 added a row, deliberately, and that is what a
+  new migration is supposed to do to this table.** The row above is the expected
+  red between the merge of #159 and the owner's paste; until then `check:live`
+  reports the client asking for a column the live project has not granted, which
+  is the check working rather than a fault. #162 is the story that confirms the
+  paste and REMOVES that row.
+
+  Unlike `0013`, this migration is **observable**: `0013` granted privileges the
+  live project already held by inheritance, so the probe read the same on both
+  sides of the paste and could not testify that it had happened. `0014` grants a
+  column that has never been readable by `authenticated` anywhere, and every
+  table probe is `select(<columns>).limit(0)` signed in as that role — so the
+  red is real before and gone after, on exactly this action.
+
+  **What follows describes the state before #159 and is kept as history.** The two rows that
   stood here earlier on 2026-08-24 — the `chores` repeat columns and `catch_up_repeats()` — were
   both cleared by the single paste of `supabase/migrations/0012_repeating_chores.sql` that evening,
   *measured* at **24 of 24**. They are recorded in the inversion history below rather than left

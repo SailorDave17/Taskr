@@ -70,7 +70,12 @@ describe('AC 1 — the allocator is a pure module and is GIVEN capacity', () => 
     // nothing" rather than "found nothing bad".
     const chores = readFileSync(resolve(process.cwd(), 'src/lib/chores.js'), 'utf8')
     const imports = [...chores.matchAll(/^\s*import\s[^\n]*?from\s+'([^']+)'/gm)].map((m) => m[1])
-    expect(imports).toContain('./household.js')
+    // Was './household.js' until #159, which removed that dependency from
+    // chores.js - addChore no longer resolves a household for itself. A
+    // control pointing at an import that no longer exists is not a weaker
+    // control, it is a failing one, so it is re-pointed at what remains.
+    expect(imports).toContain('./supabase.js')
+    expect(imports.length).toBeGreaterThan(0)
   })
 
   it('never reads the members table column, so capacity cannot leak in that way', () => {

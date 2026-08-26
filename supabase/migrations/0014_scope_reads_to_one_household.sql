@@ -1,0 +1,138 @@
+-- The one grant that lets a client name which household it means — #159.
+--
+-- ===========================================================================
+-- Why this exists at all
+-- ===========================================================================
+--
+-- Every list read in `src/lib/*.js` filtered by NOTHING and leaned on row-level
+-- security to scope it. That was correct for exactly as long as a person could
+-- belong to one household: `current_household_ids()` returned one id, so the
+-- policy predicate and the intended filter were the same set and the client had
+-- nothing to add.
+--
+-- `0009` made membership per-household and #62 keyed it to `claimed_by`, so a
+-- person CAN now hold member rows in two households. The moment they do, the
+-- policy still does its job — it returns every row the caller may see — and
+-- "every row they may see" stops meaning "one household". The reads do not
+-- become insecure; they become WRONG, quietly, by mixing two households into
+-- one roster.
+--
+-- To filter by household the client has to be able to NAME one, and on `members`
+-- and `chores` it cannot: `household_id` is the column both tables deliberately
+-- withhold.
+--
+-- ===========================================================================
+-- Why a grant rather than the two alternatives — #157, measured
+-- ===========================================================================
+--
+-- #157 measured three mechanisms against the real grants and recommended this
+-- one. The report is `src/test/scoping-mechanism.pglite.test.js`, a committed
+-- test rather than a memo, so its findings re-derive from these files and go red
+-- instead of going stale. Two of the three are gone for reasons worth keeping
+-- here, because a future reader will otherwise re-propose them:
+--
+--   - A PostgREST EMBED filter (`members.select('…, households!fk(id)')`) is
+--     IMPOSSIBLE, not merely expensive. The decisive control was an embed with
+--     NO FILTER AT ALL, which is still refused `42501` — so it is the JOIN that
+--     needs SELECT on `members.household_id`, not the filter. No query rewriting
+--     reaches around it. That killed the only option avoiding a migration.
+--
+--   - A SECURITY DEFINER read RPC per list works and costs ~2 engineer-days: five
+--     new functions with their own grants and anon revokes, five `LIVE_RPCS`
+--     entries, and a function permanently between the client and its most-read
+--     table. It preserves one assertion on one table at a standing structural
+--     cost.
+--
+-- Owner decision 2026-08-26, taken at the #159 gate on that report.
+--
+-- ===========================================================================
+-- What this gives up, stated plainly because it is a real loss
+-- ===========================================================================
+--
+-- `members` has withheld exactly one column since `0007`, and that withholding
+-- is what made `select('*')` fail outright on the table. After this grant there
+-- is NO withheld column left, so `select('*')` on `members` SUCCEEDS.
+--
+-- That is not a side effect to discover later — it is the entire cost of this
+-- option, it was measured before the option was chosen, and three assertion
+-- sites rest on it. Per #159 AC 7 each is REWRITTEN to the narrower property it
+-- still holds rather than deleted:
+--
+--     src/lib/household.js          the comment claiming the wildcard refuses
+--     src/test/migrations.pglite    → assert the GRANT SHAPE (every column named)
+--     src/test/rls.integration      → assert the RLS predicate still scopes rows
+--
+-- The row-level guarantee is untouched. A caller still sees only households they
+-- belong to; what changes is that they can now read WHICH household a row is in,
+-- which is the whole point.
+--
+-- ===========================================================================
+-- `chores` costs nothing, and that asymmetry is the finding
+-- ===========================================================================
+--
+-- #157's most useful correction: this is a PER-TABLE question, not one question.
+-- The story assumed ten sites had to be rewritten; measured, only THREE concern
+-- `members`. The other seven are about tables that keep a withheld column
+-- whatever happens here.
+--
+-- `chores` is the clearest case. `0012` withholds `repeat_since` and
+-- `repeat_caught_up_through` as well as `household_id`, so granting
+-- `household_id` here leaves two columns still withheld and `select('*')` on
+-- `chores` STILL FAILS. *Measured* in `scoping-mechanism.pglite.test.js` — the
+-- grant is free on this table, and the wildcard refusal survives it.
+--
+-- ===========================================================================
+-- Re-runnable, and NOT a no-op on the live project
+-- ===========================================================================
+--
+-- `grant` is idempotent in Postgres, so a second paste changes nothing and
+-- raises nothing. No `if not exists` ceremony, for `0013`'s reason: adding one
+-- would imply a hazard that is absent.
+--
+-- Unlike `0013`, this file IS observable against the live project, and that
+-- difference matters for how it gets confirmed. `0013` granted privileges the
+-- live project already held by inheritance, so `check:live` read the same on
+-- both sides of the paste and could not testify that it had happened. This one
+-- grants a column that has never been readable by `authenticated` anywhere, and
+-- `check:live` probes every table as `select(<columns>).limit(0)` signed in as
+-- that role — so until this is pasted, `members` and `chores` answer `42501
+-- permission denied` and the check is RED ON PURPOSE.
+--
+-- That red is recorded in `docs/access-model.md`'s excused-red table with the
+-- single action that clears it, and it clears on this paste and on nothing else.
+
+-- ---------------------------------------------------------------------------
+-- 1. members — the roster read, and the table that pays for this
+-- ---------------------------------------------------------------------------
+--
+-- Column-scoped and additive: this names ONLY the new column. The existing
+-- `0007` grant already covers the rest, and grants accumulate per column, so
+-- re-stating the full list here would be a second place for it to drift from
+-- `MEMBER_COLUMNS`.
+--
+-- `anon` is deliberately not named, matching every grant since `0002`. It is
+-- revoked wholesale and no policy targets it; naming it here would be one
+-- `to anon` away from mattering.
+grant select (household_id) on public.members to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. chores — the free half
+-- ---------------------------------------------------------------------------
+--
+-- Same statement, no cost: `0012`'s two repeat columns stay withheld, so this
+-- table keeps the loud `select('*')` failure that `members` gives up above.
+grant select (household_id) on public.chores to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- What is deliberately NOT here
+-- ---------------------------------------------------------------------------
+--
+-- `member_capacity` (`0005`), `chore_exclusions` (`0010`) and
+-- `calendar_connections` (`0011`) need NO grant change. Each already grants the
+-- `member_id` or `chore_id` it is keyed by, and each is scoped by the client
+-- from an already-scoped member or chore set rather than by naming a household
+-- directly — so all three keep their withheld `household_id`, and keep the
+-- wildcard refusal with it. *Measured* in #157 AC 4.
+--
+-- No policy is added or altered by this file. The policies were never the thing
+-- that was wrong.

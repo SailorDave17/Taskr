@@ -30,7 +30,12 @@ function makeQuery(table) {
       calls.push({ op: 'select', table, cols })
       return q
     },
-    order() {
+    // #159 - this recorded NOTHING until now, so the ordering of any read in
+    // this file was structurally unobservable and an assertion about it would
+    // have passed against a query with no `order by` at all. AC 2 turns on that
+    // ordering, so the fake has to be able to see it.
+    order(column, options) {
+      calls.push({ op: 'order', table, column, ascending: options?.ascending })
       return q
     },
     limit(n) {
@@ -116,6 +121,7 @@ vi.mock('./supabase.js', () => ({
 const {
   addMember,
   currentHousehold,
+  listHouseholds,
   createHousehold,
   currentSession,
   deviceTimezone,
@@ -328,12 +334,51 @@ describe('finding the household the signed-in person belongs to', () => {
     expect(calls).not.toContainEqual(
       expect.objectContaining({ op: 'eq', table: 'households', column: 'id' }),
     )
-    expect(calls).toContainEqual({ op: 'limit', table: 'households', n: 1 })
+  })
+
+  // #159 AC 2 - the read is PLURAL and ORDERED, and no path picks a household by
+  // an unordered limit. This is what the old assertion becomes: it read
+  // `toContainEqual({ op: 'limit', n: 1 })`, which is precisely the shape this
+  // story exists to remove, so the check is inverted rather than dropped.
+  it('issues no limit at all, and orders by created_at then id', async () => {
+    results.households = { data: [{ id: 'h1' }], error: null }
+    await listHouseholds()
+
+    expect(calls.filter((c) => c.op === 'limit' && c.table === 'households')).toEqual([])
+    const orders = calls.filter((c) => c.op === 'order' && c.table === 'households')
+    expect(orders.map((o) => o.column)).toEqual(['created_at', 'id'])
+    expect(orders.every((o) => o.ascending === true)).toBe(true)
+  })
+
+  // #159 AC 3 - both rows come back, and the ORDER is asserted rather than
+  // assumed. Proving the read is plural is what everything downstream rests on:
+  // if this quietly returned one row, every scoping test in this repo would pass
+  // against a world that only ever had one household in it.
+  it('returns BOTH households, in the order the query asked for', async () => {
+    results.households = {
+      data: [
+        { id: 'h1', name: 'Placeholder Household', created_at: '2026-01-01T00:00:00Z' },
+        { id: 'h2', name: 'Placeholder Other Household', created_at: '2026-02-01T00:00:00Z' },
+      ],
+      error: null,
+    }
+
+    const all = await listHouseholds()
+    expect(all).toHaveLength(2)
+    expect(all.map((h) => h.id)).toEqual(['h1', 'h2'])
+    // And the active one is the FIRST of that order - today's placeholder for a
+    // switcher, asserted so the seam is visible rather than implied.
+    await expect(currentHousehold()).resolves.toMatchObject({ id: 'h1' })
+  })
+
+  it('is an empty array, not null, when nobody is signed in', async () => {
+    results.households = { data: null, error: null }
+    await expect(listHouseholds()).resolves.toEqual([])
   })
 
   it('names what it was doing when the query fails, not just the driver message', async () => {
     results.households = { data: null, error: { message: 'connection reset' } }
-    await expect(currentHousehold()).rejects.toThrow(/loading the household: connection reset/)
+    await expect(currentHousehold()).rejects.toThrow(/loading your households: connection reset/)
   })
 })
 
@@ -343,40 +388,57 @@ describe('maintaining the roster', () => {
     results.members = { data: { id: 'm9' }, error: null }
   })
 
-  it('writes into the household this device belongs to, not one the caller names', async () => {
-    // The security claim this mirrors is enforced by RLS, not here. What this
-    // asserts is that the app never even asks to write elsewhere, so a refusal
-    // from the database would mean something has genuinely gone wrong.
-    await addMember({ displayName: 'Placeholder One', weeklyMinutes: 120, household_id: 'somewhere-else' })
+  // #159 AC 4 - rewritten, not deleted, and the title's claim is the part that
+  // changed. It asserted the household came from "this device", which was one
+  // unordered read standing in for a choice nobody had made. The caller names it
+  // now, and the property that survives is that the row is BUILT here field by
+  // field - so a stray snake_case `household_id` cannot smuggle one past the
+  // named argument. RLS still refuses any id outside current_household_ids().
+  it('writes the household it was given, and ignores a stray household_id', async () => {
+    await addMember({
+      displayName: 'Placeholder One',
+      weeklyMinutes: 120,
+      householdId: 'h1',
+      household_id: 'somewhere-else',
+    })
 
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.household_id).toBe('h1')
     expect(insert.row).toMatchObject({ display_name: 'Placeholder One', weekly_minutes: 120 })
   })
 
+  // The discriminating half: a DIFFERENT id has to reach the row, or the test
+  // above passes just as well against a function that hard-codes the first
+  // household it can find.
+  it('writes into the household it was asked for, not the first one going', async () => {
+    await addMember({ displayName: 'Placeholder Two', weeklyMinutes: 60, householdId: 'h2' })
+
+    const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
+    expect(insert.row.household_id).toBe('h2')
+  })
+
   it('trims a name before storing it', async () => {
-    await addMember({ displayName: '  Placeholder One  ', weeklyMinutes: 0 })
+    await addMember({ displayName: '  Placeholder One  ', weeklyMinutes: 0, householdId: 'h1' })
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.display_name).toBe('Placeholder One')
   })
 
   it('refuses a blank name before spending a round trip', async () => {
-    await expect(addMember({ displayName: '   ', weeklyMinutes: 60 })).rejects.toThrow(
+    await expect(addMember({ displayName: '   ', weeklyMinutes: 60, householdId: 'h1' })).rejects.toThrow(
       /needs a name/i,
     )
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
-  it('refuses to add anyone when nobody is signed in to a household', async () => {
-    // The empty ARRAY is the new "not a member": the households policy returns
-    // the caller's own and nothing else, so no rows means no membership. Setting
-    // the old `household_devices` fixture to null left this passing vacuously —
-    // that table is not read any more, so the fixture said nothing and the
-    // beforeEach's household was still returned.
-    results.households = { data: [], error: null }
-    await expect(addMember({ displayName: 'Placeholder One', weeklyMinutes: 60 })).rejects.toThrow(
-      /not signed in to a household/i,
-    )
+  // #159 - rewritten. addMember no longer reads `households` at all, so an empty
+  // fixture there cannot be what stops it any more; asserting against that
+  // fixture would now pass VACUOUSLY, which is the exact trap the comment this
+  // replaces had recorded about the PREVIOUS rewrite of this same test. The
+  // property is restated against what the function actually reads.
+  it('refuses to add anyone when no household is named', async () => {
+    await expect(
+      addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: undefined }),
+    ).rejects.toThrow(/which household/i)
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
@@ -392,7 +454,7 @@ describe('maintaining the roster', () => {
 
   it('lists an empty roster as an empty array, never null', async () => {
     results.members = { data: null, error: null }
-    await expect(listMembers()).resolves.toEqual([])
+    await expect(listMembers('h1')).resolves.toEqual([])
   })
 })
 
@@ -497,6 +559,24 @@ describe('the retired credential path', () => {
 })
 
 describe('the roster read', () => {
+  // #159 AC 1 - the roster names ONE household. Nothing asserted this until the
+  // mutation pass went looking: every other scoped read had a filter assertion
+  // and this one did not, so removing `.eq('household_id', ...)` from
+  // listMembers would have reddened nothing at all.
+  it('filters to the one household it was given, and refuses to guess', async () => {
+    results.members = { data: [], error: null }
+    await listMembers('h2')
+
+    expect(calls).toContainEqual(
+      expect.objectContaining({ op: 'eq', table: 'members', column: 'household_id', value: 'h2' }),
+    )
+  })
+
+  it('issues no request at all when no household is named', async () => {
+    await expect(listMembers(undefined)).rejects.toThrow(/which household/i)
+    expect(calls.filter((c) => c.table === 'members')).toHaveLength(0)
+  })
+
   it('asks for a column list, never `*`, because the grants would refuse the whole select', async () => {
     // `select('*')` on members fails outright rather than quietly omitting a
     // column, so this is a working/not-working distinction, not tidiness.
@@ -508,7 +588,7 @@ describe('the roster read', () => {
     // email's presence, because a column list that still named them would fail
     // against the live project rather than degrade.
     results.members = { data: [], error: null }
-    await listMembers()
+    await listMembers('h1')
     const selects = calls.filter((c) => c.op === 'select' && c.table === 'members')
     expect(selects.length).toBeGreaterThan(0)
     for (const call of selects) {

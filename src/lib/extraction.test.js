@@ -287,7 +287,12 @@ describe('AC 3 — the grader reports error, tolerance, attribution and refusals
   it('POSITIVE CONTROL: the import scan can see an import when there is one', () => {
     const chores = readFileSync(resolve(process.cwd(), 'src/lib/chores.js'), 'utf8')
     const imports = [...chores.matchAll(/^\s*import\s[^\n]*?from\s+'([^']+)'/gm)].map((m) => m[1])
-    expect(imports).toContain('./household.js')
+    // Was './household.js' until #159, which removed that dependency from
+    // chores.js - addChore no longer resolves a household for itself. A
+    // control pointing at an import that no longer exists is not a weaker
+    // control, it is a failing one, so it is re-pointed at what remains.
+    expect(imports).toContain('./supabase.js')
+    expect(imports.length).toBeGreaterThan(0)
   })
 
   it('never calls out, by any of the names a call would have', () => {

@@ -124,10 +124,21 @@ export default function App() {
   const refresh = useCallback(async () => {
     const found = await currentHousehold()
     setHousehold(found)
-    setMembers(found ? await listMembers() : [])
+    // #159 — every read below names the household it means. `found.id` is the
+    // ONE place that id enters this function, so a switcher later changes which
+    // household `currentHousehold()` returns and nothing here has to move.
+    //
+    // The roster is read FIRST and is not merely one read among several: the
+    // three tables that withhold `household_id` (member_capacity,
+    // chore_exclusions, calendar_connections) are scoped by the member set
+    // rather than by a household id, so `roster` below is the scope for all
+    // three. That ordering is load-bearing, not incidental.
+    const roster = found ? await listMembers(found.id) : []
+    setMembers(roster)
+    const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
-    setChores(found ? await listChores() : [])
+    setChores(found ? await listChores(found.id) : [])
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -139,18 +150,18 @@ export default function App() {
     // file this week's capacity under last week's key.
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
-    setOverrides(period ? await listCapacity(period) : [])
+    setOverrides(period ? await listCapacity(period, memberIds) : [])
     // #37 AC 9 — read from the server on every refresh, through the same path as
     // everything else, so a device holds no exclusion state of its own. What
     // another phone recorded is on this screen after the next mutation for the
     // same reason the roster is: there is no cache to be stale.
-    setExclusions(found ? await listExclusions() : [])
+    setExclusions(found ? await listExclusions(memberIds) : [])
     // #95 AC 5 — "Calendar connected" is derived from a SERVER read on every
     // refresh, exactly like the roster. A locally remembered flag would show
     // connected on the phone that pressed the button and nothing on the phone
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
-    setConnections(found ? await listCalendarConnections() : [])
+    setConnections(found ? await listCalendarConnections(memberIds) : [])
     setUserId(await currentUserId())
     return found
   }, [])
@@ -320,7 +331,15 @@ export default function App() {
     [mutate],
   )
   const handleSignOut = useCallback(() => mutate(() => signOut()), [mutate])
-  const handleAdd = useCallback((person) => mutate(() => addMember(person)), [mutate])
+  // #159 AC 4 — every write names the household THIS SCREEN IS SHOWING, taken
+  // from the `household` state that `refresh()` set, rather than re-resolving it
+  // inside the data layer. Re-resolving was the defect: it went through the same
+  // unordered read, so with two households a person could be added to one while
+  // the roster on screen showed the other, and no artefact would disagree.
+  const handleAdd = useCallback(
+    (person) => mutate(() => addMember({ ...person, householdId: household?.id })),
+    [mutate, household],
+  )
   const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
   const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
@@ -384,7 +403,10 @@ export default function App() {
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.
-  const handleAddChore = useCallback((chore) => mutate(() => addChore(chore)), [mutate])
+  const handleAddChore = useCallback(
+    (chore) => mutate(() => addChore({ ...chore, householdId: household?.id })),
+    [mutate, household],
+  )
   const handleSaveChore = useCallback((id, patch) => mutate(() => updateChore(id, patch)), [mutate])
   const handleRemoveChore = useCallback((id) => mutate(() => removeChore(id)), [mutate])
   // #35 — completion goes through an RPC because the SERVER sets the clock, not
@@ -421,8 +443,8 @@ export default function App() {
   // about the hazard rather than from the hazard — and the second time is the
   // one worth recording, because knowing the rule is what produced the breach.
   const handleExcludeMember = useCallback(
-    (choreId, memberId) => mutate(() => excludeMember(choreId, memberId)),
-    [mutate],
+    (choreId, memberId) => mutate(() => excludeMember(choreId, memberId, household?.id)),
+    [mutate, household],
   )
   const handleAllowMember = useCallback(
     (choreId, memberId) => mutate(() => allowMember(choreId, memberId)),
@@ -439,9 +461,9 @@ export default function App() {
   const handleSetCapacity = useCallback(
     (memberId, minutes) => {
       if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
-      return mutate(() => setCapacity({ memberId, periodStart, minutes }))
+      return mutate(() => setCapacity({ memberId, periodStart, minutes, householdId: household?.id }))
     },
-    [mutate, periodStart],
+    [mutate, periodStart, household],
   )
   const handleClearCapacity = useCallback(
     (memberId) => {

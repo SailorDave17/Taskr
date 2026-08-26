@@ -100,6 +100,7 @@ export const MIGRATIONS = [
   '0011_calendar_connection.sql',
   '0012_repeating_chores.sql',
   '0013_grants_the_platform_no_longer_infers.sql',
+  '0014_scope_reads_to_one_household.sql',
 ]
 
 export function migrationSql(name) {

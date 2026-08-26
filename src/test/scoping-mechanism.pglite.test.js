@@ -208,10 +208,20 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
   // AC 1 — the refusal, recorded verbatim
   // -------------------------------------------------------------------------
 
-  it('AC1: refuses a WHERE on household_id for members and chores, and the refusal is 42501', async () => {
-    // A WHERE clause needs SELECT on the column it names. This is the SQL-level
-    // half; the PostgREST-level half is POSTGREST_MEASURED.eqOnMembers, taken
-    // against a real stack because this harness has no PostgREST in it.
+  // #159 RE-POINTED THIS. It measured the REFUSAL that made the decision
+  // necessary: as role `authenticated`, a WHERE on `household_id` was denied
+  // 42501, because a WHERE clause needs SELECT on the column it names.
+  //
+  // 0014 granted that column, so the refusal is no longer reproducible - which
+  // is the decision being executed, not a regression. The assertion is turned
+  // around to prove the grant actually landed and that the WHERE the whole
+  // mechanism depends on now works.
+  //
+  // POSTGREST_MEASURED is NOT re-pointed and must never be: it is captured data
+  // from a real PostgREST stack on 2026-08-26, recording the world before the
+  // grant. Its `42501`s are the evidence the decision rested on, and rewriting
+  // them would destroy the record this file exists to be.
+  it('AC1 (re-pointed): the WHERE that was refused 42501 now works, on both tables', async () => {
     const uid = await newDevice(db)
     const members = await attempt(() =>
       asDevice(db, uid, () =>
@@ -223,14 +233,14 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
         db.query('select id from public.chores where household_id = gen_random_uuid()'),
       ),
     )
-    expect(members.ok).toBe(false)
-    expect(chores.ok).toBe(false)
-    expect(members.error).toMatch(/permission denied/i)
-    expect(chores.error).toMatch(/permission denied/i)
+    expect(members.ok).toBe(true)
+    expect(chores.ok).toBe(true)
 
-    // And the same fact from the client's side, verbatim, measured elsewhere.
+    // The measurement that justified the change, kept verbatim and still
+    // asserted for shape - this is what it looked like BEFORE 0014.
     expect(POSTGREST_MEASURED.eqOnMembers.code).toBe('42501')
     expect(POSTGREST_MEASURED.eqOnChores.code).toBe('42501')
+    expect(POSTGREST_MEASURED.embedNoFilterAtAll.code).toBe('42501')
   })
 
   // -------------------------------------------------------------------------
@@ -273,26 +283,20 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
     }
   })
 
-  it('AC2 (the cost side): after granting household_id on members, select(*) SUCCEEDS', async () => {
-    const own = await freshDatabase()
-    try {
-      const uid = await newDevice(own)
-      const before = await attempt(() =>
-        asDevice(own, uid, () => own.query('select * from public.members')),
-      )
-      expect(before.ok).toBe(false)
-
-      await own.exec('grant select (household_id) on public.members to authenticated')
-      const after = await attempt(() =>
-        asDevice(own, uid, () => own.query('select * from public.members')),
-      )
-      // members withholds household_id and NOTHING ELSE, so granting it leaves
-      // no withheld column at all. This is the entire cost of the recommended
-      // option, and it is a fact about members alone.
-      expect(after.ok).toBe(true)
-    } finally {
-      await own.close?.()
-    }
+  // #159 RE-POINTED THIS. It SIMULATED the grant on a private database and
+  // asserted the wildcard then succeeded - the predicted cost of the recommended
+  // option. 0014 makes that grant real, and `freshDatabase()` applies every
+  // migration, so the simulation's own `before` arm is no longer reachable: the
+  // column is granted before the test starts.
+  //
+  // Re-pointed to assert the PREDICTION CAME TRUE. This is the cost side of the
+  // decision, now a standing fact rather than a forecast.
+  it('AC2 (the cost side, realised): members withholds nothing, so select(*) succeeds', async () => {
+    const uid = await newDevice(db)
+    const after = await attempt(() =>
+      asDevice(db, uid, () => db.query('select * from public.members')),
+    )
+    expect(after.ok).toBe(true)
   })
 
   it('AC2: the asymmetry is a property of the grant lists, re-derived from the migrations', async () => {
@@ -311,12 +315,21 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
     const byTable = {}
     for (const r of withheld) (byTable[r.tbl] ??= []).push(r.col)
 
-    expect(byTable.members).toEqual(['household_id'])
+    // #159 RE-POINTED THIS, and it is the single most informative assertion in
+    // the file now. Before 0014: members withheld exactly ['household_id'] - one
+    // card left to play - and chores withheld that plus two repeat columns. The
+    // report's whole recommendation turned on that asymmetry.
+    //
+    // After 0014 the asymmetry is REALISED rather than predicted: members
+    // withholds NOTHING (which is why its wildcard refusal is gone, the cost),
+    // and chores still withholds the two repeat columns (which is why its
+    // refusal survives, the free half). Both halves asserted, because a change
+    // to either one is a change to the decision this file recommended.
+    expect(byTable.members ?? []).toEqual([])
     expect(byTable.chores).toEqual(
-      expect.arrayContaining(['household_id', 'repeat_since', 'repeat_caught_up_through']),
+      expect.arrayContaining(['repeat_since', 'repeat_caught_up_through']),
     )
-    // The asymmetry in one line: members has exactly one card left to play.
-    expect(byTable.members.length).toBe(1)
+    expect(byTable.chores).not.toContain('household_id')
     expect(byTable.chores.length).toBeGreaterThan(1)
   })
 
@@ -358,9 +371,21 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
       // The line is a citation, and a citation drifts. Assert the SUBJECT is
       // still near it rather than pinning an exact line number, which cairn
       // records decaying with a two-day half-life.
-      const window = lines.slice(Math.max(0, site.line - 6), site.line + 5).join('\n')
-      expect(window, `${site.file}:${site.line} should still discuss select('*')`)
-        .toMatch(/select\('\*'\)|select \*|wildcard/i)
+      const body = lines.join('\n')
+      // #159 RE-POINTED THIS. It asserted each site still DISCUSSED the wildcard
+      // near its cited line - which was a check that nobody had rewritten them
+      // yet. #159 AC 7 is the instruction to rewrite the three affected ones, so
+      // the old assertion is satisfied only while the story is undone.
+      //
+      // The property that survives, and is the one worth guarding: each named
+      // FILE still exists and still says something about the subject. An
+      // AFFECTED site must now also carry its story marker, which is how a
+      // rewrite is told apart from a deletion.
+      expect(body, `${site.file} should still discuss the grant or the wildcard`)
+        .toMatch(/select\('\*'\)|select \*|wildcard|household_id/i)
+      if (site.affected) {
+        expect(body, `${site.file} is an affected site and should cite #159`).toMatch(/#159/)
+      }
       expect(site.narrowerProperty.length).toBeGreaterThan(20)
     }
     // The finding: 3 of 10, not 10 of 10.
@@ -412,11 +437,27 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
     expect(embed.cost).toMatch(/IMPOSSIBLE/)
   })
 
-  it('AC7: this story adds no migration — the report is the artefact', () => {
+  // #159 RE-POINTED THIS. AC 7 forbade the MEASUREMENT story from taking the
+  // decision, and the assertion enforced it: a 0014 appearing would have meant
+  // somebody applied a grant inside a story whose job was to price one.
+  //
+  // #159 is the story that legitimately adds it. So the check is inverted: 0014
+  // must exist, and it must grant exactly what this report recommended, on
+  // exactly the two tables it named - which turns the report from a forecast
+  // into a live guard that the decision was executed as recommended.
+  it('AC7 (re-pointed): 0014 exists, and grants exactly what this report recommended', () => {
     const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
-    // 0013 is the highest at the time of this story. A 0014 appearing means
-    // somebody took the decision inside the measurement story, which AC 7 forbids.
-    expect(files.some((f) => f.startsWith('0014'))).toBe(false)
-    expect(files[files.length - 1]).toMatch(/^0013_/)
+    const migration = files.find((f) => f.startsWith('0014'))
+    expect(migration, 'the recommended grant should have landed as 0014').toBeTruthy()
+
+    const sql = readFileSync(join(migrationsDir, migration), 'utf8')
+    const grants = [...sql.matchAll(/grant\s+select\s*\(\s*household_id\s*\)\s+on\s+public\.(\w+)/gi)]
+      .map((m) => m[1])
+      .sort()
+    // The recommended mechanism was `grant-select-household-id` on members and
+    // chores. Not one table, not five - the three that scope from an
+    // already-scoped member set were measured as needing no grant change.
+    expect(grants).toEqual(['chores', 'members'])
+    expect(RECOMMENDATION.recommended).toBe('grant-select-household-id')
   })
 })

@@ -761,15 +761,34 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       expect(still.claimed_by).toBe(insiderAuthId)
     })
 
-    it('household_id cannot be read on members, so select(*) fails outright', async () => {
-      // The behaviour every MEMBER_COLUMNS read in this file depends on. 0007
-      // withheld `household_id` from the readable set precisely to restore this
-      // property once `pin_hash` was dropped — without it, `select('*')` would
-      // quietly start succeeding and every empty-read assertion above would go
-      // vacuous with nothing failing.
-      const { error } = await organizer.from('members').select('*')
-      expect(error, 'select(*) should be refused by the column grant').not.toBeNull()
-      expect(error.message).toMatch(/permission denied|column/i)
+    // #159 REWROTE THIS, and it is the third of the three sites #157 named by
+    // line. Its title said BOTH halves of a claim that has now gone false
+    // together: `household_id` cannot be read on members, AND therefore
+    // `select('*')` fails outright. 0014 grants the column, so neither half
+    // holds — deliberately, because a client that cannot name a household
+    // cannot filter by one and #157 measured that nothing reaches around that.
+    //
+    // The old comment was right about the STAKES and they are why this is
+    // rewritten rather than deleted: every empty-read assertion in this file
+    // would go vacuous if row scoping silently stopped working. What actually
+    // guaranteed those assertions was never the wildcard refusal — it was the
+    // RLS PREDICATE, and that is untouched by a column grant. So the surviving
+    // property is asserted directly, against the thing that could really break.
+    it('household_id is readable now, and the RLS predicate still scopes the rows', async () => {
+      // Half one: the grant landed. A client can name the household it means.
+      const { data: rows, error } = await organizer.from('members').select('id, household_id')
+      expect(error, 'household_id should be readable after 0014').toBeNull()
+      expect(rows.length).toBeGreaterThan(0)
+
+      // Half two, and this is the one carrying the weight. Reading the column
+      // does not widen WHICH ROWS come back: every row still belongs to a
+      // household this caller is in, so no outsider row is reachable even with
+      // the wildcard now permitted.
+      const { data: wild, error: wildError } = await organizer.from('members').select('*')
+      expect(wildError, 'select(*) is permitted after 0014 — that is the recorded cost').toBeNull()
+      const households = new Set(wild.map((r) => r.household_id))
+      expect(households.has(inside.id)).toBe(true)
+      expect(households.has(outside.id)).toBe(false)
     })
 
     it('cannot backdate a capacity row by writing created_at at insert time', async () => {

@@ -69,14 +69,9 @@ vi.mock('./supabase.js', () => ({
   }),
 }))
 
-// currentHousehold is household.js's, and addChore depends on it. Mocked here
-// rather than driven through the fake client, so a failure in this file is
-// always about chores.js.
-const currentHousehold = vi.fn()
-vi.mock('./household.js', async () => {
-  const actual = await vi.importActual('./household.js')
-  return { ...actual, currentHousehold: (...a) => currentHousehold(...a) }
-})
+// #159 — the currentHousehold mock is gone with the dependency. addChore no
+// longer resolves a household for itself; the caller names the one it is
+// showing, which is the whole point of the story.
 
 const {
   CHORE_COLUMNS,
@@ -105,25 +100,30 @@ const opsOn = (table) => calls.filter((c) => c.table === table)
 beforeEach(() => {
   calls.length = 0
   results = {}
-  currentHousehold.mockReset()
-  currentHousehold.mockResolvedValue(HOUSEHOLD)
 })
 
 describe('listChores', () => {
   it('asks for the granted columns by name, never a wildcard', async () => {
     results.chores = { data: [ROW], error: null }
-    await listChores()
+    await listChores(HOUSEHOLD.id)
 
     const select = opsOn('chores').find((c) => c.op === 'select')
     expect(select.cols).toBe(CHORE_COLUMNS)
-    // A wildcard is not a style preference here: 0003 withholds household_id
-    // from the select grant, so `select('*')` fails outright at the server.
+    // A wildcard is not a style preference here, and 0014 does NOT change that
+    // on this table: 0012 withholds repeat_since and repeat_caught_up_through as
+    // well, so `select('*')` on chores still fails outright at the server. That
+    // asymmetry with `members` is #157's measured finding and the reason 0014 is
+    // free here.
     expect(select.cols).not.toContain('*')
+    // #159 AC 1 — one named household, not "whatever RLS returns".
+    expect(opsOn('chores')).toContainEqual(
+      expect.objectContaining({ op: 'eq', column: 'household_id', value: HOUSEHOLD.id }),
+    )
   })
 
   it('orders by due date then creation, so the list does not reshuffle between refreshes', async () => {
     results.chores = { data: [ROW], error: null }
-    await listChores()
+    await listChores(HOUSEHOLD.id)
 
     const orders = opsOn('chores').filter((c) => c.op === 'order')
     expect(orders.map((o) => o.column)).toEqual(['due_on', 'created_at'])
@@ -134,19 +134,19 @@ describe('listChores', () => {
     // Supabase answers a no-rows select with data: null. Handing that to the
     // component would crash on .map rather than render an empty list.
     results.chores = { data: null, error: null }
-    expect(await listChores()).toEqual([])
+    expect(await listChores(HOUSEHOLD.id)).toEqual([])
   })
 
   it('throws with what we were doing when the read fails', async () => {
     results.chores = { data: null, error: { message: 'permission denied for table chores' } }
-    await expect(listChores()).rejects.toThrow(/loading the chores: permission denied/i)
+    await expect(listChores(HOUSEHOLD.id)).rejects.toThrow(/loading the chores: permission denied/i)
   })
 })
 
 describe('addChore', () => {
   it('writes the normalized values, not the raw form strings', async () => {
     results.chores = { data: ROW, error: null }
-    await addChore({ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10' })
+    await addChore({ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10', householdId: HOUSEHOLD.id })
 
     const insert = opsOn('chores').find((c) => c.op === 'insert')
     expect(insert.row).toEqual({
@@ -164,12 +164,24 @@ describe('addChore', () => {
     expect(typeof insert.row.expected_minutes).toBe('number')
   })
 
-  it('takes household_id from this device membership, never from the caller', async () => {
+  // #159 — rewritten, not deleted, and it is the test whose SUBJECT the story
+  // reverses. It asserted household_id came "from this device membership, never
+  // from the caller", which was correct while one unordered read could stand in
+  // for the answer. The caller names it now.
+  //
+  // The narrower property that survives is the one this test was really
+  // protecting: THE ROW IS BUILT HERE, FIELD BY FIELD, never spread from caller
+  // input — so a stray snake_case `household_id` in the payload cannot smuggle a
+  // household past the named argument. That, plus 0003's with-check refusing any
+  // id outside current_household_ids(), is what stops a caller writing anywhere
+  // it likes (#159 AC 5).
+  it('builds the row itself, so a stray household_id in the payload is ignored', async () => {
     results.chores = { data: ROW, error: null }
     await addChore({
       title: 'Dishes',
       expectedMinutes: 20,
       dueOn: '2026-08-10',
+      householdId: 'h1',
       household_id: 'somebody-elses-household',
     })
 
@@ -177,26 +189,38 @@ describe('addChore', () => {
     expect(insert.row.household_id).toBe('h1')
   })
 
-  it('refuses before any request when the device has joined nothing', async () => {
-    currentHousehold.mockResolvedValue(null)
-    await expect(addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10' })).rejects.toThrow(
-      /not signed in to a household/i,
-    )
+  // #159 — rewritten, not deleted. The old property was "a device that resolved
+  // no household issues no request". addChore resolves nothing now, so the
+  // property that survives and still matters is that an UNNAMED household issues
+  // no request either — the failure is loud and local rather than a write landing
+  // wherever an unordered read pointed.
+  it('refuses before any request when no household is named', async () => {
+    await expect(
+      addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: undefined }),
+    ).rejects.toThrow(/which household/i)
     expect(opsOn('chores')).toHaveLength(0)
   })
 
-  it('validates before it looks the household up, so a bad value costs no round trip', async () => {
-    await expect(addChore({ title: 'Dishes', expectedMinutes: 0, dueOn: '2026-08-10' })).rejects.toThrow(
-      /at least a minute/i,
-    )
-    expect(currentHousehold).not.toHaveBeenCalled()
+  // #159 AC 4 — proven by reading the written row back.
+  it('files the chore in the household it was given, not one it resolved', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: 'h2' })
+
+    const insert = opsOn('chores').find((c) => c.op === 'insert')
+    expect(insert.row.household_id).toBe('h2')
+  })
+
+  it('validates the value before anything else, so a bad one costs no round trip', async () => {
+    await expect(
+      addChore({ title: 'Dishes', expectedMinutes: 0, dueOn: '2026-08-10', householdId: HOUSEHOLD.id }),
+    ).rejects.toThrow(/at least a minute/i)
     expect(opsOn('chores')).toHaveLength(0)
   })
 
   it('throws with what we were doing when the insert is refused', async () => {
     results.chores = { data: null, error: { message: 'new row violates row-level security policy' } }
     await expect(
-      addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10' }),
+      addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: HOUSEHOLD.id }),
     ).rejects.toThrow(/adding the chore: new row violates row-level security/i)
   })
 })
@@ -259,7 +283,7 @@ describe('unwrap, through its callers', () => {
     const original = { message: 'permission denied', code: '42501' }
     results.chores = { data: null, error: original }
 
-    await listChores().then(
+    await listChores(HOUSEHOLD.id).then(
       () => expect.unreachable('listChores should have thrown'),
       (err) => {
         expect(err.cause).toBe(original)

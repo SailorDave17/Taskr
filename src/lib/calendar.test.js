@@ -27,18 +27,27 @@ vi.stubEnv('VITE_GOOGLE_CLIENT_ID', CLIENT_ID)
 
 const invoke = vi.fn()
 const calls = []
+const MEMBER_IDS = ['m1', 'm2']
 let selectResult = { data: [], error: null }
 
 vi.mock('./supabase.js', () => ({
   hasSupabaseConfig: true,
   getSupabase: () => ({
     functions: { invoke: (...args) => invoke(...args) },
-    from: (table) => ({
-      select: (cols) => {
-        calls.push({ op: 'select', table, cols })
-        return Promise.resolve(selectResult)
-      },
-    }),
+    from: (table) => {
+      const q = {
+        select: (cols) => {
+          calls.push({ op: 'select', table, cols })
+          return q
+        },
+        in: (column, value) => {
+          calls.push({ op: 'in', table, column, value })
+          return q
+        },
+        then: (onOk, onErr) => Promise.resolve(selectResult).then(onOk, onErr),
+      }
+      return q
+    },
   }),
 }))
 
@@ -361,12 +370,22 @@ describe('listCalendarConnections', () => {
     // OUTRIGHT on this table rather than returning a subset — the device 0003,
     // 0005 and 0010 all use. This constant is what `LIVE_SCHEMA` imports, so a
     // column added to one is added to the live check too.
-    await listCalendarConnections()
+    await listCalendarConnections(MEMBER_IDS)
     expect(calls).toEqual([
       { op: 'select', table: 'calendar_connections', cols: CALENDAR_CONNECTION_COLUMNS },
+      { op: 'in', table: 'calendar_connections', column: 'member_id', value: MEMBER_IDS },
     ])
     expect(CALENDAR_CONNECTION_COLUMNS).not.toContain('*')
+    // Still withheld after 0014, which grants household_id on `members` and
+    // `chores` only — this table is scoped from the already-scoped member set
+    // instead, so it keeps the column back and keeps the wildcard refusal.
     expect(CALENDAR_CONNECTION_COLUMNS).not.toContain('household_id')
+  })
+
+  // #159 AC 1 — an empty member set is answered without a round trip.
+  it('reads nothing at all when the household has no members', async () => {
+    expect(await listCalendarConnections([])).toEqual([])
+    expect(calls).toEqual([])
   })
 
   it('no file under src/ QUERIES the token table', () => {
@@ -410,12 +429,12 @@ describe('listCalendarConnections', () => {
 
   it('returns an empty list when nobody has connected, rather than null', async () => {
     selectResult = { data: null, error: null }
-    expect(await listCalendarConnections()).toEqual([])
+    expect(await listCalendarConnections(MEMBER_IDS)).toEqual([])
   })
 
   it('reports a failure in this app’s words, keeping the cause', async () => {
     selectResult = { data: null, error: { message: 'permission denied', code: '42501' } }
-    await expect(listCalendarConnections()).rejects.toThrow(/loading calendar connections/)
+    await expect(listCalendarConnections(MEMBER_IDS)).rejects.toThrow(/loading calendar connections/)
   })
 })
 

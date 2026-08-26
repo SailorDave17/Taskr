@@ -15,7 +15,6 @@
 // a sentence a person can act on.
 
 import { getSupabase } from './supabase.js'
-import { currentHousehold } from './household.js'
 
 /**
  * The day a household's week begins — owner decision, 2026-08-08.
@@ -33,7 +32,17 @@ export const WEEK_STARTS_ON = 'Monday'
 /** `WEEK_STARTS_ON` as Postgres `isodow` — Monday is 1. */
 export const WEEK_START_ISO_DOW = 1
 
-/** Matches the select grant in 0005 exactly; `select('*')` fails on this table. */
+// Matches the select grant in 0005 exactly; `select('*')` still fails on this
+// table, and that is unchanged by #159. 0014 grants `household_id` on `members`
+// and `chores` only — `member_capacity` keeps its withheld `household_id` and
+// keeps the loud wildcard refusal with it.
+//
+// The comment that stood here argued the client could not name a household
+// because RLS already scoped it. That reasoning is what expired (#159 AC 8): RLS
+// still scopes correctly, but to every household the caller belongs to, which is
+// no longer necessarily one. This table does not need the column anyway — it is
+// scoped from an already-scoped MEMBER set, which is why #157 measured it as
+// needing no grant change.
 export const CAPACITY_COLUMNS =
   'id, member_id, period_start, minutes, note, source, created_at'
 
@@ -161,13 +170,29 @@ export function normalizeCapacityMinutes(value) {
   return n
 }
 
-/** Every override this device's household has recorded for a period. */
-export async function listCapacity(periodStart) {
+/**
+ * Every override ONE household has recorded for a period — #159 AC 1.
+ *
+ * Scoped by `memberIds` rather than by a household id, because `member_capacity`
+ * withholds `household_id` and needs no grant to be scoped: the caller already
+ * holds the household's member set, and a row belongs to this household exactly
+ * when its member does. That is the whole reason 0014 touches two tables instead
+ * of five.
+ *
+ * An empty member set short-circuits to `[]` rather than issuing `in ()`. A
+ * household with no members has no overrides by construction, and PostgREST
+ * renders an empty `in` list as a filter matching nothing — correct, but a round
+ * trip to be told so.
+ */
+export async function listCapacity(periodStart, memberIds) {
+  if (!Array.isArray(memberIds)) throw new Error('Which household? A capacity read must name its members.')
+  if (memberIds.length === 0) return []
   return (
     unwrap(
       await getSupabase()
         .from('member_capacity')
         .select(CAPACITY_COLUMNS)
+        .in('member_id', memberIds)
         .eq('period_start', periodStart),
       'loading this week’s capacity',
     ) ?? []
@@ -181,18 +206,16 @@ export async function listCapacity(periodStart) {
  * same week is a correction rather than a second fact — the unique constraint in
  * 0005 says so and this is the client half of it.
  */
-export async function setCapacity({ memberId, periodStart, minutes, note = null, source = 'manual' }) {
+export async function setCapacity({ memberId, periodStart, minutes, note = null, source = 'manual', householdId }) {
   const value = normalizeCapacityMinutes(minutes)
-
-  const household = await currentHousehold()
-  if (!household) throw new Error('You are not signed in to a household.')
+  if (!householdId) throw new Error('Which household? Saving capacity must name one.')
 
   return unwrap(
     await getSupabase()
       .from('member_capacity')
       .upsert(
         {
-          household_id: household.id,
+          household_id: householdId,
           member_id: memberId,
           period_start: periodStart,
           minutes: value,
@@ -207,7 +230,24 @@ export async function setCapacity({ memberId, periodStart, minutes, note = null,
   )
 }
 
-/** Drop an override, so the member falls back to their baseline. */
+/**
+ * Drop an override, so the member falls back to their baseline.
+ *
+ * NO household argument, deliberately — and #159 AC 4's enumeration is slightly
+ * wrong about this one. It groups `clearCapacity` with the four writes that
+ * "read `currentHousehold()` and insert its `household_id`"; this function has
+ * never done either. It is a DELETE, so there is no `household_id` to write and
+ * no written row to read back, which is the evidence that criterion asks for.
+ *
+ * The narrower property that is true and that scopes it: a `member_id` belongs
+ * to exactly one household by construction — each household has its own member
+ * rows — so naming a member already names a household, and
+ * `member_capacity_delete_same_household` refuses any row outside
+ * `current_household_ids()` regardless. Adding a household argument here would
+ * be a parameter the statement could only check against itself.
+ *
+ * `allowMember` in exclusions.js is the same shape for the same reason.
+ */
 export async function clearCapacity(memberId, periodStart) {
   unwrap(
     await getSupabase()

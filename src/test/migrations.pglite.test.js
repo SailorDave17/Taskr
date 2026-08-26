@@ -54,7 +54,9 @@ import {
  * constant that has quietly fallen behind the schema reads exactly like one
  * that has not.
  */
-const READABLE = 'id, display_name, weekly_minutes, claimed_by, email, created_at'
+// #159 - household_id joins the list with 0014. It is the column that used to be
+// withheld, and granting it is what lets a client name which household it means.
+const READABLE = 'id, household_id, display_name, weekly_minutes, claimed_by, email, created_at'
 
 // A pglite test builds a real Postgres in WebAssembly, so vitest's 5000ms
 // default testTimeout is a number nobody chose for this suite - it is what you
@@ -788,20 +790,80 @@ describe('the migrations, run against a real Postgres', () => {
     })
   })
 
-  describe('#62 — the wildcard select still refuses', () => {
-    it('refuses select(*) on members, because one column is withheld', async () => {
-      // 0002 established revoke-wholesale-then-grant-per-column so that
-      // `select('*')` fails outright rather than quietly omitting a column, and
-      // four separate comments still say so. That property was NOT a property of
-      // the grant shape — it held because `pin_hash` was withheld, and 0007
-      // drops `pin_hash`. Every remaining column being granted would have made
-      // the wildcard start succeeding while every one of those comments went on
-      // asserting the opposite.
-      //
-      // `household_id` is withheld instead, which is what `chores` (0003) and
-      // `member_capacity` (0005) already do with the same column.
-      const refused = await attempt(() =>
+  describe('#159 — members no longer withholds a column, and what replaces the refusal', () => {
+    // THIS IS THE SITE #157 NAMED BY LINE, and #159 AC 7 says rewrite it to the
+    // narrower property rather than delete it.
+    //
+    // What it used to assert: `select('*')` on members is REFUSED. That was
+    // real, and the comment it carried is worth keeping because it records the
+    // near-miss - the refusal was never a property of the grant SHAPE, it held
+    // only because some column happened to be withheld. It was `pin_hash` until
+    // 0007 dropped it, then `household_id`, and 0014 grants that. There is no
+    // withheld column left, so the wildcard now SUCCEEDS.
+    //
+    // That is not a regression discovered here; it is the measured, chosen cost
+    // of #157's recommended mechanism. A client that cannot name a household
+    // cannot filter by one, and an embed reaches around it for exactly nobody
+    // (refused 42501 with no filter at all).
+    //
+    // The property that survives, and which the old comment already said was the
+    // real one: THE GRANT IS PER COLUMN AND EVERY COLUMN IS NAMED. That is what
+    // makes adding a column a decision somebody takes rather than an automatic
+    // exposure, and it is the thing a future migration can actually break.
+    it('grants members column by column, with every column named', async () => {
+      const { rows } = await db.query(
+        `select a.attname::text as column_name
+           from pg_attribute a
+          where a.attrelid = 'public.members'::regclass
+            and a.attnum > 0 and not a.attisdropped
+          order by 1`,
+      )
+      const all = rows.map((r) => r.column_name)
+
+      const granted = await db.query(
+        `select column_name::text
+           from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'members'
+            and grantee = 'authenticated' and privilege_type = 'SELECT'
+          order by 1`,
+      )
+      const readable = granted.rows.map((r) => r.column_name)
+
+      // Every column is named individually - NOT a table-level grant. A table
+      // grant would silently cover whatever the next migration adds; this list
+      // does not, which is the control that survives losing the wildcard.
+      expect(readable.sort()).toEqual(all.sort())
+      expect(readable.length).toBeGreaterThan(5)
+
+      const tableWide = await db.query(
+        `select count(*)::int as n
+           from information_schema.table_privileges
+          where table_schema = 'public' and table_name = 'members'
+            and grantee = 'authenticated' and privilege_type = 'SELECT'`,
+      )
+      // A column-scoped grant leaves table_privileges EMPTY for that privilege.
+      // If this ever reads 1, somebody replaced the per-column grants with
+      // `grant select on public.members`, and the decision point is gone.
+      expect(tableWide.rows[0].n).toBe(0)
+    })
+
+    it('the wildcard now succeeds on members, and that is the recorded cost', async () => {
+      // Asserted rather than left implicit: this is the one behaviour #159
+      // deliberately reverses, so it should fail loudly if somebody "fixes" it
+      // by withholding a column again - which would break every scoped read.
+      const allowed = await attempt(() =>
         asDevice(db, organizerDevice, () => db.query('select * from public.members')),
+      )
+      expect(allowed.error).toBeNull()
+    })
+
+    it('CONTRAST: chores still refuses the wildcard, because 0012 withholds two', async () => {
+      // The asymmetry #157 measured, asserted here so the two tables cannot
+      // quietly converge. 0014 granted household_id on BOTH; only members lost
+      // its refusal, because chores keeps repeat_since and
+      // repeat_caught_up_through back.
+      const refused = await attempt(() =>
+        asDevice(db, organizerDevice, () => db.query('select * from public.chores')),
       )
       expect(refused.ok).toBe(false)
       expect(refused.error).toMatch(/permission denied/i)

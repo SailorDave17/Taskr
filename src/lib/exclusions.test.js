@@ -33,6 +33,10 @@ function makeQuery(table) {
       calls.push({ op: 'eq', table, column, value })
       return q
     },
+    in(column, value) {
+      calls.push({ op: 'in', table, column, value })
+      return q
+    },
     insert(row) {
       calls.push({ op: 'insert', table, row })
       return q
@@ -56,12 +60,6 @@ vi.mock('./supabase.js', () => ({
   getSupabase: () => ({ from: (table) => makeQuery(table) }),
 }))
 
-const currentHousehold = vi.fn()
-vi.mock('./household.js', async () => {
-  const actual = await vi.importActual('./household.js')
-  return { ...actual, currentHousehold: (...a) => currentHousehold(...a) }
-})
-
 const {
   EXCLUSION_COLUMNS,
   allowMember,
@@ -73,6 +71,7 @@ const {
 } = await import('./exclusions.js')
 
 const HOUSEHOLD = { id: 'h1', name: 'Placeholder Household' }
+const MEMBER_IDS = ['m1', 'm2']
 const members = [
   { id: 'm1', display_name: 'Placeholder One' },
   { id: 'm2', display_name: 'Placeholder Two' },
@@ -88,14 +87,12 @@ const opsOn = (table) => calls.filter((c) => c.table === table)
 beforeEach(() => {
   calls.length = 0
   results = {}
-  currentHousehold.mockReset()
-  currentHousehold.mockResolvedValue(HOUSEHOLD)
 })
 
 describe('listExclusions', () => {
   it('asks for the granted columns by name, never a wildcard', async () => {
     results.chore_exclusions = { data: exclusions, error: null }
-    await listExclusions()
+    await listExclusions(MEMBER_IDS)
 
     const select = opsOn('chore_exclusions').find((c) => c.op === 'select')
     expect(select.cols).toBe(EXCLUSION_COLUMNS)
@@ -109,37 +106,48 @@ describe('listExclusions', () => {
     // round trip per row to answer a question the whole set answers in one, and
     // it would make the number of requests grow with the household's week.
     results.chore_exclusions = { data: exclusions, error: null }
-    await listExclusions()
+    await listExclusions(MEMBER_IDS)
+    // #159 scopes this read to the household's member set, which is one `in`,
+    // not one request per chore. The property under test is unchanged and is
+    // now stated against the thing that could break it: no per-CHORE filter.
     expect(opsOn('chore_exclusions').filter((c) => c.op === 'eq')).toEqual([])
+    expect(opsOn('chore_exclusions').filter((c) => c.op === 'in')).toHaveLength(1)
   })
 
   it('returns an empty array when the table is empty, so callers never fold over null', async () => {
     results.chore_exclusions = { data: null, error: null }
-    expect(await listExclusions()).toEqual([])
+    expect(await listExclusions(MEMBER_IDS)).toEqual([])
   })
 })
 
 describe('excludeMember', () => {
   it('writes exactly one row, naming this device’s household', async () => {
     results.chore_exclusions = { data: exclusions[0], error: null }
-    await excludeMember('c1', 'm2')
+    await excludeMember('c1', 'm2', HOUSEHOLD.id)
 
     const insert = opsOn('chore_exclusions').find((c) => c.op === 'insert')
     expect(insert.row).toEqual({ household_id: 'h1', chore_id: 'c1', member_id: 'm2' })
   })
 
-  it('takes the household from the session rather than from the caller', async () => {
-    // `addChore`'s rule, and the same reason: the UI does not get to choose which
-    // household it writes into. The with-check policy in 0010 would refuse any
-    // other value, and this keeps the client from ever trying.
+  // #159 AC 4 — rewritten from "it asks the session" to "it writes what it was
+  // given", which is the property the criterion actually wants and is proven by
+  // reading the written row back rather than by asserting a call happened.
+  it('writes the household it was given, not one it resolved for itself', async () => {
     results.chore_exclusions = { data: exclusions[0], error: null }
-    await excludeMember('c1', 'm2')
-    expect(currentHousehold).toHaveBeenCalled()
+    await excludeMember('c1', 'm2', 'h2')
+
+    const insert = opsOn('chore_exclusions').find((c) => c.op === 'insert')
+    expect(insert.row.household_id).toBe('h2')
   })
 
-  it('refuses before any request when there is no household', async () => {
-    currentHousehold.mockResolvedValue(null)
-    await expect(excludeMember('c1', 'm2')).rejects.toThrow(/not signed in to a household/i)
+  it('refuses before any request when no household is named', async () => {
+    await expect(excludeMember('c1', 'm2', undefined)).rejects.toThrow(/which household/i)
+    expect(opsOn('chore_exclusions')).toEqual([])
+  })
+
+  // #159 AC 1 — an empty member set is answered without a round trip.
+  it('reads nothing at all when the household has no members', async () => {
+    expect(await listExclusions([])).toEqual([])
     expect(opsOn('chore_exclusions')).toEqual([])
   })
 
@@ -147,8 +155,8 @@ describe('excludeMember', () => {
     // A dropped variable would otherwise become a `not null` violation reported
     // as "recording that they cannot do this chore: null value in column...",
     // which reads like the database rejecting a legitimate act.
-    await expect(excludeMember(null, 'm2')).rejects.toThrow(/which chore/i)
-    await expect(excludeMember('c1', null)).rejects.toThrow(/who cannot do it/i)
+    await expect(excludeMember(null, 'm2', HOUSEHOLD.id)).rejects.toThrow(/which chore/i)
+    await expect(excludeMember('c1', null, HOUSEHOLD.id)).rejects.toThrow(/who cannot do it/i)
     expect(opsOn('chore_exclusions')).toEqual([])
   })
 
@@ -160,8 +168,8 @@ describe('excludeMember', () => {
       data: null,
       error: { code: '23505', message: 'duplicate key value violates unique constraint' },
     }
-    await expect(excludeMember('c1', 'm2')).rejects.toThrow(/already marked as unable/i)
-    await expect(excludeMember('c1', 'm2')).rejects.not.toThrow(/duplicate key/i)
+    await expect(excludeMember('c1', 'm2', HOUSEHOLD.id)).rejects.toThrow(/already marked as unable/i)
+    await expect(excludeMember('c1', 'm2', HOUSEHOLD.id)).rejects.not.toThrow(/duplicate key/i)
   })
 
   it('POSITIVE CONTROL: any other error still surfaces with its own message', async () => {
@@ -171,7 +179,7 @@ describe('excludeMember', () => {
       data: null,
       error: { code: '42501', message: 'permission denied for table chore_exclusions' },
     }
-    await expect(excludeMember('c1', 'm2')).rejects.toThrow(/permission denied/i)
+    await expect(excludeMember('c1', 'm2', HOUSEHOLD.id)).rejects.toThrow(/permission denied/i)
   })
 })
 

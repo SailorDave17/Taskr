@@ -473,7 +473,13 @@ export default function App() {
     [mutate, periodStart],
   )
 
-  const me = findClaimedMember(members, userId)
+  // #160 — resolved WITHIN the household on screen. `household?.id` is the
+  // same state object `isOrganizer` compares against below, so who-you-are and
+  // what-you-organise cannot be answered about two different households. The
+  // roster is already scoped (#159), but the identity layer must not lean on
+  // that: with a claimed row in two households, an unscoped match returns
+  // whichever row the list happens to put first.
+  const me = findClaimedMember(members, userId, household?.id)
 
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
@@ -490,6 +496,11 @@ export default function App() {
   // organizer exactly while it is acting as the organizer's member row. The
   // server decides this independently in is_household_organizer(); this only
   // governs whether the control is offered.
+  //
+  // #160 — `me` above is resolved within THIS household, so this comparison
+  // can no longer pair one household's member row with another household's
+  // organizer id. Both sides come from the same `household` state, set by the
+  // single currentHousehold() read in refresh().
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
   return (

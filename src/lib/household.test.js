@@ -204,6 +204,45 @@ describe('which member this device is acting as', () => {
   it('is nobody when there is no device id, rather than the first unclaimed person', () => {
     expect(findClaimedMember(roster, null)).toBeNull()
   })
+
+  // #160 — one person, two households. Since 0009 the same auth id can hold a
+  // claimed member row in TWO households, and this function used to match
+  // across whatever list it was handed.
+  describe('within the active household — #160', () => {
+    // Both rows claimed by the SAME person, the foreign household's row FIRST,
+    // because list order is exactly what the unscoped match decides by.
+    const twoHouseholds = [
+      { id: 'm-b2', household_id: 'h-b', display_name: 'Placeholder Two', claimed_by: 'person-a' },
+      { id: 'm-a1', household_id: 'h-a', display_name: 'Placeholder One', claimed_by: 'person-a' },
+    ]
+
+    it('AC 1, the hazard on record: unscoped, list order decides who you are', () => {
+      // The pre-#160 behaviour, kept as a demonstration the same way
+      // household-scoping.pglite.test.js keeps the unfiltered roster read: the
+      // answer is not wrong, it is ARBITRARY — reverse the list and it changes.
+      expect(findClaimedMember(twoHouseholds, 'person-a')?.id).toBe('m-b2')
+      expect(findClaimedMember([...twoHouseholds].reverse(), 'person-a')?.id).toBe('m-a1')
+    })
+
+    it('AC 2: scoped, the active household’s row comes back whatever order the list is in', () => {
+      expect(findClaimedMember(twoHouseholds, 'person-a', 'h-a')?.id).toBe('m-a1')
+      expect(findClaimedMember([...twoHouseholds].reverse(), 'person-a', 'h-a')?.id).toBe('m-a1')
+      expect(findClaimedMember(twoHouseholds, 'person-a', 'h-b')?.id).toBe('m-b2')
+    })
+
+    it('AC 2: nobody in a household where this person holds no claimed row — never a foreign fallback', () => {
+      expect(findClaimedMember(twoHouseholds, 'person-a', 'h-c')).toBeNull()
+    })
+
+    it('a row that does not say its household is taken at face value', () => {
+      // Every real read includes household_id (it is in MEMBER_COLUMNS), so
+      // this tolerance never fires on data. It is what lets every pre-#160
+      // caller and fixture — rosters with no household_id key — keep exactly
+      // the old behaviour (#160 AC 6) rather than silently losing identity.
+      const bare = [{ id: 'm1', claimed_by: 'person-a' }]
+      expect(findClaimedMember(bare, 'person-a', 'h-a')?.id).toBe('m1')
+    })
+  })
 })
 
 describe('signing in as a person', () => {

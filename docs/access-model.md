@@ -282,6 +282,14 @@ Two supersessions, and the second undoes an assumption the first was built on.
 - **The join code is gone.** Not repurposed — dropped, along with `join_household` and
   `generate_join_code`. Admission is an account provisioned for one named person, so there is no
   shared secret to read out and nothing that works for whoever repeats it.
+
+  **Partly superseded 2026-08-26** — see *"Decision taken 2026-08-26"* in
+  [`refresh-charter.md`](refresh-charter.md). Admission gains a second route: an **invitation**, as
+  a withdrawable single-use code and as an emailed link. The sentence above stays true in the part
+  that mattered — there is still no shared household secret, because an invitation is created for a
+  purpose, can be withdrawn, and is spent once. What changes is that provisioning is no longer the
+  *only* way in. The names `join_household`, `generate_join_code` and `join_code` stay dropped and
+  are not reused by the new mechanism.
 - **PINs are gone as a database concept.** `pin_hash`, `has_pin`, `claim_member`,
   `claim_member_with_pin` and `set_member_pin` are all dropped, on this repo's rule that *a dead
   credential path which still works is a second way in*. A PIN can still be a person's password; the

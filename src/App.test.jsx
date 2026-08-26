@@ -380,6 +380,38 @@ describe('when the signed-in person belongs to a household', () => {
     expect(window.localStorage.getItem('taskr.members')).toBeNull()
   })
 
+  // #159 AC 1 / AC 4 - WHICH household App names, not merely that it read.
+  //
+  // The mutation pass is what produced these. Every assertion in this file about
+  // the reads was `toHaveBeenCalled()` or a call count, so App could have passed
+  // the wrong household id, a stale one, or nothing at all and nothing here
+  // would have gone red. App is the ONLY place the household is chosen - the
+  // data layer takes it as an argument now - so that was the one level at which
+  // the story's whole claim was untested.
+  it('names the active household on every read that takes one', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    expect(api.listMembers).toHaveBeenCalledWith(household.id)
+    expect(choresApi.listChores).toHaveBeenCalledWith(household.id)
+  })
+
+  it('scopes the member-keyed reads by the roster it just read, not by everything', async () => {
+    // member_capacity, chore_exclusions and calendar_connections withhold
+    // household_id and are scoped from the already-scoped MEMBER set (#157 AC
+    // 4). That makes the roster read load-bearing for three other reads, and
+    // the ORDER in refresh() load-bearing with it - a detail no other test here
+    // would notice going wrong.
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    const memberIds = ['m1']
+    expect(exclusionsApi.listExclusions).toHaveBeenCalledWith(memberIds)
+    expect(calendarApi.listCalendarConnections).toHaveBeenCalledWith(memberIds)
+    const capacityCall = capacityApi.listCapacity.mock.calls.at(-1)
+    expect(capacityCall?.[1]).toEqual(memberIds)
+  })
+
   it('marks the person signed in on this phone, from the live auth id', async () => {
     await renderApp('Who')
     expect(await screen.findByText(/· you/)).toBeInTheDocument()
@@ -465,12 +497,16 @@ describe('chores — the write path and the re-read', () => {
     const readsBefore = choresApi.listChores.mock.calls.length
     await addChoreThroughTheForm()
 
+    // #159 AC 4 - App passes the household it is SHOWING. That argument is the
+    // whole story at this level: without it the write went wherever an unordered
+    // read pointed, which with two households need not be the one on screen.
     expect(choresApi.addChore).toHaveBeenCalledWith({
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      householdId: household.id,
     })
     await waitFor(() =>
       expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
@@ -837,7 +873,11 @@ describe('capacity — this week, set by hand (#46)', () => {
     // added it.
     const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
     const imports = [...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1])
-    expect(imports.sort()).toEqual(['./household.js', './supabase.js'])
+    // './household.js' left this list with #159: capacity.js no longer
+    // resolves a household for itself, the caller names it. Still asserted
+    // EXACTLY rather than loosened to `toContain`, because the property is
+    // that nothing NEW may appear here.
+    expect(imports.sort()).toEqual(['./supabase.js'])
 
     // Named separately from the import list, because these arrive without an
     // import statement and the list above would not see them.
@@ -892,7 +932,10 @@ describe('capacity — this week, set by hand (#46)', () => {
     // Without this the assertion above passes identically if the regex stops
     // matching, which is how an empty result reads as a clean bill of health.
     const source = readFileSync(resolve(process.cwd(), 'src/lib/capacity.js'), 'utf8')
-    expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(1)
+    // Was `toBeGreaterThan(1)`: capacity.js had two imports and #159 removed
+    // one of them. The control's job is to prove the regex MATCHES, so the
+    // threshold is the one that still means that.
+    expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(0)
   })
 })
 
@@ -958,7 +1001,8 @@ describe('exclusions — the write path and the re-read (#37)', () => {
     const readsBefore = exclusionsApi.listExclusions.mock.calls.length
     await markUnable('m2')
 
-    expect(exclusionsApi.excludeMember).toHaveBeenCalledWith('c1', 'm2')
+    // #159 AC 4 - the third argument is the household on screen.
+    expect(exclusionsApi.excludeMember).toHaveBeenCalledWith('c1', 'm2', household.id)
     await waitFor(() =>
       expect(exclusionsApi.listExclusions.mock.calls.length).toBeGreaterThan(readsBefore),
     )

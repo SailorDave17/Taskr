@@ -156,6 +156,7 @@ describe('the readable column list', () => {
       'due_on',
       'expected_minutes',
       'generated_from',
+      'household_id',
       'id',
       'repeat_kind',
       'repeat_weekdays',
@@ -163,10 +164,19 @@ describe('the readable column list', () => {
     ])
   })
 
-  it('does not ask for household_id, which 0003 withholds', () => {
-    // Asking for it would make every read fail with a permission error. The
-    // column is written on insert and never read back — see 0003.
-    expect(CHORE_COLUMNS).not.toContain('household_id')
+  // #159 — rewritten, not deleted, and the subject is reversed on purpose.
+  // 0003 withheld `household_id` and this asserted the client never asked for
+  // it; 0014 grants it, because a client that cannot NAME a household cannot
+  // filter by one and #157 measured that no mechanism reaches around that.
+  //
+  // The property that survives, and the one that made the original worth having:
+  // `select('*')` STILL FAILS on this table. 0012 withholds `repeat_since` and
+  // `repeat_caught_up_through`, so the wildcard refusal is untouched here — which
+  // is exactly why #157 priced 0014 as free on `chores` and costly on `members`.
+  it('asks for household_id, and still cannot use a wildcard', () => {
+    expect(CHORE_COLUMNS).toContain('household_id')
+    expect(CHORE_COLUMNS).not.toContain('repeat_since')
+    expect(CHORE_COLUMNS).not.toContain('repeat_caught_up_through')
   })
 
   it('does not contain a wildcard', () => {

@@ -19,7 +19,6 @@
 // answers came from one read and half from another.
 
 import { getSupabase } from './supabase.js'
-import { currentHousehold } from './household.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -53,10 +52,16 @@ function unwrap({ data, error }, whatWeWereDoing) {
 }
 
 // The columns a client may read, matching the select grant in 0010 exactly.
-// `household_id` is absent for the reason 0003 gives and 0005 repeats: it is
-// written on insert, never read back, and withholding it is what makes
-// `select('*')` fail loudly on this table instead of quietly returning a shape
-// nobody checked.
+// `household_id` stays absent and `select('*')` still fails loudly here — 0014
+// grants that column on `members` and `chores` only.
+//
+// The reason for withholding it has been narrowed rather than kept. It used to
+// rest on the claim that the client could not need a household id because RLS
+// already scoped every read to one household. That is what #159 falsified: RLS
+// scopes to every household the caller belongs to, which `0009` allows to be
+// more than one. This table still does not need the column, for a different and
+// better reason — it is scoped from an already-scoped MEMBER set, so the
+// withholding costs nothing and #157 measured it as needing no grant change.
 export const EXCLUSION_COLUMNS = 'id, chore_id, member_id, created_at'
 
 /**
@@ -68,10 +73,12 @@ export const EXCLUSION_COLUMNS = 'id, chore_id, member_id, created_at'
  * actually bothered to record, which is the count this story's whole shape
  * exists to keep near zero.
  */
-export async function listExclusions() {
+export async function listExclusions(memberIds) {
+  if (!Array.isArray(memberIds)) throw new Error('Which household? An exclusion read must name its members.')
+  if (memberIds.length === 0) return []
   return (
     unwrap(
-      await getSupabase().from('chore_exclusions').select(EXCLUSION_COLUMNS),
+      await getSupabase().from('chore_exclusions').select(EXCLUSION_COLUMNS).in('member_id', memberIds),
       'loading who cannot do what',
     ) ?? []
   )
@@ -89,20 +96,24 @@ export async function listExclusions() {
  * policy expresses. So this is `member_capacity`'s shape, not `chores`'.
  *
  * `household_id` is not a parameter for `addChore`'s reason: the UI does not
- * choose which household it writes into, and the with-check policy in 0010 would
- * refuse any other value anyway.
+ * choose which household it writes into freely, and the with-check policy in
+ * 0010 refuses any other value anyway — #159 AC 5.
+ *
+ * `householdId` is passed in rather than rediscovered here (#159 AC 4). It came
+ * from the same unordered `.limit(1)` the reads used, so with two households an
+ * exclusion could be filed against a different one from the chore list on
+ * screen — and because the row would then fail the with-check, the symptom would
+ * have been an unexplained refusal rather than a wrong row.
  */
-export async function excludeMember(choreId, memberId) {
+export async function excludeMember(choreId, memberId, householdId) {
   if (!choreId) throw new Error('Which chore cannot they do?')
   if (!memberId) throw new Error('Who cannot do it?')
-
-  const household = await currentHousehold()
-  if (!household) throw new Error('You are not signed in to a household.')
+  if (!householdId) throw new Error('Which household? Recording an exclusion must name one.')
 
   return unwrap(
     await getSupabase()
       .from('chore_exclusions')
-      .insert({ household_id: household.id, chore_id: choreId, member_id: memberId })
+      .insert({ household_id: householdId, chore_id: choreId, member_id: memberId })
       .select(EXCLUSION_COLUMNS)
       .single(),
     'recording that they cannot do this chore',

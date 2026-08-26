@@ -13,7 +13,6 @@
 // whole thesis rests on.
 
 import { getSupabase } from './supabase.js'
-import { currentHousehold } from './household.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -38,12 +37,19 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // column — that is the intended behaviour of a column grant, and the reason this
 // list is a constant rather than being spelled out at each call site.
 //
-// `household_id` is absent on purpose. It is written on insert and never read
-// back: row-level security already guarantees every chore this device can see
-// belongs to its household, so the value would be a constant the client can
-// already name. 0003 carries the full reasoning.
+// `household_id` IS read back now — #159, and the reason it was absent has
+// expired rather than merely changed. It said the value "would be a constant the
+// client can already name", which was true while a person belonged to one
+// household: RLS returned one household's rows, so the column carried no
+// information. `0009` made membership per-household, so the set RLS returns can
+// span two and the column is the only thing that tells them apart.
+//
+// The wildcard refusal survives here, which is why 0014 is FREE on this table
+// and not on `members`: `0012` withholds `repeat_since` and
+// `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
+// outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -177,12 +183,14 @@ export function normalizeTitle(value) {
  * order Postgres found them, and the list would reshuffle between refreshes for
  * no visible reason.
  */
-export async function listChores() {
+export async function listChores(householdId) {
+  if (!householdId) throw new Error('Which household? A chore read must name one.')
   return (
     unwrap(
       await getSupabase()
         .from('chores')
         .select(CHORE_COLUMNS)
+        .eq('household_id', householdId)
         .order('due_on', { ascending: true })
         .order('created_at', { ascending: true }),
       'loading the chores',
@@ -193,11 +201,14 @@ export async function listChores() {
 /**
  * Record a chore as a titled unit of expected minutes — AC 1.
  *
- * `household_id` is not a parameter. The UI does not get to choose which
- * household it writes into: it is read from this device's membership, and the
- * with-check policy in 0003 would refuse any other value anyway.
+ * `householdId` is now a parameter — #159 AC 4. It was read here from the same
+ * unordered `.limit(1)` the reads used, so with two households a chore could be
+ * filed into a different one from the list on screen. The caller passes the
+ * household it is showing; the with-check policy in 0003 still refuses any id
+ * outside `current_household_ids()`, so this is defence in depth over a database
+ * guard rather than the guard (#159 AC 5).
  */
-export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
+export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, householdId }) {
   const cleanTitle = normalizeTitle(title)
   const minutes = normalizeExpectedMinutes(expectedMinutes)
   const due = normalizeDueDate(dueOn)
@@ -206,14 +217,13 @@ export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repe
   // nothing get 'none', which is the column's own default.
   const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
 
-  const household = await currentHousehold()
-  if (!household) throw new Error('You are not signed in to a household.')
+  if (!householdId) throw new Error('Which household? Adding a chore must name one.')
 
   return unwrap(
     await getSupabase()
       .from('chores')
       .insert({
-        household_id: household.id,
+        household_id: householdId,
         title: cleanTitle,
         expected_minutes: minutes,
         due_on: due,

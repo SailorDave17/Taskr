@@ -303,7 +303,8 @@ defect `check:live` exists to catch, one level up.
 ## 3b. The Google OAuth client, for the calendar connection
 
 Owner-only, and **the one step that cannot be done from a session** — it needs a Google account and a
-Google Cloud project. Until it has run, the Connect Google Calendar button on the capacity screen
+Google Cloud project, and step 2's test-user dialog fails silently from an automated browser even
+with the owner signed in (see the warning there). Until it has run, the Connect Google Calendar button on the capacity screen
 reaches an Edge Function that refuses with *"This function is not configured: GOOGLE_CLIENT_ID,
 GOOGLE_CLIENT_SECRET are not set."* Naming them is deliberate: Supabase injects its own three secrets
 into every function, so a bare "not configured" would send you to check the wrong ones.
@@ -314,6 +315,27 @@ into every function, so a bare "not configured" would send you to check the wron
    under the 100-user test-user cap, so there is no verification review to sit through. Add each
    member who will connect a calendar as a test user; a member who is not listed is refused by
    Google with a message about the app not being verified.
+
+   **Adding a test user is a hand step, in an ordinary browser.** From an automated browser, the
+   **Audience → Add users** dialog's Save silently does nothing: the chip commits, Save is enabled
+   and clicked, and **no network request is issued** — no error, no toast, and the list still reads
+   `No rows to display` after a reload. Measured five times across two sessions in
+   [#142](https://github.com/SailorDave17/Taskr/issues/142); the identical dialog works by hand.
+   There is no way around it: the console's write route for this list
+   (`TrustedUserList`) appears nowhere in its loaded bundles, no public Google API exposes OAuth
+   test users, and `gcloud` has no surface for them either. So when this step looks done from a
+   session, it is not — recognise the silent-Save failure instead of re-diagnosing it, and do the
+   step by hand.
+
+   **Check the result by reading the state back, never from the dialog** — it reports success
+   either way. Two reads, both recorded in #142:
+   - **Reload the Audience page**: the member appears under Test users. The reload is the
+     criterion; the pre-reload list is the dialog's own rendering.
+   - **The consent probe**: open the consent URL the app itself builds (press Connect Google
+     Calendar, or build the authorize URL with `prompt=consent`, which renders and grants
+     nothing). An unregistered member gets Google's `access_denied` page — *"The developer hasn't
+     given you access to this app"* — and a registered one gets the consent screen. This asks the
+     system that enforces the list, so it is evidence in a way no listing is.
 3. Create an **OAuth 2.0 Client ID**, type **Web application**, and add both of these as
    **Authorized redirect URIs** — exactly, with the trailing slash:
    - `https://taskr.madcowhq.com/`
@@ -391,3 +413,39 @@ Steps 1, 2 and 3 create accounts or hold credentials, so they are the owner's. S
 Docker and no `link` - see the flags there - but it does need an access token, which is the part that
 cannot be delegated. Everything downstream of
 them — wiring the client, the roster schema, RLS policies — is ordinary work in later stories.
+
+**So is §3b step 2's test-user addition, for a different reason.** It is not about accounts or
+credentials: the Google console's Add-users dialog does not submit from an automated browser — Save
+issues no network request at all — and no API reaches that list, so the write can only be made by
+hand in an ordinary browser and confirmed by read-back (§3b step 2 names the two checks; measured
+in [#142](https://github.com/SailorDave17/Taskr/issues/142)).
+
+### Pasting a migration, and reading the catalog back — the two routes (#150)
+
+**Route A, the browser, and it is the one in use.** With the owner signed in to the Supabase
+dashboard in the automated browser, a session can open the SQL editor, set the editor's contents and
+run them. *Measured 2026-08-26 (#150)*: `window.monaco.editor.getEditors()[0].setValue(sql)` then
+`Ctrl+Enter`, results read out of the page.
+
+Two things it is good for, and one it is not:
+
+- **Confirming a paste that no client-side instrument can see.** `check:live` reads what the client
+  reads, so a grant of a privilege the role already holds is invisible to it — that is the whole of
+  `0013`. `pg_attribute.attacl` and `pg_class.relacl` say plainly what was granted and by which
+  statement, and this route reaches them where PostgREST cannot (`information_schema` is not
+  exposed). The measurement is in `docs/access-model.md`.
+- **Checking a paste arrived intact.** A saved snippet's character count, compared against the repo
+  file's, catches a truncated or transcoded payload. *Measured*: `0013` at 6761 characters plus 120
+  carriage returns is exactly the 6881 the editor held, all 8 non-ASCII characters intact; `0014`
+  likewise at 7846. A clipboard can re-encode a file on this machine, so this is not ceremony.
+- **It is no use unattended.** It needs a live signed-in dashboard session in that browser, so it
+  serves an attended session and no cron, CI job or headless run.
+
+**Route B, a Supabase personal access token against the Management API, is NOT built.** It would
+make the paste and the catalog probe ordinary commands, runnable with nobody watching. It is filed
+as **#185**, and it is filed rather than done because a PAT is a long-lived credential with
+authority over every project in the account, which is a class of secret this repo does not hold
+today. Read that issue before minting one.
+
+**What is still the owner's either way: deciding to paste.** Neither route changes that a migration
+reaching the live project is a deliberate act with a sequence — apply, then promote.

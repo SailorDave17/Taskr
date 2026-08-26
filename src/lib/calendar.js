@@ -227,11 +227,26 @@ export async function completeConnect(
   return data
 }
 
-/** Every calendar connection this device's household has. */
-export async function listCalendarConnections() {
+/**
+ * Every calendar connection ONE household has — #159 AC 1.
+ *
+ * Scoped by `memberIds`, like capacity and exclusions: `calendar_connections`
+ * grants `member_id` (0011) and withholds `household_id`, so it is scoped from
+ * the already-scoped member set with no grant change (#157 AC 4). A connection
+ * belongs to this household exactly when its member does.
+ *
+ * `0011`'s unique index is per MEMBER row, and two households mean two member
+ * rows for one person — so a person in two households can hold two independent
+ * connections and neither read nor write collides. #161 owns the function half
+ * of that.
+ */
+export async function listCalendarConnections(memberIds) {
+  if (!Array.isArray(memberIds)) throw new Error('Which household? A connection read must name its members.')
+  if (memberIds.length === 0) return []
   const { data, error } = await getSupabase()
     .from('calendar_connections')
     .select(CALENDAR_CONNECTION_COLUMNS)
+    .in('member_id', memberIds)
 
   if (error) {
     const err = new Error(`loading calendar connections: ${error.message}`)

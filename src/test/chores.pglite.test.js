@@ -449,6 +449,7 @@ describe('chores, run against a real Postgres', () => {
         'due_on',
         'expected_minutes',
         'generated_from',
+        'household_id',
         'id',
         'repeat_kind',
         'repeat_weekdays',

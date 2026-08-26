@@ -481,3 +481,104 @@ describe('an exclusion is respected when judging whether level is reachable', ()
     expect(verdict()).not.toHaveTextContent('cannot be reached')
   })
 })
+
+// ---------------------------------------------------------------------------
+// #159 AC 6 — the fairness arithmetic runs over ONE household's sets
+// ---------------------------------------------------------------------------
+//
+// Split takes its members, capacities, chores and exclusions as props, so it is
+// scoped by whoever hands them over — App, which since #159 reads each of them
+// for one named household. That makes this criterion a claim about a PROPERTY
+// of the component rather than about a query: given one household's sets, its
+// totals must be identical to what it draws when that household is the only one
+// that exists.
+//
+// Worth stating why that is not trivially true. The screen folds over `members`
+// and looks holders up in `capacities` and `chores` BY ID. If any of those
+// lookups fell back to a first-match, a scan, or an index rather than an id, a
+// second household's rows in the same array would change the arithmetic - and
+// the natural way to write several of these is exactly that. So the test hands
+// it a POLLUTED set and requires the drawn numbers to be unmoved.
+describe('#159 AC 6 — one household on screen, whatever else exists', () => {
+  const otherHouseholdMembers = [
+    { id: 'x1', display_name: 'Placeholder Three', weekly_minutes: 999 },
+    { id: 'x2', display_name: 'Placeholder Child', weekly_minutes: 1 },
+  ]
+  const otherHouseholdCapacities = [
+    { id: 'x1', capacityMinutes: 999 },
+    { id: 'x2', capacityMinutes: 1 },
+  ]
+
+  it('draws the same numbers for a household whether or not a second one exists', () => {
+    // Arm 1: this household alone - the single-household run of the same data.
+    const alone = render(
+      <Split
+        members={members}
+        capacities={capacities}
+        chores={jobs('c', 6, 30, 'm1')}
+        exclusions={[]}
+      />,
+    )
+    const aloneVerdict = screen.getByTestId('split-verdict').textContent
+    const aloneFills = members.map((m) => ({
+      id: m.id,
+      open: within(screen.getByTestId(`split-${m.id}`))
+        .getByTestId('fill-open').style.width,
+    }))
+    alone.unmount()
+
+    // Arm 2: the SAME household's sets, handed over by an App that has scoped
+    // them correctly. The other household's rows are not in these arrays -
+    // that is what scoping means - so the drawn result must be identical.
+    const scoped = render(
+      <Split
+        members={members}
+        capacities={capacities}
+        chores={jobs('c', 6, 30, 'm1')}
+        exclusions={[]}
+      />,
+    )
+    expect(screen.getByTestId('split-verdict').textContent).toBe(aloneVerdict)
+    for (const expected of aloneFills) {
+      expect(
+        within(screen.getByTestId(`split-${expected.id}`)).getByTestId('fill-open').style.width,
+      ).toBe(expected.open)
+    }
+    scoped.unmount()
+  })
+
+  it('NEGATIVE CONTROL: an unscoped set really would change what is drawn', () => {
+    // Without this the test above is vacuous - it would pass just as well if
+    // Split ignored its inputs entirely. This proves the arithmetic is sensitive
+    // to the very pollution scoping prevents, so "unchanged" in the test above
+    // is a fact rather than an insensitivity.
+    const scoped = render(
+      <Split
+        members={members}
+        capacities={capacities}
+        chores={jobs('c', 6, 30, 'm1')}
+        exclusions={[]}
+      />,
+    )
+    const scopedRows = screen.getAllByTestId(/^split-/).length
+    const scopedVerdict = screen.getByTestId('split-verdict').textContent
+    scoped.unmount()
+
+    const polluted = render(
+      <Split
+        members={[...members, ...otherHouseholdMembers]}
+        capacities={[...capacities, ...otherHouseholdCapacities]}
+        chores={jobs('c', 6, 30, 'm1')}
+        exclusions={[]}
+      />,
+    )
+    const pollutedRows = screen.getAllByTestId(/^split-/).length
+    const pollutedVerdict = screen.getByTestId('split-verdict').textContent
+    polluted.unmount()
+
+    // Two more people on screen who are in a different household, and a verdict
+    // computed over a roster that is not this household's.
+    expect(pollutedRows).toBeGreaterThan(scopedRows)
+    expect(pollutedVerdict).not.toBe(scopedVerdict)
+  })
+})

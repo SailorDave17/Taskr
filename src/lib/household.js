@@ -177,7 +177,7 @@ export async function currentUserId() {
  * restart because it lives in the hosted database, and a local copy would make
  * a passing check indistinguishable from a device that simply remembered.
  */
-export async function currentHousehold() {
+export async function listHouseholds() {
   const supabase = getSupabase()
 
   // One read, not two. Under device auth this resolved `household_devices`
@@ -188,16 +188,51 @@ export async function currentHousehold() {
   // caller's own and nothing else, and an empty result means "not signed in as
   // anybody" rather than "no such household".
   //
-  // `limit(1)` rather than a bare `maybeSingle()`: the membership predicate
-  // returns a set, so a person could in principle belong to two households, and
-  // `maybeSingle()` treats a second row as an error rather than as a choice.
-  // One household per person is today's product decision, not a schema
-  // guarantee, and this read should not be the thing that discovers otherwise.
-  const rows = unwrap(
-    await supabase.from('households').select('*').limit(1),
-    'loading the household',
+  // PLURAL, AND ORDERED — #159 AC 2. This read carried `.limit(1)` with no
+  // `order by` until then, which is not "the first household" but "whichever row
+  // Postgres handed back first". With one household that is stable by accident;
+  // with two it is a coin toss that can land differently on consecutive reads of
+  // unchanged data, and every screen downstream inherits the toss.
+  //
+  // The old comment was right that `maybeSingle()` would be worse — it treats a
+  // second row as an error rather than as a choice — and right that a person
+  // could in principle belong to two households. What it got wrong was the
+  // conclusion: it kept `limit(1)` and left the CHOICE unmade, so the code that
+  // knew a set was possible was the code that silently picked from it.
+  //
+  // `created_at` then `id`: the second key is not decoration. Two households
+  // created inside the same clock tick would otherwise re-open exactly the
+  // ambiguity this ordering exists to close, and `id` is the only column
+  // guaranteed distinct.
+  return (
+    unwrap(
+      await supabase
+        .from('households')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true }),
+      'loading your households',
+    ) ?? []
   )
-  return rows?.[0] ?? null
+}
+
+/**
+ * The household the app is currently showing.
+ *
+ * THIS IS THE SEAM the household switcher replaces. Today "active" means "first
+ * of the ordered set", which is a deliberate placeholder and not a product
+ * decision: there is no affordance for choosing yet, and #159 ships before that
+ * affordance exists precisely so the scoping is proven correct before anything
+ * makes a second household reachable by accident.
+ *
+ * For anyone in exactly one household this returns what `.limit(1)` returned and
+ * every screen renders identically — #159 AC 9. That is what lets this land this
+ * early: under one household it changes nothing observable, so it carries no
+ * release risk while removing all of it from the stories that follow.
+ */
+export async function currentHousehold() {
+  const households = await listHouseholds()
+  return households[0] ?? null
 }
 
 /**
@@ -259,14 +294,33 @@ export function deviceTimezone() {
 }
 
 
-// The columns a client is allowed to read, and `select('*')` still fails
-// outright — 0002 established that by revoking wholesale and granting per
-// column, and 0007 re-issued the grant keeping one column back so that stays
-// true. It very nearly stopped being true: the refusal was a side effect of
-// withholding `pin_hash`, so dropping that column would have made `select('*')`
-// quietly succeed while this comment went on claiming otherwise. `household_id`
-// is the withheld column now, as it already was on `chores` and
-// `member_capacity` — a client learns its household from `households`.
+// The columns a client is allowed to read. 0002 established the shape by
+// revoking wholesale and granting per column, and 0007 re-issued it.
+//
+// `select('*')` NO LONGER FAILS on this table — #159, and this is the sentence
+// that had to change. It used to fail, and the refusal was doing real work as a
+// loud signal that the grant was per-column. That rested entirely on `members`
+// having exactly one withheld column, `household_id`, and 0014 grants it: the
+// client must be able to NAME a household to filter by one, and #157 measured
+// that no mechanism reaches around that (a PostgREST embed is refused 42501 with
+// no filter at all, so it is the join that needs the column).
+//
+// So the narrower property this list still holds, which is the one to rely on
+// now: THE GRANT IS PER COLUMN, AND ADDING A COLUMN IS A DECISION. A column
+// added by a later migration is not readable until somebody writes it into a
+// grant, and `grants.pglite.test.js` holds this constant against the live column
+// set so the omission fails in CI rather than in a household. What is gone is
+// the wildcard's loud refusal, not the per-column control.
+//
+// The near-miss recorded here before is worth keeping, because it is the same
+// hazard from the other side: the refusal was once a side effect of withholding
+// `pin_hash`, so dropping that column would have made `select('*')` quietly
+// succeed while this comment went on claiming otherwise. This time the same
+// sentence went false, deliberately, in a commit that corrected it.
+//
+// `chores`, `member_capacity`, `chore_exclusions` and `calendar_connections`
+// each keep a withheld column and keep the wildcard refusal with it — 0014 is
+// free on `chores` for exactly that reason.
 //
 // What changed in #62: `pin_hash` and its generated boolean `has_pin` are gone
 // with the credential they described, and `email` takes their place. It is not
@@ -276,37 +330,62 @@ export function deviceTimezone() {
 // and a PIN, and there is deliberately no second flag that can disagree with
 // it. Reading it is safe in a way `pin_hash` never was: it identifies a person,
 // it does not authenticate them.
-export const MEMBER_COLUMNS = 'id, display_name, weekly_minutes, claimed_by, email, created_at'
+export const MEMBER_COLUMNS =
+  'id, household_id, display_name, weekly_minutes, claimed_by, email, created_at'
 
-/** Everyone in this device's household, oldest first so the order is stable. */
-export async function listMembers() {
+/**
+ * Everyone in ONE named household, oldest first so the order is stable.
+ *
+ * `householdId` is required — #159 AC 1. This read filtered by nothing until
+ * then and leaned on row-level security, which was correct while a person could
+ * belong to one household and stops being correct the moment they can belong to
+ * two: the policy returns every row the caller MAY see, and that set is no
+ * longer one household. The rows were never exposed to the wrong person; they
+ * were merged into one roster, which is a correctness failure rather than a
+ * security one.
+ *
+ * The filter is defence in depth, not the guard. `members_select_same_household`
+ * still refuses rows outside the caller's own households whatever is passed
+ * here, so a wrong id returns nothing rather than somebody else's roster.
+ */
+export async function listMembers(householdId) {
+  if (!householdId) throw new Error('Which household? A roster read must name one.')
   return (
     unwrap(
-      await getSupabase().from('members').select(MEMBER_COLUMNS).order('created_at', { ascending: true }),
+      await getSupabase()
+        .from('members')
+        .select(MEMBER_COLUMNS)
+        .eq('household_id', householdId)
+        .order('created_at', { ascending: true }),
       'loading the roster',
     ) ?? []
   )
 }
 
 /**
- * Add a person with their weekly available minutes — AC 2.
+ * Add a person with their weekly available minutes — AC 2, and #159 AC 4.
  *
- * `household_id` is not passed by the caller. The UI does not get to choose
- * which household it writes into: it is read from this device's membership, and
- * the insert policy would refuse any other value anyway.
+ * `householdId` is now passed in rather than rediscovered here. The old shape
+ * called `currentHousehold()` itself, which was the same unordered `.limit(1)`
+ * the reads used — so with two households a person could be added to a
+ * different one from the roster that was on screen when the button was pressed,
+ * and nothing anywhere would have disagreed.
+ *
+ * The UI still does not get to choose freely: the caller passes the household it
+ * is actually showing, and `members_insert_same_household` refuses any id
+ * outside `current_household_ids()` regardless — so this is defence in depth
+ * over a database guard, not the guard itself (#159 AC 5).
  */
-export async function addMember({ displayName, weeklyMinutes }) {
+export async function addMember({ displayName, weeklyMinutes, householdId }) {
   const name = (displayName ?? '').trim()
   if (!name) throw new Error('A person needs a name.')
-
-  const household = await currentHousehold()
-  if (!household) throw new Error('You are not signed in to a household.')
+  if (!householdId) throw new Error('Which household? Adding a person must name one.')
 
   return unwrap(
     await getSupabase()
       .from('members')
       .insert({
-        household_id: household.id,
+        household_id: householdId,
         display_name: name,
         weekly_minutes: normalizeMinutes(weeklyMinutes),
       })

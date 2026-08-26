@@ -7,12 +7,13 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0012` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108),
-  `0009` on 2026-08-21, and `0010`–`0012` on 2026-08-24. **`0013` (the inherited grants, #91) exists
-  in the repo and has NOT been pasted** — and unlike every previous entry in that sentence, it does
-  **not** appear in the expected-red set below, because `check:live` is structurally blind to it.
-  See the *two* migrations that bullet cannot speak for. `0007` and `0008` were
-  pasted together, which is what emptied the expected-red set the first time. `0002` is verified
+- Status: **`0001`–`0014` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108),
+  `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, and **`0013` and `0014` on 2026-08-26 (#150)**.
+  `0013` (the inherited grants, #91) never appeared in the expected-red set below, because
+  `check:live` is structurally blind to it — and its paste was **verified anyway**, by an instrument
+  that check does not have. See the *two* migrations that bullet cannot speak for, which since
+  2026-08-26 is a statement about `check:live` rather than about what is knowable. `0007` and `0008`
+  were pasted together, which is what emptied the expected-red set the first time. `0002` is verified
   over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`, `0008`,
   `0010` and `0011` are verified by `npm run check:live` — every table, every RPC, and (since #115)
   both Edge Functions; the rest are verified only by the paste succeeding. The denominator moved
@@ -93,13 +94,18 @@
   true of the platform it was written against and has not been true since. **Nothing executes a
   comment**, so it went on reading as a decision.
 
-  Paste it when convenient rather than urgently: on the live project it changes nothing observable,
-  and on a rebuilt one it is the difference between an app that loads and an app that does not.
+  **Pasted 2026-08-26 (#150).** The "changes nothing observable" half of what this bullet used to
+  say turned out to be wrong: it changes nothing observable *to any client*, and it writes five rows
+  of `pg_attribute.attacl` that say plainly that it ran. What it is FOR is unchanged — on a project
+  rebuilt from these files it is the difference between an app that loads and one that does not.
 - **This page is prose about live state and prose is what failed here** — see the correction at the
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` has TWO expected reds, and both clear on a single paste.**
+- **`check:live` excuses NOTHING. *Measured 2026-08-26* at 24 of 24**, taken after the owner pasted
+  `0014` and `0013` that afternoon (#150). The two reds this bullet carried for the first half of
+  that day are in the table further down, beside the single action that cleared them. What follows
+  is the history, most recent first.
   ***Measured 2026-08-26*** against the live project, on the #159 branch before
   the paste: **22 of 24**, with `members` and `chores` each answering
   `42501 permission denied` because the client now asks for `household_id` and
@@ -118,27 +124,27 @@
   plain sight on 2026-08-09. With nothing excused, the instrument answers the only question worth
   asking in one bit.
 
-  **The excused reds, and the single condition that clears each**, kept in the form this page has
-  used four times before so that a future entry cannot quietly become permanent:
+  **The excused-red set is EMPTY, and the queue drained on 2026-08-26.** Any red, on any subject,
+  is real.
 
-  | Red | Cleared by | Anything else? |
+  **The two rows that stood here between #159's merge and the paste are moved into history rather
+  than left standing** — that is #162 AC 1's first half, discharged here rather than left for #162,
+  because a stale excuse is indistinguishable from a live one and it excuses precisely the subject
+  most likely to fail next. Both cleared on exactly the action they named, and on nothing else:
+
+  | Red that stood here | Cleared by | Held? |
   |---|---|---|
-  | `members` refuses `household_id` (`42501`) | Pasting `supabase/migrations/0014_scope_reads_to_one_household.sql` | **No.** Not a deploy, not a promotion to `release`, not another migration. `0014` is two `grant` statements and nothing else. |
-  | `chores` refuses `household_id` (`42501`) | The same paste — the file grants both tables in one go | **No.** Both rows clear together or neither does; there is no state where one is granted and the other is not. |
+  | `members` refuses `household_id` (`42501`) | pasting `supabase/migrations/0014_scope_reads_to_one_household.sql` | Yes. Not a deploy, not a promotion to `release`, not another migration. |
+  | `chores` refuses `household_id` (`42501`) | the same paste — the file grants both tables in one go | Yes, and together: there was never a state in which one was granted and the other was not. |
 
-  **The queue is NOT drained — #159 added a row, deliberately, and that is what a
-  new migration is supposed to do to this table.** The row above is the expected
-  red between the merge of #159 and the owner's paste; until then `check:live`
-  reports the client asking for a column the live project has not granted, which
-  is the check working rather than a fault. #162 is the story that confirms the
-  paste and REMOVES that row.
-
-  Unlike `0013`, this migration is **observable**: `0013` granted privileges the
-  live project already held by inheritance, so the probe read the same on both
-  sides of the paste and could not testify that it had happened. `0014` grants a
-  column that has never been readable by `authenticated` anywhere, and every
-  table probe is `select(<columns>).limit(0)` signed in as that role — so the
-  red is real before and gone after, on exactly this action.
+  **`0014` is observable to `check:live` and `0013` is not — but that is a fact about the CHECK,
+  not about which pastes can be confirmed.** `0014` grants a column that has never been readable by
+  `authenticated` on any project, and every table probe is `select(<columns>).limit(0)` signed in as
+  that role, so its red is real before the paste and gone after it. `0013` granted privileges the
+  live project already held by inheritance, so nothing reachable over PostgREST reads differently
+  across it. Both were nonetheless confirmed on 2026-08-26 (#150), by two different instruments:
+  `check:live` for `0014`, and the column ACL in the catalog for `0013`. The corrected `0013` bullet
+  below carries that measurement, because this page asserted the opposite for two days.
 
   **What follows describes the state before #159 and is kept as history.** The two rows that
   stood here earlier on 2026-08-24 — the `chores` repeat columns and `catch_up_repeats()` — were
@@ -176,31 +182,72 @@
   - **`0009`** is two indexes, so this bullet would read exactly the same whether that migration had
     been pasted or not. It has been — `npm run test:rls` confirms it, at setup — but the
     confirmation comes from somewhere else entirely.
-  - **`0013`** (#91) is three grants, and it is blind in a way `0009` is not: `0009` is invisible
-    because the check has no index probe, while `0013` is invisible because **the live project
-    already holds all three privileges by inheritance**. The check signs in as `authenticated` and
-    reads `households` with `select('*')`; that succeeded before `0013` existed and succeeds after
-    it is pasted. There is no reading of `check:live`, and no reading of any instrument reachable
-    over PostgREST, that differs across that paste — `information_schema` is not exposed, and the
-    only difference `0013` makes on the live project is a catalog entry nobody can query.
+  - **`0013`** (#91) is three grants, and it is blind to `check:live` in a way `0009` is not:
+    `0009` is invisible because the check has no index probe, while `0013` is invisible because
+    **the live project already holds all three privileges by inheritance**. The check signs in as
+    `authenticated` and reads `households` with `select('*')`; that succeeded before `0013` existed
+    and succeeds after it is pasted. There is no reading of `check:live`, and no reading of any
+    instrument reachable over PostgREST, that differs across that paste — `information_schema` is
+    not exposed.
 
-    So `0013` is the first migration here whose paste is **unobservable by design rather than by
-    omission**, and that is the same fact as its being a no-op on the live project (#91 AC 5). What
-    it changes is a project rebuilt from these files, where those privileges do not exist at all and
-    the app cannot load past its first screen. The instrument that covers it is
-    `src/test/grants.pglite.test.js`, which runs in CI against the migrations rather than against
-    the project, and there is no way to move that coverage over the wire.
+    **This bullet used to end "the only difference `0013` makes on the live project is a catalog
+    entry nobody can query", and called that paste "unobservable by design rather than by
+    omission". Both were wrong, and #150 measured them wrong from the SQL editor on 2026-08-26.**
+    The catalog entry is real, it is exactly where the sentence said it was, and it is queryable by
+    anything that can run SQL — which the dashboard can and PostgREST cannot. The true scope of the
+    claim is *no client-facing instrument*; *nobody* was one word too strong, and the difference is
+    the whole story, because one version says the paste is unverifiable and the other says you have
+    to ask a different system.
+
+    What `0013` writes on the live project, and what it does not — *measured 2026-08-26*:
+
+    | Catalog | Before | After | Why |
+    |---|---|---|---|
+    | `pg_attribute.attacl` on `households.id`, `.created_at`, `.organizer_member_id` | no column-level grant | `authenticated=r/postgres` | `0013` statement 1. **No other migration grants column-level select on `households`** — `0005` is the only other file that touches that table's privileges, and it grants `update (name, timezone)`. These three entries can only be `0013`'s. |
+    | `pg_attribute.attacl` on `households.name`, `.timezone` | `authenticated=w/postgres` | `authenticated=rw/postgres` | the `w` is `0005`'s update grant; the `r` is `0013`'s. |
+    | `pg_class.relacl` on `members` and `chores` | `authenticated=dDxtm/postgres` | unchanged | statements 2 and 3 grant a privilege already held, so they are no-ops in the catalog as well as in behaviour. |
+
+    So the AFTER probe #150 asked for reads **`t / t / t`** — and so did the BEFORE row, which the
+    issue predicted and which is now **derived from the post-state rather than assumed**. That
+    derivation is the only reason "no difference" is a measurement instead of a shrug:
+
+    - `hh_select` was already true because `households`' TABLE-level ACL carries
+      `authenticated=ardDxtm` and **no migration has ever granted table-level select on
+      `households`** — so that `r` is the inherited default, and it predates `0013` by months.
+    - `members_delete` and `chores_delete` were already true, and **`anon` is the control that
+      proves it.** `0002` and `0007` each revoke `select, insert, update` from `authenticated, anon`
+      in one statement, and `0013` grants only to `authenticated`. The live `members` ACL still
+      reads `anon=dDxtm` — so `d` survived that narrow revoke by inheritance for anon, and
+      `authenticated`, which took the identical revoke in the identical statement, kept it the same
+      way. `chores` corroborates from the other side: `0003` revokes **all** from anon, and the live
+      `chores` ACL has no anon entry at all.
+
+    **The general form is worth more than this file:** a column-scoped grant of a privilege the role
+    already holds is invisible to every behavioural probe and permanently visible in
+    `pg_attribute.attacl`. A paste like this one stays verifiable after the fact, indefinitely, by
+    whoever thinks to ask the catalog instead of the API.
+
+    None of this changes what `0013` is for. It is a no-op on the live project (#91 AC 5); what it
+    changes is a project rebuilt from these files, where those privileges do not exist at all and
+    the app cannot load past its first screen. `src/test/grants.pglite.test.js` is still the
+    instrument that covers that, in CI, against the migrations rather than against the project —
+    and it is still true that **that** coverage cannot be moved over the wire.
 
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013` the gap is now two migrations wide rather than one.
+  ones it does not — and with `0013` the gap is two migrations wide rather than one. Both are now
+  confirmed, and neither by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
+  ACL in the catalog (#150). **A gap covered somewhere else is still a gap here**, which is why this
+  sentence stays standing after the confirmations rather than being deleted by them.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted seven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted nine times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
-  at a measured 22 of 24** with #53's `0012` in the repo and unpasted, and now **EMPTY again at a
-  measured 24 of 24**, `0012` having been pasted the same evening. A THREE was once written here
+  at a measured 22 of 24** with #53's `0012` in the repo and unpasted, then **EMPTY again at a
+  measured 24 of 24** with `0012` pasted the same evening, then **TWO again at a measured 22 of 24**
+  on 2026-08-26 when #159 merged with `0014` unpasted, and now **EMPTY at a measured 24 of 24**,
+  `0014` and `0013` both pasted that afternoon (#150). A THREE was once written here
   first, from arithmetic, and never actually existed: the paste that would have cleared its third
   entry had already happened. **A predicted state is not a state**, and the register a count is
   written in — measured or derived — belongs beside it.* The non-empty states are the instructive
@@ -265,6 +312,27 @@
   is the good case, and the only thing it asks of this page is that the page be re-read after the
   work rather than only after an edit. Which is the argument for running `npm run check:live` when
   nothing in the repo has changed at all: on this page the subject moves without the file.*
+
+  *And it was wrong a FOURTH time, for a few hours on 2026-08-26 — between #159's merge and the
+  owner's paste that afternoon — for the one reason none of the three above covers: **nobody edited
+  it.** #159 correctly added its excused-red row to the table four screens up and never touched this
+  paragraph, so "excuses **no** red at all" went false with no edit, no diff and nothing to review.
+  The paste then made it true again, by an action taken for its own reasons. Every correction above
+  is about a sweep that reached some copies and not others; this one is about a copy no sweep was
+  ever run for, restored by luck — which is worse, because **a claim that is true again by accident
+  leaves exactly the same evidence as one that was never wrong.** The repair is the one this page
+  keeps reaching from new directions: when you ADD a row to the excused-red table, grep this file
+  for what it says about the set being empty before you close the editor. Adding a red is an edit to
+  every sentence that counts them.*
+
+  *The same pass found the two copies of the inversion COUNT disagreeing with each other. This page
+  said the set had been inverted **seven** times; `README.md` said **eight**; neither cited the
+  other, and both had been merged. The seven was checkable — this bullet enumerates its states, and
+  there were seven transitions in the list — and the eight was not, because the README carries the
+  number with no list beside it. #150 set both to **nine** by counting the enumeration and adding
+  the two states of 2026-08-26, rather than by preferring whichever copy looked fresher. **A count
+  with its derivation beside it and a count without one are not two opinions**: only one of them can
+  be checked, and that is the one to propagate.*
 - **RESOLVED 2026-08-20 — the `create_household` overload divergence, and the prediction that held.**
   Until `0007` was pasted, the live project carried `create_household(household_name, household_tz,
   organizer_name, organizer_pin)` — the four-argument version with the PIN — while the client since

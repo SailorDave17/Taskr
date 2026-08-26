@@ -391,3 +391,33 @@ Steps 1, 2 and 3 create accounts or hold credentials, so they are the owner's. S
 Docker and no `link` - see the flags there - but it does need an access token, which is the part that
 cannot be delegated. Everything downstream of
 them — wiring the client, the roster schema, RLS policies — is ordinary work in later stories.
+
+### Pasting a migration, and reading the catalog back — the two routes (#150)
+
+**Route A, the browser, and it is the one in use.** With the owner signed in to the Supabase
+dashboard in the automated browser, a session can open the SQL editor, set the editor's contents and
+run them. *Measured 2026-08-26 (#150)*: `window.monaco.editor.getEditors()[0].setValue(sql)` then
+`Ctrl+Enter`, results read out of the page.
+
+Two things it is good for, and one it is not:
+
+- **Confirming a paste that no client-side instrument can see.** `check:live` reads what the client
+  reads, so a grant of a privilege the role already holds is invisible to it — that is the whole of
+  `0013`. `pg_attribute.attacl` and `pg_class.relacl` say plainly what was granted and by which
+  statement, and this route reaches them where PostgREST cannot (`information_schema` is not
+  exposed). The measurement is in `docs/access-model.md`.
+- **Checking a paste arrived intact.** A saved snippet's character count, compared against the repo
+  file's, catches a truncated or transcoded payload. *Measured*: `0013` at 6761 characters plus 120
+  carriage returns is exactly the 6881 the editor held, all 8 non-ASCII characters intact; `0014`
+  likewise at 7846. A clipboard can re-encode a file on this machine, so this is not ceremony.
+- **It is no use unattended.** It needs a live signed-in dashboard session in that browser, so it
+  serves an attended session and no cron, CI job or headless run.
+
+**Route B, a Supabase personal access token against the Management API, is NOT built.** It would
+make the paste and the catalog probe ordinary commands, runnable with nobody watching. It is filed
+as **#185**, and it is filed rather than done because a PAT is a long-lived credential with
+authority over every project in the account, which is a class of secret this repo does not hold
+today. Read that issue before minting one.
+
+**What is still the owner's either way: deciding to paste.** Neither route changes that a migration
+reaching the live project is a deliberate act with a sequence — apply, then promote.

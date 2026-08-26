@@ -520,16 +520,32 @@ export async function resetMemberCredential({ memberId, password }) {
 }
 
 /**
- * Which member this device is acting as, or null.
+ * Which member this person is acting as, or null — within ONE household.
  *
  * Derived by matching `claimed_by` against the live auth id rather than being
- * stored anywhere: if the anonymous session ever rolls over, this correctly
- * reports "nobody" and the user picks themselves again, instead of a stale
- * local value attributing work to the wrong person.
+ * stored anywhere: if the session ever rolls over, this correctly reports
+ * "nobody" and the person signs in again, instead of a stale local value
+ * attributing work to the wrong person.
+ *
+ * `householdId` scopes the match — #160. Since 0009 one person can hold a
+ * claimed member row in TWO households, and a match over "whatever list it is
+ * handed" returns whichever claimed row happens to come first — who you are
+ * decided by list order. With the household named, a row that says it belongs
+ * to a different household can never be returned.
+ *
+ * A row that does not SAY which household it belongs to is taken at face
+ * value rather than excluded: every real read includes `household_id` (it is
+ * in MEMBER_COLUMNS), so that tolerance never fires on data — it exists so a
+ * caller without the column keeps exactly the old behaviour instead of
+ * silently losing its identity (#160 AC 6). The argument is optional for the
+ * same reason; the App-level tests are what make dropping it at the call
+ * site go red rather than degrade quietly.
  */
-export function findClaimedMember(members, userId) {
+export function findClaimedMember(members, userId, householdId) {
   if (!userId) return null
-  return members.find((m) => m.claimed_by === userId) ?? null
+  const inHousehold = (m) =>
+    householdId == null || m.household_id == null || m.household_id === householdId
+  return members.find((m) => inHousehold(m) && m.claimed_by === userId) ?? null
 }
 
 /**

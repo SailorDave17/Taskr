@@ -444,6 +444,118 @@ describe('when the backend cannot be reached', () => {
 })
 
 // ---------------------------------------------------------------------------
+// #160 — who you are, and whether you organise, WITHIN the active household
+//
+// One person, two households — the state 0009 made representable. person-a
+// ORGANIZES household A (their claimed row there is A's organizer_member_id)
+// and is a PLAIN MEMBER of household B. `isOrganizer` must be true when A is
+// active and false when B is active, asserted in BOTH directions because a
+// check that is always false satisfies the negative arm trivially.
+//
+// These live at the App level because App is the only place `me` and
+// `isOrganizer` are derived — findClaimedMember stays REAL here (the
+// household.js mock keeps it), so a mutation in the identity layer reddens
+// these, not just its unit tests.
+// ---------------------------------------------------------------------------
+
+describe('#160 — identity and organizer within the active household', () => {
+  const householdA = {
+    id: 'household-a',
+    name: 'Placeholder Household',
+    organizer_member_id: 'm-a1',
+    timezone: 'America/New_York',
+  }
+  const householdB = {
+    id: 'household-b',
+    name: 'Placeholder Other Household',
+    organizer_member_id: 'm-b1',
+    timezone: 'America/New_York',
+  }
+  // In each roster, one row is claimed by person-a. B's roster puts that row
+  // FIRST so that in the merged-roster tests below the FOREIGN claimed row is
+  // the one an unscoped match would return.
+  const rosterA = [
+    { id: 'm-a1', household_id: 'household-a', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm-a2', household_id: 'household-a', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' },
+  ]
+  const rosterB = [
+    { id: 'm-b2', household_id: 'household-b', display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm-b1', household_id: 'household-b', display_name: 'Placeholder Other Organizer', weekly_minutes: 200, claimed_by: 'person-b' },
+  ]
+
+  beforeEach(() => {
+    // Scoped, the way the real listMembers behaves since #159: the roster of
+    // the household that was asked for. The merged-roster tests below override
+    // this on purpose.
+    api.listMembers.mockImplementation(async (id) =>
+      id === householdA.id ? rosterA : id === householdB.id ? rosterB : [],
+    )
+  })
+
+  it('AC 5 / AC 3 positive: with their organized household active, the organizer-only controls are offered', async () => {
+    api.currentHousehold.mockResolvedValue(householdA)
+    await renderApp('Who')
+
+    expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
+    // Per-row too: giving somebody ELSE a sign-in is the organizer-only act.
+    expect(screen.getByTestId('provision-m-a2')).toBeInTheDocument()
+  })
+
+  it('AC 4 / AC 3 negative: a plain member of the active household gets no organizer-only control on any row', async () => {
+    api.currentHousehold.mockResolvedValue(householdB)
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    // The identity RESOLVED — they are somebody here, on their own row. Without
+    // this, the absence below would also pass for `me === null`, which is a
+    // different and worse state (nobody, rather than not-the-organizer).
+    const badge = await screen.findByText(/· you/)
+    expect(badge.closest('li')).toHaveTextContent('Placeholder Three')
+    // ...and NO row offers an organizer-only control. Queried across the whole
+    // page rather than one named row, because "any row" is the criterion.
+    expect(screen.queryByTestId('provisioning-note')).not.toBeInTheDocument()
+    expect(screen.queryAllByTestId(/^provision-/)).toHaveLength(0)
+  })
+
+  it('AC 2: `me` resolves within the household on screen even off a roster that spans both', async () => {
+    // The data-layer regression #159 exists to prevent, handed to the identity
+    // layer on purpose: a merged roster with person-a's FOREIGN claimed row
+    // first, so an unscoped match returns the wrong member. #159's own tests
+    // pin what listMembers returns; this one asserts the identity layer does
+    // not LEAN on that. Resolving `me` from the unscoped list is the mutation
+    // this must redden (AC 7): unscoped, `me` becomes m-b2, `isOrganizer` goes
+    // false, and both assertions below fail.
+    api.listMembers.mockImplementation(async () => [...rosterB, ...rosterA])
+    api.currentHousehold.mockResolvedValue(householdA)
+    await renderApp('Who')
+
+    expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
+    const badge = await screen.findByText(/· you/)
+    expect(badge.closest('li')).toHaveTextContent('Placeholder One')
+  })
+
+  it('AC 3: the household on screen and the identity come from the SAME read', async () => {
+    // currentHousehold answers A, then B, then A… — the two-household coin
+    // toss #159 removed from the data layer, made deterministic. Every refresh
+    // (boot, and arriving on Who re-reads) must derive the household state AND
+    // the roster scope from its OWN single read: a refresh that drew them from
+    // two reads pairs one household's roster with the other's identity, `me`
+    // resolves to nobody, and the badge below has no row to land on (AC 7's
+    // second mutation).
+    let calls = 0
+    api.currentHousehold.mockImplementation(async () => (++calls % 2 ? householdA : householdB))
+    await renderApp('Who')
+
+    // Which household won depends only on how many refreshes ran, so read it
+    // off the roster read's own last call rather than assuming the count.
+    const lastScoped = api.listMembers.mock.calls.at(-1)[0]
+    const expectedRow = lastScoped === householdA.id ? 'Placeholder One' : 'Placeholder Three'
+    const badge = await screen.findByText(/· you/)
+    expect(badge.closest('li')).toHaveTextContent(expectedRow)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // #34 AC 6 — the screen re-reads from the server rather than patching state
 //
 // These live at the App level rather than in Chores.test.jsx on purpose: the

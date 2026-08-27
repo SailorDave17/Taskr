@@ -831,3 +831,49 @@ describe('#47 — assess, over the assignments a human made', () => {
     expect(backwards).toEqual(forwards)
   })
 })
+
+// ---------------------------------------------------------------------------
+// #12 AC 5 — actuals influence budgets only through estimate updates a human
+// accepts. Allocation consumes the unit #6 ratified: expectedMinutes.
+// ---------------------------------------------------------------------------
+
+describe('#12 AC 5 — allocation still consumes the ratified unit', () => {
+  const members = [
+    { id: 'm1', capacityMinutes: 120 },
+    { id: 'm2', capacityMinutes: 120 },
+  ]
+
+  it('recorded actuals do not reach allocate — the assignment is identical with them and without', () => {
+    // A reopened chore is the sharpest case: OPEN work carrying an actual from
+    // an earlier completion (AC 1's reopen clause retains it). If any of these
+    // wildly wrong actuals leaked into the arithmetic, at least one assignment
+    // or share would move.
+    const bare = [
+      { id: 'c1', expectedMinutes: 60, assignedMemberId: null },
+      { id: 'c2', expectedMinutes: 30, assignedMemberId: null },
+      { id: 'c3', expectedMinutes: 30, assignedMemberId: null },
+    ]
+    const withActuals = bare.map((c, i) => ({ ...c, actualMinutes: [1440, 0, 7][i], done: false }))
+
+    const a = allocate({ members, chores: bare })
+    const b = allocate({ members, chores: withActuals })
+    // The count first, so the equality below is over real content — two
+    // undefineds would also be "equal".
+    expect(a.assignments).toHaveLength(3)
+    expect(b.assignments).toEqual(a.assignments)
+  })
+
+  it('assess is where done work reads its actual, and OPEN work still contributes its estimate', () => {
+    // The seam stated as one test: the same chore, open then done. Open, its
+    // wild actual is ignored (the estimate is the plan); done, the actual is
+    // what it cost (#47 criterion 7). This is the boundary a silent inclusion
+    // of "rolling actuals" — story #6's deferred option (c) — would cross.
+    const open = [{ id: 'c1', expectedMinutes: 30, actualMinutes: 90, assignedMemberId: 'm1', done: false }]
+    const done = [{ id: 'c1', expectedMinutes: 30, actualMinutes: 90, assignedMemberId: 'm1', done: true }]
+
+    const openLoad = assess({ members, chores: open }).load.find((l) => l.memberId === 'm1')
+    const doneLoad = assess({ members, chores: done }).load.find((l) => l.memberId === 'm1')
+    expect(openLoad.assignedMinutes).toBe(30)
+    expect(doneLoad.assignedMinutes).toBe(90)
+  })
+})

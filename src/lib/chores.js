@@ -49,7 +49,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from, actual_minutes'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -65,6 +65,22 @@ export const MAX_EXPECTED_MINUTES = 1440
  * they cannot drift apart silently.
  */
 export const CATCH_UP_BOUND_DAYS = 7
+
+/**
+ * The estimate-update thresholds — #12 AC 4. Owner-ratified tunable defaults,
+ * recorded in docs/refresh-charter.md's decision log (2026-08-26).
+ *
+ * An update is offered once a chore's family has at least
+ * `MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE` completed instances AND their average
+ * actual deviates from the current estimate by
+ * `ESTIMATE_DEVIATION_THRESHOLD` (a fraction of the estimate) or more. Both
+ * boundaries are inclusive — exactly 3 completions at exactly 25% offers —
+ * and the boundary test in chores.test.js spells the values literally rather
+ * than deriving its fixtures from these constants, so changing either one
+ * reddens a test instead of silently moving it.
+ */
+export const MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE = 3
+export const ESTIMATE_DEVIATION_THRESHOLD = 0.25
 
 /** The schedule kinds `chores_repeat_kind_known` accepts, in the UI's order. */
 export const REPEAT_KINDS = ['none', 'daily', 'weekly']
@@ -98,6 +114,32 @@ export function normalizeExpectedMinutes(value) {
   if (n < MIN_EXPECTED_MINUTES) throw new Error('A chore has to take at least a minute.')
   if (n > MAX_EXPECTED_MINUTES) {
     throw new Error('That is more than a day of work — split it into smaller chores.')
+  }
+  return n
+}
+
+/**
+ * Minutes the work actually took — #12 AC 1.
+ *
+ * Bounds match `chores_actual_minutes_range`, and ZERO IS LEGAL — the one
+ * deliberate difference from `normalizeExpectedMinutes`. A zero estimate
+ * cannot be allocated against a budget of minutes, but "it took no time — it
+ * was already done" is a real household fact, and allocation.test.js (#47
+ * criterion 7) already pins that a recorded zero contributes zero. Its own
+ * function rather than a call through the expected normalizer because the
+ * rules AND the sentences differ, and a shared implementation would make one
+ * form's refusal a side effect of editing the other's.
+ */
+export function normalizeActualMinutes(value) {
+  if (value === null || value === undefined || String(value).trim() === '') {
+    throw new Error('How many minutes did it actually take?')
+  }
+  const n = Number(value)
+  if (!Number.isFinite(n)) throw new Error('Actual minutes must be a number.')
+  if (!Number.isInteger(n)) throw new Error('Actual minutes must be a whole number of minutes.')
+  if (n < 0) throw new Error('It cannot have taken negative time.')
+  if (n > MAX_EXPECTED_MINUTES) {
+    throw new Error('That is more than a day — was this really one chore?')
   }
   return n
 }
@@ -276,6 +318,29 @@ export async function uncompleteChore(id) {
 }
 
 /**
+ * Adjust how long a chore really took — #12 AC 1.
+ *
+ * A plain column-granted update, unlike completion, and the difference is
+ * argued in 0015: `completed_at` moves only through a function because of the
+ * server clock, while an actual is a member's own claim about their own time
+ * with no derived rule keying off it — allocation reads `expected_minutes`
+ * only. Completion seeds the value to the estimate (the zero-tap default);
+ * this is the path for saying otherwise.
+ */
+export async function recordActualMinutes(id, actualMinutes) {
+  const minutes = normalizeActualMinutes(actualMinutes)
+  return unwrap(
+    await getSupabase()
+      .from('chores')
+      .update({ actual_minutes: minutes })
+      .eq('id', id)
+      .select(CHORE_COLUMNS)
+      .single(),
+    'recording how long it took',
+  )
+}
+
+/**
  * Create every missed occurrence of the household's repeating chores — #53.
  *
  * Called on app open, before the first read, so the occurrences it creates are
@@ -370,6 +435,73 @@ export function outstandingMinutes(chores) {
 }
 
 /**
+ * The completed instances a chore's feedback is computed over — #12 AC 2.
+ *
+ * A chore's FAMILY is itself plus the occurrences generated from it: a repeat
+ * anchor gathers everything its schedule produced (0012 — the anchor's own
+ * `due_on` is the first occurrence, so the anchor's own completion counts),
+ * and a one-off's family is just itself, which is how feedback stays
+ * not-template-only without a second rule. An occurrence row's family is also
+ * itself alone — its history belongs to the anchor, and double-counting it
+ * under both would weight the average by nothing real.
+ */
+export function completedInstances(chore, chores) {
+  return chores.filter(
+    (c) => (c.id === chore.id || c.generated_from === chore.id) && !isOutstanding(c),
+  )
+}
+
+/**
+ * Expected-versus-actual, summarised for one chore's family — #12 ACs 2 & 3.
+ *
+ * Null when there are no completed instances, and the caller renders "no data
+ * yet" — never a fabricated average. Where an instance predates 0015 and so
+ * carries no actual, its estimate stands in, which is `minutesOf`'s exact
+ * fallback: one definition of what a piece of work cost, not two.
+ */
+export function actualsSummary(chore, chores) {
+  const done = completedInstances(chore, chores)
+  if (done.length === 0) return null
+  const total = done.reduce((sum, c) => sum + (c.actual_minutes ?? c.expected_minutes ?? 0), 0)
+  return { count: done.length, averageMinutes: total / done.length }
+}
+
+/**
+ * The one-tap estimate update, or null when none is owed — #12 AC 4.
+ *
+ * Offered once the family has at least MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE
+ * completed instances and their average deviates from the CURRENT estimate by
+ * ESTIMATE_DEVIATION_THRESHOLD or more, both inclusive. The suggested value is
+ * the average rounded to whole minutes and held to the column's own bounds.
+ * A suggestion that rounds back to the current estimate is withheld — a
+ * button offering to change 1 minute to 1 minute is noise wearing a number.
+ *
+ * Accepting is `updateChore(id, { expectedMinutes })` on the anchor, and the
+ * propagation is #54's ratified option (b) BY CONSTRUCTION: an occurrence
+ * copies its minutes at creation (0012), so a new estimate reaches future
+ * occurrences and never rewrites work already on somebody's list.
+ *
+ * No repeat-kind gate, deliberately: a one-off or an occurrence has a family
+ * of one, so the completion floor already keeps the offer to anchors — a
+ * second gate would be a copy of that arithmetic that could drift from it.
+ */
+export function estimateSuggestion(chore, chores) {
+  const summary = actualsSummary(chore, chores)
+  if (!summary || summary.count < MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE) return null
+
+  const expected = chore.expected_minutes || 0
+  if (expected < MIN_EXPECTED_MINUTES) return null
+  const deviation = Math.abs(summary.averageMinutes - expected) / expected
+  if (deviation < ESTIMATE_DEVIATION_THRESHOLD) return null
+
+  const suggested = Math.min(
+    MAX_EXPECTED_MINUTES,
+    Math.max(MIN_EXPECTED_MINUTES, Math.round(summary.averageMinutes)),
+  )
+  return suggested === expected ? null : suggested
+}
+
+/**
  * Chore rows as the allocation module wants them — #47.
  *
  * The boundary between "a row from Postgres" and "the shape the fairness
@@ -383,12 +515,11 @@ export function outstandingMinutes(chores) {
  * segment and the chore list's Done section must agree about which chores are
  * finished, or a household sees work in one place and not the other.
  *
- * `actualMinutes` is passed through UNCHANGED, including when the column does
- * not exist — it is `undefined` today and `allocation.minutesOf` falls back to
- * the estimate. #12 adds the column and this line already carries it. Reading a
- * column that is not in `CHORE_COLUMNS` yet is not a bug: PostgREST returns the
- * columns it was asked for, so the property is simply absent and the fallback
- * is the whole point.
+ * `actualMinutes` is passed through UNCHANGED. #12 added the column; rows
+ * completed before 0015 carry null there, and `allocation.minutesOf` falls
+ * back to the estimate for exactly those — the same fallback `actualsSummary`
+ * uses, so the bar and the feedback line cannot disagree about what an old
+ * completion cost.
  */
 export function toAllocatorChores(chores) {
   return chores.map((chore) => ({

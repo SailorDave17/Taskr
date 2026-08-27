@@ -4,9 +4,12 @@ import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   WEEKDAYS,
+  actualsSummary,
   describeRepeat,
+  estimateSuggestion,
   formatMinutes,
   isOutstanding,
+  normalizeActualMinutes,
   normalizeDueDate,
   normalizeExpectedMinutes,
   normalizeRepeat,
@@ -255,8 +258,108 @@ ExcludedAssigneeNote.propTypes = {
   members: PropTypes.array.isRequired,
 }
 
+/**
+ * "Took N min" on a done row — #12 AC 1's capture, in the one-tap shape the
+ * owner ratified (2026-08-26, decision log): completion itself already stored
+ * the estimate as the honest default, so this control is the path for saying
+ * otherwise, prefilled with what is stored. Doing nothing IS the zero-tap
+ * path — there is no sheet to dismiss.
+ *
+ * Keyed by the stored value at the call site, so a change arriving from
+ * another device re-seeds the draft the same way `openEditor` re-seeds the
+ * editor — a stale draft saved over a fresher value is the exact write-back
+ * fault that comment describes.
+ */
+function ActualMinutesControl({ chore, busy, onRecordActual }) {
+  const stored = chore.actual_minutes ?? chore.expected_minutes
+  const [minutes, setMinutes] = useState(String(stored))
+  const [complaint, setComplaint] = useState(null)
+
+  return (
+    <form
+      className="chore__actual"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        // The refusal happens here, before any request — the same
+        // validate-with-a-sentence contract as the add and edit forms, calling
+        // the data layer's own normalizer rather than restating its rules.
+        let clean
+        try {
+          clean = normalizeActualMinutes(minutes)
+        } catch (err) {
+          setComplaint(err.message)
+          return
+        }
+        setComplaint(null)
+        onRecordActual(chore.id, clean).then(() => {}, () => {})
+      }}
+    >
+      <label className="chore__actual-field">
+        <span className="field__label">Took (minutes)</span>
+        <input
+          className="field__input"
+          type="number"
+          // Zero is legal here, unlike the estimate fields — "it was already
+          // done" is a real fact, and #47 pins that it contributes zero.
+          min={0}
+          max={MAX_EXPECTED_MINUTES}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          aria-label={`Minutes ${chore.title} actually took`}
+        />
+      </label>
+      <button className="button button--quiet" type="submit" disabled={busy}>
+        Save
+      </button>
+      {complaint ? (
+        <p className="error" role="alert">
+          {complaint}
+        </p>
+      ) : null}
+    </form>
+  )
+}
+
+ActualMinutesControl.propTypes = {
+  chore: PropTypes.object.isRequired,
+  busy: PropTypes.bool,
+  onRecordActual: PropTypes.func.isRequired,
+}
+
+/**
+ * Expected versus average-actual for a chore's family — #12 ACs 2 and 3.
+ *
+ * Rendered on repeat ANCHORS, which are the rows an estimate update targets.
+ * There is deliberately no detail screen for this to live on: the reimagined
+ * app has three inline surfaces and no chore detail, so the feedback sits on
+ * the row itself, beside the estimate it judges. One-offs need no separate
+ * grouping for the same reason — a completed one-off already shows its own
+ * "took N min" beside its estimate, which is AC 2's side-by-side for the
+ * family of one.
+ *
+ * "no data yet" is AC 3's literal sentence: a repeat with no completed
+ * instances shows those words, never an average fabricated from nothing.
+ */
+function ActualsFeedback({ chore, chores }) {
+  const summary = actualsSummary(chore, chores)
+  return (
+    <p className="chore__feedback" data-testid={`feedback-${chore.id}`}>
+      {summary === null
+        ? 'no data yet'
+        : `expected ${chore.expected_minutes} min · actually ~${Math.round(summary.averageMinutes)} min over ${summary.count} ${summary.count === 1 ? 'completion' : 'completions'}`}
+    </p>
+  )
+}
+
+ActualsFeedback.propTypes = {
+  chore: PropTypes.object.isRequired,
+  chores: PropTypes.array.isRequired,
+}
+
 function ChoreRow({
   chore,
+  chores,
   members,
   exclusions,
   busy,
@@ -268,6 +371,7 @@ function ChoreRow({
   onUnassign,
   onExclude,
   onAllow,
+  onRecordActual,
 }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(chore.title)
@@ -392,7 +496,39 @@ function ChoreRow({
               <span className="chore__repeat">{describeRepeat(chore)}</span>
             </>
           ) : null}
+          {/* #12 AC 2 — a completed chore says what it cost beside what it was
+              expected to cost. Null on rows completed before the column
+              existed; every completion since stores a value (seeded or
+              entered), so this renders on all new done work. */}
+          {!isOutstanding(chore) && chore.actual_minutes != null ? (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span className="chore__took">took {chore.actual_minutes} min</span>
+            </>
+          ) : null}
         </span>
+        {/* #12 ACs 2–4 — feedback and the estimate update live on the repeat
+            anchor, the row whose estimate the occurrences copy. */}
+        {describeRepeat(chore) ? <ActualsFeedback chore={chore} chores={chores} /> : null}
+        {describeRepeat(chore) && estimateSuggestion(chore, chores) != null ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            disabled={busy}
+            // Accepting is an ordinary estimate edit on the anchor, so the
+            // propagation is #54's ratified option (b) by construction:
+            // occurrences copy minutes at creation, so the new estimate
+            // reaches future occurrences and never moves committed work.
+            onClick={() =>
+              onSave(chore.id, { expectedMinutes: estimateSuggestion(chore, chores) }).then(
+                () => {},
+                () => {},
+              )
+            }
+          >
+            Update estimate to {estimateSuggestion(chore, chores)} min
+          </button>
+        ) : null}
         <AssigneeSelect
           chore={chore}
           members={members}
@@ -430,15 +566,23 @@ function ChoreRow({
             Done
           </button>
         ) : (
-          <button
-            className="button button--quiet"
-            type="button"
-            onClick={() => onUncomplete(chore.id).then(() => {}, () => {})}
-            disabled={busy}
-            aria-label={`Put ${chore.title} back on the list`}
-          >
-            Not done after all
-          </button>
+          <>
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => onUncomplete(chore.id).then(() => {}, () => {})}
+              disabled={busy}
+              aria-label={`Put ${chore.title} back on the list`}
+            >
+              Not done after all
+            </button>
+            <ActualMinutesControl
+              key={`actual-${chore.actual_minutes ?? 'unset'}`}
+              chore={chore}
+              busy={busy}
+              onRecordActual={onRecordActual}
+            />
+          </>
         )}
         <button
           className="button button--quiet"
@@ -490,6 +634,7 @@ function ChoreRow({
 
 ChoreRow.propTypes = {
   chore: PropTypes.object.isRequired,
+  chores: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
   exclusions: PropTypes.array.isRequired,
   busy: PropTypes.bool,
@@ -501,6 +646,7 @@ ChoreRow.propTypes = {
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,
   onAllow: PropTypes.func.isRequired,
+  onRecordActual: PropTypes.func.isRequired,
 }
 
 export default function Chores({
@@ -518,6 +664,7 @@ export default function Chores({
   onUnassign,
   onExclude,
   onAllow,
+  onRecordActual,
 }) {
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -554,6 +701,7 @@ export default function Chores({
               <ChoreRow
                 key={chore.id}
                 chore={chore}
+                chores={chores}
                 members={members}
                 exclusions={exclusions}
                 busy={busy}
@@ -565,6 +713,7 @@ export default function Chores({
                 onUnassign={onUnassign}
                 onExclude={onExclude}
                 onAllow={onAllow}
+                onRecordActual={onRecordActual}
               />
             ))}
           </ul>
@@ -603,6 +752,7 @@ export default function Chores({
               <ChoreRow
                 key={chore.id}
                 chore={chore}
+                chores={chores}
                 members={members}
                 exclusions={exclusions}
                 busy={busy}
@@ -614,6 +764,7 @@ export default function Chores({
                 onUnassign={onUnassign}
                 onExclude={onExclude}
                 onAllow={onAllow}
+                onRecordActual={onRecordActual}
               />
             ))}
           </ul>
@@ -769,4 +920,5 @@ Chores.propTypes = {
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,
   onAllow: PropTypes.func.isRequired,
+  onRecordActual: PropTypes.func.isRequired,
 }

@@ -433,15 +433,18 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
-      // Widened by 0004 (completion), 0006 (assignment) and 0012 (repeats),
-      // each making its columns READABLE; 0012 is also the first to widen the
-      // INSERT set, because a repeat is DECLARED where the chore is created.
-      // The update set below is unchanged across all four, which is the
-      // convention working: additive by column, and no later story revokes a
-      // shipped grant. `repeat_since`, the watermark and `generated_from` are
-      // absent from insert and update — the trigger and the catch-up pass are
-      // their only authors, and repeats.pglite.test.js proves the refusals.
+      // Widened by 0004 (completion), 0006 (assignment), 0012 (repeats) and
+      // 0015 (actuals, #12), each making its columns READABLE; 0012 is the
+      // first to widen the INSERT set, because a repeat is DECLARED where the
+      // chore is created, and 0015 the first to widen the UPDATE set since
+      // 0003 — an actual is adjustable after the fact, and actuals.pglite
+      // proves it stays out of INSERT. The convention holds: additive by
+      // column, and no later story revokes a shipped grant. `repeat_since`,
+      // the watermark and `generated_from` are absent from insert and update —
+      // the trigger and the catch-up pass are their only authors, and
+      // repeats.pglite.test.js proves the refusals.
       expect(await granted('SELECT')).toEqual([
+        'actual_minutes',
         'assigned_member_id',
         'completed_at',
         'completed_by_member_id',
@@ -463,7 +466,12 @@ describe('chores, run against a real Postgres', () => {
         'repeat_weekdays',
         'title',
       ])
-      expect(await granted('UPDATE')).toEqual(['due_on', 'expected_minutes', 'title'])
+      expect(await granted('UPDATE')).toEqual([
+        'actual_minutes',
+        'due_on',
+        'expected_minutes',
+        'title',
+      ])
     })
 
     it('every column a later story added arrived with its own write guard', async () => {

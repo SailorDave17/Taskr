@@ -7,7 +7,9 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0014` are applied to the live project**, `0001`–`0008` as of 2026-08-20 (#108),
+- Status: **`0001`–`0014` are applied to the live project; `0015` is in the repo and NOT yet
+  pasted** (#12, the actuals column — the one row in the expected-red set below). `0001`–`0008`
+  as of 2026-08-20 (#108),
   `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, and **`0013` and `0014` on 2026-08-26 (#150)**.
   `0013` (the inherited grants, #91) never appeared in the expected-red set below, because
   `check:live` is structurally blind to it — and its paste was **verified anyway**, by an instrument
@@ -102,10 +104,11 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` excuses NOTHING. *Measured 2026-08-26* at 24 of 24**, taken after the owner pasted
-  `0014` and `0013` that afternoon (#150). The two reds this bullet carried for the first half of
-  that day are in the table further down, beside the single action that cleared them. What follows
-  is the history, most recent first.
+- **`check:live` excuses ONE red — `chores` until `0015` is pasted (#12). *Measured 2026-08-26*
+  at 23 of 24** on the #12 branch, later the same day the set had drained: the afternoon's paste of
+  `0014` and `0013` (#150) read a *measured* 24 of 24, and #12 then re-opened the queue by asking
+  for a column the live project does not have yet. The earlier reds are in the table further down,
+  beside the single action that cleared each. What follows is the history, most recent first.
   ***Measured 2026-08-26*** against the live project, on the #159 branch before
   the paste: **22 of 24**, with `members` and `chores` each answering
   `42501 permission denied` because the client now asks for `household_id` and
@@ -124,8 +127,16 @@
   plain sight on 2026-08-09. With nothing excused, the instrument answers the only question worth
   asking in one bit.
 
-  **The excused-red set is EMPTY, and the queue drained on 2026-08-26.** Any red, on any subject,
-  is real.
+  **The excused-red set has ONE row, re-opened later on 2026-08-26 by #12.** *Measured* on the #12
+  branch before the paste: **23 of 24**, with `chores` answering
+  `42703 column chores.actual_minutes does not exist` because the client now asks for the actuals
+  column and `0015` has not been pasted. A `42703`, not a `42501` — an unknown column is refused
+  before the privilege check, so this red could not be faked by a grant alone. Any OTHER red, on
+  any subject, is real.
+
+  | Expected red | Cleared by | Notes |
+  |---|---|---|
+  | `chores` refuses `actual_minutes` (`42703`) | pasting `supabase/migrations/0015_actual_minutes.sql` | Not a deploy, not a promotion to `release`, not another migration. The paste also re-points `complete_chore` to seed the zero-tap default; same signature, so no function probe moves. |
 
   **The two rows that stood here between #159's merge and the paste are moved into history rather
   than left standing** — that is #162 AC 1's first half, discharged here rather than left for #162,
@@ -240,14 +251,15 @@
   sentence stays standing after the confirmations rather than being deleted by them.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted nine times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted ten times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
   at a measured 22 of 24** with #53's `0012` in the repo and unpasted, then **EMPTY again at a
   measured 24 of 24** with `0012` pasted the same evening, then **TWO again at a measured 22 of 24**
-  on 2026-08-26 when #159 merged with `0014` unpasted, and now **EMPTY at a measured 24 of 24**,
-  `0014` and `0013` both pasted that afternoon (#150). A THREE was once written here
+  on 2026-08-26 when #159 merged with `0014` unpasted, then **EMPTY at a measured 24 of 24**,
+  `0014` and `0013` both pasted that afternoon (#150), and now **ONE again at a measured 23 of 24**
+  later the same day, with #12's `0015` in the repo and unpasted. A THREE was once written here
   first, from arithmetic, and never actually existed: the paste that would have cleared its third
   entry had already happened. **A predicted state is not a state**, and the register a count is
   written in — measured or derived — belongs beside it.* The non-empty states are the instructive

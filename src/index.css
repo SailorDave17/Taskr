@@ -584,6 +584,38 @@ body {
   color: var(--ink-dim);
 }
 
+/* #12 — what a completed chore actually cost, beside what was expected. */
+.chore__took {
+  color: var(--ink-dim);
+}
+
+/* #12 — expected vs average-actual on a repeat anchor. Quiet like the repeat
+   line: feedback is information, never an alarm — red stays reserved for
+   work, and this is about work already done. */
+.chore__feedback {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #12 — the took-minutes adjuster on a done row: a field and a save, inline,
+   sized like the other row controls. */
+.chore__actual {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.chore__actual-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chore__actual-field .field__input {
+  width: 6rem;
+}
+
 .chore__exclusions {
   display: flex;
   flex-direction: column;

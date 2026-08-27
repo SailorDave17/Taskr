@@ -498,6 +498,33 @@ measurement story — `members` and `chores` both withhold `household_id` from t
 grant, and whether a PostgREST embed can filter without a grant change is unmeasured. Deciding it now
 would commit to a migration and an owner paste that may not be needed.
 
+## Decision taken 2026-08-26 — actuals: one-tap capture, and the estimate-update thresholds
+
+Owner decisions at the pickup of #12, whose AC 4 required both thresholds to be "named constants,
+recorded in the decision log as tunable defaults". This is that record.
+
+- **Capture stays ONE tap.** Marking a chore done is unchanged; `complete_chore` seeds
+  `actual_minutes = expected_minutes` when no actual is recorded yet, so doing nothing stores honest
+  data — the estimate stands as the best claim of what the work cost. The done row then carries an
+  editable "Took (minutes)" for saying otherwise. Rejected: a prefilled confirm sheet on every Done —
+  it matches AC 1's wording exactly and costs a second tap on every completion, which is the
+  input-burden this charter's bet exists to delete. Same data lands either way; only the ceremony
+  differed.
+- **`MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE = 3` and `ESTIMATE_DEVIATION_THRESHOLD = 0.25`**, both
+  inclusive, both in `src/lib/chores.js`, tunable defaults per the issue. The one-tap
+  "update estimate to N min" appears on a repeat anchor once its family has three completed
+  instances whose average actual is 25% or more away from the current estimate; N is the rounded
+  average. The boundary test in `chores.test.js` spells 3 and 25% literally and pins the constants
+  beside them, so tuning either reddens a test rather than silently moving every fixture.
+- **A zero actual is legal** (`chores_actual_minutes_range` is `0..1440` where the estimate's range
+  starts at 1). "It took no time — it was already done" is a real household fact, and
+  `allocation.test.js` (#47 criterion 7) already pinned that a recorded zero contributes zero.
+  Refusing it would make the app argue with the person reporting the most useful datum this story
+  collects.
+- **Propagation on an accepted update is #54's ratified option (b) by construction** — the update is
+  an ordinary estimate edit on the anchor, occurrences copy minutes at creation (0012), so the new
+  value reaches future occurrences and never rewrites work already on somebody's list.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

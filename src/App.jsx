@@ -24,6 +24,7 @@ import {
   completeChore,
   formatSkippedNotice,
   listChores,
+  recordActualMinutes,
   removeChore,
   unassignChore,
   uncompleteChore,
@@ -414,6 +415,12 @@ export default function App() {
   // work between weeks.
   const handleCompleteChore = useCallback((id) => mutate(() => completeChore(id)), [mutate])
   const handleUncompleteChore = useCallback((id) => mutate(() => uncompleteChore(id)), [mutate])
+  // #12 — adjusting an actual is a plain column-granted update, unlike the two
+  // above; completion already seeded the honest default, this says otherwise.
+  const handleRecordActual = useCallback(
+    (id, minutes) => mutate(() => recordActualMinutes(id, minutes)),
+    [mutate],
+  )
   // #36 — assignment goes through an RPC for ACCESS rather than the clock:
   // `assigned_member_id` is absent from the update grant, so this is the only
   // write path there is. Committed and remaining minutes are NOT fetched — they
@@ -640,6 +647,7 @@ export default function App() {
           onUnassign={handleUnassignChore}
           onExclude={handleExcludeMember}
           onAllow={handleAllowMember}
+          onRecordActual={handleRecordActual}
         />
       ) : null}
 

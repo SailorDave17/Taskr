@@ -80,6 +80,7 @@ const {
   catchUpRepeats,
   completeChore,
   listChores,
+  recordActualMinutes,
   removeChore,
   unassignChore,
   uncompleteChore,
@@ -259,6 +260,45 @@ describe('updateChore', () => {
     results.chores = { data: null, error: { message: 'permission denied for column household_id' } }
     await expect(updateChore('c1', { title: 'Dishes' })).rejects.toThrow(
       /saving the change: permission denied/i,
+    )
+  })
+})
+
+describe('recordActualMinutes — #12', () => {
+  it('writes only actual_minutes, normalized, to the row it names', async () => {
+    results.chores = { data: ROW, error: null }
+    await recordActualMinutes('c1', '35')
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ actual_minutes: 35 })
+    expect(opsOn('chores').find((c) => c.op === 'eq')).toMatchObject({ column: 'id', value: 'c1' })
+  })
+
+  it('never touches expected_minutes — the two fields cannot overwrite one another here', async () => {
+    results.chores = { data: ROW, error: null }
+    await recordActualMinutes('c1', 35)
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(Object.keys(update.patch)).toEqual(['actual_minutes'])
+  })
+
+  it('refuses a bad value before any request', async () => {
+    await expect(recordActualMinutes('c1', -5)).rejects.toThrow(/negative/i)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('accepts zero — "it was already done" is a value, not an error', async () => {
+    results.chores = { data: ROW, error: null }
+    await recordActualMinutes('c1', 0)
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ actual_minutes: 0 })
+  })
+
+  it('throws with what we were doing when the update is refused', async () => {
+    results.chores = { data: null, error: { message: 'permission denied for table chores' } }
+    await expect(recordActualMinutes('c1', 35)).rejects.toThrow(
+      /recording how long it took: permission denied/i,
     )
   })
 })

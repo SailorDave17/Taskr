@@ -60,6 +60,7 @@ function setup(overrides = {}) {
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Chores
@@ -88,6 +89,7 @@ function setupRerenderable() {
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
   const props = { members, capacities, exclusions: [], ...handlers }
   const view = render(<Chores chores={chores} {...props} />)
@@ -904,5 +906,131 @@ describe('#53 — the repeat is set where the chore is created', () => {
     // chore on the screen.
     const occurrence = screen.getByText('Placeholder Other Chore').closest('li')
     expect(occurrence).not.toHaveTextContent(/repeats/i)
+  })
+})
+
+describe('#12 — expected-vs-actual capture and feedback', () => {
+  // An anchor due back this week with three finished occurrences behind it.
+  // Literal values: expected 20, actuals averaging exactly 25 — the 25%
+  // boundary — so the offer below is asserted AT the threshold, not past it.
+  const anchor = {
+    id: 'r1',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 20,
+    due_on: '2026-08-24',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'daily',
+  }
+  const occurrence = (id, actual) => ({
+    id,
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 20,
+    due_on: '2026-08-17',
+    completed_at: '2026-08-17T10:00:00Z',
+    completed_by_member_id: 'm1',
+    generated_from: 'r1',
+    actual_minutes: actual,
+  })
+  const doneOneOff = {
+    id: 'c7',
+    household_id: 'h1',
+    title: 'Placeholder Done Chore',
+    expected_minutes: 30,
+    due_on: '2026-08-12',
+    completed_at: '2026-08-12T10:00:00Z',
+    completed_by_member_id: 'm1',
+    actual_minutes: 45,
+  }
+
+  it('AC 2 — a completed chore says what it took beside what was expected', () => {
+    setup({ chores: [doneOneOff] })
+    const row = screen.getByText('Placeholder Done Chore').closest('li')
+    expect(row).toHaveTextContent('30 min')
+    expect(row).toHaveTextContent('took 45 min')
+  })
+
+  it('AC 2 — the anchor shows expected versus average-actual, side by side', () => {
+    setup({ chores: [anchor, occurrence('o1', 24), occurrence('o2', 32)] })
+    // (24 + 32) / 2 = 28.
+    expect(screen.getByTestId('feedback-r1')).toHaveTextContent(
+      'expected 20 min · actually ~28 min over 2 completions',
+    )
+  })
+
+  it('AC 3 — a repeat with no completed instances says "no data yet", never an average', () => {
+    setup({ chores: [anchor] })
+    expect(screen.getByTestId('feedback-r1')).toHaveTextContent('no data yet')
+    expect(screen.getByTestId('feedback-r1')).not.toHaveTextContent(/actually/)
+  })
+
+  it('AC 1 — the done row offers the stored actual, prefilled', () => {
+    setup({ chores: [doneOneOff] })
+    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
+    expect(input).toHaveValue(45)
+  })
+
+  it('AC 1 — a row completed before the column existed prefills with the estimate', () => {
+    setup({ chores: [{ ...doneOneOff, actual_minutes: null }] })
+    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
+    expect(input).toHaveValue(30)
+  })
+
+  it('AC 1 — saving an adjusted actual calls the handler with the normalized value', async () => {
+    const handlers = setup({ chores: [doneOneOff] })
+    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
+    fireEvent.change(input, { target: { value: '50' } })
+    const row = screen.getByText('Placeholder Done Chore').closest('li')
+    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
+    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 50)
+  })
+
+  it('AC 1 — a bad actual is refused with a sentence before any request', async () => {
+    const handlers = setup({ chores: [doneOneOff] })
+    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
+    fireEvent.change(input, { target: { value: '-5' } })
+    const row = screen.getByText('Placeholder Done Chore').closest('li')
+    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/negative/i)
+    expect(handlers.onRecordActual).not.toHaveBeenCalled()
+  })
+
+  it('AC 1 — zero is a legal actual: "it was already done" saves rather than argues', async () => {
+    const handlers = setup({ chores: [doneOneOff] })
+    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
+    fireEvent.change(input, { target: { value: '0' } })
+    const row = screen.getByText('Placeholder Done Chore').closest('li')
+    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
+    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 0)
+  })
+
+  it('an outstanding chore offers no actual control — there is nothing to have taken time yet', () => {
+    setup({ chores: [anchor] })
+    expect(screen.queryByLabelText(/actually took/)).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — at exactly 3 completions and exactly 25%, the one-tap update is offered and applies', async () => {
+    const handlers = setup({
+      chores: [anchor, occurrence('o1', 25), occurrence('o2', 25), occurrence('o3', 25)],
+    })
+    const button = screen.getByRole('button', { name: /update estimate to 25 min/i })
+    await clickAndSettle(button)
+    // The anchor's ordinary estimate edit: occurrences copy minutes at
+    // creation (0012), so this reaches future occurrences only — #54's
+    // ratified propagation option (b) by construction.
+    expect(handlers.onSave).toHaveBeenCalledWith('r1', { expectedMinutes: 25 })
+  })
+
+  it('AC 4 — below either threshold, no update is offered', () => {
+    // Two completions at a huge deviation, then three at a small one.
+    setup({ chores: [anchor, occurrence('o1', 120), occurrence('o2', 120)] })
+    expect(screen.queryByRole('button', { name: /update estimate/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — three completions inside 25% offer nothing either', () => {
+    setup({ chores: [anchor, occurrence('o1', 24), occurrence('o2', 24), occurrence('o3', 24)] })
+    expect(screen.queryByRole('button', { name: /update estimate/i })).not.toBeInTheDocument()
   })
 })

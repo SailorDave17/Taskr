@@ -101,6 +101,7 @@ export const MIGRATIONS = [
   '0012_repeating_chores.sql',
   '0013_grants_the_platform_no_longer_infers.sql',
   '0014_scope_reads_to_one_household.sql',
+  '0015_actual_minutes.sql',
 ]
 
 export function migrationSql(name) {

@@ -38,6 +38,11 @@ const choresApi = {
   // (importActual below): it is pure, has its own tests, and the notice a
   // person reads should be the sentence the app actually words, not a stub's.
   catchUpRepeats: vi.fn(),
+  // #12 — adjusting an actual. The derivations (actualsSummary,
+  // estimateSuggestion, normalizeActualMinutes) stay real for the standing
+  // reason: pure, own tests, and a stub could disagree with the boundary the
+  // suggestion sits on.
+  recordActualMinutes: vi.fn(),
 }
 
 // #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
@@ -166,6 +171,7 @@ beforeEach(() => {
   choresApi.addChore.mockResolvedValue(undefined)
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
+  choresApi.recordActualMinutes.mockResolvedValue(undefined)
   // A session by default, because most tests are about a signed-in person. The
   // signed-OUT case is now a first-class state rather than a failure, and it has
   // its own describe below.
@@ -1449,6 +1455,60 @@ describe('#53 — the boot-time catch-up pass', () => {
     await screen.findByRole('region', { name: /the split/i })
     expect(screen.getAllByRole('alert').map((el) => el.textContent).join(' ')).toMatch(
       /catching up repeats/i,
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #12 — the actual-minutes write and its re-read. At the App level for the
+// standing reason: the wiring from the done row's control to the data layer,
+// and the mutate() re-read after it, are both invisible to Chores.test.jsx —
+// its handlers are spies, so handing the control the WRONG handler (say,
+// onComplete) would leave every component test green.
+// ---------------------------------------------------------------------------
+
+describe('#12 — adjusting how long a chore took', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const doneChore = {
+    id: 'c1',
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+    completed_at: '2026-08-10T15:00:00Z',
+    completed_by_member_id: 'm1',
+    actual_minutes: 20,
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([doneChore])
+  })
+
+  it('saves the adjusted value through the data layer, then re-reads from the server', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    fireEvent.change(screen.getByLabelText('Minutes Placeholder Chore actually took'), {
+      target: { value: '35' },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+    // The argument, not merely the call: a handler wired to the wrong id or a
+    // string value would round-trip green through a bare toHaveBeenCalled.
+    expect(choresApi.recordActualMinutes).toHaveBeenCalledWith('c1', 35)
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(choresApi.recordActualMinutes.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
     )
   })
 })

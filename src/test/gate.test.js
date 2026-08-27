@@ -961,6 +961,9 @@ describe('#19 — no real household name reaches version control', () => {
     // can look at.
     'Placeholder Third Chore': 'a chore title',
     'Placeholder Fourth Chore': 'a chore title',
+    // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
+    'Placeholder Repeat': 'a chore title',
+    'Placeholder Done Chore': 'a chore title',
     Taskr: 'the application name',
     // #47 — the three tab labels. They are literals in App.test.jsx because
     // the tests click the real control by its accessible name, which is the

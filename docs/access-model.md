@@ -8,7 +8,8 @@
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
 - Status: **`0001`–`0014` are applied to the live project; `0015` is in the repo and NOT yet
-  pasted** (#12, the actuals column — the one row in the expected-red set below). `0001`–`0008`
+  pasted** (the actuals column; **#194** is the open issue that clears it, and #12, which added
+  the column, is CLOSED — the one row in the expected-red set below). `0001`–`0008`
   as of 2026-08-20 (#108),
   `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, and **`0013` and `0014` on 2026-08-26 (#150)**.
   `0013` (the inherited grants, #91) never appeared in the expected-red set below, because
@@ -104,10 +105,18 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` excuses ONE red — `chores` until `0015` is pasted (#12). *Measured 2026-08-26*
+- **`check:live` excuses ONE red — `chores` until `0015` is pasted (#194). *Measured 2026-08-26*
   at 23 of 24** on the #12 branch, later the same day the set had drained: the afternoon's paste of
   `0014` and `0013` (#150) read a *measured* 24 of 24, and #12 then re-opened the queue by asking
-  for a column the live project does not have yet. The earlier reds are in the table further down,
+  for a column the live project does not have yet.
+  *The clearing action above was cited as `(#12)` until 2026-08-26, and #12 closed COMPLETED that
+  day once PR #195 merged — so the citation pointed at a finished story while the paste was still
+  owed. An auditor asking whether this red is still legitimately excused follows the number, finds
+  a story marked done, and concludes the paste happened. **A row whose clearing condition is an
+  action by a person must cite an OPEN issue**, and the issue that introduced the column is not
+  that issue: what #12 did is history and stays true, what #194 owes is a live obligation. The
+  other references to #12 on this page are the historical kind and are left alone.*
+  The earlier reds are in the table further down,
   beside the single action that cleared each. What follows is the history, most recent first.
   ***Measured 2026-08-26*** against the live project, on the #159 branch before
   the paste: **22 of 24**, with `members` and `chores` each answering

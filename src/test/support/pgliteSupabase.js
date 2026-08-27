@@ -103,6 +103,7 @@ export const MIGRATIONS = [
   '0014_scope_reads_to_one_household.sql',
   '0015_actual_minutes.sql',
   '0016_organizer_only_removal.sql',
+  '0017_anon_holds_nothing_in_public.sql',
 ]
 
 export function migrationSql(name) {

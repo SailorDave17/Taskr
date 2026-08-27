@@ -209,7 +209,8 @@
   with the sign flipped. They arrive in the same paste as the table, so a project with the table has
   run the whole file.
 
-  **`0009`, `0013` and `0016` are the three migrations this bullet cannot speak for at all**, and it
+  **`0009`, `0013`, `0016` and `0017` are the four migrations this bullet cannot speak for at
+  all**, and it
   is worth
   stating here rather than only four bullets up, because an empty excused-red set is easy to read as
   *the database matches the repo* and it does not mean that. The check covers tables, columns, RPCs
@@ -305,11 +306,68 @@
     the habit is what matters, and asking the database what it currently holds answers the question
     for every migration rather than for the safe ones.
 
+  - **`0017`** (#186) is a fourth, and it is blind for a fourth distinct reason — not a missing probe
+    (`0009`), not a privilege the role already holds (`0013`), not a subject the check does not read
+    (`0016`), but **a ROLE it never asks about**. `check:live` signs in as `authenticated` and asks
+    the questions the client asks. `0017` revokes what `anon` holds, and `anon` is the role an
+    unauthenticated browser gets — one the app never uses, because `src/App.jsx` skips its reads
+    entirely when there is no session. No reading of this check differs across that paste, in either
+    direction.
+
+    What `0017` removes, *measured 2026-08-27* over `pg_class.relacl` and `pg_attribute.attacl` for
+    **every relation in `public`** — seven tables, 51 columns:
+
+    | Catalog | Before | After | Why |
+    |---|---|---|---|
+    | `pg_class.relacl` on `households` | `anon=ardDxtm` | no `anon` entry | INSERT, SELECT and DELETE that **no migration granted**. `0002`-era platform default, surviving `0005`'s narrow `revoke update`. |
+    | `pg_class.relacl` on `members` | `anon=dDxtm` | no `anon` entry | DELETE, same way: `0002` and `0007` each revoke `select, insert, update` and let the rest ride. |
+    | `pg_proc.proacl` on `complete_chore(uuid)`, `uncomplete_chore(uuid)` | `=X` and `anon=X` | neither | `0004` revoked `execute` from `public, anon` for `acting_member` and not for these two, three lines below. |
+    | `pg_class.relacl` on the other five tables | no `anon` entry | unchanged | `chores` because `0003` revoked ALL; the other four because they were created after the platform tightened its defaults. |
+    | `pg_attribute.attacl`, all 51 columns | no `anon` entry anywhere | unchanged | `anon` has never held a column-level grant on this project. |
+
+    **The function row is the one that would have mattered.** A `security definer` function runs as
+    its owner, so RLS has no say in it — the sentence below about every policy being
+    `to authenticated` does not cover it. What refuses an unauthenticated caller is the first
+    statement of each body, `if (select auth.uid()) is null then raise`, and the publishable key is a
+    JWT with `role: anon` and no `sub`. So the verdict is still defence in depth rather than an
+    incident, reached by a different mechanism: one line in a function body, standing where the whole
+    policy layer stands everywhere else.
+
+    Everything else here is held by RLS and held completely. Every policy in `public` is
+    `to authenticated`; `households` has no INSERT or DELETE policy at all, for any role; nothing
+    carries a `to anon` policy. A role with a table privilege and no permissive policy for that
+    command is refused every row.
+
+    **The instrument that confirms this paste is `npm run probe:live-grants`**, extended by #186 to
+    read every relation in `public` rather than the tables `LIVE_SCHEMA` names. It asks two things
+    and the second is the one worth having:
+
+    - `anon` holds nothing — no table-level entry, no column-level entry, and no function in `public`
+      it may execute, PUBLIC grants included. Stated as a rule rather than a list, so an eighth table
+      is audited the day it lands.
+    - **`authenticated` is exactly where it was**, on all seven tables. That is the control:
+      `revoke all on public.households from anon` is one word from `... from authenticated`, and a
+      revoke that hit the wrong role leaves the first assertion looking precisely like success. The
+      probe refuses on a moved control row and says which failure it is.
+
+    One exemption, named rather than filtered: `rls_auto_enable()` keeps `anon=X` and PUBLIC `=X`. It
+    returns `event_trigger`, appears in no file under `supabase/migrations/`, and is Supabase's
+    furniture rather than ours — a migration that revokes a platform grant is one that fights the
+    platform at its next upgrade. The probe reports an exemption that matched nothing, so it cannot
+    quietly become a claim about a function that no longer exists.
+
+    **This file called `0013`'s paste "a no-op on the live project" and #186's own AC 4 calls this one
+    "a no-op on any project built from these files". Both are true of BEHAVIOUR and neither is true
+    of the catalog** — on a rebuilt project `anon` starts at the modern `Dxtm` and the two revokes
+    strip it. Stated precisely here because the loose version of exactly this sentence is what
+    produced "unobservable by design", which had to be withdrawn on 2026-08-26.
+
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013` and `0016` the gap is three migrations wide rather than one.
-  All three are now
+  ones it does not — and with `0013`, `0016` and `0017` the gap is four migrations wide rather than
+  one. Three of the four are
   confirmed, and none by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
-  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). **A gap covered
+  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). `0017` is the fourth and is confirmed
+  by `npm run probe:live-grants` once it is pasted. **A gap covered
   somewhere else is still a gap here**, which is why this
   sentence stays standing after the confirmations rather than being deleted by them.
 

@@ -7,11 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0014` are applied to the live project; `0015` is in the repo and NOT yet
-  pasted** (the actuals column; **#194** is the open issue that clears it, and #12, which added
-  the column, is CLOSED — the one row in the expected-red set below). `0001`–`0008`
+- Status: **`0001`–`0015` are ALL applied to the live project, and the expected-red set is
+  EMPTY** — *measured 2026-08-26 at 24 of 24*. `0001`–`0008`
   as of 2026-08-20 (#108),
-  `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, and **`0013` and `0014` on 2026-08-26 (#150)**.
+  `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, **`0013` and `0014` on 2026-08-26 (#150)**,
+  and **`0015` on 2026-08-26 (#194)**.
   `0013` (the inherited grants, #91) never appeared in the expected-red set below, because
   `check:live` is structurally blind to it — and its paste was **verified anyway**, by an instrument
   that check does not have. See the *two* migrations that bullet cannot speak for, which since
@@ -105,19 +105,23 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **`check:live` excuses ONE red — `chores` until `0015` is pasted (#194). *Measured 2026-08-26*
-  at 23 of 24** on the #12 branch, later the same day the set had drained: the afternoon's paste of
-  `0014` and `0013` (#150) read a *measured* 24 of 24, and #12 then re-opened the queue by asking
-  for a column the live project does not have yet.
-  *The clearing action above was cited as `(#12)` until 2026-08-26, and #12 closed COMPLETED that
-  day once PR #195 merged — so the citation pointed at a finished story while the paste was still
-  owed. An auditor asking whether this red is still legitimately excused follows the number, finds
-  a story marked done, and concludes the paste happened. **A row whose clearing condition is an
-  action by a person must cite an OPEN issue**, and the issue that introduced the column is not
-  that issue: what #12 did is history and stays true, what #194 owes is a live obligation. The
-  other references to #12 on this page are the historical kind and are left alone.*
-  The earlier reds are in the table further down,
+- **The excused-red set is EMPTY, so ANY red is real.** *Measured 2026-08-26 at 24 of 24*, after
+  `0015` was pasted (#194). It held one row for most of that day — `chores` until `0015` arrived,
+  re-opened by #12 asking for a column the live project did not have yet — and the row was
+  DELETED when the paste landed rather than re-pointed at something else, because an empty set is
+  the whole source of the check's authority. A row that outlives its action reads exactly like one
+  that never drained. The earlier reds are in the table further down,
   beside the single action that cleared each. What follows is the history, most recent first.
+
+  *Two rules this page paid for on 2026-08-26, kept here because the NEXT excused row will need
+  them. **A row whose clearing condition is an action by a person must cite an OPEN issue.** That
+  row cited `(#12)` until PR #200; #12 had closed COMPLETED hours earlier when PR #195 merged, so
+  the citation named a finished story while the paste was still owed — and an auditor following it
+  would have concluded the paste had happened. The issue that INTRODUCED a column is not the issue
+  that owes its paste. **And the row is cleared by the instrument, never by a report.** The paste
+  was stated as done once while `check:live` still read 23 of 24 on three probes two minutes
+  apart; the real paste followed, and the same command read 24 of 24. Both readings were correct
+  and only the second licensed this edit.*
   ***Measured 2026-08-26*** against the live project, on the #159 branch before
   the paste: **22 of 24**, with `members` and `chores` each answering
   `42501 permission denied` because the client now asks for `household_id` and
@@ -136,16 +140,23 @@
   plain sight on 2026-08-09. With nothing excused, the instrument answers the only question worth
   asking in one bit.
 
-  **The excused-red set has ONE row, re-opened later on 2026-08-26 by #12.** *Measured* on the #12
-  branch before the paste: **23 of 24**, with `chores` answering
-  `42703 column chores.actual_minutes does not exist` because the client now asks for the actuals
-  column and `0015` has not been pasted. A `42703`, not a `42501` — an unknown column is refused
-  before the privilege check, so this red could not be faked by a grant alone. Any OTHER red, on
-  any subject, is real.
+  **The excused-red set is EMPTY. *Measured 2026-08-26 at 24 of 24*, after `0015` was pasted
+  (#194).** It held one row for most of that day, re-opened by #12: `chores` answering
+  `42703 column chores.actual_minutes does not exist`, because the client had started asking for
+  the actuals column while `0015` sat unpasted. A `42703`, not a `42501` — an unknown column is
+  refused before the privilege check, so that red could not have been faked by a grant alone. With
+  nothing excused, ANY red, on any subject, is real.
 
   | Expected red | Cleared by | Notes |
   |---|---|---|
-  | `chores` refuses `actual_minutes` (`42703`) | pasting `supabase/migrations/0015_actual_minutes.sql` | Not a deploy, not a promotion to `release`, not another migration. The paste also re-points `complete_chore` to seed the zero-tap default; same signature, so no function probe moves. |
+  | *(none)* | — | The set is empty. Adding a row is a claim that has to name the single action that clears it. |
+
+  **The row that stood here between #12's merge and the `0015` paste is moved into history rather
+  than left standing**, on the same reasoning as the two below it:
+
+  | Red that stood here | Cleared by | Held? |
+  |---|---|---|
+  | `chores` refuses `actual_minutes` (`42703`) | pasting `supabase/migrations/0015_actual_minutes.sql` (#194) | Yes. Not a deploy, not a promotion to `release`, not another migration. The paste also re-points `complete_chore` to seed the zero-tap default; same signature, so no function probe moved — the column was the only observable. |
 
   **The two rows that stood here between #159's merge and the paste are moved into history rather
   than left standing** — that is #162 AC 1's first half, discharged here rather than left for #162,
@@ -260,15 +271,16 @@
   sentence stays standing after the confirmations rather than being deleted by them.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted ten times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted eleven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
   at a measured 22 of 24** with #53's `0012` in the repo and unpasted, then **EMPTY again at a
   measured 24 of 24** with `0012` pasted the same evening, then **TWO again at a measured 22 of 24**
   on 2026-08-26 when #159 merged with `0014` unpasted, then **EMPTY at a measured 24 of 24**,
-  `0014` and `0013` both pasted that afternoon (#150), and now **ONE again at a measured 23 of 24**
-  later the same day, with #12's `0015` in the repo and unpasted. A THREE was once written here
+  `0014` and `0013` both pasted that afternoon (#150), then **ONE again at a measured 23 of 24**
+  later the same day with #12's `0015` in the repo and unpasted, and now **EMPTY at a measured
+  24 of 24** with `0015` pasted that evening (#194). A THREE was once written here
   first, from arithmetic, and never actually existed: the paste that would have cleared its third
   entry had already happened. **A predicted state is not a state**, and the register a count is
   written in — measured or derived — belongs beside it.* The non-empty states are the instructive

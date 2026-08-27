@@ -84,11 +84,13 @@ so pasting `0011` did not and could not clear it. That red survived the `0011` p
 measured **22 of 24** with two expected reds — and ***`0012` was pasted that same evening***, so the
 run read a *measured* **24 of 24** with the set empty again. Both reds cleared on
 exactly the action they named and on nothing else. The set has inverted twice more since: #159/#150
-(2026-08-26, two reds until `0014` was pasted the same afternoon), and **#12 later that day, which
-is where it stands — ONE expected red, `chores` refusing `actual_minutes` until `0015` is pasted,
-*measured* at 23 of 24. Any OTHER red, on any subject, is real.**
+(2026-08-26, two reds until `0014` was pasted the same afternoon), and #12 later that day, which
+opened ONE expected red — `chores` refusing `actual_minutes` — cleared when `0015` was pasted
+(#194) that evening. **Where it stands: the excused-red set is EMPTY, *measured* at 24 of 24, so
+ANY red, on any subject, is real.**
 
-[`docs/access-model.md`](docs/access-model.md) carries the excused-red table — one row, `0015` — and
+[`docs/access-model.md`](docs/access-model.md) carries the excused-red table — empty as of the
+`0015` paste — and
 the history of the ten times that set has been inverted, which is the
 record worth keeping: an empty set is the state in which the check is worth the most, and every
 entry added to it is a claim that has to be cleared by a named action.

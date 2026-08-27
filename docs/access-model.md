@@ -386,13 +386,24 @@
     produced "unobservable by design", which had to be withdrawn on 2026-08-26.
 
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013`, `0016` and `0017` the gap is four migrations wide rather than
-  one. Three of the four are
+  ones it does not — and with `0013`, `0016`, `0017` and now `0019` the gap is **five** migrations
+  wide rather than one. Four of the five are
   confirmed, and none by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
   ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). `0017` is the fourth and is confirmed
   by `npm run probe:live-grants` once it is pasted. **A gap covered
   somewhere else is still a gap here**, which is why this
   sentence stays standing after the confirmations rather than being deleted by them.
+
+  `0019` (#227) is the fifth, and it is worth saying WHY it is not an excused row four screens up,
+  because a reader who has just read that migration will look for one. It revokes the table-level
+  privileges `authenticated` holds on `households`, `members` and `chores` that no migration
+  granted, and re-grants the `households` column reads in the same file. `check:live` asks what the
+  client can read; the client reads the same columns either side of the paste, so the check reads
+  **25 of 25 before and after** and the excused-red set stays genuinely EMPTY. The instrument that
+  *can* see it is `npm run probe:live-grants`, whose `MEASURED_TABLE_ACLS` was moved to the
+  post-paste values in the same change — so **that** command reports exactly three moved control
+  rows until the paste, and its own output names all three and the single action that clears them.
+  Confirming the paste is **#235**.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
   been inverted thirteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the

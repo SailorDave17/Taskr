@@ -352,10 +352,18 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
-  Object.freeze({ table: 'chores', authenticated: 'dDxtm' }),
-  Object.freeze({ table: 'households', authenticated: 'ardDxtm' }),
+  // The three below moved with `0019` (#227). Until it is pasted this probe
+  // DISAGREES with the live project on exactly these rows, and that
+  // disagreement is the excused red `docs/access-model.md` records — one
+  // action clears all three and nothing else can.
+  //
+  // *Measured 2026-08-27, before the paste*: chores `dDxtm`, households
+  // `ardDxtm`, members `dDxtm`. Those readings are kept here rather than
+  // deleted, because a measurement with no successor reads as one nobody took.
+  Object.freeze({ table: 'chores', authenticated: 'd' }),
+  Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
-  Object.freeze({ table: 'members', authenticated: 'dDxtm' }),
+  Object.freeze({ table: 'members', authenticated: 'd' }),
 ])
 
 /**
@@ -593,13 +601,20 @@ async function main(env) {
     refuse(
       `anon reaches ${strays.length + fns.unexpected.length} thing(s) in public, and ` +
         `${controlsMoved.length} control row(s) moved.\n\n` +
-        'Before `0017` is pasted this is the EXPECTED reading, and the two strays are\n' +
-        '`households` and `members` — that red is the entry doing its job, exactly as\n' +
-        '`LIVE_SCHEMA` carries a table whose migration has not been pasted yet.\n\n' +
-        'After the paste it is a real finding: either a privilege arrived from\n' +
-        'somewhere, or a revoke hit `authenticated` instead of `anon`. A moved CONTROL\n' +
-        'row is the second of those and is the more serious — it means the paste took\n' +
-        'a privilege the app needs.',
+        'READ WHICH HALF MOVED before reading this as a fault — the two mean\n' +
+        'opposite things and only one of them is bad news.\n\n' +
+        'STRAYS are `anon` reaching something. Before `0017` was pasted that was the\n' +
+        'expected reading, with `households` and `members` the two entries; it has\n' +
+        'been pasted, so a stray now is a real finding.\n\n' +
+        'MOVED CONTROL ROWS are `authenticated` sitting somewhere other than the\n' +
+        'recorded value. Until `0019` (#227) is pasted, EXACTLY THREE are expected —\n' +
+        '`households` reading `ardDxtm` against no table-level grant, and `chores`\n' +
+        'and `members` reading `dDxtm` against `d`. That is the entry doing its job,\n' +
+        'the same way `LIVE_SCHEMA` carries a table whose migration is not pasted\n' +
+        'yet, and one paste clears all three.\n\n' +
+        'A moved row that is NOT one of those three, or any moved row after `0019`\n' +
+        'is applied, is the serious case: a revoke hit `authenticated` when it was\n' +
+        'aimed at `anon`, which means the paste took a privilege the app needs.',
     )
   }
 

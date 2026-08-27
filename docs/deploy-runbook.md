@@ -459,7 +459,11 @@ in [#142](https://github.com/SailorDave17/Taskr/issues/142)).
 
 ### Pasting a migration, and reading the catalog back — the two routes (#150)
 
-**Route A, the browser, and it is the one in use.** With the owner signed in to the Supabase
+**Both routes are built, and neither replaces the other.** The condition that picks between them is
+whether a person is present, not which is newer — so read the two headings as a question about the
+run you are in, and see the table at the foot of this section.
+
+**Route A, the browser — for an attended session.** With the owner signed in to the Supabase
 dashboard in the automated browser, a session can open the SQL editor, set the editor's contents and
 run them. *Measured 2026-08-26 (#150)*: `window.monaco.editor.getEditors()[0].setValue(sql)` then
 `Ctrl+Enter`, results read out of the page.
@@ -476,13 +480,64 @@ Two things it is good for, and one it is not:
   carriage returns is exactly the 6881 the editor held, all 8 non-ASCII characters intact; `0014`
   likewise at 7846. A clipboard can re-encode a file on this machine, so this is not ceremony.
 - **It is no use unattended.** It needs a live signed-in dashboard session in that browser, so it
-  serves an attended session and no cron, CI job or headless run.
+  serves an attended session and no cron, CI job or headless run. That is what Route B is for.
 
-**Route B, a Supabase personal access token against the Management API, is NOT built.** It would
-make the paste and the catalog probe ordinary commands, runnable with nobody watching. It is filed
-as **#185**, and it is filed rather than done because a PAT is a long-lived credential with
-authority over every project in the account, which is a class of secret this repo does not hold
-today. Read that issue before minting one.
+**Route B, a Supabase personal access token against the Management API — for an unattended run.**
+Built by **#185**. It makes the paste and the catalog probe ordinary commands:
+
+```
+npm run migrate:live supabase/migrations/0017_something.sql
+npm run migrate:live supabase/migrations/0017_something.sql -- --dry-run
+npm run probe:live-grants
+```
+
+Both need `SUPABASE_ACCESS_TOKEN` and **refuse by name without it**, never falling back to the anon
+key sitting in the same file. `--dry-run` needs no credential at all: it prints the project it
+derived, the statement count and the file's digest, and sends nothing — which is the cheap way to
+see what a command would do before deciding to hold a token.
+
+What each is good for:
+
+- **`migrate:live` proves the payload arrived, from the far end.** Route A's character-count check
+  is the one thing about it that cannot be delegated to a person reliably, because it is the step
+  that is easy to skip when the paste *looks* fine. This one asks Postgres for the length, byte
+  count and md5 of what it received, compares them against the file on disk, and **applies nothing
+  if they disagree**. A file compared against itself would prove nothing at all.
+- **`probe:live-grants` reads the catalog that `check:live` cannot reach**, reconciles it against
+  what #150 measured on 2026-08-26, and exits non-zero on a difference. It carries a negative
+  control — `chores.repeat_since`, which `0012` grants to nobody — because a probe reporting grants
+  everywhere cannot report an absence.
+- **It runs with nobody watching**, which is the whole reason it exists: a cron job, a CI step, or a
+  session with no browser.
+
+**The cost, which is why this was a separate decision and not a widening of #150.** A personal
+access token authenticates as the ACCOUNT, not as a project. It has full authority over every
+project in the account and can create, pause and delete them — there is no row-level security in
+front of it and no policy that limits it. It is the only credential of that class this repo has ever
+needed.
+
+So: **it is never committed.** `.gitignore` keeps `.env.local` out of git, and `src/test/gate.test.js`
+scans every file in the repo — tracked and untracked — for a token-shaped literal and fails the
+build on one. **Revoke it** at <https://supabase.com/dashboard/account/tokens>, which is immediate
+and free: do so the moment a one-off use is finished, or at once if it has been pasted anywhere that
+is not `.env.local`, or if you are simply unsure. Minting another takes ten seconds. `.env.example`
+carries the same instructions beside the variable.
+
+**Which route to use**
+
+| | Route A — browser | Route B — token |
+|---|---|---|
+| Needs | a signed-in dashboard session | `SUPABASE_ACCESS_TOKEN` |
+| Runs unattended | no | yes |
+| Credential | the owner's live session | account-wide, long-lived |
+| Payload checked | by hand, character counts | automatically, before applying |
+| Arbitrary SQL | yes — it is an editor | no, by construction |
+
+Route A can run any statement, which makes it the one to reach for when the task is genuinely
+exploratory. Route B deliberately cannot: it applies a named file from `supabase/migrations/` or
+reads the catalog, and nothing else. That narrowness is the point rather than an unfinished edge —
+the general command is exactly what a token of this authority makes easy and what #185 argued
+against building.
 
 **What is still the owner's either way: deciding to paste.** Neither route changes that a migration
 reaching the live project is a deliberate act with a sequence — apply, then promote.

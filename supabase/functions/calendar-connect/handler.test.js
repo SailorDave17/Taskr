@@ -40,9 +40,49 @@ const MEMBER = {
   display_name: 'Placeholder One',
   claimed_by: 'auth-1',
   email: 'placeholder.one@example.test',
+  household_id: 'household-1',
+}
+
+/**
+ * The SAME person's roster entry in a SECOND household - #161.
+ *
+ * One `claimed_by`, two member ids, two household ids. That is not an exotic
+ * shape: 0009 made membership per-household and #62 keyed it to `claimed_by`,
+ * so it is what a person in two households looks like.
+ */
+const MEMBER_IN_B = {
+  id: 'member-2',
+  display_name: 'Placeholder One',
+  claimed_by: 'auth-1',
+  email: 'placeholder.one@example.test',
+  household_id: 'household-2',
 }
 
 const PIN_MEMBER = { ...MEMBER, email: null }
+
+/**
+ * What postgrest-js manufactures when `maybeSingle()` matches more than one row.
+ *
+ * Copied from the shape it really produces rather than invented, because the
+ * whole point of asserting a refusal is that the refusal is the platform's and
+ * not this file's. *Measured 2026-08-26* two ways that agree: read out of
+ * `@supabase/postgrest-js` (`isMaybeSingle && data.length > 1` sets exactly
+ * this object, `data` to null and the status to 406), and observed end to end
+ * against a local stack, where one auth user claimed on member rows in two
+ * households read `status 406, code PGRST116, data null`.
+ *
+ * It matters that this is an ERROR and not a pick. The handler routes a
+ * `memberError` to 'Could not read your roster entry.' with a 400, so before
+ * #161 a person in two households could not connect a calendar AT ALL - a
+ * total refusal, which is a different defect from silently choosing the wrong
+ * household and needs a different fix.
+ */
+const MULTIPLE_ROWS = (n) => ({
+  code: 'PGRST116',
+  details: `Results contain ${n} rows, application/vnd.pgrst.object+json requires 1 row`,
+  hint: null,
+  message: 'JSON object requested, multiple (or no) rows returned',
+})
 
 const ENV = {
   SUPABASE_URL: 'https://placeholder.supabase.co',
@@ -71,10 +111,25 @@ const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
 function makeWorld(overrides = {}) {
   const world = {
     user: { id: 'auth-1' },
-    member: MEMBER,
+    /**
+     * Every member row the CALLER-SCOPED read can see — #161.
+     *
+     * A list rather than the single row this held before, and the change is
+     * not cosmetic. The old double returned `world.member` to any `eq()`
+     * whatsoever, so no arrangement of it could express a person with rows in
+     * two households: the production interface typed `eq()` as returning
+     * `{ maybeSingle() }`, the fake matched that, and the two-row case was
+     * unrepresentable in BOTH. A fake that cannot disagree with the handler it
+     * stands beside certifies its author rather than the platform.
+     *
+     * These are the rows row-level security lets this caller see, so a filter
+     * naming a household they do not belong to matches nothing — which is what
+     * the real database does, and is why naming a household in the request body
+     * cannot reach one. *Measured* against a local stack: a bogus household id
+     * returns `data: null` with NO error, i.e. the 403 branch and not the 400.
+     */
+    members: [MEMBER],
     memberError: null,
-    householdIds: ['household-1'],
-    householdError: null,
     upsertErrors: {},
     /** Every write attempted, in order — `[]` is what AC 6 asserts. */
     writes: [],
@@ -90,22 +145,54 @@ function makeWorld(overrides = {}) {
       auth: {
         getUser: async () => ({ data: { user: world.user } }),
       },
-      rpc: async (fn) => {
-        world.reads.push({ role, rpc: fn })
+      // `SupabaseLike` no longer declares this and the handler no longer calls
+      // it — and it stays on the double ON PURPOSE, answering correctly. A fake
+      // that cannot express the behaviour being removed cannot testify that it
+      // is gone: with this here, reintroducing the `current_household_ids()`
+      // lookup reddens exactly the one assertion about it, rather than reddening
+      // everything for the unrelated reason that the fake threw.
+      rpc: async (fn, args) => {
+        world.reads.push({ role, rpc: fn, args })
         if (fn === 'current_household_ids') {
-          return { data: world.householdIds, error: world.householdError }
+          return { data: [...new Set(world.members.map((m) => m.household_id))], error: null }
         }
         return { data: null, error: null }
       },
       from: (table) => ({
-        select: (columns) => ({
-          eq: (column, value) => ({
-            maybeSingle: async () => {
-              world.reads.push({ role, table, columns, column, value })
-              return { data: world.member, error: world.memberError }
+        select: (columns) => {
+          // A chainable filter builder, because the fix needs two `eq()`s and
+          // the shape that could hold only one is what hid the defect.
+          const filters = []
+          const builder = {
+            eq(column, value) {
+              filters.push({ column, value })
+              return builder
             },
-          }),
-        }),
+            async maybeSingle() {
+              world.reads.push({
+                role,
+                table,
+                columns,
+                filters: [...filters],
+                // Kept so a reader can still ask "what was this keyed on?"
+                // without unpacking the list.
+                column: filters[0]?.column,
+                value: filters[0]?.value,
+              })
+              if (world.memberError) return { data: null, error: world.memberError }
+              const matched = world.members.filter((row) =>
+                filters.every((f) => row[f.column] === f.value),
+              )
+              // The platform's behaviour, not this file's opinion of it: more
+              // than one match is a REFUSAL, and `data` is null with it.
+              if (matched.length > 1) {
+                return { data: null, error: MULTIPLE_ROWS(matched.length) }
+              }
+              return { data: matched[0] ?? null, error: null }
+            },
+          }
+          return builder
+        },
         upsert: async (row, options) => {
           world.writes.push({ role, table, row, options })
           return { error: world.upsertErrors[table] ?? null }
@@ -138,7 +225,16 @@ function makeFetch(answer) {
 const googleOk = (body = { refresh_token: '1//placeholder-refresh', scope: FREEBUSY }) =>
   new Response(JSON.stringify(body), { status: 200 })
 
-function post(body = { code: 'the-code', redirectUri: 'https://taskr.example.test/' }, init = {}) {
+function post(
+  body = {
+    code: 'the-code',
+    redirectUri: 'https://taskr.example.test/',
+    // #161 — the client names WHICH household, never who. `startConnect` puts it
+    // in sessionStorage beside the CSRF state and `completeConnect` sends it.
+    householdId: 'household-1',
+  },
+  init = {},
+) {
   return new Request('https://placeholder.supabase.co/functions/v1/calendar-connect', {
     method: 'POST',
     headers: { Authorization: 'Bearer caller-jwt', 'content-type': 'application/json', ...(init.headers ?? {}) },
@@ -224,7 +320,7 @@ describe('what it refuses before Google is involved at all', () => {
   })
 
   it('refuses somebody who is in no household', async () => {
-    world.member = null
+    world.members = []
     const response = await handler()(post())
     expect(response.status).toBe(403)
     expect(fetchFn).not.toHaveBeenCalled()
@@ -236,7 +332,7 @@ describe('what it refuses before Google is involved at all', () => {
     // rule enforced only inside code we provide is enforced only for callers who
     // choose to call it. docs/access-model.md's central lesson, applied to a
     // function.
-    world.member = PIN_MEMBER
+    world.members = [PIN_MEMBER]
     const response = await handler()(post())
     expect(response.status).toBe(403)
     expect((await response.json()).error).toMatch(/real email address/)
@@ -252,23 +348,61 @@ describe('the authorization shape — who answers which question', () => {
     expect(memberRead.role, 'a service_role read bypasses RLS and finds every household').toBe(
       'caller',
     )
-    expect(memberRead.column, 'the request body must not say who this is about').toBe('claimed_by')
-    expect(memberRead.value).toBe('auth-1')
+    // #161 — this asserted `column === 'claimed_by'` on the ONE filter the read
+    // could carry. The read carries two now, so the assertion is rewritten to
+    // the property that survives the change rather than deleted: WHO this is
+    // about still comes from the JWT and can never come from the body.
+    expect(
+      memberRead.filters,
+      'the person is auth.uid(), off the token, never a field in the request',
+    ).toContainEqual({ column: 'claimed_by', value: 'auth-1' })
   })
 
-  it('never NAMES household_id in the member select, which the grant withholds', async () => {
-    // Measured on #87: naming it made every call fail with a 400, because a
-    // column withheld from `select` cannot even be mentioned — PostgREST answers
-    // "permission denied for table members", which reads like the whole table is
-    // closed rather than like one column is.
-    await handler()(post())
-    expect(world.reads.find((r) => r.table === 'members').columns).not.toContain('household_id')
+  it('IGNORES a member id in the request body, whatever the caller puts there', async () => {
+    // The teeth behind the sentence above. A body that names somebody must not
+    // reach the read at all — not be overridden later, not be validated, simply
+    // never consulted.
+    world.members = [MEMBER, { ...MEMBER_IN_B, id: 'member-99' }]
+    await handler()(post({
+      code: 'the-code',
+      redirectUri: 'https://taskr.example.test/',
+      householdId: 'household-1',
+      memberId: 'member-99',
+    }))
+    const memberRead = world.reads.find((r) => r.table === 'members')
+    expect(memberRead.filters.map((f) => f.value)).not.toContain('member-99')
+    // The length assertion is not decoration: `[].every(...)` is TRUE, so
+    // without it this passes just as happily on a request that was refused and
+    // wrote nothing at all — which is exactly what happens under the mutation
+    // this test exists to catch.
+    expect(world.writes).toHaveLength(2)
+    expect(world.writes.every((w) => w.row.member_id === 'member-1')).toBe(true)
   })
 
-  it('asks the database which household the caller is in, as the caller', async () => {
+  it('names household_id in the member select, which 0014 grants — #161', async () => {
+    // The reverse of what this asserted before, and the reversal is the point.
+    // It read `not.toContain('household_id')`, correctly: the column was absent
+    // from 0007's select grant, and a column withheld from `select` cannot even
+    // be mentioned — PostgREST answers "permission denied for table members",
+    // measured on #87 as a 400 on every call. `0014` grants it (#159), and this
+    // function needs it, so the assertion flips rather than being dropped.
     await handler()(post())
-    const rpc = world.reads.find((r) => r.rpc === 'current_household_ids')
-    expect(rpc.role).toBe('caller')
+    expect(world.reads.find((r) => r.table === 'members').columns).toContain('household_id')
+  })
+
+  it('takes the household from the MEMBER ROW, asking the database for no list', async () => {
+    // What stood here asserted `current_household_ids` was called as the caller.
+    // That call is gone — it is the defect — so the assertion becomes the
+    // property that replaced it: no household list is consulted, and what gets
+    // written is the household on the row that was read.
+    world.members = [{ ...MEMBER, household_id: 'household-7' }]
+    await handler()(post({
+      code: 'the-code',
+      redirectUri: 'https://taskr.example.test/',
+      householdId: 'household-7',
+    }))
+    expect(world.reads.find((r) => r.rpc === 'current_household_ids')).toBeUndefined()
+    expect(world.writes.map((w) => w.row.household_id)).toEqual(['household-7', 'household-7'])
   })
 
   it('writes as service_role, because the client is granted nothing here', async () => {
@@ -425,5 +559,122 @@ describe('when the database refuses the write', () => {
     expect(world.deletes).toEqual([
       { role: 'service', table: 'calendar_tokens', column: 'member_id', value: 'member-1' },
     ])
+  })
+})
+
+describe('#161 — a person in two households', () => {
+  // WHAT THIS SECTION IS FOR, AND WHY THE FIRST TEST IS NOT ABOUT THE HANDLER
+  //
+  // The defect this story fixes was invisible in the TYPE, not merely untested:
+  // `SupabaseLike.eq()` returned `{ maybeSingle() }`, so no two-row result was
+  // expressible in the production contract, and the fake written against that
+  // contract could not express one either. The two agreed, and what they agreed
+  // about was never checked against the platform.
+  //
+  // So the double is widened first and CONTROLLED first. If it cannot reproduce
+  // the refusal, everything below it is a fake agreeing with its author.
+
+  it('CONTROL: the double refuses two rows the way postgrest-js does', async () => {
+    // Not a test of the handler. A test of the instrument, against the shape
+    // read out of `@supabase/postgrest-js` and observed end to end on a local
+    // stack: `data` null, `error.code` PGRST116, and NOT an arbitrary pick.
+    world.members = [MEMBER, MEMBER_IN_B]
+    const client = world.createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY)
+    const unscoped = await client
+      .from('members')
+      .select('id, household_id')
+      .eq('claimed_by', 'auth-1')
+      .maybeSingle()
+
+    expect(unscoped.data, 'a refusal returns no row at all').toBeNull()
+    expect(unscoped.error.code).toBe('PGRST116')
+    expect(unscoped.error.details).toMatch(/Results contain 2 rows/)
+  })
+
+  it('CONTROL: the same read scoped to one household returns exactly one row', async () => {
+    // The other half, or the control above proves only that the double refuses
+    // everything. Same fixture, one more filter, one row.
+    world.members = [MEMBER, MEMBER_IN_B]
+    const client = world.createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY)
+    const scoped = await client
+      .from('members')
+      .select('id, household_id')
+      .eq('claimed_by', 'auth-1')
+      .eq('household_id', 'household-2')
+      .maybeSingle()
+
+    expect(scoped.error).toBeNull()
+    expect(scoped.data.id).toBe('member-2')
+  })
+
+  it('connects in the household the request names, not whichever row came first', async () => {
+    // The defect, from the outside. Before #161 this exact arrangement returned
+    // 400 'Could not read your roster entry.' — *measured* against the unfixed
+    // handler with this same double, which is the run that licensed using it to
+    // verify the fix.
+    world.members = [MEMBER, MEMBER_IN_B]
+    const response = await handler()(post({
+      code: 'the-code',
+      redirectUri: 'https://taskr.example.test/',
+      householdId: 'household-2',
+    }))
+
+    expect(response.status).toBe(200)
+    expect(world.writes.map((w) => w.row.household_id)).toEqual(['household-2', 'household-2'])
+    expect(world.writes.map((w) => w.row.member_id)).toEqual(['member-2', 'member-2'])
+  })
+
+  it('holds TWO independent connections, one per household — criterion 7', async () => {
+    // `0011`'s unique index is per MEMBER ROW and two households mean two member
+    // rows, so `onConflict: 'member_id'` never collides across them. Connecting
+    // in A and then in B writes two different keys rather than replacing one.
+    world.members = [MEMBER, MEMBER_IN_B]
+    // A FRESH answer per call. `makeFetch(googleOk())` hands back one `Response`
+    // object, and a body can only be read once — the second connection then died
+    // on 'Google answered with something this app could not read' and looked
+    // exactly like the defect under test being only half fixed.
+    fetchFn = makeFetch(() => googleOk())
+
+    await handler()(post({ code: 'a', redirectUri: 'https://taskr.example.test/', householdId: 'household-1' }))
+    await handler()(post({ code: 'b', redirectUri: 'https://taskr.example.test/', householdId: 'household-2' }))
+
+    const connections = world.writes.filter((w) => w.table === 'calendar_connections')
+    expect(connections).toHaveLength(2)
+    expect(connections.map((w) => w.row.member_id)).toEqual(['member-1', 'member-2'])
+    expect(connections.map((w) => w.row.household_id)).toEqual(['household-1', 'household-2'])
+    expect(
+      new Set(connections.map((w) => w.options.onConflict)),
+      'one conflict key, and it is the one that differs per household',
+    ).toEqual(new Set(['member_id']))
+  })
+
+  it('refuses a household the caller is not in, and asks Google nothing', async () => {
+    // Fails CLOSED, and this is what makes it safe for the body to name a
+    // household at all: row level security scopes the read, so a household the
+    // caller does not belong to matches no row. *Measured* against a local
+    // stack, the real read returns `data: null` with NO error — the 403 branch
+    // rather than the 400 one.
+    world.members = [MEMBER, MEMBER_IN_B]
+    const response = await handler()(post({
+      code: 'the-code',
+      redirectUri: 'https://taskr.example.test/',
+      householdId: 'household-somebody-elses',
+    }))
+
+    expect(response.status).toBe(403)
+    expect((await response.json()).error).toMatch(/not a member of that household/)
+    expect(fetchFn, 'nothing is asked of Google').not.toHaveBeenCalled()
+    expect(world.writes).toEqual([])
+  })
+
+  it('refuses a request that names no household at all', async () => {
+    const response = await handler()(post({
+      code: 'the-code',
+      redirectUri: 'https://taskr.example.test/',
+    }))
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toMatch(/No household was named/)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(world.writes).toEqual([])
   })
 })

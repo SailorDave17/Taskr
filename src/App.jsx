@@ -24,6 +24,7 @@ import {
   completeChore,
   formatSkippedNotice,
   listChores,
+  recordActualMinutes,
   removeChore,
   unassignChore,
   uncompleteChore,
@@ -395,11 +396,15 @@ export default function App() {
   const handleConnectCalendar = useCallback(() => {
     setError(null)
     try {
-      globalThis.location.assign(startConnect())
+      // #161 — the household THIS SCREEN IS SHOWING travels with the consent
+      // state, so the connection lands where the member was standing when they
+      // pressed it. Same `household` state every other write on this screen
+      // takes its id from (#159 AC 4), and the same one a switcher will change.
+      globalThis.location.assign(startConnect({ householdId: household?.id }))
     } catch (err) {
       setError(err.message)
     }
-  }, [])
+  }, [household])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.
@@ -414,6 +419,12 @@ export default function App() {
   // work between weeks.
   const handleCompleteChore = useCallback((id) => mutate(() => completeChore(id)), [mutate])
   const handleUncompleteChore = useCallback((id) => mutate(() => uncompleteChore(id)), [mutate])
+  // #12 — adjusting an actual is a plain column-granted update, unlike the two
+  // above; completion already seeded the honest default, this says otherwise.
+  const handleRecordActual = useCallback(
+    (id, minutes) => mutate(() => recordActualMinutes(id, minutes)),
+    [mutate],
+  )
   // #36 — assignment goes through an RPC for ACCESS rather than the clock:
   // `assigned_member_id` is absent from the update grant, so this is the only
   // write path there is. Committed and remaining minutes are NOT fetched — they
@@ -473,7 +484,13 @@ export default function App() {
     [mutate, periodStart],
   )
 
-  const me = findClaimedMember(members, userId)
+  // #160 — resolved WITHIN the household on screen. `household?.id` is the
+  // same state object `isOrganizer` compares against below, so who-you-are and
+  // what-you-organise cannot be answered about two different households. The
+  // roster is already scoped (#159), but the identity layer must not lean on
+  // that: with a claimed row in two households, an unscoped match returns
+  // whichever row the list happens to put first.
+  const me = findClaimedMember(members, userId, household?.id)
 
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
@@ -490,6 +507,11 @@ export default function App() {
   // organizer exactly while it is acting as the organizer's member row. The
   // server decides this independently in is_household_organizer(); this only
   // governs whether the control is offered.
+  //
+  // #160 — `me` above is resolved within THIS household, so this comparison
+  // can no longer pair one household's member row with another household's
+  // organizer id. Both sides come from the same `household` state, set by the
+  // single currentHousehold() read in refresh().
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
   return (
@@ -629,6 +651,7 @@ export default function App() {
           onUnassign={handleUnassignChore}
           onExclude={handleExcludeMember}
           onAllow={handleAllowMember}
+          onRecordActual={handleRecordActual}
         />
       ) : null}
 

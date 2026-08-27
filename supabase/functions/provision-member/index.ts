@@ -17,12 +17,18 @@
 // caller's own JWT — before the service_role client is touched at all:
 //
 //   1. Read the target member THROUGH THE CALLER. RLS restricts `members` to the
-//      caller's household, so a member id from another household simply is not
+//      caller's households, so a member id from outside them simply is not
 //      found. The request body is never trusted to say which household it means.
-//   2. Ask `is_household_organizer(household_id)` THROUGH THE CALLER, so the
-//      answer is about the person holding the JWT and not about this function.
+//   2. Ask `is_household_organizer(...)` THROUGH THE CALLER — about the
+//      household ON THAT MEMBER'S ROW — so the answer is about the person
+//      holding the JWT, and about the household the action lands in.
 //   3. Only then use service_role, and only for the two things that genuinely
 //      need it.
+//
+// Step 2 named the CALLER's first household until #161, which is a privilege
+// escalation once anybody belongs to two: organise one, be an ordinary member
+// of another, and the check passes for a member of the other. Measured; see the
+// comment at the check itself.
 //
 // Doing (1) with the service_role client would be the classic hole: it bypasses
 // RLS, so every member of every household would be found and the only thing
@@ -150,39 +156,56 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // is simply not found, so the 404 below covers both "no such member" and
   // "not yours" — deliberately indistinguishable.
   //
-  // `household_id` is DELIBERATELY not selected here, and this is a trap worth
-  // stating: it is absent from 0007's select grant for `authenticated`, and a
-  // column withheld from `select` cannot even be NAMED — PostgREST returns
-  // "permission denied for table members", which reads like the whole table is
-  // closed rather than like one column is. Measured: naming it here made every
-  // provision fail with a 400.
+  // `household_id` IS selected here now, and the comment that used to sit in
+  // this spot said the opposite — it is a reversal rather than an addition, so
+  // it says so. The column was absent from 0007's select grant for
+  // `authenticated`, and a column withheld from `select` cannot even be NAMED:
+  // PostgREST returns "permission denied for table members", which reads like
+  // the whole table is closed rather than like one column is, and naming it
+  // here once made every provision fail with a 400. `0014` grants it (#159, on
+  // #157's measurement), so the trap is gone and the column is readable by the
+  // caller for exactly the rows RLS already lets them see.
+  //
+  // Reading it is now NECESSARY, which it was not before — #161 criterion 2.
+  // Until 0009 a caller had one household, so "the caller's household" and
+  // "this member's household" were the same value and either would do. They are
+  // different values now, and the one this function must act on is the member's.
   const { data: member, error: memberError } = await asCaller
     .from('members')
-    .select('id, display_name, claimed_by, email')
+    .select('id, display_name, claimed_by, email, household_id')
     .eq('id', memberId)
     .maybeSingle()
 
   if (memberError) return refuse('Could not read that person.', 400)
   if (!member) return refuse('No such person in your household.', 404)
 
-  // The household comes from the CALLER, not from the member row — and that is
-  // both simpler and stronger. The read above already proved this member is
-  // visible to the caller, which under `members_select_joined` means same
-  // household; so the caller's own household id IS the member's, and asking
-  // service_role for it would add a privileged read that buys nothing.
+  // The household comes from the MEMBER ROW — #161 criteria 1 and 3.
   //
-  // It also sidesteps a live trap: `household_id` is absent from the client
-  // select grant, so the caller cannot read it even for their own row.
-  const { data: householdIds, error: householdError } = await asCaller.rpc(
-    'current_household_ids',
-  )
-  if (householdError) return refuse('Could not check your permissions.', 400)
-  const householdId = Array.isArray(householdIds) ? householdIds[0] : householdIds
-  if (!householdId) return refuse('You are not signed in to a household.', 403)
-
+  // What stood here argued the opposite, and the argument is worth keeping
+  // because it is the PREMISE that failed rather than the conclusion: "the read
+  // above already proved this member is visible to the caller, which under
+  // `members_select_joined` means same household; so the caller's own household
+  // id IS the member's". Every clause of that is still true except the last.
+  // Visibility means the member is in ONE OF the caller's households, and since
+  // 0009 there can be more than one — so the code took
+  // `current_household_ids()[0]`, whichever the database returned first, and
+  // asked whether the caller organises THAT.
+  //
+  // *Measured 2026-08-26* against a local stack, and it is a privilege
+  // escalation rather than an inconvenience: a caller who organises household A
+  // and is an ordinary member of household B can see B's members, and
+  // `current_household_ids()` returned `[A, B]`. `is_household_organizer(A)`
+  // answered true, so the check passed and the function would have minted a
+  // sign-in for somebody in B — a household this caller organises nothing in.
+  // Asking about `member.household_id` instead answered false and refused, on
+  // the same fixture.
+  //
+  // Still asked THROUGH THE CALLER, which is the part that must not change:
+  // `is_household_organizer` resolves `auth.uid()` itself, so the answer is
+  // about the person holding the JWT and not about this function.
   const { data: isOrganizer, error: organizerError } = await asCaller.rpc(
     'is_household_organizer',
-    { target_household: householdId },
+    { target_household: member.household_id },
   )
   if (organizerError) return refuse('Could not check your permissions.', 400)
   if (isOrganizer !== true) {

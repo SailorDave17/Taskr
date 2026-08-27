@@ -472,7 +472,28 @@ function MemberRow({
         >
           Edit
         </button>
-        {confirmingRemove ? (
+        {/* #152 — Remove is the organizer's alone, and Edit deliberately is not.
+            That asymmetry is a decision, not an oversight, so it is stated here
+            rather than left for a reader to infer from the absence of a gate:
+            editing a name or a weekly-minutes figure is ordinary household
+            maintenance anybody may do and anybody can undo, while removing a
+            member is destructive, has no undo, and — when the member removed is
+            the organizer — ends provisioning for that household permanently,
+            because `create_household` is the only thing that ever writes
+            `organizer_member_id`.
+
+            This is NOT the guard. `members_delete_same_household` (0016) is,
+            and it refuses the same delete with no client involved. Offering a
+            control that the database would refuse is the thing #87 already
+            decided against one gate up, on the sign-in control at the top of
+            this row: a control that is always refused is worse than no control.
+
+            `isMe` is part of the same rule for that reason, not a separate one.
+            0007 refuses SELF-removal from every caller including the organizer,
+            so a Remove on your own row is a button the database will always
+            turn down. Hiding it is the same decision as hiding it from a
+            non-organizer, applied to the other clause of the same policy. */}
+        {!isOrganizer || isMe ? null : confirmingRemove ? (
           <>
             <button
               className="button button--danger"
@@ -625,6 +646,24 @@ export default function Roster({
             Add people here, then give each of them a sign-in from their row.
             They sign in with their own name and a PIN you set — tell them what
             it is, because no email is sent.
+          </p>
+        ) : null}
+        {/* #152 — a household whose organizer row is gone. 0016 stops this being
+            created from now on; it cannot repair one that already exists,
+            because `create_household` is the only thing that ever writes
+            `organizer_member_id` and there is no route to it from any client.
+
+            Said plainly rather than left to be inferred from controls quietly
+            not appearing. Without this the screen renders as an ordinary roster
+            with the organizer's tools missing, which reads as a permissions bug
+            in the app — so somebody would go looking for the fault in the wrong
+            place. `role="status"`, not `alert`: nothing is happening right now,
+            it is a standing condition. */}
+        {household && !household.organizer_member_id ? (
+          <p className="card__note" role="status" data-testid="no-organizer-note">
+            This household has no organizer, so nobody can be given a sign-in or
+            have one reset. That cannot be fixed from inside the app — it needs
+            somebody with database access to name an organizer again.
           </p>
         ) : null}
       </section>

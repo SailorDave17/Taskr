@@ -941,6 +941,12 @@ describe('#19 — no real household name reaches version control', () => {
     // #53 — the second member of household A, who exists so an occurrence can
     // carry an exclusion forward to somebody.
     'Placeholder Second',
+    // #161 — one person holding a member row in BOTH households, and the
+    // single-household control beside them. Synthetic, and named for the shape
+    // they exist to build rather than after anybody.
+    'Placeholder Everywhere', 'Placeholder Control',
+    // #161 — the caller's ordinary member row in a household they do not organise.
+    'Housemate',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',
@@ -961,6 +967,9 @@ describe('#19 — no real household name reaches version control', () => {
     // can look at.
     'Placeholder Third Chore': 'a chore title',
     'Placeholder Fourth Chore': 'a chore title',
+    // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
+    'Placeholder Repeat': 'a chore title',
+    'Placeholder Done Chore': 'a chore title',
     Taskr: 'the application name',
     // #47 — the three tab labels. They are literals in App.test.jsx because
     // the tests click the real control by its accessible name, which is the

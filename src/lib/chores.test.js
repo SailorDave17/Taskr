@@ -4,12 +4,18 @@ import { describe, expect, it } from 'vitest'
 import {
   CATCH_UP_BOUND_DAYS,
   CHORE_COLUMNS,
+  ESTIMATE_DEVIATION_THRESHOLD,
+  MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE,
+  actualsSummary,
+  completedInstances,
   describeRepeat,
+  estimateSuggestion,
   formatSkippedNotice,
   isOutstanding,
   outstandingMinutes,
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
+  normalizeActualMinutes,
   normalizeDueDate,
   normalizeExpectedMinutes,
   normalizeRepeat,
@@ -145,10 +151,11 @@ describe('the readable column list', () => {
     // A column grant makes `select('*')` fail outright rather than quietly
     // returning a narrower row, so this list is load-bearing rather than tidy.
     // 0004 added the two completion columns as readable, 0006 added
-    // assigned_member_id, and 0012 the three repeat columns a screen renders;
-    // if this list and the grant ever disagree, every read fails with a
-    // permission error.
+    // assigned_member_id, 0012 the three repeat columns a screen renders, and
+    // 0015 the actual (#12); if this list and the grant ever disagree, every
+    // read fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
+      'actual_minutes',
       'assigned_member_id',
       'completed_at',
       'completed_by_member_id',
@@ -319,5 +326,193 @@ describe('#53 AC 4 — the skipped-occurrences sentence', () => {
     // two equal. This pins the JS copy to the DECISION, so a drive-by edit
     // here reddens something even with the pglite suite filtered out.
     expect(CATCH_UP_BOUND_DAYS).toBe(7)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #12 — expected-vs-actual capture and feedback, the pure half.
+//
+// The write paths (seeding at completion, the update grant, the constraint)
+// are exercised against a real Postgres in src/test/actuals.pglite.test.js.
+// What is tested here is the arithmetic the screen renders and the boundary
+// the estimate-update offer sits on. Boundary fixtures spell 3 and 25%
+// LITERALLY rather than deriving from the constants, and the constants are
+// pinned beside them — so changing a constant reddens a test instead of
+// silently moving every fixture with it (the derive-from-the-same-source
+// vacuity prove-tests names as shape 4).
+// ---------------------------------------------------------------------------
+
+describe('#12 AC 1 — minutes the work actually took', () => {
+  it('accepts a whole number inside the bounds', () => {
+    expect(normalizeActualMinutes(35)).toBe(35)
+    expect(normalizeActualMinutes('45')).toBe(45)
+  })
+
+  it('refuses blank, non-numeric and fractional values with a sentence', () => {
+    expect(() => normalizeActualMinutes('')).toThrow(/how many minutes did it actually take/i)
+    expect(() => normalizeActualMinutes('soon')).toThrow(/must be a number/i)
+    expect(() => normalizeActualMinutes(12.5)).toThrow(/whole number/i)
+  })
+
+  it('accepts ZERO — "it was already done" is a real fact, and #47 pins that it contributes zero', () => {
+    expect(normalizeActualMinutes(0)).toBe(0)
+    expect(normalizeActualMinutes('0')).toBe(0)
+  })
+
+  it('refuses negative time and more-than-a-day, matching chores_actual_minutes_range', () => {
+    expect(() => normalizeActualMinutes(-5)).toThrow(/negative/i)
+    expect(() => normalizeActualMinutes(1441)).toThrow(/more than a day/i)
+  })
+})
+
+describe('#12 AC 2 — the family feedback is computed over', () => {
+  const anchor = {
+    id: 'r1',
+    title: 'trash run',
+    expected_minutes: 20,
+    repeat_kind: 'weekly',
+    completed_at: '2026-08-10T10:00:00Z',
+    actual_minutes: 25,
+  }
+  const occurrenceDone = {
+    id: 'o1',
+    generated_from: 'r1',
+    expected_minutes: 20,
+    completed_at: '2026-08-17T10:00:00Z',
+    actual_minutes: 31,
+  }
+  const occurrenceOpen = { id: 'o2', generated_from: 'r1', expected_minutes: 20, completed_at: null }
+  const unrelatedDone = {
+    id: 'c9',
+    expected_minutes: 60,
+    completed_at: '2026-08-11T10:00:00Z',
+    actual_minutes: 90,
+  }
+
+  it('an anchor gathers itself and its completed occurrences, and nothing else', () => {
+    const all = [anchor, occurrenceDone, occurrenceOpen, unrelatedDone]
+    const ids = completedInstances(anchor, all).map((c) => c.id)
+    expect(ids.sort()).toEqual(['o1', 'r1'])
+  })
+
+  it("an occurrence's own family is itself alone — its history belongs to the anchor", () => {
+    const all = [anchor, occurrenceDone, occurrenceOpen, unrelatedDone]
+    expect(completedInstances(occurrenceDone, all).map((c) => c.id)).toEqual(['o1'])
+  })
+
+  it('a one-off is its own family, so feedback is not template-only', () => {
+    const all = [anchor, occurrenceDone, unrelatedDone]
+    const summary = actualsSummary(unrelatedDone, all)
+    expect(summary).toEqual({ count: 1, averageMinutes: 90 })
+  })
+
+  it('averages the recorded actuals', () => {
+    const all = [anchor, occurrenceDone, occurrenceOpen]
+    expect(actualsSummary(anchor, all)).toEqual({ count: 2, averageMinutes: 28 })
+  })
+
+  it('a completed instance from before 0015 counts at its own estimate — minutesOf\'s exact fallback', () => {
+    const old = { id: 'o3', generated_from: 'r1', expected_minutes: 40, completed_at: '2026-08-03T10:00:00Z' }
+    const all = [anchor, old]
+    // (25 + 40) / 2 — the null actual stands in as that instance's estimate.
+    expect(actualsSummary(anchor, all)).toEqual({ count: 2, averageMinutes: 32.5 })
+  })
+})
+
+describe('#12 AC 3 — no completed instances means no fabricated average', () => {
+  it('returns null on the zero-instance fixture, and the screen renders "no data yet"', () => {
+    const fresh = { id: 'r2', expected_minutes: 20, repeat_kind: 'weekly', completed_at: null }
+    expect(actualsSummary(fresh, [fresh])).toBeNull()
+    expect(estimateSuggestion(fresh, [fresh])).toBeNull()
+  })
+})
+
+describe('#12 AC 4 — the estimate-update boundary, at exactly 3 and exactly 25%', () => {
+  // Build an anchor plus (n - 1) completed occurrences, n completions in all,
+  // each with the actual asked for. Literal values throughout.
+  const family = (expected, actuals) => {
+    const anchor = {
+      id: 'r1',
+      expected_minutes: expected,
+      repeat_kind: 'weekly',
+      completed_at: '2026-08-10T10:00:00Z',
+      actual_minutes: actuals[0],
+    }
+    const rest = actuals.slice(1).map((a, i) => ({
+      id: `o${i}`,
+      generated_from: 'r1',
+      expected_minutes: expected,
+      completed_at: '2026-08-17T10:00:00Z',
+      actual_minutes: a,
+    }))
+    return { anchor, all: [anchor, ...rest] }
+  }
+
+  it('the tunable defaults are the ratified values', () => {
+    // Pinned literally, so a drive-by constant edit reddens here even though
+    // every fixture below spells its own numbers.
+    expect(MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE).toBe(3)
+    expect(ESTIMATE_DEVIATION_THRESHOLD).toBe(0.25)
+  })
+
+  it('offers at EXACTLY 3 completions and EXACTLY 25% deviation — both boundaries inclusive', () => {
+    const { anchor, all } = family(20, [25, 25, 25])
+    expect(estimateSuggestion(anchor, all)).toBe(25)
+  })
+
+  it('withholds at 2 completions, whatever the deviation', () => {
+    const { anchor, all } = family(20, [120, 120])
+    expect(estimateSuggestion(anchor, all)).toBeNull()
+  })
+
+  it('withholds below 25% — an average of 24 against 20 is only 20% out', () => {
+    const { anchor, all } = family(20, [24, 24, 24])
+    expect(estimateSuggestion(anchor, all)).toBeNull()
+  })
+
+  it('offers downward too — an estimate can be too generous', () => {
+    const { anchor, all } = family(20, [15, 15, 15])
+    expect(estimateSuggestion(anchor, all)).toBe(15)
+  })
+
+  it('suggests the rounded average', () => {
+    // (31 + 25 + 28) / 3 = 28, deviation 40% against 20.
+    const { anchor, all } = family(20, [31, 25, 28])
+    expect(estimateSuggestion(anchor, all)).toBe(28)
+  })
+
+  it('withholds a suggestion that rounds back to the current estimate', () => {
+    // Average 1.33, deviation 33% — over the threshold, and still a button
+    // offering to change 1 minute to 1 minute, so it is withheld.
+    const { anchor, all } = family(1, [1, 1, 2])
+    expect(estimateSuggestion(anchor, all)).toBeNull()
+  })
+
+  it('a run of zero-actuals suggests the floor — an estimate can never be zero', () => {
+    // Three "it was already done" completions: average 0, deviation 100%. The
+    // suggestion is a future ESTIMATE, and a zero estimate cannot be allocated
+    // (0003's bound), so the offer floors at one minute rather than proposing
+    // a value the column would refuse.
+    const { anchor, all } = family(20, [0, 0, 0])
+    expect(estimateSuggestion(anchor, all)).toBe(1)
+  })
+
+  it('SYNTHETIC CONTROL: the upper clamp is held to the column bounds', () => {
+    // chores_actual_minutes_range keeps stored actuals inside 1..1440, so this
+    // state cannot arrive from the database — the clamp is a defence at the
+    // pure layer, and an unexercised defence is indistinguishable from dead
+    // code, so this fixture manufactures the state the corpus cannot contain.
+    const { anchor, all } = family(1000, [2000, 2000, 2000])
+    expect(estimateSuggestion(anchor, all)).toBe(1440)
+  })
+
+  it('a one-off can never reach the floor, so the offer stays on anchors by arithmetic', () => {
+    const one = {
+      id: 'c1',
+      expected_minutes: 20,
+      completed_at: '2026-08-10T10:00:00Z',
+      actual_minutes: 120,
+    }
+    expect(estimateSuggestion(one, [one])).toBeNull()
   })
 })

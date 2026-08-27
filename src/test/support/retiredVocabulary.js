@@ -122,14 +122,108 @@ export function blankComments(source) {
 }
 
 /**
+ * Blank out every comment in SQL source, preserving line structure.
+ *
+ * A SECOND dialect rather than a flag on the one above, because the two differ
+ * in both directions and a single relaxed matcher would be wrong for each. SQL
+ * opens a line comment with `--`, which JavaScript spells as a decrement; SQL
+ * has no backslash escape, and closes a `'` string by DOUBLING it. Running the
+ * JavaScript blanker over a migration leaves every `--` line unblanked, which
+ * is not a subtle failure: measured on this repo at the moment the corpus
+ * widened, it turned 27 sentences of prose in `0001`–`0007` into refusals, all
+ * of them the historical explanation a migration most needs to carry.
+ *
+ * `$$`-quoted bodies are deliberately NOT treated as strings. A plpgsql body is
+ * executable code and a `join_household` inside one is exactly the reference
+ * this guard exists to find — blanking it would hide the hazard in the one
+ * place SQL puts real logic.
+ *
+ * THIS IS UNEXERCISED BY THE CORPUS, and saying so is cheaper than letting the
+ * next reader assume otherwise. Measured on #170: replacing this call with the
+ * JavaScript blanker reddened 0 of 75, because the migrations the corpus
+ * actually covers — `0008` and up — happen to name nothing retired in any
+ * comment. The 27 refusals that justified writing it are all in `0001`–`0007`,
+ * which the history boundary excludes.
+ *
+ * So it is a defence against a state the corpus does not yet contain, and it
+ * becomes load-bearing the first time a new migration EXPLAINS what 0007 took
+ * away — which is the ordinary thing for a migration to do. That is why it is a
+ * pure function with its own synthetic controls in `retiredVocabulary.test.js`
+ * rather than a branch inside the scan: an unexercised defence is
+ * byte-identical to dead code to whoever is next tidying up, and the controls
+ * are what tell them apart.
+ */
+export function blankSqlComments(source) {
+  const out = []
+  let i = 0
+  let inString = false
+
+  while (i < source.length) {
+    const char = source[i]
+    const next = source[i + 1]
+
+    if (inString) {
+      out.push(char)
+      // `''` is SQL's escape, and toggling on each quote lands in the right
+      // state for it: the first closes, the second immediately reopens.
+      if (char === "'") inString = false
+      i += 1
+      continue
+    }
+
+    if (char === "'") {
+      inString = true
+      out.push(char)
+      i += 1
+      continue
+    }
+
+    if (char === '-' && next === '-') {
+      while (i < source.length && source[i] !== '\n') {
+        out.push(' ')
+        i += 1
+      }
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      out.push(' ', ' ')
+      i += 2
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
+        // Newlines are kept so the line count does not shift.
+        out.push(source[i] === '\n' ? '\n' : ' ')
+        i += 1
+      }
+      out.push(' ', ' ')
+      i += 2
+      continue
+    }
+
+    out.push(char)
+    i += 1
+  }
+
+  return out.join('')
+}
+
+/** Which blanker a path's contents need. Extension, not guesswork. */
+export function isSqlPath(path) {
+  return path.endsWith('.sql')
+}
+
+/**
  * Every retired name still referenced in executable code, with its line.
  *
  * An empty array is the passing answer. Each finding carries the line so the
  * failure message can name a place rather than a fact — a scan that says only
  * "something is wrong" costs the reader the same search twice.
+ *
+ * `options.sql` picks the dialect. It defaults to JavaScript so that every
+ * existing caller is unchanged, and the corpus scan passes it from the path's
+ * extension rather than sniffing the content.
  */
-export function retiredNamesIn(source) {
-  const code = blankComments(source)
+export function retiredNamesIn(source, options = {}) {
+  const code = options.sql ? blankSqlComments(source) : blankComments(source)
   const lines = code.split('\n')
   const found = []
 

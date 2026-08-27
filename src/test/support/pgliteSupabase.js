@@ -105,6 +105,7 @@ export const MIGRATIONS = [
   '0016_organizer_only_removal.sql',
   '0017_anon_holds_nothing_in_public.sql',
   '0018_stored_reassignment.sql',
+  '0019_authenticated_holds_only_what_a_migration_granted.sql',
 ]
 
 export function migrationSql(name) {

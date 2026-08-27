@@ -970,6 +970,12 @@ describe('#19 — no real household name reaches version control', () => {
     // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
     'Placeholder Repeat': 'a chore title',
     'Placeholder Done Chore': 'a chore title',
+    // #49 — reassignment.pglite.test.js needs up to three distinguishable
+    // chores per scenario. Declared rather than lower-cased, same instinct as
+    // the #37 chores above: the vocabulary exists to put every name-shaped
+    // literal in a diff somebody can look at.
+    Laundry: 'a chore title in reassignment.pglite.test.js',
+    Vacuuming: 'a chore title in reassignment.pglite.test.js',
     Taskr: 'the application name',
     // #47 — the three tab labels. They are literals in App.test.jsx because
     // the tests click the real control by its accessible name, which is the

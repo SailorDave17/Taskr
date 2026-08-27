@@ -582,3 +582,83 @@ describe('#159 AC 6 — one household on screen, whatever else exists', () => {
     expect(pollutedVerdict).not.toBe(scopedVerdict)
   })
 })
+
+// #49 AC 7 — what the last automatic re-balance reported, rendered from the
+// verdict the run STORED rather than from any computation here. The wiring
+// that fetches it is App's (App.test.jsx); what the run stores is the pglite
+// suite's; this covers only what the screen says for a given stored verdict.
+describe('the last re-balance note (#49)', () => {
+  const verdict = (extra = {}) => ({
+    contested: true,
+    level: true,
+    reason: null,
+    boundByBudget: false,
+    jobsMoved: 0,
+    minutesMoved: 0,
+    changeBudgetMinutes: 120,
+    applied_at: '2026-08-27T12:00:00Z',
+    ...extra,
+  })
+
+  it('says nothing when no run has been stored', () => {
+    setup({ lastRebalance: null })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+
+  it('says nothing about an uneventful run — a note that always fires is an absent note', () => {
+    setup({ lastRebalance: verdict() })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+
+  it('states the budget refusal in the stored run’s own minutes', () => {
+    setup({
+      lastRebalance: verdict({ boundByBudget: true, jobsMoved: 2, minutesMoved: 90 }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('moved 90 min')
+    expect(note).toHaveTextContent('change budget (120 min)')
+  })
+
+  it('states the stored unreachable reason, naming the person and both numbers', () => {
+    setup({
+      lastRebalance: verdict({
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('Placeholder Two')
+    expect(note).toHaveTextContent('25 min')
+    expect(note).toHaveTextContent('90 min')
+  })
+
+  it('lets the budget sentence win when both facts are true of one run', () => {
+    // A run can be budget-bound AND end off level. The budget is the one the
+    // household can act on this week, so it is the sentence — two notes would
+    // bury both.
+    setup({
+      lastRebalance: verdict({
+        boundByBudget: true,
+        minutesMoved: 30,
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('change budget')
+    expect(note).not.toHaveTextContent('fair share')
+  })
+
+  it('does not render a stale reason as unreachable when the run was not contested', () => {
+    // One person with capacity: `level` is vacuously true and `reason` null,
+    // but a malformed verdict could carry both — the guard is on contested.
+    setup({
+      lastRebalance: verdict({
+        contested: false,
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+})

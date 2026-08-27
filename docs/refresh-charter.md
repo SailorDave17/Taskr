@@ -525,6 +525,36 @@ recorded in the decision log as tunable defaults". This is that record.
   an ordinary estimate edit on the anchor, occurrences copy minutes at creation (0012), so the new
   value reaches future occurrences and never rewrites work already on somebody's list.
 
+## Decision taken 2026-08-27 — concurrent re-assignments serialize through a version CAS
+
+Taken at the gate of #49, whose criterion 6 required the concurrency mechanism to be "recorded in
+the decision log". This is that record. The grooming decision above (2026-08-06) had already fixed
+the shape — allocation STORED, an automatic re-derive on capacity change, "costs a transactional
+RPC" — and #49 is that RPC. Two mechanism choices inside it:
+
+- **The server applies; it never allocates.** The placement rule has exactly one implementation
+  (`src/lib/allocation.js`, #40 AC 9), so the client that observed the capacity change computes the
+  new allocation with the real module and hands the *result* to `apply_assignments` (migration
+  `0018`). Rejected: a plpgsql re-implementation — a second copy of the placement rule, drifting
+  the first time either changed, which is the exact drift this schema's own comments forbid for
+  `members.committed_minutes`. The trust envelope does not move: a member's client can already
+  place any chore on any member one `assign_chore` call at a time.
+- **Freshness is a compare-and-set on `households.assignments_version`**, bumped by triggers on
+  every table the allocator reads (chores, members, member_capacity, chore_exclusions). The RPC
+  locks the household row, refuses a result computed from any other version (errcode `TA049`), and
+  the refused device re-reads — now seeing both writes — recomputes and re-applies
+  (`reassignHousehold`, bounded at 3 attempts). Convergence is then a property of the allocator
+  being deterministic rather than of timing. Rejected: **last-write-wins** (a stale result computed
+  before the other device's capacity write would stand, and the split would answer a household
+  state that never existed) and **comparing the inputs themselves** (the RPC would need its own
+  copy of the capacity-resolution rule to check them — the same second-implementation drift as
+  above, one layer down).
+- **The trigger extension is the owner's, taken at pickup**: a baseline `weekly_minutes` edit on
+  the roster is a capacity change and re-runs the assignment, alongside the weekly override's set
+  and clear. Rejected: overrides-only (a baseline edit would visibly change the bars and silently
+  not move the split) and every-input-write (a re-balance on writes nobody experiences as a
+  capacity change, beyond what #49 asserts).
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

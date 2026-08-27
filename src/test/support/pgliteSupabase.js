@@ -104,6 +104,7 @@ export const MIGRATIONS = [
   '0015_actual_minutes.sql',
   '0016_organizer_only_removal.sql',
   '0017_anon_holds_nothing_in_public.sql',
+  '0018_stored_reassignment.sql',
 ]
 
 export function migrationSql(name) {

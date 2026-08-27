@@ -757,6 +757,17 @@ body {
   filter: brightness(1.6);
 }
 
+/* What the last automatic re-balance reported (#49 AC 7) — quieter than the
+   verdict above on purpose: it is the run's footnote, not the household's
+   answer. */
+.split__rebalance {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
 .split__list {
   list-style: none;
   margin: 0;

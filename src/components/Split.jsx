@@ -211,7 +211,53 @@ Verdict.propTypes = {
   nameOf: PropTypes.func.isRequired,
 }
 
-export default function Split({ members, chores, capacities, exclusions, error }) {
+/**
+ * What the last automatic re-balance had to say for itself — #49 AC 7.
+ *
+ * Rendered from the verdict the run STORED (`households.last_rebalance`),
+ * never recomputed here, and the distinction is the criterion: whether the
+ * change budget bound the result depends on the state the run replaced, which
+ * no read of the current rows can reconstruct. A surface that re-derived it
+ * would eventually state a different reason than the run recorded, and two
+ * disagreeing sentences about one household is the charter's named
+ * trust-killer.
+ *
+ * This is deliberately NOT the `Verdict` above. That one answers "is the
+ * household level, and is level reachable at all?" over what people are
+ * actually carrying — a live question, freeing everything, asked fresh each
+ * render (#47). This one reports what the last run DID: two different
+ * questions, each honest, and folding them into one sentence would make the
+ * stored facts look recomputed. The announcement story owns any richer
+ * presentation; this line is the verdict travelling, no more.
+ */
+function LastRebalance({ verdict, nameOf }) {
+  if (!verdict) return null
+  if (verdict.boundByBudget) {
+    return (
+      <p className="split__rebalance" data-testid="rebalance-note">
+        The last re-balance moved {verdict.minutesMoved} min and stopped there — the change
+        budget ({verdict.changeBudgetMinutes} min) held the rest of the week where it was.
+      </p>
+    )
+  }
+  if (verdict.contested && !verdict.level && verdict.reason) {
+    return (
+      <p className="split__rebalance" data-testid="rebalance-note">
+        The last re-balance could not make the split level: {nameOf(verdict.reason.memberId)}
+        &rsquo;s fair share is {verdict.reason.fairShareMinutes} min and the smallest job is{' '}
+        {verdict.reason.smallestJobMinutes} min.
+      </p>
+    )
+  }
+  return null
+}
+
+LastRebalance.propTypes = {
+  verdict: PropTypes.object,
+  nameOf: PropTypes.func.isRequired,
+}
+
+export default function Split({ members, chores, capacities, exclusions, lastRebalance, error }) {
   const { actual, reachable, reason } = verdictFor({ capacities, chores, exclusions })
 
   const nameOf = (memberId) => members.find((m) => m.id === memberId)?.display_name ?? 'Someone'
@@ -242,6 +288,8 @@ export default function Split({ members, chores, capacities, exclusions, error }
         ) : null}
 
         <Verdict actual={actual} reachable={reachable} reason={reason} nameOf={nameOf} />
+
+        <LastRebalance verdict={lastRebalance} nameOf={nameOf} />
 
         {members.length === 0 ? (
           <p className="card__body">
@@ -337,5 +385,6 @@ Split.propTypes = {
   chores: PropTypes.array.isRequired,
   capacities: PropTypes.array.isRequired,
   exclusions: PropTypes.array.isRequired,
+  lastRebalance: PropTypes.object,
   error: PropTypes.string,
 }

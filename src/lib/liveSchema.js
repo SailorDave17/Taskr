@@ -115,8 +115,9 @@ export const LIVE_RPCS = Object.freeze([
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
-  // #49, arriving with `0018` — red on purpose until that file is pasted, the
-  // same deliberate window every migration-borne entry here has had. The probe
+  // #49, arriving with `0018`. It was red on purpose until that file was applied
+  // — the same deliberate window every migration-borne entry here has had — and
+  // `0018` was applied on 2026-08-27 (#231), so this reads green now. The probe
   // passes the nil UUID for all four arguments; `expected_version` is a bigint
   // and `placements`/`verdict` are jsonb, so a resolved function refuses the
   // CAST (`22P02`, Postgres answering) before it could check anything — which

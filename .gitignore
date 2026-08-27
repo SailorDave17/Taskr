@@ -33,3 +33,15 @@ pnpm-debug.log*
 build/
 bin/
 *.mv.db
+
+# Production bundles pulled down for inspection — a saved copy of a deployed
+# `dist/assets/index-*.js`, kept at the root while somebody reads it. Globbed and
+# root-anchored rather than an exact name: the second copy somebody makes is
+# `prodbundle.old.js`, and an exact-name rule is what let a credential backup
+# stay committable in another repo here.
+#
+# NOTE: this line does NOT stop `npm run lint` reading the file. ESLint flat
+# config ignores what `eslint.config.js` lists and never consults `.gitignore`,
+# so that file carries the same pattern. Two lists, deliberately, because
+# neither tool reads the other.
+/prodbundle*.js

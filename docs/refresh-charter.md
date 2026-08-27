@@ -1,9 +1,17 @@
 # Taskr refresh charter
 
-- Date: 2026-08-04
+- Date: 2026-08-04; **ambition retrofit 2026-08-06**
 - Ratified by: owner (SailorDave17), at the charter and verdict gates of cairn's `refresh-project` SOP
-- Verdict: **rebuild from charter** — this document is the contract the rebuild is built from,
-  written so the rebuild needs nothing else from the legacy code
+- Verdict, code axis: **rebuild from charter** — this document is the contract the rebuild is built
+  from, written so the rebuild needs nothing else from the legacy code
+- Verdict, ambition axis: **reimagine** (owner, 2026-08-06) — the problem is re-framed for how the
+  world works now, and **the 2020 feature set below is input, not spec**
+
+> **Read this first if you are picking Taskr up.** Everything from "The problem" to "Salvage
+> inventory" was written on 2026-08-04 under a one-axis procedure and is still accurate as *history
+> and preservation*. The sections from **"The ambition retrofit"** onward were added 2026-08-06 and
+> are what the remaining work is built against. Where they disagree, the retrofit wins — that is what
+> the reimagine verdict means.
 
 ## The problem (the spirit — this survives whatever happens to the code)
 
@@ -19,8 +27,24 @@ should not receive the same chore count.
 
 1. **Fairness = time-budget allocation.** Proportional to capacity (total → remaining available
    time), never equal counts.
-2. **Capability constraints.** A task only goes to someone who can do it (the legacy
-   `usersWhoCanDoThisTask` set on a template).
+2. **Capability constraints.** A task only goes to someone who can do it — expressed as an
+   **exclusion** set: everyone can do everything until somebody says otherwise (the legacy
+   `usersWhoCannotDoThisTask` set on a template).
+
+   *Corrected in band 2026-08-21 by story #37, and the correction matters because it inverts the
+   polarity.* This line cited `usersWhoCanDoThisTask`, a positive capability set. **Measured**:
+   `git grep usersWhoCanDoThisTask legacy-final` returns **nothing** — no such identifier exists
+   anywhere in the 2020 tree. The field is `usersWhoCannotDoThisTask`
+   (`back-end/src/main/java/com/taskr/core/model/TaskTemplate.java:22`, 15 references), and
+   `ResourceManager.allocateSingleTask` filters on it hard:
+   `if (!taskTemplate.getUsersWhoCannotDoThisTask().contains(user))`.
+
+   The constraint is unchanged and still ratified; what was wrong was the *shape* it was recorded
+   in. It is worth stating rather than fixing quietly, because a positive capability set would have
+   been ruled out anyway by *"being set up is not a project"* below: it means a fresh household
+   allocates **nothing** until somebody has configured every person against every chore, which is
+   the setup burden the field scan measures at 70% abandonment within 100 days. The two arguments
+   agree, and only one of them needed the legacy code to be read correctly.
 3. **Visibility.** Every member's load and progress on one screen (the legacy all-users view with
    progress bars).
 4. **Recurring chores as templates**, instantiated into dated concrete tasks (`TaskTemplate` → `Task`).
@@ -90,3 +114,423 @@ decision at the end of execution, not a step in this document.
 - Whether allocation ever worked end-to-end in the legacy app is unknown; the rebuild treats the
   legacy behavior as intent, not as an oracle.
 - License for the new code — choose one at rebuild start, before outside code arrives.
+
+---
+
+# The ambition retrofit — 2026-08-06
+
+## Why this section exists
+
+The 2026-08-04 charter was rigorous and still aimed at reproducing a 2020 app on a 2026 stack,
+because **every criterion it could generate was derived from the old code**. The collapse is
+traceable in this document's own text:
+
+| Where | What it said |
+|---|---|
+| The problem, above | *"makes everyone's load visible so the fairness is **seen**, not asserted"* |
+| "What must survive" #3 | *"Visibility. …the legacy all-users view with **progress bars**"* |
+| Story #7, after grooming | *"One-screen household load view, **time-based**"* |
+
+A felt experience became a 2020 screen reference became a data-display story, and no gate asked
+whether the thing worth building had survived. All fifteen stories came out as mechanisms.
+`groom-backlog` was not at fault — it faithfully decomposed the charter it was given. The general
+form is in cairn as `derived-criteria-cannot-exceed-their-source-2026-08-06`.
+
+## The bar to beat (field scan, 2026-08-06)
+
+The field moved a long way after 2020. An entire **mental-load** category now exists that did not.
+
+| App | What it does well — this is what Taskr gets no credit for |
+|---|---|
+| **Tody** | Color-coded urgency: you clean what actually *needs* it, not what a calendar says |
+| **OurHome** | Genuinely free; points, leaderboards and rewards, well executed |
+| **Sweepy** | Points + leaderboard, explicitly strong on splitting work across a household |
+| **FairShare** | **Noticing Score** — separates *who noticed a job needed doing* from *who did it*; the gap is the mental load, made visible |
+| **fiftyfifty** | Explicitly rejects 50/50 in favour of "fair and transparent" |
+
+**What they are all bad at — the opening:**
+
+1. **Setup burden is the universal killer.** Every one requires you to build the system before it
+   helps — rooms, task lists, frequencies. A 2024 JMIR meta-analysis puts abandonment at **70%
+   within 100 days**, and the burden falls hardest on exactly the people who most need the app.
+2. **Leaderboards measure output, not fairness.** Points and rank *punish the member with less
+   capacity* — structurally the opposite of this project's thesis. Every gamified competitor has
+   this backwards.
+3. **Nobody does unequal capacity across a family.** Tody's multi-person support reads as "a
+   single-user app with sharing bolted on"; the mental-load apps are couples-focused. *A kid's 60
+   minutes against a parent's 300* is still an unoccupied position.
+
+**The uncomfortable finding:** Taskr's model needs **more** setup than its competitors — per-member
+time budgets and capability sets — and setup is the measured thing that kills these apps. That
+tension is the reason for the deliberate bet below.
+
+*Scope of this scan: two searches on 2026-08-06. A fast read, not exhaustive. Treat the named
+alternatives as real and the absence of others as unproven.*
+
+## What must become true (the ambition — this cannot be read out of the old code)
+
+1. **The split stays fair as life changes**, not only at the moment it is set. Capacity is a moving
+   quantity; every competitor treats it as a constant.
+2. **Being set up is not a project.** A household reaches useful in one sitting, without an evening
+   of data entry — the bet below exists for this.
+3. **Fairness is legible to the person who thinks it is unfair.** The test is not that a number is
+   displayed; it is that the argument ends.
+4. **The invisible half is at least acknowledged.** The reimagine verdict admits the noticing
+   dimension the field discovered after 2020 — whether it is modelled or only surfaced is an open
+   decision below, but it is not to be silently dropped.
+
+## The signature moment (owner-chosen, 2026-08-06)
+
+> **When someone's week gets busy, the household load visibly re-balances without anyone having to
+> negotiate it.**
+
+Stated so it can fail: the negotiation either happens or it does not. This is the one thing no
+competitor can do, because it requires capacity to be a live input rather than a setup step.
+
+**It must not become a screen.** "A load view", "a dashboard", "progress bars" are mechanisms that
+may or may not serve it. If a proposal could be satisfied by a screenshot of the 2020 all-users view,
+it has collapsed and is wrong. The 2020 progress-bar screen is *evidence of intent*, not the target.
+
+## The deliberate bet (one, owner-chosen)
+
+**AI-assisted setup and capacity capture.** Describe your week in plain language instead of filling
+in per-member minute budgets and capability matrices.
+
+- **Where:** the setup and capacity-update path only. Nowhere else.
+- **Why it creates the moment:** re-balancing requires *current* capacity. If updating capacity is a
+  form, nobody updates it, capacity goes stale, and the moment never fires in real life. The bet is
+  really about making capacity cheap enough to stay true.
+- **What kills it:** latency, cost, or an LLM failure in the one flow that must never break; or
+  extraction that is wrong often enough to erode trust in the numbers the fairness claim rests on.
+- **Fallback:** manual entry — which is what every competitor ships, so the floor is parity, not
+  failure. **The manual path must exist and work on day one; the bet is an accelerator on top of it,
+  never the only road in.**
+
+### Widened 2026-08-08 — the bet covers CHORE capture too (owner decision)
+
+The scope sentence above named "per-member minute budgets and capability matrices" and nothing else,
+which left a household still typing an unbounded chore list by hand — **the exact burden the field
+scan above measures as the universal killer**, at 70% abandonment within 100 days. `groom-backlog`
+raised this as an open question on #34 rather than deciding it, and the owner took the wider scope.
+
+- **Where, now:** the setup path, the capacity-update path, **and chore capture**. Still nowhere
+  else — allocation, assignment and completion stay boring by construction.
+- **What does NOT change, and it is why the widening is safe:** the fallback rule. *The manual path
+  must exist and work on day one.* #34 shipped exactly that for chores — typed title, typed minutes,
+  typed due date, with the refusal sentences tested — **before** any extraction exists. The
+  accelerator is still an accelerator.
+- **What it costs:** #42's corpus was scoped to capacity descriptions only. A bet that covers chore
+  capture needs chore descriptions in the same corpus, scored by the same grader, or the measurement
+  that decides whether the bet survives is silent about half of what it now claims.
+- **Why it was not built into #34:** there is no server-side compute in this repo, and an LLM
+  credential cannot reach a phone — `src/lib/keyShape.js` exists because a secret key reached a
+  published bundle once already. The route runs through #56, whose own AC 1 records that its platform
+  decision has not been taken.
+
+Everything outside that path is deliberately boring, proven technology (owner directive: selectively
+bleeding-edge, one bet).
+
+## Design direction
+
+- **Glanceable over comprehensive.** The moment is judged at arm's length in a hallway, not studied.
+- **Never a leaderboard.** Ranking members by output is the exact inversion of the thesis; whatever
+  is shown must make a *smaller* fair share look correct rather than losing.
+- **The re-balance must be perceptible as an event**, not a silently different number on next look —
+  something changed, here is what and why. Legibility is the product.
+- **No shame mechanics.** No streaks to break, no red for a person. Red is for work, never for people.
+- **It must never feel like it is nagging** — that is the thing the original problem statement names
+  as the enemy.
+
+## The prototype gate — passed 2026-08-06
+
+The signature moment was built as a disposable prototype and judged by the owner *running*, before
+any story was written. **Outcome: passed — "this is the thing."**
+
+Reference (throwaway, never merged, no backend, fixed data):
+`https://claude.ai/code/artifact/0e3b4cb8-2b6e-48aa-992a-7d00f2f7407e`
+
+The design idea that made the thesis visible, and which should survive into the product: **show each
+person's load as a share of *their own* capacity, so fair means every bar is level** regardless of how
+different the people are. It is structurally anti-leaderboard — level is the goal, not rank — and it
+satisfies "fairness is seen" without a number having to be read.
+
+### Three findings, and they are constraints on #9 rather than notes
+
+1. **The granularity floor is real and irreducible.** When a member's capacity approaches the size of
+   a single chore, level is arithmetically impossible: at 25 minutes' capacity Ava's fair share is
+   ~17 minutes and the smallest job is 10. *Measured*: greedy allocation was ragged in **3 of 5**
+   scenarios (spread to 15%); a local-search pass fixed two and **could not fix this one**. The
+   product must therefore have a designed answer for "level is unreachable", and the one that worked
+   is to **say so plainly and name the reason** — which reads as the fairness claim being honest
+   rather than as a failure. An allocator that silently reports "level" over a visibly ragged set is
+   the fastest way to destroy trust in the number the whole product rests on.
+2. **Re-balancing churns 8–10 of 14 jobs.** This is the kill condition named for derived allocation,
+   observed on the first run and currently unmitigated. Net *counts* barely move while *minutes* move
+   a lot, so the churn is mostly invisible in a count and very visible on a person's list. #9 needs a
+   stability rule — pinned assignments, a change budget, or preferring the incumbent on ties.
+3. **Minutes, not chore counts, is the unit.** The first narration read "10 chores moved" beside
+   "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
+   is in minutes, because that is the unit the fairness claim is made in.
+
+### Open caveat, carried rather than closed
+
+The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
+no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
+prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
+**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
+it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.**
+
+## Consequences for the backlog
+
+The reimagine lands **before the layer it changes exists**, which is lucky and will not last.
+
+- **Unaffected — proceed as written:** #23, #24, #25, #26 and PR #31. Household identity, join flow,
+  members with `weekly_minutes`, and per-member credentials are foundation a capacity model needs
+  regardless. The merged migration `0001_household_and_roster.sql` encodes no task or allocation
+  semantics and survives intact.
+- **Must be re-derived from this section before they are started:** **#7, #9, #10, #11, #12** — load
+  view, allocation, templates, instantiation, expected-vs-actual. All open, none started. They were
+  decomposed from the one-axis charter and encode the 2020 feature set as spec.
+- **#9 is the point of no return.** After allocation is built to the old model, the reimagine gets
+  materially more expensive. Re-derivation happens before it, not after.
+
+## Decisions taken at grooming, 2026-08-06
+
+Settled by the owner after the `groom-backlog` run raised them as escalations. Recorded here rather
+than only in the pipeline output, because a decision that lives in a pipeline's report stops existing
+at filing.
+
+- **Allocation is STORED, with an automatic re-derive on capacity change.** Not derived-at-read and
+  not an explicit re-balance button — the latter was ruled out against the charter, since *a button
+  someone presses is the negotiation moved rather than removed*. Reasoning: the change budget and the
+  announcement both need a **before-state**, #6 already stores manual assignments, and the
+  re-read-after-mutation pattern in `App.jsx` absorbs it. Costs a transactional RPC. This closes the
+  charter's "decide before #9" item.
+- **The LLM extraction call runs in a Supabase Edge Function.** The secret sits next to the data, the
+  auth context already exists, and one platform holds credentials. Rejected: a Vercel function (a
+  second platform holding a provider secret) and any client-side key, which is the `VITE_` secret-key
+  defect wearing a different hat. It is a **new deployment surface with no CI coverage**, so it is its
+  own story rather than a line in another one.
+- **The load surface opens by default**, with the roster reachable from it — it is the product's
+  thesis and the thing judged at arm's length.
+- **#6 and #8 are re-derived too** (owner, overruling the recommendation to re-derive only #8). Both
+  were decomposed from the one-axis charter and sit upstream of everything with a UI. #8 in
+  particular risks shipping a capability matrix — a form — in the same window the bet exists to
+  delete forms.
+
+## Decision taken 2026-08-16 — the calendar is an input, both halves, capacity first
+
+Settles the "what does *busy week* mean as an input" item that had been open below since the
+retrofit. Owner decision, taken with the tradeoffs stated at the gate.
+
+- **Google Calendar read is in scope, and it serves two distinct features — both are wanted:**
+  1. **Capacity inference** (primary): read a member's calendar to inform how busy their week is,
+     feeding the fairness split. This is the half that serves the signature moment — re-balancing
+     needs *current* capacity, and a calendar is the one place busy-ness already lives without
+     anyone typing it.
+  2. **Event import** (secondary): pull a calendar item in as a one-time chore so it is not typed
+     twice.
+- **Sequencing: capacity inference first, import later.** Both halves share the OAuth/consent
+  work; the capacity half is the one no competitor has and the one the charter's thesis needs.
+  Import without capacity would be scope spent on the half that muddies the fairness arithmetic
+  (imported commitments are not household chores) while the signature moment waits.
+- **This is not a second bet.** The deliberate bet stays LLM capture on the setup/capacity/chore
+  paths. Calendar OAuth and a read of the events API are boring, proven technology, which is what
+  the "one bet" directive requires of everything else. Calendar-inferred capacity is an *input* to
+  the same capacity model the bet feeds; neither replaces the other, and manual entry remains the
+  floor under both.
+- **What kills it:** consent friction (per-member Google sign-in is a real setup cost, and setup
+  burden is the field scan's universal killer) — if connecting a calendar costs more than it saves,
+  the declared-by-the-person path stays primary and calendar stays an accelerator; or inference
+  wrong often enough that members stop trusting the split, which is the same trust-erosion kill
+  condition the bet carries.
+
+New open questions this creates (owed at grooming, not settled here):
+
+- **Data minimization** — store the derived busy-minutes or the events themselves. Third-party
+  calendar contents in the household DB is a materially bigger privacy surface than anything #19
+  currently weighs.
+- **Whose calendars** — adults only, or kids' school calendars too. Bears directly on the
+  kids-data question.
+- **Where the read runs** — the Google credential must never reach the client bundle
+  (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
+  same Edge Function surface #56 stands up.
+
+## Decision taken 2026-08-24 — the repeat catch-up bound is SEVEN days
+
+Owner decision at the pickup of #53, which required the bound to be "a named tunable constant
+recorded in the decision log". This is that record.
+
+- **`CATCH_UP_BOUND_DAYS = 7`.** When nobody has opened the app for a while, the catch-up pass
+  creates at most the last seven days of missed occurrences; anything older is counted, skipped,
+  and said. The authority is the constant of that name in `catch_up_repeats_at`
+  (`supabase/migrations/0012_repeating_chores.sql`); `src/lib/chores.js` carries the same value for
+  the sentence the UI shows, and `repeats.pglite.test.js` holds the two copies equal.
+- **Why seven**: a week away costs at most a week of chores on return, matching the app's weekly
+  capacity cadence — and #53's own criterion names "a fortnight of stale chores" as the failure, so
+  fourteen would sit exactly on the failure it exists to prevent. Rejected: **14 days** (more
+  forgiving of long gaps, at the cost of the walk-in pile the design direction rules out) and
+  **3 days** (nothing stale ever appears, but a long weekend silently drops a weekly chore's
+  occurrence).
+- **How the household is told** (same gate, same day): a transient notice on the device whose open
+  performed the skip. Rejected: a persisted notice every member sees until dismissed — genuinely
+  household-wide, but it costs a notifications table, RLS, grants and a dismiss flow, a substantial
+  widening of a three-day story for a message whose whole content is "less work appeared than you
+  might have expected".
+
+## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
+
+Owner decision at the pickup of #47, whose criterion 11 required "the navigation approach chosen is
+recorded in the decision log". This is that record.
+
+- **Three surfaces — Split, Chores, Who — as a tab strip in `App.jsx`, with the current view held in
+  `useState`.** The split opens by default, which is not a new decision: the grooming section above
+  settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
+  What #47 settled is the *mechanism*.
+- ~~**Why not a router.** `react-router` would be the largest dependency in the repo, added to move
+  between three views of one household. It also wants the URL, and the URL is already spoken for:
+  Google returns a calendar consent to the app **root** with a `?code=` (#95), the PWA's scope is
+  `/`, and a path-based route would need a rewrite rule at Vercel to behave the way the root already
+  does. Rejected on cost, not on principle — the moment a surface needs to be linkable from outside
+  the app, this decision is the one to reopen.~~ **Superseded 2026-08-26 — see the decision section
+  below.** The stated condition fired exactly as written: an invitation has to be openable from an
+  email, which is a surface linkable from outside the app. The rest of this section stands.
+- **Why not a state library.** There is no state to share: `App.jsx` holds every read and hands the
+  results down. A library here would be ceremony around one string.
+- **Why not keep the surfaces stacked on one page**, which is what the app did until this story and
+  is the smallest possible change. Criterion 11 asks that the household be "re-read from the server
+  on arrival", and a stacked page has no arrival — so the criterion is unsatisfiable by construction
+  rather than merely unmet. The deeper reason is the charter's: the split is the thing judged at
+  arm's length, and a thesis that has to be scrolled to is not the thing on screen.
+- **Arrival performs a full re-read**, through the same `mutate` every write goes through, so
+  arriving and mutating cannot drift into two ideas of what "current" means. It costs one round trip
+  per tap. That is deliberate and it is the criterion: another phone's edit has to be on this screen
+  when you get there, and a view swap over state this device already holds would show what it held
+  when it booted.
+- **The current tab is marked with `aria-current`** and styled off that attribute rather than off a
+  second class name — one state, in the place a screen reader already reads it.
+
+Consequence recorded here because it is easy to read later as work dropped: the per-person load
+figures **left the chore screen**. #36 shipped them there in deliberately the ugliest honest form,
+with a comment saying #47 owned the presentation and would replace it. It has. Two answers to one
+question on two screens is the fault `src/lib/capacity.js`'s own docstring calls invisible.
+
+## Decision taken 2026-08-26 — a person may belong to more than one household
+
+Owner decisions taken at the routing and grooming gates of the auth/household-separation goal. This
+section supersedes the router bullet above and the admission record in
+[`access-model.md`](access-model.md); it is the charter-level statement that the product's model
+changed.
+
+**The model.** A person may belong to more than one household. Until now that was implicit — it is
+worth being precise that it was never written down anywhere in this file, so this is an *addition*
+rather than a correction. What made it urgent is that the schema stopped forbidding it on
+2026-08-21: migration `0009` rescoped two global unique indexes to per-household and said in its own
+header that it "does not make the app support a person in two households; it stops the SCHEMA
+forbidding it". The client never caught up, and `create_household` guards nothing — so the state was
+reachable and every household-scoped read would have merged two households silently. The alternative
+considered and rejected was to guard `create_household` and stay single-household, which is cheaper
+and closes the gap just as well; it was rejected because the household this app is built for has
+members who belong to a second one.
+
+**Admission changes for the third time, and this is the reversal.** `access-model.md` records the
+chain: 2026-08-05 → 2026-08-06 → 2026-08-11 (#62, *"The join code is gone. Not repurposed —
+dropped"*). Admission is now **an invitation**: a code an organizer creates and can withdraw, and an
+emailed invitation carrying the same thing as a link. Two things are deliberately *not* reinstated:
+
+- **The shared household secret is not coming back.** #62's objection was that a code anybody could
+  repeat admitted anybody who overheard it. An invitation is created for a purpose, is withdrawable,
+  and is spent once — so the objection is answered by the mechanism rather than waived.
+- **The retired vocabulary stays retired.** `join_code`, `join_household`, `generate_join_code` and
+  the seven other names in `src/test/support/retiredVocabulary.js` are not reused. A resurrected
+  identifier meaning something different from what it meant before #62 makes every old comment and
+  migration header ambiguous rather than wrong, and no grep finds that. The guard is *widened* to
+  `src/`, `supabase/migrations/` and `supabase/functions/` before any admission code is written —
+  today it scans two test files, so the rule it enforces would not have reached the code that needed
+  it.
+
+**Request-to-join was considered and dropped.** An organizer already knows who lives in the house, so
+an approval queue and a pending state buy little for a household of four and cost a state machine
+this app has no precedent for. Reversible: nothing in the invitation schema forecloses it.
+
+**`react-router` is adopted, and this supersedes the 2026-08-25 rejection.** That rejection named its
+own kill condition — *"the moment a surface needs to be linkable from outside the app"* — and an
+emailed invitation is exactly that. The costs it named have not gone away and are accepted rather
+than disputed: it becomes the largest dependency in the repo, it needs a rewrite rule at Vercel, and
+it has to share `/` with the calendar consent return (`?code=`, #95) at a PWA scope of `/`. Two
+existing guards in `gate.test.js` pin the `useState` shape it replaces and must be rewritten and
+shown to redden rather than merely going green. The routing work is deliberately sequenced **last**
+in the backlog, and nothing before it depends on a URL, so the block lifts out whole if the emailed
+half turns out not to be worth its days.
+
+**Smaller decisions, recorded because each has a defensible opposite.**
+
+- **The active household is remembered in `localStorage`**, validated against the membership set on
+  load. This sits against `App.jsx`'s stated discipline that data is never held locally — that
+  discipline distinguishes the *credential*, which is held locally and correctly, from the *data*,
+  which never is. A UI preference is on the credential side of that line. The reasoning belongs at
+  the call site, because a future reader will otherwise read it as a violation.
+- **The default underneath it is the oldest household** by `households.created_at`. Stable across
+  devices and across re-provisioning, where "most recently joined" is not — a re-provisioned member
+  row changes the answer and two devices then disagree permanently. Wrong at most once per device,
+  and remembered after one tap.
+- **Leaving deletes the member row** and lets the existing foreign keys cascade as they stand. This
+  was reaffirmed after the consequences were measured rather than assumed, and they are a mixture
+  that accumulated across six migrations: completions and assignments are `set null` (the work
+  survives, the attribution does not), while capacity, exclusions and calendar rows cascade away.
+  Closing a household nobody is left in **deletes** it, for consistency with that and because this
+  app has no undo anywhere else.
+- **Only the organizer may remove a member.** Today every member can remove every other, including
+  the organizer — and `households.organizer_member_id` is `on delete set null` while
+  `create_household` is the only thing that ever writes it, so the household permanently loses the
+  ability to provision anyone. Filed as its own issue ahead of this work because it depends on none
+  of it.
+- **One Google account connected in two households means two consents and two tokens** — what the
+  composite foreign keys were already built for, asserted explicitly rather than inherited from an
+  `onConflict` target by accident.
+- **Leaving does not revoke the Google grant**, because #99 owns the revoke. The screen says so
+  plainly and names it; the alternative coupled an irreversible household action to a calendar
+  story's schedule.
+
+**What is not decided here.** How the client scopes a read to one household is deliberately left to a
+measurement story — `members` and `chores` both withhold `household_id` from the client select
+grant, and whether a PostgREST embed can filter without a grant change is unmeasured. Deciding it now
+would commit to a migration and an owner paste that may not be needed.
+
+## Decision taken 2026-08-26 — actuals: one-tap capture, and the estimate-update thresholds
+
+Owner decisions at the pickup of #12, whose AC 4 required both thresholds to be "named constants,
+recorded in the decision log as tunable defaults". This is that record.
+
+- **Capture stays ONE tap.** Marking a chore done is unchanged; `complete_chore` seeds
+  `actual_minutes = expected_minutes` when no actual is recorded yet, so doing nothing stores honest
+  data — the estimate stands as the best claim of what the work cost. The done row then carries an
+  editable "Took (minutes)" for saying otherwise. Rejected: a prefilled confirm sheet on every Done —
+  it matches AC 1's wording exactly and costs a second tap on every completion, which is the
+  input-burden this charter's bet exists to delete. Same data lands either way; only the ceremony
+  differed.
+- **`MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE = 3` and `ESTIMATE_DEVIATION_THRESHOLD = 0.25`**, both
+  inclusive, both in `src/lib/chores.js`, tunable defaults per the issue. The one-tap
+  "update estimate to N min" appears on a repeat anchor once its family has three completed
+  instances whose average actual is 25% or more away from the current estimate; N is the rounded
+  average. The boundary test in `chores.test.js` spells 3 and 25% literally and pins the constants
+  beside them, so tuning either reddens a test rather than silently moving every fixture.
+- **A zero actual is legal** (`chores_actual_minutes_range` is `0..1440` where the estimate's range
+  starts at 1). "It took no time — it was already done" is a real household fact, and
+  `allocation.test.js` (#47 criterion 7) already pinned that a recorded zero contributes zero.
+  Refusing it would make the app argue with the person reporting the most useful datum this story
+  collects.
+- **Propagation on an accepted update is #54's ratified option (b) by construction** — the update is
+  an ordinary estimate edit on the anchor, occurrences copy minutes at creation (0012), so the new
+  value reaches future occurrences and never rewrites work already on somebody's list.
+
+## Open decisions (still owed)
+
+- **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.
+  Adding capture adds input burden, which is the failure mode the bet exists to fight.
+- ~~**What "busy week" means as an input** — declared by the person, inferred from completions, or
+  read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
+  It bears on whether #12's actuals ever become an input to capacity.~~ **Settled 2026-08-16 —
+  see the decision section above.** The #12 sub-question (whether actuals feed capacity) is *not*
+  settled by it and stays open.

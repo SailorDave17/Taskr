@@ -1,0 +1,18 @@
+# Branches in this repo that are entered only by a pull request the owner merges,
+# in addition to the driver default (develop main master).
+#
+# Taskr has four branch roles, which is why this file exists at all: `develop`
+# is the 2020 legacy tip, `main` is the cutover target tagged `legacy-final`,
+# `rebuild/v1` is where rebuild work actually merges, and `release` is what Vercel
+# builds production from - so neither the integration branch nor the production
+# branch is one of the three default names, and both would otherwise fall through
+# as if they were feature branches.
+rebuild/v1
+
+# Added 2026-08-12, with the Vercel production-branch change that created it.
+# A push to `release` IS a production deployment - it is the most consequential
+# ref in the repo and was the only one of the four that nothing refused. The
+# decoupling only buys anything if promotion stays a deliberate act, and an
+# unguarded branch that deploys on push is the coupling reintroduced under a new
+# name.
+release

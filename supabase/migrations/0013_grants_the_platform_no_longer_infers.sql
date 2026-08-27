@@ -1,0 +1,120 @@
+-- The three privileges this schema was relying on the platform to infer — #91.
+--
+-- ===========================================================================
+-- What was wrong, and why nothing caught it for three months
+-- ===========================================================================
+--
+-- Supabase historically set the default ACL for tables created by `postgres` in
+-- `public` to `arwdDxtm` for anon, authenticated and service_role — SELECT,
+-- INSERT, UPDATE and DELETE included. Newer stacks tightened it. *Measured
+-- 2026-08-13* against `supabase start` (CLI 2.114.0) and again 2026-08-24
+-- against PGlite 0.5 (PG 18), the default is now:
+--
+--     anon=Dxtm  authenticated=Dxtm  service_role=Dxtm
+--
+-- TRUNCATE, REFERENCES, TRIGGER, MAINTAIN — and no DML of any kind.
+--
+-- Every migration before this one that wanted to keep a privilege wrote a NARROW
+-- revoke and let the rest ride on that default. `revoke select, insert, update`
+-- preserves DELETE only if DELETE was ever granted. On the hosted project it
+-- was, by inheritance; on anything rebuilt from these files it never has been.
+--
+-- So the schema in git and the schema in production disagreed, in the direction
+-- nothing checks: production is MORE permissive than the files that describe it.
+--
+-- ===========================================================================
+-- The audit, measured rather than read (#91 AC 3)
+-- ===========================================================================
+--
+-- Every operation `src/lib/*.js` issues, driven as role `authenticated` against
+-- a database built only from `supabase/migrations/` with the real default ACL.
+-- Seventeen operations, three refused:
+--
+--     DENIED  households   select *   household.js:197   -- the app cannot load
+--     DENIED  members      delete     household.js:337   -- removing a person
+--     DENIED  chores       delete     chores.js:440      -- removing a chore
+--
+-- The pattern is exact and it is worth naming, because it predicts where the
+-- fourth instance will be. `member_capacity` (0005) and `chore_exclusions`
+-- (0010) each write `grant delete` explicitly, and both are fine. `members`
+-- (0002, 0007) and `chores` (0003) narrow their revoke to `select, insert,
+-- update` and inherit the rest, and both are broken.
+--
+-- All four DELETE policies already exist and are correct. Only the grants were
+-- missing, which is why this file contains no policy at all.
+--
+-- The sharpest part: 0003 states the assumption in prose, at line 161 —
+--
+--     "DELETE stays granted to `authenticated`, which needs it for
+--      `chores_delete_same_household`. That is why anon and authenticated are
+--      two statements here rather than one."
+--
+-- That reasoning is correct about the revoke being deliberately narrow, and its
+-- conclusion was true on the platform it was written against. Nothing executes a
+-- comment, so it went on reading as a decision.
+--
+-- ===========================================================================
+-- Re-runnable, and a no-op on the live project (#91 AC 4, AC 5)
+-- ===========================================================================
+--
+-- `grant` is idempotent in Postgres: granting a privilege already held changes
+-- nothing and raises nothing, so a second paste of this file is a no-op by
+-- construction rather than by a guard. There is no `if not exists` ceremony here
+-- because none is needed, and adding one would imply a hazard that is absent.
+--
+-- Against the LIVE project this file changes nothing observable. That project
+-- predates the platform's tightening and already holds all three privileges by
+-- inheritance; this states them so a rebuild does too. It is safe to paste at
+-- any time, and pasting it is what makes the repo's record true rather than
+-- what makes the app work.
+
+-- ---------------------------------------------------------------------------
+-- 1. households — the read that loads the app
+-- ---------------------------------------------------------------------------
+--
+-- Column-scoped rather than `grant select on public.households`, matching 0002,
+-- 0003, 0005, 0007 and 0010 (#91 AC 2). This list is EVERY column, which 0003's
+-- own measurement notes makes it behaviourally identical to a table grant today:
+-- a column grant only refuses `select('*')` when something is actually withheld.
+--
+-- It is written this way anyway, for a reason that is about tomorrow rather than
+-- today. A table grant silently covers every column added later; a column grant
+-- does not, so the next `alter table public.households add column` has to come
+-- back here and say whether the new column is readable by a signed-in member.
+-- That turns an automatic exposure into a decision somebody makes.
+--
+-- The cost of that choice is a way to forget: a column added and not granted
+-- breaks `currentHousehold()`'s `select('*')` outright rather than omitting a
+-- field. `grants.pglite.test.js` asserts this list against the live column set
+-- so the omission fails in CI instead of in a household.
+--
+-- Nothing is withheld. `households` has no secret: `id` is quoted in every other
+-- table's foreign key, `name` and `timezone` are rendered, `organizer_member_id`
+-- decides who sees the organizer controls, and `created_at` is inert. Compare
+-- `chores`, where `household_id` IS withheld and the withholding does real work.
+grant select (id, name, created_at, organizer_member_id, timezone)
+  on public.households to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. members — removing a person from the roster
+-- ---------------------------------------------------------------------------
+--
+-- `members_delete_same_household` (0001, re-pointed by 0007) is the policy that
+-- decides WHICH rows, and it has been correct throughout. This is the privilege
+-- that decides whether the statement may be attempted at all.
+--
+-- Table-level rather than column-scoped, because DELETE has no column list in
+-- Postgres — a row goes or it does not. Same for `chores` below.
+--
+-- `anon` is deliberately not named. 0002 and 0007 revoke it wholesale and no
+-- policy targets it; granting it here would be one `to anon` away from mattering.
+grant delete on public.members to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. chores — removing a chore
+-- ---------------------------------------------------------------------------
+--
+-- The privilege 0003's comment says is already held. It was, on the platform of
+-- the day. `chores_delete_same_household` (0003, re-pointed by 0007) is the
+-- policy; this is the grant it was always assumed to be sitting on.
+grant delete on public.chores to authenticated;

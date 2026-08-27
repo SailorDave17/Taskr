@@ -1,0 +1,47 @@
+# This machine has core.autocrlf=true and the repo had no .gitattributes, which
+# is a combination that has already cost this workspace a real incident: files
+# correct in the repo, CRLF on disk, and reported as unmodified by every git
+# command you would think to run. `.gitattributes` governs checkout, so it is
+# the fix; hand-normalising is not, because a fresh clone brings it back.
+#
+# Scoped deliberately rather than applied as a blanket rule.
+
+# Source and config: LF in the repo and on disk, everywhere.
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.svg   text eol=lf
+*.sql   text eol=lf
+
+# `.ts` was missing until #95, and the omission is the shape this repo keeps
+# recording: the rule was written when the tree had no TypeScript in it, stayed
+# correct, and its EXTENSION fell behind. *Measured 2026-08-24*:
+# `supabase/functions/provision-member/index.ts` is `i/lf w/crlf` — LF in the
+# repo, CRLF on disk — which is exactly the state the header above says has
+# already cost this workspace an incident. Nothing is broken in the repo, because
+# `core.autocrlf=true` normalises on the way in; what is missing is the half that
+# governs checkout. #95 adds two more `.ts` files, which is what made the gap
+# visible. Beyond that story's acceptance criteria and inert either way.
+*.ts    text eol=lf
+
+# Binary: never touched, never diffed as text.
+*.png   binary
+*.jpg   binary
+*.ico   binary
+
+# githooks/ holds a POSIX shell script plus plain-text list files that
+# githooks/pre-push reads line by line. This machine has core.autocrlf=true, so
+# without this rule they check out CRLF and `rebuild/v1\r` stops equalling
+# `rebuild/v1` - the branch then falls through the owner-only list and is pushed
+# as if it were a feature branch. Measured on Taskr 2026-08-05: the file was
+# present, correct in the repo, `git status` clean, and the guard silently off.
+#
+# The hook strips a trailing CR itself as well. Neither half replaces the other:
+# .gitattributes governs checkout and so fixes the files in repos that carry it,
+# while the in-hook strip covers any clone or repo that does not.
+/githooks/*    text eol=lf

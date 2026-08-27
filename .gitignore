@@ -1,136 +1,61 @@
-*.mv.db
+# Node / Vite
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.local
 
-# Created by https://www.toptal.com/developers/gitignore/api/intellij,gradle,vscode
-# Edit at https://www.toptal.com/developers/gitignore?templates=intellij,gradle,vscode
+# Env — credentials never enter git (#4's stated prerequisite). Runtime config
+# for Supabase is set in Vercel's dashboard as VITE_-prefixed variables.
+#
+# Since #185 the file these lines exclude holds SUPABASE_ACCESS_TOKEN, which is a
+# Supabase personal access token: it authenticates as the account owner and has
+# full authority over EVERY project in the account, not one. Committing it would
+# be worse than committing a service-role key, which is at least scoped to a
+# single project. Revoke at https://supabase.com/dashboard/account/tokens, where
+# revoking is immediate and free; `.env.example` says the rest.
+#
+# These two lines are not the only defence, deliberately. A `.gitignore` protects
+# one path and says nothing about a token pasted into a script, a document or a
+# test fixture — so `src/test/gate.test.js` scans every file in the repo, tracked
+# and untracked, for a token-shaped literal. `.env.local` is correctly outside
+# that scan's corpus BECAUSE these lines ignore it, which is the token's one
+# sanctioned home.
+.env
+.env.*
+!.env.example
 
-### Intellij ###
-# Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
-# Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
-
-# User-specific stuff
-.idea/**/workspace.xml
-.idea/**/tasks.xml
-.idea/**/usage.statistics.xml
-.idea/**/dictionaries
-.idea/**/shelf
-
-# Generated files
-.idea/**/contentModel.xml
-
-# Sensitive or high-churn files
-.idea/**/dataSources/
-.idea/**/dataSources.ids
-.idea/**/dataSources.local.xml
-.idea/**/sqlDataSources.xml
-.idea/**/dynamic.xml
-.idea/**/uiDesigner.xml
-.idea/**/dbnavigator.xml
-
-# Gradle
-.idea/**/gradle.xml
-.idea/**/libraries
-
-# Gradle and Maven with auto-import
-# When using Gradle or Maven with auto-import, you should exclude module files,
-# since they will be recreated, and may cause churn.  Uncomment if using
-# auto-import.
-.idea/artifacts
-.idea/compiler.xml
-.idea/jarRepositories.xml
-.idea/modules.xml
-.idea/*.iml
-.idea/modules
-*.iml
-*.ipr
-
-# CMake
-cmake-build-*/
-
-# Mongo Explorer plugin
-.idea/**/mongoSettings.xml
-
-# File-based project format
-*.iws
-
-# IntelliJ
-out/
-
-# mpeltonen/sbt-idea plugin
-.idea_modules/
-
-# JIRA plugin
-atlassian-ide-plugin.xml
-
-# Cursive Clojure plugin
-.idea/replstate.xml
-
-# Crashlytics plugin (for Android Studio and IntelliJ)
-com_crashlytics_export_strings.xml
-crashlytics.properties
-crashlytics-build.properties
-fabric.properties
-
-# Editor-based Rest Client
-.idea/httpRequests
-
-# Android studio 3.1+ serialized cache file
-.idea/caches/build_file_checksums.ser
-
-### Intellij Patch ###
-# Comment Reason: https://github.com/joeblau/gitignore.io/issues/186#issuecomment-215987721
-
-*.iml
-modules.xml
-.idea/misc.xml
-*.ipr
-
-# Sonarlint plugin
-# https://plugins.jetbrains.com/plugin/7973-sonarlint
-.idea/**/sonarlint/
-
-# SonarQube Plugin
-# https://plugins.jetbrains.com/plugin/7238-sonarqube-community-plugin
-.idea/**/sonarIssues.xml
-
-# Markdown Navigator plugin
-# https://plugins.jetbrains.com/plugin/7896-markdown-navigator-enhanced
-.idea/**/markdown-navigator.xml
-.idea/**/markdown-navigator-enh.xml
-.idea/**/markdown-navigator/
-
-# Cache file creation bug
-# See https://youtrack.jetbrains.com/issue/JBR-2257
-.idea/$CACHE_FILE$
-
-# CodeStream plugin
-# https://plugins.jetbrains.com/plugin/12206-codestream
-.idea/codestream.xml
-
-### vscode ###
+# Editors
 .vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
+.idea/
 *.code-workspace
 
-### Gradle ###
-.gradle
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Legacy toolchain leftovers. The legacy tree is gone from this branch and lives
+# at tag `legacy-final`; checking that tag out would recreate these.
+.gradle/
 build/
+bin/
+*.mv.db
 
-# Ignore Gradle GUI config
-gradle-app.setting
-
-# Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
-!gradle-wrapper.jar
-
-# Cache of project
-.gradletasknamecache
-
-# # Work around https://youtrack.jetbrains.com/issue/IDEA-116898
-# gradle/wrapper/gradle-wrapper.properties
-
-### Gradle Patch ###
-**/build/
-
-# End of https://www.toptal.com/developers/gitignore/api/intellij,gradle,vscode
+# Production bundles pulled down for inspection — a saved copy of a deployed
+# `dist/assets/index-*.js`, kept at the root while somebody reads it. Globbed and
+# root-anchored rather than an exact name: the second copy somebody makes is
+# `prodbundle.old.js`, and an exact-name rule is what let a credential backup
+# stay committable in another repo here.
+#
+# NOTE: this line does NOT stop `npm run lint` reading the file. ESLint flat
+# config ignores what `eslint.config.js` lists and never consults `.gitignore`,
+# so that file carries the same pattern. Two lists, deliberately, because
+# neither tool reads the other.
+/prodbundle*.js

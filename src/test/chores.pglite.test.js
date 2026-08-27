@@ -446,6 +446,7 @@ describe('chores, run against a real Postgres', () => {
       expect(await granted('SELECT')).toEqual([
         'actual_minutes',
         'assigned_member_id',
+        'assigned_source',
         'completed_at',
         'completed_by_member_id',
         'created_at',

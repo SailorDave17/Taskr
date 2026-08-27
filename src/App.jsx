@@ -31,6 +31,7 @@ import {
   updateChore,
 } from './lib/chores.js'
 import {
+  baselineMoved,
   capacitiesFor,
   clearCapacity,
   listCapacity,
@@ -38,6 +39,7 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import { reassignHousehold } from './lib/reassign.js'
 import {
   completeConnect,
   listCalendarConnections,
@@ -348,7 +350,25 @@ export default function App() {
     (person) => mutate(() => addMember({ ...person, householdId: household?.id })),
     [mutate, household],
   )
-  const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
+  // #49 — a baseline edit is a capacity change (owner decision at pickup,
+  // extending the grooming decision's "on capacity change" to the roster's
+  // weekly_minutes), so the re-assignment runs before the refresh the same way
+  // it does for a weekly override. Gated on the value actually MOVING: the
+  // roster's save always sends `weeklyMinutes`, and a name-only edit must not
+  // overwrite `last_rebalance` with a run nothing prompted.
+  const handleSave = useCallback(
+    (id, patch) =>
+      mutate(async () => {
+        const moved = baselineMoved(
+          members.find((m) => m.id === id),
+          patch.weeklyMinutes,
+        )
+        const saved = await updateMember(id, patch)
+        if (moved) await reassignHousehold({ householdId: household?.id })
+        return saved
+      }),
+    [mutate, members, household],
+  )
   const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
@@ -476,19 +496,32 @@ export default function App() {
   // database (AC 6): the manual road in is the floor the charter requires on day
   // one, and the extraction bet (#57) is an accelerator on top of it, never the
   // only way in. A test asserts that this path imports nothing else.
+  // #49 — the capacity write is what the grooming decision named as the
+  // trigger: the household's assignments follow it with nobody pressing an
+  // assign button and nobody asked to approve. `reassignHousehold` re-reads
+  // everything fresh, computes with the real allocator and applies through the
+  // one transactional RPC; `mutate()`'s refresh then shows the stored result,
+  // so what this device shows is what the next device to load will see.
   const handleSetCapacity = useCallback(
     (memberId, minutes) => {
       if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
-      return mutate(() => setCapacity({ memberId, periodStart, minutes, householdId: household?.id }))
+      return mutate(async () => {
+        const saved = await setCapacity({ memberId, periodStart, minutes, householdId: household?.id })
+        await reassignHousehold({ householdId: household?.id })
+        return saved
+      })
     },
     [mutate, periodStart, household],
   )
   const handleClearCapacity = useCallback(
     (memberId) => {
       if (!periodStart) return Promise.reject(new Error('No week to clear capacity for yet.'))
-      return mutate(() => clearCapacity(memberId, periodStart))
+      return mutate(async () => {
+        await clearCapacity(memberId, periodStart)
+        await reassignHousehold({ householdId: household?.id })
+      })
     },
-    [mutate, periodStart],
+    [mutate, periodStart, household],
   )
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
@@ -615,6 +648,7 @@ export default function App() {
           chores={chores}
           capacities={capacities}
           exclusions={exclusions}
+          lastRebalance={household?.last_rebalance ?? null}
           error={error}
         />
       ) : null}

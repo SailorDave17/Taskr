@@ -151,12 +151,13 @@ describe('the readable column list', () => {
     // A column grant makes `select('*')` fail outright rather than quietly
     // returning a narrower row, so this list is load-bearing rather than tidy.
     // 0004 added the two completion columns as readable, 0006 added
-    // assigned_member_id, 0012 the three repeat columns a screen renders, and
-    // 0015 the actual (#12); if this list and the grant ever disagree, every
-    // read fails with a permission error.
+    // assigned_member_id, 0012 the three repeat columns a screen renders,
+    // 0015 the actual (#12), and 0018 assigned_source (#49); if this list and
+    // the grant ever disagree, every read fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
       'actual_minutes',
       'assigned_member_id',
+      'assigned_source',
       'completed_at',
       'completed_by_member_id',
       'created_at',

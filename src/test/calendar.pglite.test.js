@@ -352,6 +352,61 @@ describe('connecting a calendar, run against a real Postgres', () => {
       },
     )
 
+    it('#161 — ONE person, TWO households, two independent connections', async () => {
+      // The schema half of #161 criterion 7, and the reason `onConflict:
+      // 'member_id'` survives multi-household unchanged.
+      //
+      // `calendar_connections_one_per_member` is unique on the MEMBER ROW, and
+      // since 0009 a person in two households holds two member rows — one per
+      // household, sharing a `claimed_by`. So "one connection per person" is
+      // really "one per person PER HOUSEHOLD", and the two never collide.
+      //
+      // Had the constraint been keyed on the PERSON instead, connecting in the
+      // second household would have destroyed the first household's token. That
+      // is the row this test exists to prove cannot happen.
+      const person = await newDevice(db, 'placeholder.two.households@example.test')
+      const inA = await seedMember(householdA.id, 'Placeholder Everywhere')
+      const inB = await seedMember(householdB.id, 'Placeholder Everywhere')
+      await provisionMember(db, inA, person)
+      await provisionMember(db, inB, person)
+
+      await connect(householdA.id, inA)
+      const second = await attempt(() => connect(householdB.id, inB))
+
+      expect(second.ok, second.error ?? '').toBe(true)
+      expect(await countAsOwner('calendar_connections')).toBe(2)
+      expect(await countAsOwner('calendar_tokens')).toBe(2)
+
+      // And they really are one per household rather than two rows that happen
+      // to exist: the pair is distinct on both keys.
+      const { rows } = await db.query(
+        `select household_id, member_id from public.calendar_connections order by household_id`,
+      )
+      expect(new Set(rows.map((r) => r.member_id)).size).toBe(2)
+      expect(new Set(rows.map((r) => r.household_id)).size).toBe(2)
+    })
+
+    it('#161 — and the SAME member still cannot hold two, in either household', async () => {
+      // The control on the test above. Without it, "two rows exist" would pass
+      // just as happily against a schema with no uniqueness at all, which is the
+      // opposite of what 0011 says. One person, two households: two connections.
+      // One MEMBER ROW: still exactly one.
+      const person = await newDevice(db, 'placeholder.control@example.test')
+      const inB = await seedMember(householdB.id, 'Placeholder Control')
+      await provisionMember(db, inB, person)
+
+      await connect(householdB.id, inB)
+      const again = await attempt(() =>
+        db.query(
+          `insert into public.calendar_connections (household_id, member_id, scope)
+           values ($1, $2, $3)`,
+          [householdB.id, inB, FREEBUSY],
+        ),
+      )
+      expect(again.ok).toBe(false)
+      expect(again.error).toMatch(/calendar_connections_one_per_member|duplicate key/i)
+    })
+
     it('takes both rows with the member when they are removed from the roster', async () => {
       // A credential outliving the person it belongs to is the failure worth
       // preventing here. Contrast 0006, where deleting a member RELEASES their

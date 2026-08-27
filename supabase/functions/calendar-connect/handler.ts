@@ -27,16 +27,26 @@
 // CALLER-SCOPED client — the anon key plus the caller's own JWT — before the
 // service_role client is used for anything.
 //
-//   1. Find the member THROUGH THE CALLER, by `claimed_by = auth.uid()`. Row
-//      level security scopes `members` to the caller's household, so this cannot
-//      return somebody else's row even if the caller asks for one. The request
-//      body never says who it is about.
-//   2. Ask the database which household the caller is in, THROUGH THE CALLER.
+//   1. Find the member THROUGH THE CALLER, by `claimed_by = auth.uid()` AND the
+//      household the request names. Row level security scopes `members` to the
+//      households the caller belongs to, so this cannot return somebody else's
+//      row even if the caller asks for one. The request body never says who it
+//      is about — only which household, and a household the caller is not in
+//      matches nothing.
+//   2. Take the household FROM THAT ROW, because the row is the record being
+//      acted on and the body is not a source of truth about it.
 //   3. Only then use service_role, and only to write the two rows a client is
 //      deliberately unable to write at all.
 //
 // Doing (1) with service_role would be the classic hole. Under the shape above,
 // getting it wrong fails closed: the read returns nothing.
+//
+// Step 2 is #161, and it replaces a step that asked the database which
+// households the caller was in and then took the FIRST one. That was correct
+// for exactly as long as there could only be one. Since 0009 a person can hold
+// a member row per household, and from that moment the old step 1 could not
+// return a row at all — `maybeSingle()` over two rows is a refusal, not a pick —
+// so this endpoint failed outright for anyone in two households.
 
 /** Google's OAuth 2.0 token endpoint. Named so the test can assert it is the one used. */
 export const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
@@ -83,13 +93,31 @@ export const REQUIRED_GOOGLE_ENV = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 export interface SupabaseLike {
   auth: { getUser(): Promise<{ data: { user: { id: string } | null } | null }> }
   from(table: string): {
-    select(columns: string): {
-      eq(column: string, value: unknown): { maybeSingle(): Promise<{ data: any; error: any }> }
-    }
+    select(columns: string): Filterable
     upsert(row: unknown, options?: unknown): Promise<{ error: any }>
     delete(): { eq(column: string, value: unknown): Promise<{ error: any }> }
   }
-  rpc(fn: string, args?: unknown): Promise<{ data: any; error: any }>
+}
+
+/**
+ * A filter chain, because one `eq()` was never the shape of the question — #161.
+ *
+ * This used to read `eq(...): { maybeSingle() }`, which is worth stating plainly
+ * rather than quietly widening: the type could express neither a second filter
+ * nor a result of more than one row, so the defect #161 fixes was invisible in
+ * the CONTRACT and not merely untested. A fake written to satisfy that shape
+ * agreed with it, and the two agreed with each other about something neither had
+ * checked.
+ *
+ * `maybeSingle()` returning more than one row is an ERROR, not a pick.
+ * *Measured 2026-08-26* against a local stack, one auth user claimed on member
+ * rows in two households: `status 406`, `data null`, `code PGRST116`. The
+ * handler routes that to 'Could not read your roster entry.' with a 400, so
+ * before this story such a person could not connect a calendar at all.
+ */
+export interface Filterable {
+  eq(column: string, value: unknown): Filterable
+  maybeSingle(): Promise<{ data: any; error: any }>
 }
 
 export interface CalendarConnectDeps {
@@ -208,7 +236,7 @@ export function createHandler(deps: CalendarConnectDeps) {
     const authorization = req.headers.get('Authorization') ?? ''
     if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
 
-    let body: { code?: string; redirectUri?: string }
+    let body: { code?: string; redirectUri?: string; householdId?: string }
     try {
       body = await req.json()
     } catch {
@@ -217,8 +245,19 @@ export function createHandler(deps: CalendarConnectDeps) {
 
     const code = String(body.code ?? '')
     const redirectUri = String(body.redirectUri ?? '')
+    // WHICH household, and only which — #161. The body still never says WHO
+    // this is about: the person is `auth.uid()` off the JWT, exactly as before,
+    // and this narrows that person's roster entries to one household.
+    //
+    // It cannot widen anything. Row level security scopes `members` to the
+    // households the caller belongs to, so a household id they are not in
+    // matches no row and the read comes back empty — the 403 below, not a
+    // successful read of somebody else's household. *Measured* against a local
+    // stack: a bogus id returns `data: null` with no error at all.
+    const householdId = String(body.householdId ?? '')
     if (!code) return refuse('No authorization code was sent.', 400)
     if (!redirectUri) return refuse('No redirect address was sent.', 400)
+    if (!householdId) return refuse('No household was named.', 400)
 
     const url = deps.env('SUPABASE_URL')
     const anonKey = deps.env('SUPABASE_ANON_KEY')
@@ -257,19 +296,34 @@ export function createHandler(deps: CalendarConnectDeps) {
     const callerId = caller?.user?.id
     if (!callerId) return refuse('Sign in first.', 401)
 
-    // `household_id` is DELIBERATELY not selected. It is absent from 0007's
-    // select grant for `authenticated`, and a column withheld from `select`
-    // cannot even be NAMED — PostgREST answers "permission denied for table
-    // members", which reads like the whole table is closed rather than like one
-    // column is. Measured on #87: naming it made every call fail with a 400.
+    // `household_id` IS selected now, and that sentence is a reversal worth
+    // stating rather than a quiet edit. It was absent from 0007's select grant
+    // for `authenticated`, and a column withheld from `select` cannot even be
+    // NAMED — PostgREST answers "permission denied for table members", which
+    // reads like the whole table is closed rather than like one column is
+    // (measured on #87: naming it made every call fail with a 400). `0014`
+    // grants it, for #159's reason: to filter by a household a client has to be
+    // able to name one, and #157 measured that no query rewriting reaches around
+    // that. So the trap this comment used to warn about is gone.
+    //
+    // TWO filters, not one — #161. `claimed_by` alone was correct for exactly as
+    // long as a person could hold one member row. Since 0009 they can hold one
+    // per household, and `maybeSingle()` over two rows is a REFUSAL rather than
+    // a pick: the read comes back `PGRST116` with `data` null, so this fell
+    // straight to the 400 below and a person in two households could not connect
+    // a calendar at all.
     const { data: member, error: memberError } = await asCaller
       .from('members')
-      .select('id, display_name, claimed_by, email')
+      .select('id, display_name, claimed_by, email, household_id')
       .eq('claimed_by', callerId)
+      .eq('household_id', householdId)
       .maybeSingle()
 
     if (memberError) return refuse('Could not read your roster entry.', 400)
-    if (!member) return refuse('You are not a member of a household.', 403)
+    // Covers "no such household", "not yours" and "not on that roster" alike,
+    // deliberately indistinguishable — the caller-scoped read already decided
+    // what this caller may know.
+    if (!member) return refuse('You are not a member of that household.', 403)
 
     // The discriminator 0007 established, enforced on the SERVER as well as
     // drawn on the screen. #95 AC 1 is a routing rule about what is shown, and a
@@ -284,12 +338,14 @@ export function createHandler(deps: CalendarConnectDeps) {
       )
     }
 
-    const { data: householdIds, error: householdError } = await asCaller.rpc(
-      'current_household_ids',
-    )
-    if (householdError) return refuse('Could not check your household.', 400)
-    const householdId = Array.isArray(householdIds) ? householdIds[0] : householdIds
-    if (!householdId) return refuse('You are not signed in to a household.', 403)
+    // No `current_household_ids()` call any more, and its absence is the fix.
+    // It answered "which households is this person in", and the code then took
+    // element [0] of that — whichever the database happened to return first —
+    // as the household to file the connection under. The member row read above
+    // answers the question that was actually being asked, and answers it about
+    // the record being acted on. `member.household_id` rather than the
+    // `householdId` off the body: the body is allowed to NARROW the read and
+    // never to be the source of what gets written.
 
     // ---- The exchange, before anything at all is written --------------------
 
@@ -303,9 +359,15 @@ export function createHandler(deps: CalendarConnectDeps) {
 
     // ---- 3: the two writes no client is granted -----------------------------
 
+    // `onConflict: 'member_id'` stays right per household rather than in spite of
+    // them — #161 criterion 7. `0011`'s unique index is per MEMBER ROW, and two
+    // households mean two member rows for one person, so these two upserts can
+    // never collide across households: reconnecting in household A replaces
+    // A's token and leaves B's alone. The constraint that would have been wrong
+    // here is one keyed on the PERSON.
     const { error: tokenError } = await asService.from('calendar_tokens').upsert(
       {
-        household_id: householdId,
+        household_id: member.household_id,
         member_id: member.id,
         refresh_token: exchanged.refreshToken,
         scope: exchanged.scope,
@@ -316,7 +378,7 @@ export function createHandler(deps: CalendarConnectDeps) {
 
     const { error: connectionError } = await asService.from('calendar_connections').upsert(
       {
-        household_id: householdId,
+        household_id: member.household_id,
         member_id: member.id,
         scope: exchanged.scope,
       },

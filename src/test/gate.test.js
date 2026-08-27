@@ -941,6 +941,12 @@ describe('#19 — no real household name reaches version control', () => {
     // #53 — the second member of household A, who exists so an occurrence can
     // carry an exclusion forward to somebody.
     'Placeholder Second',
+    // #161 — one person holding a member row in BOTH households, and the
+    // single-household control beside them. Synthetic, and named for the shape
+    // they exist to build rather than after anybody.
+    'Placeholder Everywhere', 'Placeholder Control',
+    // #161 — the caller's ordinary member row in a household they do not organise.
+    'Housemate',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',

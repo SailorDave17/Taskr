@@ -115,6 +115,16 @@ export const LIVE_RPCS = Object.freeze([
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
+  // #49, arriving with `0018` — red on purpose until that file is pasted, the
+  // same deliberate window every migration-borne entry here has had. The probe
+  // passes the nil UUID for all four arguments; `expected_version` is a bigint
+  // and `placements`/`verdict` are jsonb, so a resolved function refuses the
+  // CAST (`22P02`, Postgres answering) before it could check anything — which
+  // classifies as PRESENT, exactly like `25006` on the writers above.
+  Object.freeze({
+    fn: 'apply_assignments',
+    args: Object.freeze(['household_id', 'expected_version', 'placements', 'verdict']),
+  }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

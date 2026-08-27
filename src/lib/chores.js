@@ -49,7 +49,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from, actual_minutes'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1

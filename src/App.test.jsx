@@ -56,6 +56,16 @@ const capacityApi = {
   clearCapacity: vi.fn(),
 }
 
+// #49 — the whole module is stubbed, including its exported constant: the
+// orchestrator reads the server through its own client calls, and this suite's
+// getSupabase throws on purpose. What App owes is WHEN it runs, which is
+// exactly what a stub records.
+const reassignApi = {
+  reassignHousehold: vi.fn(),
+  planReassignment: vi.fn(),
+  REASSIGN_MAX_ATTEMPTS: 3,
+}
+
 // #37 — only the three IMPURE exclusion functions are stubbed. `isExcluded`,
 // `excludedMemberIds` and `eligibleMembers` stay real for the reason the
 // capacity mock gives: they are pure, they have their own tests, and a stub of
@@ -114,6 +124,8 @@ vi.mock('./lib/calendar.js', async () => {
   return { ...actual, ...calendarApi }
 })
 
+vi.mock('./lib/reassign.js', () => reassignApi)
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -164,6 +176,8 @@ beforeEach(() => {
   capacityApi.listCapacity.mockResolvedValue([])
   capacityApi.setCapacity.mockResolvedValue(undefined)
   capacityApi.clearCapacity.mockResolvedValue(undefined)
+  reassignApi.reassignHousehold.mockReset()
+  reassignApi.reassignHousehold.mockResolvedValue({ applied: 0, assignments_version: 1 })
   choresApi.listChores.mockResolvedValue([])
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
@@ -1054,6 +1068,101 @@ describe('capacity — this week, set by hand (#46)', () => {
     // one of them. The control's job is to prove the regex MATCHES, so the
     // threshold is the one that still means that.
     expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(0)
+  })
+
+  // -------------------------------------------------------------------------
+  // #49 — the assignments follow a capacity change on their own. What App owes
+  // is WHEN the re-assignment runs and for WHICH household; what it does is
+  // reassign.io.test.js's subject, and what the database enforces is
+  // reassignment.pglite.test.js's.
+  // -------------------------------------------------------------------------
+
+  it('#49 AC 2: setting this week’s capacity re-assigns, nobody pressing an assign button', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await saveMinutes('120')
+
+    // The household on screen, AFTER the write that changed it, BEFORE the
+    // refresh — so the re-read that follows shows the stored result rather
+    // than racing it.
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+    expect(capacityApi.setCapacity.mock.invocationCallOrder[0]).toBeLessThan(
+      reassignApi.reassignHousehold.mock.invocationCallOrder[0],
+    )
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(reassignApi.reassignHousehold.mock.invocationCallOrder[0]).toBeLessThan(
+      capacityApi.listCapacity.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#49: clearing an override re-assigns too — a week back to normal is a capacity change', async () => {
+    overrideThisWeek(120)
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await openTheWeekEditor()
+    await act(async () =>
+      void fireEvent.click(
+        screen.getByRole('button', { name: /use the usual weekly minutes for placeholder one/i }),
+      ),
+    )
+
+    expect(capacityApi.clearCapacity).toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('#49: a baseline edit that MOVES the minutes re-assigns; a name-only save does not', async () => {
+    // Owner decision at pickup: a weekly_minutes edit is a capacity change.
+    // The roster's save always sends the minutes field, so the discriminator
+    // is whether the value moved — a name fix must not overwrite
+    // `last_rebalance` with a run nothing prompted.
+    api.updateMember.mockResolvedValue({})
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^edit$/i })))
+    fireEvent.change(screen.getByLabelText(/name for placeholder one/i), {
+      target: { value: 'placeholder renamed' },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+    expect(api.updateMember).toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^edit$/i })))
+    fireEvent.change(screen.getByLabelText(/weekly minutes for/i), {
+      target: { value: '150' },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('#49 AC 7: the stored verdict reaches the split surface from the household row', async () => {
+    api.currentHousehold.mockResolvedValue({
+      ...household,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: true,
+        jobsMoved: 2,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: '2026-08-27T12:00:00Z',
+      },
+    })
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    // Rendered from the STORED verdict — no allocator call could produce this
+    // sentence here, because nothing on this screen knows what the last run's
+    // budget did.
+    expect(screen.getByTestId('rebalance-note')).toHaveTextContent(/moved 90 min/)
+    expect(screen.getByTestId('rebalance-note')).toHaveTextContent(/change/)
   })
 })
 

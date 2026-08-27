@@ -157,6 +157,25 @@ export function capacitiesFor(members, overrides, periodStart) {
   }))
 }
 
+/**
+ * Did a roster save actually move this member's baseline? — #49.
+ *
+ * The owner extended the re-assignment trigger to baseline edits at pickup of
+ * #49, and the roster's save form always sends `weeklyMinutes` whether or not
+ * the person touched it — so the caller needs to know whether the value MOVED,
+ * or a name-only edit would overwrite `last_rebalance` with a run nothing
+ * prompted.
+ *
+ * Here rather than in App.jsx because this file is the one place baseline and
+ * override meet: capacity.test.js's reader allowlist exists precisely so that a
+ * new consumer of `weekly_minutes` has to arrive through this module and be
+ * asked whether it should.
+ */
+export function baselineMoved(member, weeklyMinutes) {
+  if (weeklyMinutes === undefined) return false
+  return Number(weeklyMinutes) !== Number(member?.weekly_minutes ?? 0)
+}
+
 /** Minutes a person can claim for a week. */
 export function normalizeCapacityMinutes(value) {
   if (value === null || value === undefined || String(value).trim() === '') {

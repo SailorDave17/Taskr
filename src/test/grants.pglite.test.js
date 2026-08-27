@@ -32,12 +32,27 @@
 // all seventeen of them silently stop meaning anything.
 //
 // MEASURED, because the first draft of this paragraph said "and only that one
-// notices" and the mutation pass falsified it: restoring `grant all` reddens
+// notices" and the mutation pass falsified it: restoring `grant all` reddened
 // THREE tests here, not one — the positive control, plus both "nothing was
 // widened" assertions, because a widened default hands DML to `anon` and
-// `service_role` as well. Three independent tests notice, which is better than
-// the design claimed and is recorded here rather than left as a nicer surprise
+// `service_role` as well. Three independent tests noticed, which was better than
+// the design claimed and was recorded here rather than left as a nicer surprise
 // for the next reader.
+//
+// **That count is TWO since `0017` (#186), and the drop is a strengthening
+// rather than a regression.** *Re-measured 2026-08-27*: restoring `grant all`
+// reddens the positive control and the `service_role` assertion, and NOT the
+// `anon` one. `0005`, `0010` and `0011` all revoke wholesale from `anon`, and
+// `0003` does too; `households` and `members` were the only two tables left
+// where a widened default could reach that role, and `0017` revokes both. So a
+// widened default can no longer hand `anon` anything anywhere in `public`, and
+// the assertion below has stopped being a control on the harness default and
+// become a claim about the migrations — which is what it says it is. It is
+// still load-bearing: deleting either `0017` revoke reddens it, measured 1 and 1.
+//
+// The sentence above is left standing rather than rewritten, because it records
+// a measurement that was true of the code it was taken against. Nothing executes
+// a comment, so a count corrected silently reads as one nobody ever got wrong.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -285,31 +300,91 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   // AC 3 — and nothing was widened on the way past
   // ---------------------------------------------------------------------------
 
-  it('leaves anon holding no DML anywhere in public, at table level or column level', async () => {
-    // DML only, and the exclusion of REFERENCES is a measurement rather than a
-    // convenience. MEASURED while writing this file: anon retains the platform
-    // default's REFERENCES on `households` and `members`, because the revokes
-    // that touch those two are narrow — 0002 revokes `select, insert, update`
-    // and 0005 revokes `update`, neither of which strips it. (`chores` differs:
-    // 0003 says `revoke all ... from anon`, so anon holds literally nothing
-    // there, which is what chores.pglite.test.js asserts.)
+  it('leaves anon holding NOTHING in public, at table level or column level', async () => {
+    // #186 changed what this can assert, and the change is the point.
     //
-    // Left alone deliberately. REFERENCES permits creating a foreign key that
-    // points at the table, and anon has no CREATE on schema `public`, so it
-    // reaches nothing. Asserting it away would be tidying a privilege that
-    // cannot be exercised, in a story about privileges that are missing.
+    // It used to read `privilege_type in ('SELECT','INSERT','UPDATE','DELETE')`
+    // and carried a measurement explaining the exclusion: anon retained the
+    // platform default's REFERENCES on `households` and `members`, because the
+    // revokes touching those two are NARROW — 0002 revokes `select, insert,
+    // update` and 0005 revokes `update`, neither of which strips it. That was
+    // accurate, and its conclusion — "asserting it away would be tidying a
+    // privilege that cannot be exercised" — was reasoning about the wrong
+    // project. The same narrow revokes left `anon` holding INSERT, SELECT and
+    // DELETE on the LIVE `households`, which this harness cannot show because
+    // its default privileges are the modern tight ones.
+    //
+    // 0017 revokes ALL from anon on both tables, so the filter comes off and the
+    // claim becomes the one worth making: anon reaches nothing in `public` by
+    // any route. That is a NEGATIVE assertion against a stub that is no more
+    // permissive than production on this axis, which is the class this file's
+    // header calls load-bearing.
     const { rows: tableLevel } = await db.query(
       `select table_name, privilege_type from information_schema.table_privileges
         where table_schema = 'public' and grantee = 'anon'
-          and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')`,
+        order by table_name, privilege_type`,
     )
     const { rows: columnLevel } = await db.query(
       `select table_name, privilege_type from information_schema.column_privileges
         where table_schema = 'public' and grantee = 'anon'
-          and privilege_type in ('SELECT', 'INSERT', 'UPDATE')`,
+        order by table_name, privilege_type`,
     )
     expect(tableLevel).toEqual([])
     expect(columnLevel).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the query above can find a privilege when there is one', async () => {
+    // Without this, a typo'd schema name, a renamed catalog view or a grantee
+    // spelled `"anon"` would make the assertion above pass by returning nothing
+    // — and it asserts an empty result, so an empty result is what success
+    // looks like. `authenticated` is asked the identical question through the
+    // identical views and must come back with rows.
+    const { rows } = await db.query(
+      `select count(*)::int as n from information_schema.table_privileges
+        where table_schema = 'public' and grantee = 'authenticated'`,
+    )
+    expect(rows[0].n).toBeGreaterThan(0)
+  })
+
+  it('and anon may EXECUTE nothing in public either — 0017 section 4', async () => {
+    // The catalog `check:live` cannot reach and RLS does not cover. A
+    // `security definer` function runs as its owner, so a policy has no say in
+    // it; `complete_chore` and `uncomplete_chore` were executable by PUBLIC and
+    // by `anon` on the live project because 0004 revoked from `public, anon`
+    // for `acting_member` and not for the two lines below it.
+    //
+    // `has_function_privilege` is used rather than `routine_privileges` because
+    // it resolves PUBLIC as well as a by-name grant. Those are separate entries
+    // in `proacl`, and revoking only one of them leaves the privilege in place
+    // while the catalog looks tidier — the half-fix 0017's section 4 argues
+    // against at length.
+    const { rows } = await db.query(
+      `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as fn
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and has_function_privilege('anon', p.oid, 'EXECUTE')
+        order by fn`,
+    )
+    expect(rows).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: authenticated may execute the two functions 0017 revokes', async () => {
+    // The revoke names one role and `authenticated` is one word away in the same
+    // statement. Without this, deleting `to authenticated` from 0004's grants —
+    // or widening 0017's revoke to hit both — leaves the assertion above green
+    // while the app cannot mark a chore done.
+    const { rows } = await db.query(
+      `select p.proname,
+              has_function_privilege('authenticated', p.oid, 'EXECUTE') as may
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname in ('complete_chore', 'uncomplete_chore')
+        order by p.proname`,
+    )
+    expect(rows).toEqual([
+      { proname: 'complete_chore', may: true },
+      { proname: 'uncomplete_chore', may: true },
+    ])
   })
 
   it('and service_role reaches only what the Edge Functions need', async () => {

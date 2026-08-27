@@ -1,0 +1,224 @@
+-- The privileges `anon` holds that no migration ever granted — #186.
+--
+-- ===========================================================================
+-- What is wrong, and why every instrument here reads green through it
+-- ===========================================================================
+--
+-- `0013` (#91) audited the privileges the client NEEDS and found three missing.
+-- This is the same audit with the sign flipped: what does `anon` HAVE that
+-- nothing asked for? Nobody had asked, because every check in this repo is
+-- driven by what the app does, and the app never signs in as `anon`.
+--
+-- `anon` is the role an unauthenticated browser gets. It holds the publishable
+-- key that ships in the bundle, so anyone who opens the site has it.
+--
+-- *Measured 2026-08-27* against the live project, `pg_class.relacl` and
+-- `pg_attribute.attacl` over every relation in `public` — seven tables, all
+-- ordinary tables, 51 columns. `anon` appears in exactly two places, and in
+-- neither did a migration put it there:
+--
+--     households   anon=ardDxtm     INSERT, SELECT, DELETE, TRUNCATE,
+--                                   REFERENCES, TRIGGER, MAINTAIN
+--     members      anon=dDxtm       DELETE, TRUNCATE, REFERENCES, TRIGGER,
+--                                   MAINTAIN
+--
+-- No column anywhere carries an `anon` entry. The full reading is on #186.
+--
+-- Both are the platform default of the day, surviving a NARROW revoke. This is
+-- `0013`'s mechanism exactly — `revoke select, insert, update` preserves DELETE
+-- only if DELETE was ever granted — read from the other end: there it left the
+-- files SHORT of production, here it leaves production WIDER than the files.
+-- One cause, two opposite symptoms, and only the first one broke anything.
+--
+-- ===========================================================================
+-- Two comments in this directory already assert what this file makes true
+-- ===========================================================================
+--
+-- `0007` section 8:  "`anon` is revoked wholesale for the reason 0002 gives"
+-- `0013` section 2:  "0002 and 0007 revoke it wholesale and no policy targets
+--                     it"
+--
+-- The statement each sits beside is `revoke select, insert, update ... from
+-- authenticated, anon` — narrow, in both files. The sentences were not careless;
+-- they describe the INTENT accurately and the STATEMENT inaccurately, and there
+-- was no instrument that could tell them apart until the catalog was read.
+--
+-- `0013`'s own header says why that survives: nothing executes a comment, so it
+-- goes on reading as a decision. It said that about `0003` line 161 while
+-- carrying the same defect four sections later. These two are left standing
+-- rather than edited, because a corrected comment in a file that has already
+-- been applied describes a statement that never ran that way. This file is what
+-- makes them true.
+--
+-- ===========================================================================
+-- Why this is not an outage today — stated plainly so nobody panics or relaxes
+-- ===========================================================================
+--
+-- Row-level security is holding the line on the tables, and holding it
+-- completely. `0001` enables RLS on `households`; every policy on it is `to
+-- authenticated`, and there is no INSERT or DELETE policy on `households` at
+-- all, for any role. A role with a table privilege and no permissive policy for
+-- that command is refused every row. Nothing in `public` carries a `to anon`
+-- policy.
+--
+-- The functions in section 4 are the exception, and they are the reason this
+-- file has a section 4: a `security definer` function is precisely the thing RLS
+-- does not hold. What holds those is a line inside each body, quoted there.
+--
+-- So this is defence in depth that was never decided on, not a hole. The reason
+-- to close it anyway is the one this repo has already paid for twice: a
+-- privilege nobody granted is a privilege nobody reviews, and the next policy
+-- change is made by someone who assumes the grant layer is narrow because every
+-- other table's is.
+--
+-- ===========================================================================
+-- What this file changes where, and what can see it
+-- ===========================================================================
+--
+-- On the LIVE project: the two ACL entries above are removed outright, and the
+-- three function grants in section 4 with them. No behaviour changes, because
+-- nothing reached those privileges — see above, and `src/App.jsx`, which skips
+-- its reads entirely when there is no session rather than issuing them as
+-- `anon`.
+--
+-- On a project REBUILT from these files: `anon` starts at the modern default of
+-- `Dxtm` on every table, so the two revokes still change the catalog — they
+-- strip TRUNCATE, REFERENCES, TRIGGER and MAINTAIN. #186 AC 4 calls this file "a
+-- no-op on any project built from these files"; that is true of BEHAVIOUR and
+-- not of the catalog, and the distinction is the same one #150 had to make about
+-- `0013`. Stating it the loose way is how "unobservable by design" got written
+-- down and had to be withdrawn.
+--
+-- What CANNOT see it either way is `npm run check:live`. That check signs in as
+-- `authenticated` and asks the questions the client asks; it never asks what
+-- `anon` may do, and no reading of it differs across this paste. This is the
+-- fourth migration here blind to that check, and the fourth distinct reason:
+-- `0009` because it changes only indexes, `0013` because the role already held
+-- what it grants, `0016` because a policy is a subject that check does not read,
+-- and this one because the ROLE is one it never asks about.
+--
+-- `npm run probe:live-grants` is the instrument that can, and #186 extends it to
+-- read every relation in `public` rather than the tables the client happens to
+-- name. `docs/access-model.md` carries this with the catalog read that confirms
+-- it, as `0013`'s is carried.
+--
+-- ===========================================================================
+-- Re-runnable
+-- ===========================================================================
+--
+-- `revoke` is idempotent in Postgres: revoking a privilege not held changes
+-- nothing and raises nothing. A second paste of this file is a no-op by
+-- construction rather than by a guard, so there is no `if exists` ceremony here
+-- — adding one would imply a hazard that is absent.
+
+-- ---------------------------------------------------------------------------
+-- 1. households — INSERT, SELECT and DELETE that nothing ever asked for
+-- ---------------------------------------------------------------------------
+--
+-- Wholesale rather than column by column, matching `0003`, which is the only
+-- file in this directory that got `anon` right and did it this way (#186 AC 3).
+-- A named list would have to be `insert, select, delete, truncate, references,
+-- trigger, maintain`, which is every privilege there is, spelled in a way that
+-- silently misses whatever the platform adds next.
+--
+-- Nothing loses a capability. `households` is read by `currentHousehold()` after
+-- a session exists, as `authenticated`; the app's boot path does not read it at
+-- all when there is none. `0013` grants `authenticated` column-level SELECT on
+-- every column here, and this statement does not name `authenticated`.
+revoke all on public.households from anon;
+
+-- ---------------------------------------------------------------------------
+-- 2. members — DELETE
+-- ---------------------------------------------------------------------------
+--
+-- `0002` and `0007` both intended this and both wrote the narrow form. The `d`
+-- that survived is the same `d` that `0013` section 2 grants to `authenticated`,
+-- arriving by the same inheritance — which is why `anon` was the control that
+-- let #150 prove `authenticated` had held DELETE all along. That control has now
+-- been spent: after this file, `chores` is no longer the only table where `anon`
+-- has no entry, so the next reader cannot use `anon` to date a privilege on
+-- `members`. The reading it supported is recorded in `docs/access-model.md` and
+-- on #150.
+revoke all on public.members from anon;
+
+-- ---------------------------------------------------------------------------
+-- 3. The five tables this file does not name, and why each needs nothing
+-- ---------------------------------------------------------------------------
+--
+-- Named rather than revoked. Every statement in this file does something; five
+-- more that provably change nothing would read as thoroughness and be noise,
+-- and this repo's convention is to state the reason instead. *Measured
+-- 2026-08-27*, none of the five carries an `anon` entry at table or column
+-- level:
+--
+--     chores                 `0003` revoked ALL from anon. The one that was
+--                            right, and the shape sections 1 and 2 copy.
+--     member_capacity        `0005` created it after the platform tightened its
+--                            default privileges, so `anon` was never granted
+--                            anything to revoke.
+--     chore_exclusions       `0010`, same reason.
+--     calendar_connections   `0011`, same reason.
+--     calendar_tokens        `0011`, same reason — and it holds refresh tokens,
+--                            so it is the one where this was worth checking
+--                            rather than assuming. It carries no column-level
+--                            grant for ANY client role.
+--
+-- `public` contains no views, materialized views, partitioned tables, foreign
+-- tables or sequences, so there is no relation kind this file has skipped. That
+-- was measured rather than assumed: an audit that filters to ordinary tables
+-- would be this story's own blind spot in miniature.
+
+-- ---------------------------------------------------------------------------
+-- 4. Two `security definer` functions anon may EXECUTE
+-- ---------------------------------------------------------------------------
+--
+-- Owner decision at pickup, 2026-08-27: this goes in the same file. #186 AC 2
+-- says "table by table", written before the audit; this is the same defect in
+-- the same role in a different catalog, and splitting it would mean two pastes
+-- for one class. The criterion is annotated on the issue rather than quietly
+-- exceeded.
+--
+-- *Measured 2026-08-27*, both carry PUBLIC and `anon`:
+--
+--     complete_chore(uuid)     =X | postgres=X | anon=X | authenticated=X |
+--                              service_role=X
+--     uncomplete_chore(uuid)   the same
+--
+-- `0004` created both, granted execute to `authenticated`, and revoked from
+-- `public, anon` for `acting_member` — the two lines immediately above, in the
+-- same block. The other thirteen functions this repo creates are correctly
+-- scoped; these two are the ones the revoke skipped.
+--
+-- THIS ONE IS NOT COVERED BY RLS. A `security definer` function runs as its
+-- owner, which here is `postgres`, so a policy has no say in it. What refuses an
+-- unauthenticated caller is the first statement of each body:
+--
+--     caller uuid := (select auth.uid());
+--     if caller is null then raise exception 'not authenticated'; end if;
+--
+-- The publishable key is a JWT carrying `role: anon` and no `sub`, so
+-- `auth.uid()` is null and the call is refused. That is a real guard and it is
+-- why this is still defence in depth rather than an incident — but it is one
+-- line in a function body standing where the whole policy layer stands
+-- everywhere else, and a future edit to either body has no reason to know it is
+-- load-bearing for an unauthenticated caller.
+--
+-- BOTH GRANTEES ARE NAMED, and that is not belt and braces. `PUBLIC` and `anon`
+-- are separate entries in `proacl` — the platform grants execute to `anon` BY
+-- NAME through its default privileges, and `revoke ... from public` does not
+-- reach a by-name grant. Revoking only `public` is the half-fix that reads as
+-- done: the `=X` entry disappears, the `anon=X` entry stays, and the catalog
+-- looks tidier while the privilege is untouched.
+--
+-- `authenticated` is deliberately not named. `0004` grants it execute on both,
+-- `src/lib/chores.js` calls both, and the bodies scope every write to the
+-- caller's own household.
+revoke execute on function public.complete_chore(uuid)   from public, anon;
+revoke execute on function public.uncomplete_chore(uuid) from public, anon;
+
+-- `rls_auto_enable()` also carries `anon=X` and PUBLIC `=X` on the live project
+-- and is deliberately NOT revoked here. It returns `event_trigger` and appears
+-- in no file in this directory — it is Supabase platform furniture, not ours,
+-- and a migration that revokes a platform grant is a migration that fights the
+-- platform on its next upgrade. Named so the next audit does not have to
+-- rediscover it.

@@ -5,13 +5,20 @@ import { describe, expect, it } from 'vitest'
 import { LIVE_TABLES } from '../src/lib/liveSchema.js'
 import {
   MEASURED_GRANTS,
+  MEASURED_TABLE_ACLS,
   SUBJECT_ROLE,
+  anonEntries,
+  anonExecutable,
   assertReadOnly,
   attaclQuery,
   nameList,
   privilegesFor,
   probeTables,
+  publicAttaclQuery,
+  publicProaclQuery,
+  publicRelaclQuery,
   reconcile,
+  reconcileTableAcls,
   relaclQuery,
   sqlIdentifier,
 } from './probe-live-grants.mjs'
@@ -311,5 +318,161 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'chores.household_id=ar',
       'chores.repeat_since=null',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #186 — the whole schema, asked about `anon`
+//
+// Driven with rows that DISAGREE as well as rows that agree, for the reason
+// this file's header gives: a comparator that always says yes and a comparator
+// that is right look identical when fed only correct data.
+// ---------------------------------------------------------------------------
+
+describe('the whole-schema queries take no name list, so they cannot go stale', () => {
+  it('all three pass the read-only guard', () => {
+    expect(() => publicRelaclQuery()).not.toThrow()
+    expect(() => publicAttaclQuery()).not.toThrow()
+    expect(() => publicProaclQuery()).not.toThrow()
+  })
+
+  it('reads every relation kind rather than filtering to ordinary tables', () => {
+    // A filter to `'r'` is this story's own blind spot in miniature: a view or a
+    // materialized view carries an ACL in the same column, and an audit that
+    // drops them reports a clean `public` while one sits there granted to anon.
+    for (const sql of [publicRelaclQuery(), publicAttaclQuery()]) {
+      expect(sql).toMatch(/relkind in \('r', 'p', 'v', 'm', 'f'\)/)
+    }
+  })
+
+  it('names no table, so an eighth table is audited the day it lands', () => {
+    // The point of the pair. If any LIVE_TABLES name appears here, the audit has
+    // gone back to being a hand-written list.
+    for (const sql of [publicRelaclQuery(), publicAttaclQuery(), publicProaclQuery()]) {
+      for (const table of LIVE_TABLES) expect(sql).not.toContain(`'${table}'`)
+    }
+  })
+})
+
+describe('anonEntries reports what anon reaches, and can report nothing', () => {
+  const clean = [
+    { table_name: 'chores', acl: 'postgres=arwdDxtm/postgres,authenticated=dDxtm/postgres' },
+  ]
+
+  it('finds a table-level entry, and reads the RIGHT role', () => {
+    // The two roles are given DIFFERENT privilege strings deliberately, and the
+    // live project is why. There, `households` reads `anon=ardDxtm` beside
+    // `authenticated=ardDxtm` and `members` reads `anon=dDxtm` beside
+    // `authenticated=dDxtm` - identical on both tables, because both roles took
+    // the same narrow revoke in the same statement. So a fixture copied from
+    // production cannot tell which role this function read, and MEASURED: with
+    // the matching pair, mutating `anon` to `authenticated` here reddened 3 of a
+    // predicted 4, this being the one that passed. `prove-tests` shape 9.
+    expect(
+      anonEntries(
+        [{ table_name: 'households', acl: 'anon=ardDxtm/postgres,authenticated=dDxtm/postgres' }],
+        [],
+      ),
+    ).toEqual([{ where: 'households', privileges: 'ardDxtm' }])
+  })
+
+  it('finds a column-level entry, which the live project has never had', () => {
+    expect(
+      anonEntries([], [{ table_name: 'members', column_name: 'email', acl: 'anon=r/postgres' }]),
+    ).toEqual([{ where: 'members.email', privileges: 'r' }])
+  })
+
+  it('NEGATIVE CONTROL: returns nothing when anon holds nothing', () => {
+    // The command asserts this array is EMPTY, so an implementation that always
+    // returned [] would pass every other test in this block.
+    const columns = [{ table_name: 'chores', column_name: 'id', acl: 'authenticated=r/postgres' }]
+    expect(anonEntries(clean, columns)).toEqual([])
+  })
+
+  it('does not mistake `authenticated` for `anon`', () => {
+    // `privilegesFor` matches the grantee up to `=`; a substring match would
+    // read `authenticated=r` as an anon entry. This is what would catch that.
+    const rows = [{ table_name: 'chores', acl: 'authenticated=dDxtm/postgres' }]
+    expect(anonEntries(rows, [])).toEqual([])
+  })
+})
+
+describe('anonExecutable reads PUBLIC and a by-name grant as the same reachability', () => {
+  const rows = [
+    {
+      function_name: 'complete_chore',
+      args: 'chore_id uuid',
+      acl: '=X/postgres,anon=X/postgres,authenticated=X/postgres',
+    },
+    { function_name: 'create_household', args: 'a text', acl: 'postgres=X/postgres,authenticated=X/postgres' },
+    { function_name: 'rls_auto_enable', args: '', acl: '=X/postgres,anon=X/postgres' },
+  ]
+
+  it('reports an unexempted function and holds the platform one aside', () => {
+    const verdict = anonExecutable(rows)
+    expect(verdict.unexpected.map((row) => row.function_name)).toEqual(['complete_chore'])
+    expect(verdict.exempted).toEqual(['rls_auto_enable'])
+    expect(verdict.unusedExemptions).toEqual([])
+  })
+
+  it('catches a PUBLIC grant with no anon entry, which a revoke from public alone leaves', () => {
+    // The half-fix 0017 section 4 argues against, from the other side: revoking
+    // only the by-name grant leaves `=X`, which reaches anon exactly as well.
+    const verdict = anonExecutable([{ function_name: 'f', args: '', acl: '=X/postgres' }], [])
+    expect(verdict.unexpected.map((row) => row.function_name)).toEqual(['f'])
+  })
+
+  it('reports an exemption that matched nothing, rather than passing quietly', () => {
+    // An allowlist entry nobody exercises has become a claim about a function
+    // that may no longer exist. Every exemption must still be needed.
+    expect(anonExecutable([rows[1]]).unusedExemptions).toEqual(['rls_auto_enable'])
+  })
+
+  it('NEGATIVE CONTROL: reports nothing when no function is reachable', () => {
+    expect(anonExecutable([rows[1]]).unexpected).toEqual([])
+  })
+})
+
+describe('reconcileTableAcls is the control on the role a revoke could hit by mistake', () => {
+  const live = [
+    { table_name: 'households', acl: 'anon=ardDxtm/postgres,authenticated=ardDxtm/postgres' },
+    { table_name: 'members', acl: 'authenticated=dDxtm/postgres' },
+    { table_name: 'calendar_tokens', acl: 'postgres=arwdDxtm/postgres' },
+  ]
+  const expected = [
+    { table: 'households', authenticated: 'ardDxtm' },
+    { table: 'members', authenticated: 'dDxtm' },
+    { table: 'calendar_tokens', authenticated: null },
+  ]
+
+  it('agrees when authenticated is untouched', () => {
+    expect(reconcileTableAcls(live, expected).every((row) => row.agrees)).toBe(true)
+  })
+
+  it('DISAGREES when a revoke took authenticated with it — the failure worth catching', () => {
+    // `revoke all on public.households from anon` is one word from `... from
+    // authenticated`, and a revoke that hit the wrong role leaves the anon
+    // assertion looking exactly like success.
+    const damaged = [{ table_name: 'households', acl: 'anon=ardDxtm/postgres' }, ...live.slice(1)]
+    const verdicts = reconcileTableAcls(damaged, expected)
+    expect(verdicts[0].agrees).toBe(false)
+    expect(verdicts[0].note).toMatch(/wrong role/)
+  })
+
+  it('distinguishes a table that is gone from one carrying no grant', () => {
+    // Different repairs: an absent table means a migration did not run, an
+    // ungranted one means the control is working.
+    const verdicts = reconcileTableAcls([], [{ table: 'members', authenticated: 'dDxtm' }])
+    expect(verdicts[0].agrees).toBe(false)
+    expect(verdicts[0].note).toMatch(/not there/)
+  })
+
+  it('MEASURED_TABLE_ACLS covers every table LIVE_SCHEMA names, and one it does not', () => {
+    // The control is deliberately wider than the tables 0017 touches and wider
+    // than the tables the client reads: `calendar_tokens` is in neither, and a
+    // control that only watches what you changed cannot report a surprise.
+    const covered = MEASURED_TABLE_ACLS.map((entry) => entry.table)
+    for (const table of LIVE_TABLES) expect(covered).toContain(table)
+    expect(covered).toContain('calendar_tokens')
   })
 })

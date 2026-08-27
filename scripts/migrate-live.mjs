@@ -38,6 +38,7 @@ import { pathToFileURL } from 'node:url'
 
 import { resolveSupabaseUrl } from './deploy-function.mjs'
 import {
+  Refusal,
   compareEcho,
   echoQuery,
   localBytes,
@@ -53,6 +54,64 @@ import {
 
 /** The one directory a file may come from. */
 export const MIGRATIONS_DIR = 'supabase/migrations'
+
+/** Every flag this command understands. Anything else is refused, never ignored. */
+export const KNOWN_FLAGS = Object.freeze(['--dry-run'])
+
+/**
+ * Was a rehearsal asked for? — and the answer is NOT just `process.argv`.
+ *
+ * `npm run` EATS a flag it recognises. *Measured under npm 11.16.0*:
+ * `npm run migrate:live 0017.sql --dry-run` forwards only `["0017.sql"]` to the
+ * script and sets `npm_config_dry_run="true"` in the environment, because npm
+ * has a `--dry-run` of its own and claims it first. So the natural spelling —
+ * the one a person types, the one this file's own header used to show —
+ * arrived here with no flag at all and performed a REAL, irreversible apply
+ * while the operator believed they had asked for a rehearsal.
+ *
+ * Reading npm's variable as well as `argv` is what makes both spellings work.
+ * The two-source read is deliberate rather than defensive: the flag a user typed
+ * is the fact, and which of the two channels carried it is npm's business.
+ *
+ * It fails toward the SAFE side by construction — a stray `npm_config_dry_run`
+ * in the environment makes this rehearse when it might have applied, which
+ * costs a re-run and nothing else.
+ */
+export function dryRunRequested(argv, env = {}) {
+  if (argv.includes('--dry-run')) return true
+  const fromNpm = String(env.npm_config_dry_run ?? '').toLowerCase()
+  return fromNpm === 'true' || fromNpm === '1'
+}
+
+/**
+ * REFUSE a flag this command does not know, rather than dropping it.
+ *
+ * `migrationFileFrom` filters `-`-prefixed arguments out when looking for the
+ * file, which is right for finding a file and silently wrong for everything
+ * else: it means `--dry-rnu`, `--dryrun` and `--pretend` were all discarded
+ * without a word, and the run applied for real. A mistyped safety flag must be
+ * the loudest thing in the output, because the person who typed it is by
+ * definition the person expecting nothing to happen.
+ */
+export function assertKnownFlags(argv) {
+  const unknown = argv.filter((arg) => arg.startsWith('-') && !KNOWN_FLAGS.includes(arg))
+  if (unknown.length) {
+    throw new Error(
+      `Unknown flag: ${unknown.join(', ')}\n\n` +
+        `This command understands ${KNOWN_FLAGS.join(', ')} and nothing else.\n\n` +
+        'Refusing rather than ignoring it, because the flag people mistype here is\n' +
+        'the one that stops the migration being applied — and a silently dropped\n' +
+        '`--dry-run` is a real apply that the operator thinks is a rehearsal.\n\n' +
+        'Note that `npm run` claims flags for itself, so a rehearsal is either\n' +
+        `    npm run migrate:live ${MIGRATIONS_DIR}/0017_x.sql -- --dry-run\n` +
+        `    npm run migrate:live ${MIGRATIONS_DIR}/0017_x.sql --dry-run\n` +
+        'and both are understood.\n\n' +
+        'Nothing was sent and nothing was changed.',
+    )
+  }
+  return argv
+}
+
 
 /**
  * Which file this invocation should apply.
@@ -161,33 +220,29 @@ export async function applyMigration({ ref, token, sql, fetchImpl }) {
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href
 
-if (isMain) {
-  const argv = process.argv.slice(2)
-
-  const fail = (message, code = 1) => {
-    console.error(`\n${message}\n`)
-    process.exit(code)
+async function main(argv, env) {
+  const refuse = (message) => {
+    throw new Refusal(message)
   }
 
   let ref
   try {
-    ref = projectRefFrom(resolveSupabaseUrl(process.env, readEnvLocal))
+    ref = projectRefFrom(resolveSupabaseUrl(env, readEnvLocal))
   } catch (error) {
-    fail(`Cannot work out which project to apply to.\n\n${error.message}`)
+    refuse(`Cannot work out which project to apply to.\n\n${error.message}`)
   }
 
-  let path
-  try {
-    path = migrationFileFrom(argv)
-  } catch (error) {
-    fail(error.message)
-  }
+  // Flags first, and before anything is read or resolved: a mistyped `--dry-run`
+  // has to be refused whatever else is wrong with the invocation.
+  assertKnownFlags(argv)
+
+  const path = migrationFileFrom(argv)
 
   let sql
   try {
     sql = readFileSync(path, 'utf8')
   } catch (error) {
-    fail(`Cannot read ${path}\n\n${error.message}`)
+    refuse(`Cannot read ${path}\n\n${error.message}`)
   }
 
   const shown = relative(process.cwd(), path).split('\\').join('/')
@@ -195,25 +250,20 @@ if (isMain) {
   for (const line of planLines({ ref, path: shown, sql })) console.log(line)
   console.log('')
 
-  if (argv.includes('--dry-run')) {
+  if (dryRunRequested(argv, env)) {
     console.log('--dry-run: nothing was sent and nothing was applied.\n')
-    process.exit(0)
+    return
   }
 
   // The token is required AFTER the plan is printed and BEFORE anything is sent,
   // so a dry run needs no credential at all — which is what makes it useful to
   // somebody checking what a command would do before deciding to hold one.
-  let token
-  try {
-    token = requireAccessToken(resolveAccessToken(process.env, readEnvLocal))
-  } catch (error) {
-    fail(error.message)
-  }
+  const token = requireAccessToken(resolveAccessToken(env, readEnvLocal))
 
   const result = await applyMigration({ ref, token, sql, fetchImpl: fetch })
 
   if (!result.ok && result.stage === 'echo' && result.problems) {
-    fail(
+    refuse(
       'REFUSED: the database did not receive the file that is on disk.\n\n' +
         result.problems.map((line) => `  - ${line}`).join('\n') +
         '\n\nNothing was applied. This is the check that a clipboard paste needs a person\n' +
@@ -221,10 +271,10 @@ if (isMain) {
     )
   }
   if (!result.ok && result.stage === 'echo') {
-    fail(`The echo round trip failed, so nothing was applied.\n\n${result.error}`)
+    refuse(`The echo round trip failed, so nothing was applied.\n\n${result.error}`)
   }
   if (!result.ok) {
-    fail(
+    refuse(
       'The payload arrived intact and Postgres REFUSED THE SQL, so the fault is in\n' +
         `the file rather than in transit.\n\n${result.error}`,
     )
@@ -239,4 +289,21 @@ if (isMain) {
   console.log(`  md5 read back       : ${result.received.digest}`)
   console.log('\nConfirm with:  npm run check:live')
   console.log('and, for a grant a client-side probe cannot see:  npm run probe:live-grants\n')
+
+  return result
+}
+
+if (isMain) {
+  try {
+    await main(process.argv.slice(2), process.env)
+  } catch (error) {
+    // No `process.exit()` anywhere on this path — see `Refusal`. The exit code is
+    // SET and the event loop drains on its own, which is what keeps a refusal
+    // that follows a single fetch from being replaced by a libuv abort. An
+    // unexpected error prints its stack; a deliberate refusal prints only its
+    // message, because a stack under a carefully-worded refusal sends the reader
+    // to the tool rather than to the token or the file.
+    console.error(`\n${error instanceof Refusal ? error.message : (error?.stack ?? error)}\n`)
+    process.exitCode = 1
+  }
 }

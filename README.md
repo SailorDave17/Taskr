@@ -116,13 +116,24 @@ lesson is not that a README goes stale; it is that the correcting edit landed in
 directly above and stopped there, so the section a new reader opens to learn what is missing was the
 one still describing a system that no longer exists.*
 
-**Migrations are applied by hand, and nothing checks that they were.** Each file in
-`supabase/migrations/` is pasted into the Supabase SQL editor by a person, at the merge of the story
-that adds it. *The reason recorded here used to be "there is no Supabase CLI or Docker on the build
-machine". Both are available as of 2026-08-20 - the CLI through `npx`, Docker running - so the
-hand-paste is a workflow that has outlived its stated cause. Automating it is a real decision rather
-than a tidy-up, because it couples a merge to a schema change, and it has not been taken.* They are re-runnable and a test proves
-it, because a re-paste after a partial failure is the normal path.
+**Migrations are applied deliberately, by a person, and nothing checks that they were.** Each file
+in `supabase/migrations/` reaches the live project at the merge of the story that adds it, by one of
+two routes: pasted into the Supabase SQL editor, or applied with `npm run migrate:live <file>`
+(#185). [`docs/deploy-runbook.md`](docs/deploy-runbook.md) section 5 carries both and the condition
+each is for — the editor needs a signed-in browser and suits an attended session; the command takes
+a token and is the only one that runs unattended. *The reason recorded here used to be "there is no
+Supabase CLI or Docker on the build machine". Both are available as of 2026-08-20 - the CLI through
+`npx`, Docker running - so that reason had outlived its cause well before either route existed.*
+They are re-runnable and a test proves it, because a re-paste after a partial failure is the normal
+path.
+
+**What is still not automated, and deliberately: applying a migration is not coupled to a merge.**
+Both routes are a separate act somebody chooses, in a stated order — apply, then promote
+`rebuild/v1` to `release`. #185 gave the paste a command; it did not give it a trigger. *That
+distinction is the whole reason this paragraph survives: coupling a merge to a schema change is a
+real decision rather than a tidy-up, and it has not been taken. The 2026-08-09 outage in
+[`docs/access-model.md`](docs/access-model.md) is what happens when the two are coupled the other
+way round.*
 
 *Two were missed, and the live app could not hold a household for a day before an unrelated paste
 found it (2026-08-09).* `docs/access-model.md` records which are live and **was wrong in both

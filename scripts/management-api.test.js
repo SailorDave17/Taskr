@@ -374,6 +374,30 @@ describe('runQuery — what it sends, and what it does with an answer', () => {
     expect(result.error).toMatch(/never completed/)
   })
 
+  it('reports a body that cannot be READ, rather than escaping as an unhandled rejection', async () => {
+    // Reading the body is a second network operation: a connection reset
+    // mid-response throws at `.text()`, not at the `fetch`. That call sat outside
+    // the try until review found it, and both callers await this at top level
+    // with no catch — so the process died with an unhandled rejection instead of
+    // producing the deliberate refusal this module is built around.
+    const result = await runQuery({
+      ref: 'r',
+      token: 't',
+      sql: 'select 1;',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          throw new Error('socket hang up')
+        },
+      }),
+    })
+    expect(result.ok).toBe(false)
+    expect(result.rows).toBeNull()
+    expect(result.error).toMatch(/body could not be read/)
+    expect(result.error).toMatch(/socket hang up/)
+  })
+
   it('survives a body that is not JSON, rather than throwing over an HTML error page', async () => {
     const result = await runQuery({
       ref: 'r',

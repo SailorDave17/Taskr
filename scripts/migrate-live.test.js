@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { MIGRATIONS_DIR, applyMigration, migrationFileFrom, planLines } from './migrate-live.mjs'
+import {
+  KNOWN_FLAGS,
+  MIGRATIONS_DIR,
+  applyMigration,
+  assertKnownFlags,
+  dryRunRequested,
+  migrationFileFrom,
+  planLines,
+} from './migrate-live.mjs'
 import { localBytes, localChars, localDigest } from './management-api.mjs'
 
 // `npm run migrate:live` — #185 AC 1 and AC 2.
@@ -95,6 +103,58 @@ describe('which file this command will accept', () => {
 
   it('refuses a non-.sql file inside the directory', () => {
     expect(() => migrationFileFrom([`${MIGRATIONS_DIR}/README.md`])).toThrow(/Not a \.sql file/)
+  })
+})
+
+describe('the rehearsal flag, and the two ways it used to be lost', () => {
+  it('is recognised when it reaches argv', () => {
+    expect(dryRunRequested(['file.sql', '--dry-run'], {})).toBe(true)
+    expect(dryRunRequested(['file.sql'], {})).toBe(false)
+  })
+
+  it('is ALSO recognised when npm ate it, which is the natural spelling', () => {
+    // `npm run migrate:live <file> --dry-run` forwards only the file and sets
+    // `npm_config_dry_run="true"`, because npm has a `--dry-run` of its own and
+    // claims it first. Reading argv alone meant the flag was absent and the
+    // command performed a real, irreversible apply while the operator believed
+    // they had asked for a rehearsal. Measured under npm 11.16.0.
+    expect(dryRunRequested(['file.sql'], { npm_config_dry_run: 'true' })).toBe(true)
+    expect(dryRunRequested(['file.sql'], { npm_config_dry_run: '1' })).toBe(true)
+  })
+
+  it('does not read an unrelated or falsy npm value as a rehearsal', () => {
+    expect(dryRunRequested(['file.sql'], { npm_config_dry_run: 'false' })).toBe(false)
+    expect(dryRunRequested(['file.sql'], { npm_config_dry_run: '' })).toBe(false)
+    expect(dryRunRequested(['file.sql'], { npm_config_something_else: 'true' })).toBe(false)
+  })
+
+  it('REFUSES an unknown flag rather than dropping it', () => {
+    // The mistyped flag is the dangerous one: the person who typed it is by
+    // definition the person expecting nothing to happen. `migrationFileFrom`
+    // filters `-`-prefixed arguments out when looking for the file, which is
+    // right for finding a file and silently wrong for everything else.
+    expect(() => assertKnownFlags(['file.sql', '--dry-rnu'])).toThrow(/Unknown flag/)
+    expect(() => assertKnownFlags(['file.sql', '--dryrun'])).toThrow(/Unknown flag/)
+    expect(() => assertKnownFlags(['file.sql', '--pretend'])).toThrow(/Unknown flag/)
+    expect(() => assertKnownFlags(['file.sql', '-n'])).toThrow(/Unknown flag/)
+  })
+
+  it('names both working spellings in the refusal, since npm is why there are two', () => {
+    expect(() => assertKnownFlags(['--dry-rnu'])).toThrow(/-- --dry-run/)
+  })
+
+  it('accepts the flag it knows, and a bare file', () => {
+    expect(() => assertKnownFlags(['file.sql', '--dry-run'])).not.toThrow()
+    expect(() => assertKnownFlags(['file.sql'])).not.toThrow()
+  })
+
+  it('KNOWN_FLAGS is the single list both the refusal and the detector work from', () => {
+    // A second copy would let the two disagree — a flag accepted by one and
+    // unrecognised by the other is a flag that is silently dropped again.
+    expect(KNOWN_FLAGS).toContain('--dry-run')
+    for (const flag of KNOWN_FLAGS) {
+      expect(() => assertKnownFlags([flag]), flag).not.toThrow()
+    }
   })
 })
 

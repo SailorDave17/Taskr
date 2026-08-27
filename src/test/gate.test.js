@@ -1452,7 +1452,17 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
     //
     // End to end: listed, read, and REFUSED. Removed in a `finally`, and the
     // removal is then proven rather than assumed.
-    const probe = 'src/test/.token-probe.tmp.js'
+    //
+    // AT THE REPO ROOT, not under `src/test/`, and that is not cosmetic. Four
+    // suites — allocation, calendar, capacity and liveSchema — walk `src/`
+    // recursively at RUN TIME, and vitest's default file parallelism runs them
+    // alongside this one, so a probe written there can be read between the write
+    // and the `rm` and redden an unrelated suite with ENOENT. Nothing enumerates
+    // the repo root. The extension is `.tmp` rather than `.js` for the same class
+    // of reason: `npm run lint` is `eslint .`, which would lint a stray root
+    // `.js`. The rule is cairn's — before writing a probe into a repo directory,
+    // grep for who enumerates that directory at run time.
+    const probe = '.token-probe.tmp'
     const absolute = resolve(process.cwd(), probe)
     writeFileSync(absolute, `const fixture = '${PREFIX}${'0123456789abcdef'.repeat(3)}'\n`)
     try {

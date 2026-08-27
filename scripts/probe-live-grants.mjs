@@ -52,6 +52,7 @@ import { pathToFileURL } from 'node:url'
 import { LIVE_TABLES } from '../src/lib/liveSchema.js'
 import { resolveSupabaseUrl } from './deploy-function.mjs'
 import {
+  Refusal,
   projectRefFrom,
   readEnvLocal,
   requireAccessToken,
@@ -266,25 +267,19 @@ function show(privileges) {
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href
 
-if (isMain) {
-  const fail = (message) => {
-    console.error(`\n${message}\n`)
-    process.exit(1)
+async function main(env) {
+  const refuse = (message) => {
+    throw new Refusal(message)
   }
 
   let ref
   try {
-    ref = projectRefFrom(resolveSupabaseUrl(process.env, readEnvLocal))
+    ref = projectRefFrom(resolveSupabaseUrl(env, readEnvLocal))
   } catch (error) {
-    fail(`Cannot work out which project to read.\n\n${error.message}`)
+    refuse(`Cannot work out which project to read.\n\n${error.message}`)
   }
 
-  let token
-  try {
-    token = requireAccessToken(resolveAccessToken(process.env, readEnvLocal))
-  } catch (error) {
-    fail(error.message)
-  }
+  const token = requireAccessToken(resolveAccessToken(env, readEnvLocal))
 
   const tables = probeTables()
   console.log(`\nproject : ${ref}   (derived from VITE_SUPABASE_URL)`)
@@ -292,16 +287,16 @@ if (isMain) {
   console.log(`role    : ${SUBJECT_ROLE}\n`)
 
   const relacl = await runQuery({ ref, token, sql: relaclQuery(tables), fetchImpl: fetch })
-  if (!relacl.ok) fail(`Could not read pg_class.relacl.\n\n${relacl.error}`)
+  if (!relacl.ok) refuse(`Could not read pg_class.relacl.\n\n${relacl.error}`)
 
   const attacl = await runQuery({ ref, token, sql: attaclQuery(tables), fetchImpl: fetch })
-  if (!attacl.ok) fail(`Could not read pg_attribute.attacl.\n\n${attacl.error}`)
+  if (!attacl.ok) refuse(`Could not read pg_attribute.attacl.\n\n${attacl.error}`)
 
   // A catalog read that comes back empty is an ABSENT answer, not a clean one —
   // and for this probe an empty result is exactly what a wrong schema name or a
   // typo'd table produces. Refuse it rather than printing a tidy empty report.
   if (!relacl.rows.length || !attacl.rows.length) {
-    fail(
+    refuse(
       'The catalog returned NOTHING for these tables, which is not the same as ' +
         'their having no grants.\nEither the project is not the one you meant, or the ' +
         'query reached a schema with none of these tables in it.',
@@ -332,11 +327,18 @@ if (isMain) {
     const mark = verdict.agrees ? 'ok  ' : 'DIFF'
     console.log(`  ${mark} ${verdict.key.padEnd(34)} expected ${show(verdict.privileges)}`)
     console.log(`       ${''.padEnd(34)} actual   ${show(verdict.actual ?? null)}`)
+    // The note is PRINTED, and it was computed and dropped until review found it.
+    // `reconcile` distinguishes a column that is not there from one carrying no
+    // grant, and `show` renders both as `no column-level grant` — so without this
+    // line the two print identically, including on the negative control, where
+    // the difference is the whole point: an absent column means a migration did
+    // not run, an ungranted one means the control is working.
+    if (verdict.note) console.log(`       ${''.padEnd(34)} note     ${verdict.note}`)
     console.log(`       ${''.padEnd(34)} ${verdict.source}`)
   }
 
   if (differing.length) {
-    fail(
+    refuse(
       `${differing.length} of ${verdicts.length} rows DIFFER from the recorded measurement.\n\n` +
         'That is either a migration this repo does not know about, or a row that has\n' +
         'legitimately moved — in which case update MEASURED_GRANTS in\n' +
@@ -349,4 +351,17 @@ if (isMain) {
     `\n${verdicts.length} of ${verdicts.length} agree, negative control included — ` +
       'the probe can report an absence.\n',
   )
+}
+
+if (isMain) {
+  try {
+    await main(process.env)
+  } catch (error) {
+    // `process.exitCode`, never `process.exit()` — see `Refusal` in
+    // scripts/management-api.mjs. The first query's failure branch is reached after
+    // exactly ONE completed fetch, which is the count that aborts inside libuv on
+    // Windows/Node 24 and replaces the exit code with one a shell reports as 127.
+    console.error(`\n${error instanceof Refusal ? error.message : (error?.stack ?? error)}\n`)
+    process.exitCode = 1
+  }
 }

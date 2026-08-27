@@ -43,6 +43,44 @@ import { resolve } from 'node:path'
 // currently works is disturbed by a story that only adds commands.
 import { parseEnvFile, projectRefFrom } from './deploy-function.mjs'
 
+/**
+ * A refusal a command makes on purpose, as opposed to a crash.
+ *
+ * It is a THROW rather than a `process.exit()`, and both halves of that matter.
+ *
+ * Throwing means a refusal cannot fall through. The first version of both
+ * commands used a `fail()` helper that called `process.exit()` and therefore
+ * never returned, and six call sites sat in `catch` blocks relying on exactly
+ * that. Setting an exit code in place of the exit, without restructuring, would
+ * have let each of those continue with `ref`, `path`, `sql` or `token`
+ * undefined — trading a wrong exit code for a cascade of undefined-value
+ * failures. So the callers run inside one `try` and the refusal unwinds.
+ *
+ * Not calling `process.exit()` is the other half, and it is a platform fact
+ * rather than a matter of taste: on Windows/Node 24, `process.exit()` after
+ * exactly ONE completed `fetch` aborts inside libuv — `Assertion failed:
+ * !(handle->flags & UV_HANDLE_CLOSING)` — replacing the exit code with
+ * `0xC0000409`, which a shell reports as **127**. *Measured 3/3 on these
+ * scripts, 5/5 synthetic, with a two-fetch control exiting 1 cleanly 5/5, and a
+ * single 200 response aborting identically 4/4.*
+ *
+ * The paths that fail after exactly one request are the echo-stage refusals —
+ * including `REFUSED: the database did not receive the file that is on disk`,
+ * which is the reason `migrate:live` exists — so the single most important
+ * message these commands can print was being stapled under a crash and reported
+ * to an unattended caller as command-not-found. That matters here more than in
+ * most repos, because running with nobody watching is the whole pitch of this
+ * route. cairn `reference/node-process-exit-after-fetch-2026-08-23.md` records
+ * the hazard, and measured the repair — `process.exitCode` plus a natural drain
+ * — as FASTER than the immediate exit, so there is no trade.
+ */
+export class Refusal extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'Refusal'
+  }
+}
+
 /** The variable both scripts read. The name the Supabase CLI uses, so one token serves both. */
 export const TOKEN_VAR = 'SUPABASE_ACCESS_TOKEN'
 
@@ -176,7 +214,24 @@ export async function runQuery({ ref, token, sql, fetchImpl = fetch, root = MANA
     }
   }
 
-  const text = await response.text()
+  // INSIDE a try, and it was outside until review found it. Reading the body is
+  // a second network operation: a connection reset mid-response throws here, not
+  // at the `fetch` above, and both callers `await` this function at top level
+  // with no catch — so an escape becomes an unhandled rejection and the process
+  // dies, rather than the deliberate refusal this whole module is built around.
+  // An absent answer must read as a reported failure, never as a crash.
+  let text
+  try {
+    text = await response.text()
+  } catch (error) {
+    return {
+      ok: false,
+      status: response.status,
+      rows: null,
+      error: `the response body could not be read — ${error?.message ?? error}`,
+    }
+  }
+
   let parsed = null
   try {
     parsed = text ? JSON.parse(text) : null

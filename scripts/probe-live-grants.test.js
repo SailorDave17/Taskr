@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -66,6 +66,31 @@ describe('the probe cannot write, and the claim is enforced rather than asserted
     expect(sqlIdentifier('chore_exclusions')).toBe('chore_exclusions')
   })
 
+  // The two tests below prove WIRING, not the functions — and until review they
+  // were missing, so both guards could have been unhooked from the query builders
+  // entirely and every other test in this file would have stayed green while the
+  // module header's production-safety claim became false. `prove-tests` shape 12:
+  // a test that builds its own call certifies the mechanism and says nothing
+  // about whether the production path uses it. Deleting either call from
+  // `relaclQuery`/`attaclQuery` now reddens here.
+
+  it('WIRING: the query builders actually call sqlIdentifier', () => {
+    // A hyphen is a legal-looking table name and an illegal SQL identifier, so it
+    // can only be refused by the validator being in the path.
+    expect(() => relaclQuery(['not-a-plain-name'])).toThrow(/plain SQL name/)
+    expect(() => attaclQuery(['not-a-plain-name'])).toThrow(/plain SQL name/)
+  })
+
+  it('WIRING: the query builders actually call assertReadOnly', () => {
+    // `drop` is a perfectly valid SQL identifier, so `sqlIdentifier` passes it —
+    // and it puts the word into the generated SQL, where only `assertReadOnly`
+    // being in the path can refuse it. That separation is what makes this a test
+    // of the second guard rather than a second test of the first.
+    expect(sqlIdentifier('drop')).toBe('drop')
+    expect(() => relaclQuery(['drop'])).toThrow(/write verb/)
+    expect(() => attaclQuery(['drop'])).toThrow(/write verb/)
+  })
+
   it('quotes each name as a literal', () => {
     expect(nameList(['a', 'b_c'])).toBe("'a', 'b_c'")
   })
@@ -121,6 +146,26 @@ describe('what it asks for — AC 3', () => {
   })
 })
 
+/**
+ * Which migrations grant `column` — one predicate, used by both the absence
+ * assertion and its positive control.
+ *
+ * The corpus is DISCOVERED rather than listed. It was a hand-written list of
+ * three files until review found it, and that list already omitted `0016` — so
+ * the future-migration case the negative control exists for could not have
+ * reddened it. A guard whose corpus is enumerated by hand covers exactly the
+ * files somebody remembered, and the file that breaks it is by definition the
+ * one written after the list.
+ */
+function migrationsGranting(column) {
+  const dir = resolve(process.cwd(), 'supabase/migrations')
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .filter((file) =>
+      new RegExp(`grant[^;]*\\b${column}\\b`, 'is').test(readFileSync(resolve(dir, file), 'utf8')),
+    )
+}
+
 describe('the negative control — AC 3 requires one by name', () => {
   it('the expectation set contains a column that must have NO grant', () => {
     const controls = MEASURED_GRANTS.filter((entry) => entry.privileges === null)
@@ -130,19 +175,44 @@ describe('the negative control — AC 3 requires one by name', () => {
     )
   })
 
-  it('the control column is one no migration grants, which is why it can be one', () => {
-    // Asserted against the FILES rather than trusted: if a future migration ever
-    // grants `repeat_since`, the control silently stops being a control and this
-    // is what says so. `0012` adds the column and withholds it deliberately.
+  it('the control column is one NO migration grants, which is why it can be one', () => {
+    // Asserted against the FILES rather than trusted: if any migration ever grants
+    // `repeat_since`, the control silently stops being a control and this is what
+    // says so. `0012` adds the column and withholds it deliberately.
+    //
+    // The corpus is DISCOVERED, and it was a hand-written list of three until
+    // review found it — a list that already omitted `0016`, so the future-migration
+    // case this test exists for could not have reddened it. A guard whose corpus is
+    // enumerated by hand covers exactly the files somebody remembered, and the file
+    // that breaks it is by definition the one written after the list.
     const dir = resolve(process.cwd(), 'supabase/migrations')
-    const names = readFileSync(resolve(dir, '0012_repeating_chores.sql'), 'utf8')
-    expect(names).toContain('repeat_since')
+    const files = readdirSync(dir).filter((name) => name.endsWith('.sql'))
 
-    const granted = ['0013_grants_the_platform_no_longer_infers.sql', '0014_scope_reads_to_one_household.sql', '0015_actual_minutes.sql']
-      .map((file) => readFileSync(resolve(dir, file), 'utf8'))
-      .filter((sql) => /grant[^;]*\brepeat_since\b/is.test(sql))
+    // Without this the whole test passes the moment the filter stops matching.
+    expect(files.length).toBeGreaterThan(10)
+    expect(files).toContain('0012_repeating_chores.sql')
 
-    expect(granted, 'a migration now grants the negative control column').toEqual([])
+    expect(readFileSync(resolve(dir, '0012_repeating_chores.sql'), 'utf8')).toContain(
+      'repeat_since',
+    )
+
+    const granted = migrationsGranting('repeat_since')
+    expect(
+      granted,
+      `a migration now grants the negative control column: ${granted.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: that scan DOES fire on a column the migrations really grant', () => {
+    // The assertion above is an absence, and an absence proves nothing until the
+    // search is shown to find something. This runs the SAME function against a
+    // column `0014` really grants — one predicate, not two literals, because two
+    // copies would let a typo break the real scan while the control went on
+    // matching its own private pattern.
+    expect(
+      migrationsGranting('household_id').length,
+      'the grant pattern matches nothing at all',
+    ).toBeGreaterThan(0)
   })
 })
 

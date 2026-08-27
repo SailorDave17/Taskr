@@ -7,14 +7,17 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0015` are ALL applied to the live project, and the expected-red set is
-  EMPTY** — *measured 2026-08-26 at 24 of 24*. `0001`–`0008`
+- Status: **`0001`–`0016` are ALL applied to the live project, and the expected-red set is
+  EMPTY** — *measured 2026-08-26 at 24 of 24, re-measured 2026-08-27 at 24 of 24 across the `0016`
+  paste, which could not have moved it*. `0001`–`0008`
   as of 2026-08-20 (#108),
   `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, **`0013` and `0014` on 2026-08-26 (#150)**,
-  and **`0015` on 2026-08-26 (#194)**.
-  `0013` (the inherited grants, #91) never appeared in the expected-red set below, because
-  `check:live` is structurally blind to it — and its paste was **verified anyway**, by an instrument
-  that check does not have. See the *two* migrations that bullet cannot speak for, which since
+  **`0015` on 2026-08-26 (#194)**, and **`0016` on 2026-08-27 (#198)**.
+  `0013` (the inherited grants, #91) and `0016` (the organizer-only removal rule, #152) never
+  appeared in the expected-red set below, because
+  `check:live` is structurally blind to both — and each paste was **verified anyway**, by an
+  instrument that check does not have. See the *three* migrations that bullet cannot speak for,
+  which since
   2026-08-26 is a statement about `check:live` rather than about what is knowable. `0007` and `0008`
   were pasted together, which is what emptied the expected-red set the first time. `0002` is verified
   over the wire by the live RLS suite (PR #65, 13/13 against the real project); `0007`, `0008`,
@@ -106,7 +109,8 @@
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
 - **The excused-red set is EMPTY, so ANY red is real.** *Measured 2026-08-26 at 24 of 24*, after
-  `0015` was pasted (#194). It held one row for most of that day — `chores` until `0015` arrived,
+  `0015` was pasted (#194), and *re-measured 2026-08-27 at 24 of 24* across the `0016` paste (#198),
+  which is blind to this check and so could not have moved either number. It held one row for most of that day — `chores` until `0015` arrived,
   re-opened by #12 asking for a column the live project did not have yet — and the row was
   DELETED when the paste landed rather than re-pointed at something else, because an empty set is
   the whole source of the check's authority. A row that outlives its action reads exactly like one
@@ -141,7 +145,7 @@
   asking in one bit.
 
   **The excused-red set is EMPTY. *Measured 2026-08-26 at 24 of 24*, after `0015` was pasted
-  (#194).** It held one row for most of that day, re-opened by #12: `chores` answering
+  (#194), and *re-measured 2026-08-27 at 24 of 24* across the `0016` paste (#198).** It held one row for most of that day, re-opened by #12: `chores` answering
   `42703 column chores.actual_minutes does not exist`, because the client had started asking for
   the actuals column while `0015` sat unpasted. A `42703`, not a `42501` — an unknown column is
   refused before the privilege check, so that red could not have been faked by a grant alone. With
@@ -205,7 +209,8 @@
   with the sign flipped. They arrive in the same paste as the table, so a project with the table has
   run the whole file.
 
-  **`0009` and `0013` are the two migrations this bullet cannot speak for at all**, and it is worth
+  **`0009`, `0013` and `0016` are the three migrations this bullet cannot speak for at all**, and it
+  is worth
   stating here rather than only four bullets up, because an empty excused-red set is easy to read as
   *the database matches the repo* and it does not mean that. The check covers tables, columns, RPCs
   and Edge Functions.
@@ -264,10 +269,48 @@
     instrument that covers that, in CI, against the migrations rather than against the project —
     and it is still true that **that** coverage cannot be moved over the wire.
 
+  - **`0016`** (#152) is one RLS policy and nothing else, so it is invisible for a third distinct
+    reason: not a missing probe (`0009`) and not a privilege already held (`0013`), but a **subject
+    the check does not read at all**. `check:live` reads tables, columns, RPCs and Edge Functions;
+    a policy is none of those, and no policy change can move its reading in either direction. There
+    was never an expected-red row to add, because there was no red available to excuse.
+
+    *Measured 2026-08-27, both sides.* `check:live` read **24 of 24** before the paste (2026-08-26,
+    after `0015`) and **24 of 24** after it, and the denominator cannot have drifted between the two
+    readings: `src/lib/liveSchema.js` and `src/test/schema.integration.test.js` last changed
+    2026-08-24. **That agreement is recorded here precisely so a green run is not mistaken for
+    evidence the paste happened** — it is the same reading the check would have given had `0016`
+    never been pasted at all.
+
+    What confirms it is the **post-state**, read the way `0013`'s was — SQL against the catalog,
+    which the dashboard can run and PostgREST cannot. *Measured 2026-08-27*, the live
+    `pg_get_expr(polqual, polrelid)` for `members_delete_same_household` on `public.members`:
+
+    ```
+    ((household_id IN ( SELECT current_household_ids() AS current_household_ids))
+     AND (claimed_by IS DISTINCT FROM ( SELECT auth.uid() AS uid))
+     AND is_household_organizer(household_id))
+    ```
+
+    The third clause is `0016`'s and can only be `0016`'s — no other migration references
+    `is_household_organizer` in a policy on `members`. The first two are `0001`'s and `0007`'s,
+    unchanged, which is the other half of the check: this migration was supposed to **narrow** the
+    predicate, not rewrite it, and the self-removal clause `0007` argues for at length is still
+    there. `is_household_organizer` deparses unqualified because the policy was created with it on
+    the search path; that is how Postgres renders it, not a sign the schema qualifier was dropped.
+
+    **Why the post-state and not a ledger.** Nothing in this repo records which migrations have
+    reached the project, and the natural response to not knowing is to paste again to be sure.
+    Re-pasting `0016` is genuinely harmless — `drop policy if exists` then `create policy` — but
+    the habit is what matters, and asking the database what it currently holds answers the question
+    for every migration rather than for the safe ones.
+
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013` the gap is two migrations wide rather than one. Both are now
-  confirmed, and neither by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
-  ACL in the catalog (#150). **A gap covered somewhere else is still a gap here**, which is why this
+  ones it does not — and with `0013` and `0016` the gap is three migrations wide rather than one.
+  All three are now
+  confirmed, and none by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
+  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). **A gap covered
+  somewhere else is still a gap here**, which is why this
   sentence stays standing after the confirmations rather than being deleted by them.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
@@ -280,7 +323,13 @@
   on 2026-08-26 when #159 merged with `0014` unpasted, then **EMPTY at a measured 24 of 24**,
   `0014` and `0013` both pasted that afternoon (#150), then **ONE again at a measured 23 of 24**
   later the same day with #12's `0015` in the repo and unpasted, and now **EMPTY at a measured
-  24 of 24** with `0015` pasted that evening (#194). A THREE was once written here
+  24 of 24** with `0015` pasted that evening (#194). **`0016` (#198) is deliberately NOT a twelfth
+  inversion**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
+  the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
+  could go red. The check was *re-measured* at 24 of 24 on 2026-08-27 after that paste — a
+  re-measurement, not a transition. **Count the inversions from rows this table could have held,
+  never from migrations that landed**, or the next blind paste inflates a number whose whole value
+  is that it counts something real. A THREE was once written here
   first, from arithmetic, and never actually existed: the paste that would have cleared its third
   entry had already happened. **A predicted state is not a state**, and the register a count is
   written in — measured or derived — belongs beside it.* The non-empty states are the instructive

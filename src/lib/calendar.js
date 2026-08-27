@@ -64,6 +64,24 @@ export const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/aut
 /** Where the state token waits while the browser is at Google. */
 export const CONSENT_STATE_KEY = 'taskr.calendar.consent-state'
 
+/**
+ * Where the household waits beside it — #161.
+ *
+ * The Edge Function has to be told which household the connection is for: since
+ * 0009 a person can hold a member row in two, and the function finds its member
+ * by `claimed_by` plus a household. Remembering it here rather than resolving it
+ * on the way back binds the connection to the household that was ON SCREEN when
+ * Connect was pressed, which is what the member chose — a resolution taken after
+ * the trip to Google would be a fresh guess at "active", made at the one moment
+ * the app has no idea what it was showing beforehand.
+ *
+ * It rides in the same storage as the state token deliberately: that token
+ * ALREADY has to survive the round trip, so this adds no new way to fail. Lose
+ * the storage and the state check refuses first, which it did before this
+ * existed.
+ */
+export const CONSENT_HOUSEHOLD_KEY = 'taskr.calendar.consent-household'
+
 /** Matches the select grant in `0011` exactly; `select('*')` fails on this table. */
 export const CALENDAR_CONNECTION_COLUMNS = 'id, member_id, scope, connected_at'
 
@@ -181,9 +199,14 @@ export function readConsentReturn(search) {
  * server-side would add a table, a write and a cleanup problem to defend a value
  * that is worthless the moment the tab is closed.
  */
-export function startConnect({ storage = globalThis.sessionStorage, location } = {}) {
+export function startConnect({ householdId, storage = globalThis.sessionStorage, location } = {}) {
+  if (!householdId) throw new Error('Which household? A calendar connection must name one.')
   const state = newConsentState()
   storage.setItem(CONSENT_STATE_KEY, state)
+  // #161 — written with the state, read back with it, cleared with it. Three
+  // operations on two keys that must not drift apart, which is why they sit
+  // next to each other in both functions rather than in a tidier place.
+  storage.setItem(CONSENT_HOUSEHOLD_KEY, householdId)
   return consentUrl({ redirectUri: redirectUriFor(location), state })
 }
 
@@ -198,14 +221,25 @@ export async function completeConnect(
   { storage = globalThis.sessionStorage, location } = {},
 ) {
   const expected = storage.getItem(CONSENT_STATE_KEY)
+  const householdId = storage.getItem(CONSENT_HOUSEHOLD_KEY)
   storage.removeItem(CONSENT_STATE_KEY)
+  // Consumed whatever happens, for the same reason the state is: a value left
+  // behind is one a later request could match against.
+  storage.removeItem(CONSENT_HOUSEHOLD_KEY)
 
   if (!expected || !state || state !== expected) {
     throw new Error('That calendar connection did not come from this device. Nothing was changed.')
   }
 
+  // Checked AFTER the state, so a forged return is refused as a forgery rather
+  // than as a missing household — the two failures route to different places
+  // and only one of them is the member's problem.
+  if (!householdId) {
+    throw new Error('This device forgot which household that connection was for. Try again.')
+  }
+
   const { data, error } = await getSupabase().functions.invoke('calendar-connect', {
-    body: { code, redirectUri: redirectUriFor(location) },
+    body: { code, redirectUri: redirectUriFor(location), householdId },
   })
 
   if (error) {

@@ -53,6 +53,7 @@ vi.mock('./supabase.js', () => ({
 
 const {
   CALENDAR_CONNECTION_COLUMNS,
+  CONSENT_HOUSEHOLD_KEY,
   CONSENT_STATE_KEY,
   GOOGLE_AUTH_ENDPOINT,
   GOOGLE_FREEBUSY_SCOPE,
@@ -268,10 +269,52 @@ describe('the state token', () => {
 
   it('is written down before the browser leaves, and appears in the URL', () => {
     const storage = fakeStorage()
-    const url = startConnect({ storage, location: LOCATION })
+    const url = startConnect({ householdId: 'household-1', storage, location: LOCATION })
     const stored = storage.getItem(CONSENT_STATE_KEY)
     expect(stored).toBeTruthy()
     expect(paramsOf(url).get('state')).toBe(stored)
+  })
+
+  it('#161 — the household travels with it, and is spent with it', async () => {
+    // Which household a connection is for has to survive a trip to Google and
+    // back. It rides in the same storage as the state token because that token
+    // ALREADY has to survive it: no new way to fail, and the failure that does
+    // exist is refused by the state check first.
+    const storage = fakeStorage()
+    startConnect({ householdId: 'household-7', storage, location: LOCATION })
+    expect(storage.getItem(CONSENT_HOUSEHOLD_KEY)).toBe('household-7')
+
+    invoke.mockResolvedValue({ data: { ok: true }, error: null })
+    await completeConnect(
+      { code: 'abc', state: storage.getItem(CONSENT_STATE_KEY) },
+      { storage, location: LOCATION },
+    )
+    expect(invoke.mock.calls[0][1].body.householdId).toBe('household-7')
+    expect(
+      storage.getItem(CONSENT_HOUSEHOLD_KEY),
+      'consumed like the state, so a later request cannot inherit it',
+    ).toBeNull()
+  })
+
+  it('#161 — refuses to start without a household rather than guessing one', () => {
+    // The alternative is a connection filed under whichever household came back
+    // first, which is the defect this story exists to remove. Loud here beats
+    // silent there.
+    expect(() => startConnect({ storage: fakeStorage(), location: LOCATION })).toThrow(
+      /must name one/,
+    )
+  })
+
+  it('#161 — refuses a return whose household this device no longer remembers', async () => {
+    // Checked AFTER the state, deliberately: a forged return is a forgery, not a
+    // forgotten household, and the two sentences send a person to different
+    // places.
+    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok' })
+    invoke.mockResolvedValue({ data: { ok: true }, error: null })
+    await expect(
+      completeConnect({ code: 'abc', state: 'ok' }, { storage, location: LOCATION }),
+    ).rejects.toThrow(/forgot which household/)
+    expect(invoke, 'nothing reaches the server without a household').not.toHaveBeenCalled()
   })
 
   it('is what a return has to match, or nothing is sent to the server', async () => {
@@ -321,13 +364,19 @@ describe('completeConnect', () => {
     // Google requires the `redirect_uri` at the exchange to equal the one used at
     // consent. Deriving both from `location.origin` through one function is what
     // makes that true by construction rather than by two matching literals.
-    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok' })
+    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok', [CONSENT_HOUSEHOLD_KEY]: 'household-1' })
     invoke.mockResolvedValue({ data: { ok: true }, error: null })
 
     await completeConnect({ code: 'the-code', state: 'ok' }, { storage, location: LOCATION })
 
     expect(invoke).toHaveBeenCalledWith('calendar-connect', {
-      body: { code: 'the-code', redirectUri: 'https://taskr.example.test/' },
+      body: {
+        code: 'the-code',
+        redirectUri: 'https://taskr.example.test/',
+        // #161 — which household, never who. The person is `auth.uid()` on the
+        // server side and no field here can say otherwise.
+        householdId: 'household-1',
+      },
     })
   })
 
@@ -337,7 +386,7 @@ describe('completeConnect', () => {
     // refused code from an unreachable Google from a missing configuration, and
     // that distinction is the whole value — #112 is this repo's recorded case of
     // a generic message sending somebody to check the network.
-    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok' })
+    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok', [CONSENT_HOUSEHOLD_KEY]: 'household-1' })
     invoke.mockResolvedValue({
       data: null,
       error: {
@@ -355,7 +404,7 @@ describe('completeConnect', () => {
     // A genuinely dropped connection has no response to unwrap. Without this the
     // member would get an empty sentence, which reads as the app having no idea
     // — and it is the branch a happy-path test cannot reach.
-    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok' })
+    const storage = fakeStorage({ [CONSENT_STATE_KEY]: 'ok', [CONSENT_HOUSEHOLD_KEY]: 'household-1' })
     invoke.mockResolvedValue({ data: null, error: { message: 'Failed to send a request' } })
 
     await expect(

@@ -396,11 +396,15 @@ export default function App() {
   const handleConnectCalendar = useCallback(() => {
     setError(null)
     try {
-      globalThis.location.assign(startConnect())
+      // #161 — the household THIS SCREEN IS SHOWING travels with the consent
+      // state, so the connection lands where the member was standing when they
+      // pressed it. Same `household` state every other write on this screen
+      // takes its id from (#159 AC 4), and the same one a switcher will change.
+      globalThis.location.assign(startConnect({ householdId: household?.id }))
     } catch (err) {
       setError(err.message)
     }
-  }, [])
+  }, [household])
   // #34 — chores. Each goes through mutate(), which re-reads from the server
   // rather than patching local state from the response: what the next device to
   // load will see is exactly what this device now shows.

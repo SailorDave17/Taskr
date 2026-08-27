@@ -21,6 +21,7 @@
 // dependency is absent passes vacuously, which is the exact defect
 // `docs/ci-gate.md` exists to prevent and the reason `test:rls` is loud too.
 
+import { execSync } from 'node:child_process'
 import { describe, it, expect, beforeAll } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 
@@ -32,6 +33,29 @@ const ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0'
 
 const FUNCTION_URL = `${URL}/functions/v1/provision-member`
+
+/**
+ * The local stack's privileged key, ASKED FOR rather than written down — #161.
+ *
+ * Every other key in this file is a published local default, safe to embed
+ * because it grants nothing anywhere but a stack on this machine. This one is
+ * the same in fact, and is still not written down: `src/test/gate.test.js`
+ * refuses a secret key NAME anywhere under `src/`, and a service-role JWT is
+ * precisely the shape that guard exists to keep out of this tree. It cannot
+ * currently see a raw JWT, so embedding one would widen a hole the guard is
+ * blind to rather than break a rule it enforces — which is worse, not better.
+ *
+ * So it is read from the CLI at run time. That costs one subprocess and adds no
+ * new precondition: this suite already refuses to run without the local stack,
+ * and a stack that is up can always answer this.
+ */
+let serviceKey = null
+
+function serviceClient() {
+  return createClient(URL, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
 
 /** A fresh anonymous-capable client with no session of its own. */
 function freshClient() {
@@ -92,7 +116,24 @@ beforeAll(async () => {
       )
     }
   }
-}, 30_000)
+
+  // Resolved here rather than at module scope so a failure names the stack
+  // rather than arriving as an unreadable import-time crash.
+  serviceKey = process.env.SUPABASE_LOCAL_SECRET ?? null
+  if (!serviceKey) {
+    try {
+      const status = JSON.parse(execSync('npx supabase status -o json', { encoding: 'utf8' }))
+      serviceKey = status.SERVICE_ROLE_KEY
+    } catch (cause) {
+      throw new Error(
+        'Could not read the privileged key for the local stack from `npx supabase status -o json`. ' +
+          'Set SUPABASE_LOCAL_SECRET to override. ' +
+          `One fixture below needs it, and is loud rather than skipped. (${cause.message})`,
+      )
+    }
+  }
+  expect(serviceKey, 'the local stack reported no service_role key').toBeTruthy()
+}, 120_000)
 
 /**
  * One household with an organizer and one unprovisioned member.
@@ -323,6 +364,69 @@ describe('#87 — provisioning a member, against a real stack', () => {
       .eq('id', theirs.member.id)
       .single()
     expect(untouched.claimed_by, 'a stranger provisioned into another household').toBeNull()
+  })
+
+  it('#161 — refuses a member of a household the caller is IN but does not ORGANISE', async () => {
+    // The escalation, which the test above does not reach. That one uses a
+    // household the caller is not in AT ALL, so the caller-scoped read finds
+    // nothing and the 404 is decided before any organizer question is asked.
+    //
+    // Here the caller CAN see the target: they are an ordinary member of that
+    // household. Everything the old code checked passed — the member row was
+    // visible, and the caller really does organise A — because it asked whether
+    // the caller organises `current_household_ids()[0]` rather than whether they
+    // organise the household the TARGET is in.
+    const mine = await makeHousehold()
+    const theirs = await makeHousehold()
+
+    // Putting the caller on the other roster needs `service_role`, and that is
+    // not a shortcut: there is NO public path that attaches an EXISTING auth
+    // user to a second member row. `provision-member` mints a new one, which is
+    // the gap #191 and #168 both record. So this state is unreachable through
+    // the app today — which is exactly why #161 lands before the affordance
+    // that makes it reachable, rather than after.
+    const { data: identity } = await mine.organizer.auth.getUser()
+    const housemate = await theirs.addMember('Housemate', 60)
+    const svc = serviceClient()
+    const { error: attachError } = await svc
+      .from('members')
+      .update({ claimed_by: identity.user.id })
+      .eq('id', housemate.id)
+    expect(attachError, `attaching the caller to the second household failed: ${attachError?.message}`).toBeNull()
+
+    // PRECONDITION, asserted rather than assumed. The defect needs the caller's
+    // OWN household to be the one `current_household_ids()` happens to return
+    // first — that unordered pick is the whole bug — so if this ever stops
+    // holding, the fixture has stopped reproducing the escalation and this test
+    // must fail LOUDLY rather than pass for the wrong reason.
+    const { data: ids } = await mine.organizer.rpc('current_household_ids')
+    expect(ids, 'the caller should now be in both households').toContain(theirs.household.id)
+    expect(
+      ids[0],
+      'fixture no longer reproduces the escalation ordering — re-derive it before trusting this test',
+    ).toBe(mine.household.id)
+
+    const result = await callFunction(mine.organizerToken, {
+      action: 'provision',
+      memberId: theirs.member.id,
+      password: 'escalation-secret-1',
+    })
+
+    // 403 and not 404: the caller may legitimately SEE this person, so the read
+    // succeeded and it is the organizer check that refuses. Different from the
+    // test above on purpose, and the difference is the story.
+    expect(result.status, `expected a refusal, got ${JSON.stringify(result.body)}`).toBe(403)
+    expect(result.body.error).toMatch(/only the household organizer/i)
+
+    const { data: untouched } = await svc
+      .from('members')
+      .select('claimed_by')
+      .eq('id', theirs.member.id)
+      .single()
+    expect(
+      untouched.claimed_by,
+      'a non-organizer minted a sign-in for somebody in a household they merely belong to',
+    ).toBeNull()
   })
 
   it('refuses provisioning twice, and says to reset instead', async () => {

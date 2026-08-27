@@ -164,10 +164,16 @@ export function offLevelOf(load) {
  * took — #47 criterion 7, which supersedes #12's AC 6 and settles the open
  * decision that AC carried (its option (a), recommended there and taken here).
  *
- * `actualMinutes` is the field #12 will fill; nothing writes it yet, so the
- * fallback is what runs today and the preference is what runs the moment that
- * column exists. That ordering is deliberate: the alternative is a change to
- * this line inside #12, which is a coupling nobody would be looking for.
+ * `actualMinutes` IS filled, since #12 shipped (PR #195, 2026-08-27) and `0015`
+ * was pasted the same evening: completing a chore seeds `actual_minutes` from
+ * the estimate, and the done row carries an editable "Took (minutes)" for
+ * saying otherwise. So the PREFERENCE is what runs today, and the fallback now
+ * covers only rows completed before that column existed, which read back null.
+ *
+ * This line did not change when #12 landed, and that was the point of writing
+ * it ahead of the column rather than inside the story that filled it — the
+ * alternative was a change to allocation arithmetic buried in a capture story,
+ * a coupling nobody would have been looking for.
  *
  * The fallback is on ABSENCE, not on falsiness. A chore genuinely recorded at
  * zero actual minutes must contribute zero, and `actual || expected` would

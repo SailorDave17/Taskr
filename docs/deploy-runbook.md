@@ -211,6 +211,42 @@ and touches nothing here. Until `provision-member` has run, an organizer who tri
 sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed.
 
+**A source change to an Edge Function needs a deploy of its own, and nothing in this repo will tell
+you it is owed.** Merging does not deploy a function, and neither does pasting a migration — those
+are the other two acts on this page that make production move, and it is easy to assume one of them
+carries this. `supabase/functions/**` reaches production only when `npm run deploy:function` runs, as
+a separate act, by somebody who remembered.
+
+*Measured 2026-08-27 (#196), which is why this is a paragraph and not a caution:* #161 changed the
+source of both functions and merged at 02:12Z. Production went on serving the 2026-08-24 build, and
+**`npm run check:live` read 24 of 24 green throughout — before the redeploy and after it,
+identically, with the excused-red set empty and correct both times.** Every instrument in this repo
+agreed that everything was fine while both fixes were absent from production.
+
+**No check here can report the omission. One command outside here can.** `check:live` asks whether a
+function is *there and callable*, which the superseded build answers just as well, so it is blind to
+this by construction rather than by oversight — and its blindness is invisible, because a green run
+is what a correctly deployed project looks like too. What is not blind is the platform's own record:
+
+```
+npx supabase functions list --project-ref <project ref>
+```
+
+Read three fields. `version` and `updated_at` say a deploy happened; **`ezbr_sha256` is the hash of
+the deployed bundle**, and it is the one that matters, because it separates *a deploy happened* from
+*a deploy happened and the code was different*. Compare `updated_at` against the merge time of the
+commit that changed the source: if the deploy is older, it is owed. On #196 both functions moved a
+version and both hashes changed, and that pair is the only evidence anywhere in that story that the
+fixes are actually running.
+
+*The hash is content-addressed, and that was measured rather than assumed* — a claim about an
+instrument is worth exactly what its control is worth. Redeploying `provision-member` a second time
+from **byte-identical** source moved it v5 to v6 and left `ezbr_sha256` **unchanged**, while
+`calendar-connect`, untouched in that round, held both its version and its hash. So `version` and
+`updated_at` answer *did a deploy happen*, and only `ezbr_sha256` answers *was the code different*.
+Had the hash moved on the identical redeploy it would have been a per-deploy build id, and the
+sentence above would have been false.
+
 **Every command takes the `npx` prefix, and must run from the repo root.** Both halves of that cost a
 round trip on 2026-08-20 and neither is guessable:
 
@@ -295,8 +331,9 @@ there is no state in which the check is green and the function is missing, so no
 taken on trust.
 
 Two caveats on reading it that way. On a **redeploy** the check is green on both sides, since it
-answers *is a function there and callable* and not *is this the build you just pushed* - use the
-timestamp in the dashboard for that. And the count is deliberately not written here: it moves
+answers *is a function there and callable* and not *is this the build you just pushed* -
+`npx supabase functions list` answers that second question, and section 3 above says which three
+fields to read. And the count is deliberately not written here: it moves
 whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
 defect `check:live` exists to catch, one level up.
 
@@ -422,7 +459,11 @@ in [#142](https://github.com/SailorDave17/Taskr/issues/142)).
 
 ### Pasting a migration, and reading the catalog back — the two routes (#150)
 
-**Route A, the browser, and it is the one in use.** With the owner signed in to the Supabase
+**Both routes are built, and neither replaces the other.** The condition that picks between them is
+whether a person is present, not which is newer — so read the two headings as a question about the
+run you are in, and see the table at the foot of this section.
+
+**Route A, the browser — for an attended session.** With the owner signed in to the Supabase
 dashboard in the automated browser, a session can open the SQL editor, set the editor's contents and
 run them. *Measured 2026-08-26 (#150)*: `window.monaco.editor.getEditors()[0].setValue(sql)` then
 `Ctrl+Enter`, results read out of the page.
@@ -439,13 +480,64 @@ Two things it is good for, and one it is not:
   carriage returns is exactly the 6881 the editor held, all 8 non-ASCII characters intact; `0014`
   likewise at 7846. A clipboard can re-encode a file on this machine, so this is not ceremony.
 - **It is no use unattended.** It needs a live signed-in dashboard session in that browser, so it
-  serves an attended session and no cron, CI job or headless run.
+  serves an attended session and no cron, CI job or headless run. That is what Route B is for.
 
-**Route B, a Supabase personal access token against the Management API, is NOT built.** It would
-make the paste and the catalog probe ordinary commands, runnable with nobody watching. It is filed
-as **#185**, and it is filed rather than done because a PAT is a long-lived credential with
-authority over every project in the account, which is a class of secret this repo does not hold
-today. Read that issue before minting one.
+**Route B, a Supabase personal access token against the Management API — for an unattended run.**
+Built by **#185**. It makes the paste and the catalog probe ordinary commands:
+
+```
+npm run migrate:live supabase/migrations/0017_something.sql
+npm run migrate:live supabase/migrations/0017_something.sql -- --dry-run
+npm run probe:live-grants
+```
+
+Both need `SUPABASE_ACCESS_TOKEN` and **refuse by name without it**, never falling back to the anon
+key sitting in the same file. `--dry-run` needs no credential at all: it prints the project it
+derived, the statement count and the file's digest, and sends nothing — which is the cheap way to
+see what a command would do before deciding to hold a token.
+
+What each is good for:
+
+- **`migrate:live` proves the payload arrived, from the far end.** Route A's character-count check
+  is the one thing about it that cannot be delegated to a person reliably, because it is the step
+  that is easy to skip when the paste *looks* fine. This one asks Postgres for the length, byte
+  count and md5 of what it received, compares them against the file on disk, and **applies nothing
+  if they disagree**. A file compared against itself would prove nothing at all.
+- **`probe:live-grants` reads the catalog that `check:live` cannot reach**, reconciles it against
+  what #150 measured on 2026-08-26, and exits non-zero on a difference. It carries a negative
+  control — `chores.repeat_since`, which `0012` grants to nobody — because a probe reporting grants
+  everywhere cannot report an absence.
+- **It runs with nobody watching**, which is the whole reason it exists: a cron job, a CI step, or a
+  session with no browser.
+
+**The cost, which is why this was a separate decision and not a widening of #150.** A personal
+access token authenticates as the ACCOUNT, not as a project. It has full authority over every
+project in the account and can create, pause and delete them — there is no row-level security in
+front of it and no policy that limits it. It is the only credential of that class this repo has ever
+needed.
+
+So: **it is never committed.** `.gitignore` keeps `.env.local` out of git, and `src/test/gate.test.js`
+scans every file in the repo — tracked and untracked — for a token-shaped literal and fails the
+build on one. **Revoke it** at <https://supabase.com/dashboard/account/tokens>, which is immediate
+and free: do so the moment a one-off use is finished, or at once if it has been pasted anywhere that
+is not `.env.local`, or if you are simply unsure. Minting another takes ten seconds. `.env.example`
+carries the same instructions beside the variable.
+
+**Which route to use**
+
+| | Route A — browser | Route B — token |
+|---|---|---|
+| Needs | a signed-in dashboard session | `SUPABASE_ACCESS_TOKEN` |
+| Runs unattended | no | yes |
+| Credential | the owner's live session | account-wide, long-lived |
+| Payload checked | by hand, character counts | automatically, before applying |
+| Arbitrary SQL | yes — it is an editor | no, by construction |
+
+Route A can run any statement, which makes it the one to reach for when the task is genuinely
+exploratory. Route B deliberately cannot: it applies a named file from `supabase/migrations/` or
+reads the catalog, and nothing else. That narrowness is the point rather than an unfinished edge —
+the general command is exactly what a token of this authority makes easy and what #185 argued
+against building.
 
 **What is still the owner's either way: deciding to paste.** Neither route changes that a migration
 reaching the live project is a deliberate act with a sequence — apply, then promote.

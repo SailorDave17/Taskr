@@ -186,10 +186,17 @@ export default function App() {
         // and a person decides who they are.
         //
         // The reads are skipped entirely rather than attempted and allowed to
-        // come back empty. They would succeed — every policy simply returns
-        // nothing to an unauthenticated caller — and "signed out" would be
-        // indistinguishable from "your household disappeared", which is the more
-        // alarming of the two readings and the wrong one.
+        // come back empty, so that "signed out" is never indistinguishable from
+        // "your household disappeared" — the more alarming of the two
+        // readings and the wrong one.
+        //
+        // This paragraph used to add "they would succeed — every policy simply
+        // returns nothing to an unauthenticated caller". That was true when it was
+        // written and `0017` (#186) falsifies it: `anon` held SELECT on
+        // `households` by inherited platform default and now holds nothing, so the
+        // read would be REFUSED rather than empty. Nothing here changes — the
+        // reads were already skipped — but that clause was a claim about the
+        // grant layer, and the grant layer moved.
         const session = await currentSession()
         if (!session) {
           if (!cancelled) setStatus('onboarding')

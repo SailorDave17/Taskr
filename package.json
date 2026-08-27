@@ -15,6 +15,8 @@
     "test:functions": "vitest run --config vitest.functions.config.js",
     "check:live": "vitest run --config vitest.integration.config.js src/test/schema.integration.test.js",
     "deploy:function": "node scripts/deploy-function.mjs",
+    "migrate:live": "node scripts/migrate-live.mjs",
+    "probe:live-grants": "node scripts/probe-live-grants.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs",
     "rebalance:corpus": "node scripts/rebalance-churn-report.mjs",

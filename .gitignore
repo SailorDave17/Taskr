@@ -7,6 +7,20 @@ coverage/
 
 # Env — credentials never enter git (#4's stated prerequisite). Runtime config
 # for Supabase is set in Vercel's dashboard as VITE_-prefixed variables.
+#
+# Since #185 the file these lines exclude holds SUPABASE_ACCESS_TOKEN, which is a
+# Supabase personal access token: it authenticates as the account owner and has
+# full authority over EVERY project in the account, not one. Committing it would
+# be worse than committing a service-role key, which is at least scoped to a
+# single project. Revoke at https://supabase.com/dashboard/account/tokens, where
+# revoking is immediate and free; `.env.example` says the rest.
+#
+# These two lines are not the only defence, deliberately. A `.gitignore` protects
+# one path and says nothing about a token pasted into a script, a document or a
+# test fixture — so `src/test/gate.test.js` scans every file in the repo, tracked
+# and untracked, for a token-shaped literal. `.env.local` is correctly outside
+# that scan's corpus BECAUSE these lines ignore it, which is the token's one
+# sanctioned home.
 .env
 .env.*
 !.env.example
@@ -33,3 +47,15 @@ pnpm-debug.log*
 build/
 bin/
 *.mv.db
+
+# Production bundles pulled down for inspection — a saved copy of a deployed
+# `dist/assets/index-*.js`, kept at the root while somebody reads it. Globbed and
+# root-anchored rather than an exact name: the second copy somebody makes is
+# `prodbundle.old.js`, and an exact-name rule is what let a credential backup
+# stay committable in another repo here.
+#
+# NOTE: this line does NOT stop `npm run lint` reading the file. ESLint flat
+# config ignores what `eslint.config.js` lists and never consults `.gitignore`,
+# so that file carries the same pattern. Two lists, deliberately, because
+# neither tool reads the other.
+/prodbundle*.js

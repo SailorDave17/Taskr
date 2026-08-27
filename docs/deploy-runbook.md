@@ -211,6 +211,42 @@ and touches nothing here. Until `provision-member` has run, an organizer who tri
 sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed.
 
+**A source change to an Edge Function needs a deploy of its own, and nothing in this repo will tell
+you it is owed.** Merging does not deploy a function, and neither does pasting a migration — those
+are the other two acts on this page that make production move, and it is easy to assume one of them
+carries this. `supabase/functions/**` reaches production only when `npm run deploy:function` runs, as
+a separate act, by somebody who remembered.
+
+*Measured 2026-08-27 (#196), which is why this is a paragraph and not a caution:* #161 changed the
+source of both functions and merged at 02:12Z. Production went on serving the 2026-08-24 build, and
+**`npm run check:live` read 24 of 24 green throughout — before the redeploy and after it,
+identically, with the excused-red set empty and correct both times.** Every instrument in this repo
+agreed that everything was fine while both fixes were absent from production.
+
+**No check here can report the omission. One command outside here can.** `check:live` asks whether a
+function is *there and callable*, which the superseded build answers just as well, so it is blind to
+this by construction rather than by oversight — and its blindness is invisible, because a green run
+is what a correctly deployed project looks like too. What is not blind is the platform's own record:
+
+```
+npx supabase functions list --project-ref <project ref>
+```
+
+Read three fields. `version` and `updated_at` say a deploy happened; **`ezbr_sha256` is the hash of
+the deployed bundle**, and it is the one that matters, because it separates *a deploy happened* from
+*a deploy happened and the code was different*. Compare `updated_at` against the merge time of the
+commit that changed the source: if the deploy is older, it is owed. On #196 both functions moved a
+version and both hashes changed, and that pair is the only evidence anywhere in that story that the
+fixes are actually running.
+
+*The hash is content-addressed, and that was measured rather than assumed* — a claim about an
+instrument is worth exactly what its control is worth. Redeploying `provision-member` a second time
+from **byte-identical** source moved it v5 to v6 and left `ezbr_sha256` **unchanged**, while
+`calendar-connect`, untouched in that round, held both its version and its hash. So `version` and
+`updated_at` answer *did a deploy happen*, and only `ezbr_sha256` answers *was the code different*.
+Had the hash moved on the identical redeploy it would have been a per-deploy build id, and the
+sentence above would have been false.
+
 **Every command takes the `npx` prefix, and must run from the repo root.** Both halves of that cost a
 round trip on 2026-08-20 and neither is guessable:
 
@@ -295,8 +331,9 @@ there is no state in which the check is green and the function is missing, so no
 taken on trust.
 
 Two caveats on reading it that way. On a **redeploy** the check is green on both sides, since it
-answers *is a function there and callable* and not *is this the build you just pushed* - use the
-timestamp in the dashboard for that. And the count is deliberately not written here: it moves
+answers *is a function there and callable* and not *is this the build you just pushed* -
+`npx supabase functions list` answers that second question, and section 3 above says which three
+fields to read. And the count is deliberately not written here: it moves
 whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
 defect `check:live` exists to catch, one level up.
 

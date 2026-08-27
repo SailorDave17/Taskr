@@ -1345,3 +1345,150 @@ describe('every pglite suite chooses its own testTimeout', () => {
     expect(DECLARES.test('// we could vi.setConfig({ testTimeout: 30_000 }) here')).toBe(false)
   })
 })
+
+// #185 — a Supabase personal access token never reaches version control.
+//
+// WHY THIS IS SEPARATE FROM THE #87 BLOCK ABOVE, which already scans for secrets.
+//
+// Three differences, and each of them changes the design:
+//
+//   - THE CORPUS IS THE WHOLE REPO, not `src/`. #87 guards against a secret
+//     reaching the CLIENT BUNDLE, so `src/` is exactly the right scope: a key in
+//     a script cannot be inlined into a bundle. This guards against a secret
+//     reaching GIT, which every file can do. A token in a runbook, a fixture or a
+//     scratch note is published the moment the repo is.
+//
+//   - IT SCANS UNTRACKED FILES TOO. `git ls-files --cached --others
+//     --exclude-standard` — the same corpus the #19 name scan settled on, and for
+//     the same measured reason: a corpus built from the index scans a file the
+//     day it is STAGED, not the day it is written, so the guard is silent on
+//     exactly the change that introduces the thing. `.env.local` is correctly
+//     OUTSIDE this corpus, because `--exclude-standard` honours `.gitignore` —
+//     and that is the token's one sanctioned home, not a hole.
+//
+//   - IT NEEDS NO ALLOWLIST, which is the part worth copying. #87 exempts four
+//     files because its patterns are bare names that its own detector and tests
+//     must spell. Here the pattern matches a token-SHAPED literal rather than the
+//     prefix, and the needle is BUILT FROM FRAGMENTS rather than written out, so
+//     no file in this repo — this one included — contains a string it matches.
+//     The scan is therefore literally true of every file, which is what AC 5
+//     asks, instead of true-except-for-a-list. An allowlist is a thing that goes
+//     stale; a guard that can scan itself cannot.
+//
+// WHY THE PATTERN IS A SHAPE AND NOT THE PREFIX.
+//
+// A token's prefix has to appear in prose: `.env.example` documents the variable,
+// `docs/deploy-runbook.md` explains the route, and this comment is doing it now.
+// A guard matching the bare prefix would refuse all three — the hazard cairn
+// records as `a-guard-that-reads-source-must-survive-its-own-docs`, whose repair
+// here is not an allowlist but a sharper question. What is dangerous is a token
+// VALUE, and a real one carries no underscore after its prefix while every
+// placeholder in this repo is written with underscores precisely so that it
+// cannot be mistaken for one. `.env.example` says to keep them, and the positive
+// control below holds it to that.
+describe('#185 — no Supabase personal access token literal is in the repo', () => {
+  // Built, never written. If this file contained a string matching the pattern,
+  // the scan below would have to exempt itself — and an exemption is the thing
+  // this guard is designed not to need.
+  const PREFIX = 'sbp' + '_'
+  const TOKEN_SHAPE = new RegExp(PREFIX + '[A-Za-z0-9-]{20,}')
+
+  function repoFiles() {
+    return execSync('git ls-files -z --cached --others --exclude-standard', {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    })
+      .split('\0')
+      .filter(Boolean)
+  }
+
+  function offendersIn(paths) {
+    return paths.filter((path) => {
+      let text
+      try {
+        text = readFileSync(resolve(process.cwd(), path), 'utf8')
+      } catch {
+        // A path git lists but cannot be read as text is not a place a token
+        // hides as a literal. Skipping is safe; failing here would make the
+        // guard refuse a submodule or a broken symlink.
+        return false
+      }
+      return TOKEN_SHAPE.test(text)
+    })
+  }
+
+  it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
+    const corpus = repoFiles()
+    expect(corpus.length).toBeGreaterThan(50)
+    expect(corpus).toContain('.env.example')
+    expect(corpus).toContain('docs/deploy-runbook.md')
+    expect(corpus).toContain('scripts/management-api.mjs')
+    expect(corpus).toContain('src/test/gate.test.js')
+  })
+
+  it('POSITIVE CONTROL: .env.local is OUTSIDE the corpus, which is where the token lives', () => {
+    // Not an omission — the one file allowed to hold a real token is the one
+    // `.gitignore` keeps out of git, and this asserts the two agree. If
+    // `.env.local` ever entered this list, the token's home would be inside the
+    // repo and the scan would be the thing telling you.
+    expect(repoFiles()).not.toContain('.env.local')
+  })
+
+  it('no file in the repo contains a token-shaped literal', () => {
+    const offenders = offendersIn(repoFiles())
+    expect(
+      offenders,
+      `these files carry something shaped like a personal access token: ${offenders.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: an untracked file carrying one IS caught, the day it lands', () => {
+    // The control has to CREATE the condition. On a clean tree nothing is
+    // untracked, so the widened corpus is byte-identical to the narrow one and no
+    // assertion over the corpus as it stands can tell the two commands apart —
+    // which is precisely what made the same blind spot invisible in the #19 scan
+    // until it was measured.
+    //
+    // End to end: listed, read, and REFUSED. Removed in a `finally`, and the
+    // removal is then proven rather than assumed.
+    const probe = 'src/test/.token-probe.tmp.js'
+    const absolute = resolve(process.cwd(), probe)
+    writeFileSync(absolute, `const fixture = '${PREFIX}${'0123456789abcdef'.repeat(3)}'\n`)
+    try {
+      const corpus = repoFiles()
+      expect(corpus, 'the corpus does not list an untracked file').toContain(probe)
+      expect(offendersIn(corpus)).toContain(probe)
+    } finally {
+      rmSync(absolute, { force: true })
+    }
+    expect(offendersIn(repoFiles())).not.toContain(probe)
+  })
+
+  it('POSITIVE CONTROL: the .env.example placeholder does NOT match, and is still there', () => {
+    // Both halves. The placeholder must be present — otherwise the file has
+    // stopped documenting the variable — and it must not match, which is what
+    // lets this guard run without an allowlist. `.env.example` states the rule it
+    // is being held to here: keep the underscores.
+    const example = readFileSync(resolve(process.cwd(), '.env.example'), 'utf8')
+    expect(example).toContain('SUPABASE_ACCESS_TOKEN=')
+    expect(TOKEN_SHAPE.test(example)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: the pattern separates a real-shaped token from prose about one', () => {
+    // Both directions, because a pattern that matches nothing and a pattern that
+    // matches everything produce the same clean scan.
+    expect(TOKEN_SHAPE.test(`${PREFIX}${'0123456789abcdef'.repeat(3)}`)).toBe(true)
+    expect(TOKEN_SHAPE.test(`${PREFIX}your_personal_access_token`)).toBe(false)
+    expect(TOKEN_SHAPE.test(`the ${PREFIX} prefix, discussed in prose`)).toBe(false)
+  })
+
+  it('this file can scan ITSELF, which is what makes the allowlist unnecessary', () => {
+    // The claim the whole block rests on, asserted rather than argued. If someone
+    // later writes the pattern out as a literal instead of building it, this is
+    // what fails — and it fails here, next to the reason, rather than as a
+    // mystery offender in the scan above.
+    const self = readFileSync(resolve(process.cwd(), 'src/test/gate.test.js'), 'utf8')
+    expect(TOKEN_SHAPE.test(self)).toBe(false)
+  })
+})

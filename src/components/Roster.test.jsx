@@ -261,13 +261,13 @@ describe('editing and removing — AC 4', () => {
   // Removing a person is destructive and there is no undo, so it takes two
   // deliberate taps. One tap on a phone in a pocket is not a decision.
   it('does not remove anyone on the first tap', () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     fireEvent.click(within(rowFor('Placeholder One')).getByRole('button', { name: /remove placeholder one/i }))
     expect(onRemove).not.toHaveBeenCalled()
   })
 
   it('removes only after the confirmation is tapped', async () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     const row = rowFor('Placeholder One')
     fireEvent.click(within(row).getByRole('button', { name: /remove placeholder one/i }))
     await clickAndSettle(within(row).getByRole('button', { name: /remove placeholder one\?/i }))
@@ -275,12 +275,87 @@ describe('editing and removing — AC 4', () => {
   })
 
   it('can be backed out of after the first tap', () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     const row = rowFor('Placeholder One')
     fireEvent.click(within(row).getByRole('button', { name: /remove placeholder one/i }))
     fireEvent.click(within(row).getByRole('button', { name: /^keep$/i }))
     expect(onRemove).not.toHaveBeenCalled()
     expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+  })
+})
+
+// #152 — removing a member is the organizer's alone.
+//
+// Before this, every member saw Remove on every row, and the database agreed:
+// `members_delete_same_household` refused only SELF-removal. So any second
+// claimed member could remove the organizer, which sets
+// `households.organizer_member_id` to NULL — and `create_household` is the only
+// thing that ever writes it, so provisioning ended for that household for good.
+//
+// These are the CLIENT half. The guard is the policy (0016), asserted over a
+// real Postgres in `organizer-removal.pglite.test.js`; nothing here would stop
+// a crafted request and nothing here is meant to.
+describe('only the organizer may remove a member — #152', () => {
+  it('offers Remove on no row at all to a member who is not the organizer', () => {
+    setup({ isOrganizer: false })
+    // Every row, not just somebody else's: a non-organizer may not remove
+    // themselves either, which 0007's clause already refused server-side.
+    expect(screen.queryAllByRole('button', { name: /^remove/i })).toHaveLength(0)
+  })
+
+  it('offers Remove on every OTHER row to the organizer', () => {
+    setup({ isOrganizer: true })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /remove placeholder one/i }),
+    ).toBeInTheDocument()
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', { name: /remove placeholder two/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not offer the organizer Remove on their OWN row', () => {
+    // 0007 refuses self-removal from every caller, the organizer included — so a
+    // Remove here is a control the database will always turn down. Same rule as
+    // hiding it from a non-organizer, applied to the other clause of the same
+    // policy, and the reason `me` is passed into the row at all.
+    setup({ isOrganizer: true, me: { id: 'm1', display_name: 'Placeholder One' } })
+    expect(
+      within(rowFor('Placeholder One')).queryByRole('button', { name: /remove placeholder one/i }),
+    ).toBeNull()
+    // POSITIVE CONTROL: the other row still offers it, so this is about WHOSE
+    // row it is and not about the organizer having lost the control entirely.
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', { name: /remove placeholder two/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('still offers Edit to a member who is not the organizer', () => {
+    // The asymmetry is deliberate and is the thing most likely to be "tidied"
+    // later by somebody gating both on one flag. Editing a name or a minutes
+    // figure is ordinary maintenance with an undo; removing a person is not.
+    setup({ isOrganizer: false })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /^edit$/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('says so plainly when the household has no organizer at all', () => {
+    // 0016 stops this state being created; it cannot repair one that exists.
+    // Rendering an ordinary roster with the organizer's tools silently missing
+    // reads as a permissions bug and sends somebody hunting the wrong fault.
+    setup({ isOrganizer: false, household: { id: 'h1', name: 'Placeholder Household' } })
+    expect(screen.getByTestId('no-organizer-note')).toBeInTheDocument()
+    expect(screen.getByTestId('no-organizer-note')).toHaveAttribute('role', 'status')
+  })
+
+  it('says nothing about a missing organizer when there is one', () => {
+    // POSITIVE CONTROL for the test above: without it, a note that never renders
+    // and a note that always renders are indistinguishable from a passing suite.
+    setup({
+      isOrganizer: true,
+      household: { id: 'h1', name: 'Placeholder Household', organizer_member_id: 'm1' },
+    })
+    expect(screen.queryByTestId('no-organizer-note')).toBeNull()
   })
 })
 

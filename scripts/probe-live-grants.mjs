@@ -352,10 +352,20 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
-  Object.freeze({ table: 'chores', authenticated: 'dDxtm' }),
-  Object.freeze({ table: 'households', authenticated: 'ardDxtm' }),
+  // The three below moved with `0019` (#227), and it has been APPLIED —
+  // 2026-08-27, under #235, by `npm run migrate:live`. This probe now agrees
+  // with the live project on every row, so a moved row here is a real finding
+  // rather than the entry doing its job.
+  //
+  // *Measured 2026-08-27, before the paste*: chores `dDxtm`, households
+  // `ardDxtm`, members `dDxtm`. *Measured 2026-08-27, after it*: chores `d`,
+  // households no table-level grant, members `d` — the values below, read back
+  // from the catalog. The pre-paste readings are kept rather than deleted,
+  // because a measurement with no successor reads as one nobody took.
+  Object.freeze({ table: 'chores', authenticated: 'd' }),
+  Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
-  Object.freeze({ table: 'members', authenticated: 'dDxtm' }),
+  Object.freeze({ table: 'members', authenticated: 'd' }),
 ])
 
 /**
@@ -593,13 +603,22 @@ async function main(env) {
     refuse(
       `anon reaches ${strays.length + fns.unexpected.length} thing(s) in public, and ` +
         `${controlsMoved.length} control row(s) moved.\n\n` +
-        'Before `0017` is pasted this is the EXPECTED reading, and the two strays are\n' +
-        '`households` and `members` — that red is the entry doing its job, exactly as\n' +
-        '`LIVE_SCHEMA` carries a table whose migration has not been pasted yet.\n\n' +
-        'After the paste it is a real finding: either a privilege arrived from\n' +
-        'somewhere, or a revoke hit `authenticated` instead of `anon`. A moved CONTROL\n' +
-        'row is the second of those and is the more serious — it means the paste took\n' +
-        'a privilege the app needs.',
+        'READ WHICH HALF MOVED before reading this as a fault — the two mean\n' +
+        'opposite things and only one of them is bad news.\n\n' +
+        'STRAYS are `anon` reaching something. Before `0017` was pasted that was the\n' +
+        'expected reading, with `households` and `members` the two entries; it has\n' +
+        'been pasted, so a stray now is a real finding.\n\n' +
+        'MOVED CONTROL ROWS are `authenticated` sitting somewhere other than the\n' +
+        'recorded value. Before `0019` (#227) was pasted, EXACTLY THREE were\n' +
+        'expected — `households` reading `ardDxtm` against no table-level grant,\n' +
+        'and `chores` and `members` reading `dDxtm` against `d`. IT HAS BEEN\n' +
+        'PASTED (2026-08-27, #235), so a moved row now is a REAL FINDING and not\n' +
+        'the entry doing its job. No excused moved row is left.\n\n' +
+        'What a moved row means now: a revoke hit `authenticated` when it was\n' +
+        'aimed at `anon`, or took a privilege the app needs. `households` losing\n' +
+        'its column SELECTs is the one that breaks the app for every signed-in\n' +
+        'member at once — see `0019` section 1, where the re-grant sits below the\n' +
+        'revoke for exactly that reason.',
     )
   }
 

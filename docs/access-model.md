@@ -7,8 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0018` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-27 at 25 of 25*, by running the instrument after `0018` was applied under #231.
+- Status: **`0001`–`0019` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-27 at 25 of 25*, by running the instrument after `0019` was applied under #235.
+  `0019` never entered the set, because this check is blind to it in both directions (see
+  its bullet below); it is confirmed instead by `npm run probe:live-grants`, which reads **zero
+  moved control rows** where it read exactly three before the paste.
   `0017` never entered the set because this check is blind to it (see its bullet below); it is
   confirmed instead by `npm run probe:live-grants`, which reads **anon holds no table-level or
   column-level privilege in `public` and may execute no function there** — 6 of 6 agreeing, negative
@@ -17,8 +20,9 @@
   paste, which could not have moved it*. `0001`–`0008`
   as of 2026-08-20 (#108),
   `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, **`0013` and `0014` on 2026-08-26 (#150)**,
-  **`0015` on 2026-08-26 (#194)**, **`0016` on 2026-08-27 (#198)**, and **`0017` and `0018` on
-  2026-08-27** — `0018` applied under #231 with `npm run migrate:live`, and `0017` confirmed already
+  **`0015` on 2026-08-26 (#194)**, **`0016` on 2026-08-27 (#198)**, **`0017` and `0018` on
+  2026-08-27**, and **`0019` on 2026-08-27 (#235)** — `0018` applied under #231 with
+  `npm run migrate:live`, `0019` the same way under #235, and `0017` confirmed already
   applied by the grant catalog in the same pass rather than by a paste anybody recorded.
   `0013` (the inherited grants, #91) and `0016` (the organizer-only removal rule, #152) never
   appeared in the expected-red set below, because
@@ -386,13 +390,29 @@
     produced "unobservable by design", which had to be withdrawn on 2026-08-26.
 
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013`, `0016` and `0017` the gap is four migrations wide rather than
-  one. Three of the four are
-  confirmed, and none by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
-  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). `0017` is the fourth and is confirmed
-  by `npm run probe:live-grants` once it is pasted. **A gap covered
+  ones it does not — and with `0013`, `0016`, `0017` and now `0019` the gap is **five** migrations
+  wide rather than one. **All five are now
+  confirmed, and none by this check**: `0009` by `npm run test:rls` at setup, `0013` by the column
+  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198), `0017` by
+  `npm run probe:live-grants` reading `anon` holding nothing anywhere, and `0019` by that same
+  command reading zero moved control rows on 2026-08-27 (#235). **A gap covered
   somewhere else is still a gap here**, which is why this
   sentence stays standing after the confirmations rather than being deleted by them.
+
+  `0019` (#227) is the fifth, and it is worth saying WHY it is not an excused row four screens up,
+  because a reader who has just read that migration will look for one. It revokes the table-level
+  privileges `authenticated` holds on `households`, `members` and `chores` that no migration
+  granted, and re-grants the `households` column reads in the same file. `check:live` asks what the
+  client can read; the client reads the same columns either side of the paste, so the check reads
+  **25 of 25 before and after** and the excused-red set stays genuinely EMPTY. The instrument that
+  *can* see it is `npm run probe:live-grants`, whose `MEASURED_TABLE_ACLS` was moved to the
+  post-paste values in the same change — so **that** command reported exactly three moved control
+  rows until the paste, and its own output named all three and the single action that cleared them.
+  **It was applied on 2026-08-27 under #235**, by `npm run migrate:live`, which read the payload
+  back from Postgres at 10,409 characters and md5 `7639fbfc641338bdca8c30b8d72e0125` before
+  applying anything. Both readings were taken either side: `check:live` 25 of 25 before and after,
+  and `probe:live-grants` three moved rows before and **zero** after, 6 of 6 agreeing with its own
+  negative control. There is no excused moved row left, so any moved row now is a real finding.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
   been inverted thirteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the

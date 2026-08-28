@@ -77,7 +77,9 @@
     unless `0009` is applied — `beforeAll` puts one seeded account in two households, which the
     pre-`0009` global `members_claimed_by_key` forbids, and that is exactly how #127 was found.
     *Re-measured 2026-08-24: 31 of 31, no skips. Re-measured again 2026-08-28: **57 of 57**, no
-    skips, after #221 restored the seeded account.* **A suite that fails at setup under the old schema
+    skips, after #221 restored the seeded account — and **65 of 65** later the same day, once #38
+    added eight chore cases to it. The count moved because tests were added; none were removed.*
+    **A suite that fails at setup under the old schema
     is a stronger presence check than any probe**, because it cannot pass for the wrong reason.
     The 2026-08-28 re-measurement matters for a reason beyond the number: this confirmation had
     **lapsed without saying so**. The seeded account was cleared around 2026-08-25, so from then
@@ -803,6 +805,29 @@ the stated reason. What it did not name:
 - **The one-time re-claim is not re-runnable**, and every other file here is. Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
+- **AND NEITHER IS ANY PRE-`0007` FILE, RE-PASTED ON ITS OWN, ONTO TODAY'S SCHEMA** — which is a
+  narrower claim than the bullet above and a wider hazard. *Measured 2026-08-28 under #38*, on a
+  pglite database carrying `0001`–`0021` and then handed one older file again:
+
+  | file | apply | what it leaves |
+  |---|---|---|
+  | `0003_chores.sql` | **FAILS** — `relation "public.household_devices" does not exist` | its five `chores` policies still name the dropped table; rolled back |
+  | `0004_chore_completion.sql` | **succeeds, silently** | `complete_chore` and `uncomplete_chore` revert to the retired model, and the next authenticated call raises `relation "public.household_devices" does not exist` |
+  | `0005_weekly_capacity.sql` | **FAILS** — same | rolled back |
+  | `0006_chore_assignment.sql` | **succeeds, silently** | `assign_chore` and `unassign_chore` revert the same way |
+
+  Both silent cases were proven end to end with a before/after control in one run: the RPC worked
+  before the re-apply and raised after it. The two that fail are the safe ones. **`0005` is the
+  worst of the four if its policies are ever satisfied**, because it also drops the live
+  three-argument `create_household` and installs a four-argument one whose body calls
+  `assert_valid_pin` and `generate_join_code` and writes `household_devices` and `members.pin_hash`
+  — all of which `0007` removed.
+
+  What is re-runnable is what `migrations.pglite.test.js` actually asserts and CI actually runs:
+  **the whole list, in order**. That is also the only re-run anybody has a reason to perform, and
+  `databaseThrough`'s docblock in `support/pgliteSupabase.js` has said so since it was written. This
+  bullet exists because #38's AC 1 asked for the other thing — each chore file pasted a second time
+  against the live project — and nothing in the repo said out loud that it must not be.
 
 Deliberately little, and the schema is why:
 

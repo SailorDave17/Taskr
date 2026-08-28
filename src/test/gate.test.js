@@ -1026,6 +1026,12 @@ describe('#19 — no real household name reaches version control', () => {
     'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Request-Headers': 'an HTTP header asserted by the CORS tests',
+    // #246 — the dashboard checkbox the seeded test account is created with,
+    // quoted in the sign-in refusal of both live suites. The RLS suite's copy
+    // sits inside a single-quoted string and is absorbed by the outer match;
+    // schema.integration.test.js quotes it inside a template literal, where the
+    // scan sees it standalone. Declared rather than re-quoted to slip past.
+    'Auto Confirm User': 'the dashboard checkbox both live suites tell you to tick',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])

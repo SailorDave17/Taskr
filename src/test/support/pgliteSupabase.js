@@ -108,6 +108,7 @@ export const MIGRATIONS = [
   '0019_authenticated_holds_only_what_a_migration_granted.sql',
   '0020_split_seen.sql',
   '0021_fairness_note_dismissed.sql',
+  '0022_an_upsert_writes_every_column_it_names.sql',
 ]
 
 export function migrationSql(name) {

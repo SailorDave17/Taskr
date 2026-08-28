@@ -7,11 +7,26 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0021` are ALL applied to the live project, and the expected-red set is EMPTY** —
+- Status: **`0001`–`0022` are ALL applied to the live project, and the expected-red set is EMPTY** —
   *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
   ACCOUNT can still sign in. That is the first time this denominator has moved on something a
-  migration cannot change, and nothing became excusable: the two rows are green whenever the account
-  works. The reading before them was *measured 2026-08-28 at 26 of 26*, by running the instrument
+  migration cannot change, and nothing became excusable: the two rows are green whenever the
+  account works.
+  **`0022` on 2026-08-28**, applied with `npm run migrate:live` (md5
+  `13ce80f76fe0b15d5cbeb85b4e2a7a06` read back identical) in the session that found the defect.
+  It is the FOURTH migration this check cannot speak for, and the reason is the same shape as
+  `0013`'s: `0022` is made of column grants and one trigger, and `check:live` reads tables,
+  columns, RPCs and functions. The blindness is verified rather than assumed — `0022` creates no
+  table, adds no column, and its one function (`member_capacity_identity_is_fixed`) is named
+  nowhere in `src/lib/liveSchema.js`, `LIVE_RPCS` included. It read **28 of 28 after** the paste;
+  the before-reading was NOT taken, so that half is reasoned from the two artefacts and not
+  measured, which is why it is said here rather than left to be inferred. What testifies
+  instead is `npm run probe:live-grants`, which gained four expectation rows in the same change
+  (`member_split_seen.member_id`, and `member_capacity`'s `household_id`, `member_id` and
+  `period_start`, all `arw`): they read **MOVED before the apply and ok after**, 10 of 10 agreeing
+  with the negative control included. Unlike `0013`, whose paste production genuinely could not
+  testify to because it was a no-op there, `0022` changed real state and the catalog says so.
+  The reading before #250's two rows was *measured 2026-08-28 at 26 of 26*, by running the instrument
   after `0021` was applied in #59's own
   session with `npm run migrate:live` (md5 `addd7e14b36383cee3b9282f36f9bcb4` read back identical).
   `0021` widened an existing entry rather than adding one — the `member_split_seen` column list grew

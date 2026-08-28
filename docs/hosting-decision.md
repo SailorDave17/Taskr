@@ -1,8 +1,8 @@
 # Hosting and backend decision
 
-- Date: 2026-08-04
+- Date: 2026-08-04; extraction platform section added 2026-08-26 (see below)
 - Decided by: owner (SailorDave17), at pickup of story #4
-- Status: decided; accounts not yet created (see *What is not done*)
+- Status: decided; provisioned 2026-08-05 (see *What is not done*, kept as the 2026-08-04 record)
 - Sources: vendor pricing/limits pages, fetched 2026-08-04 — links at the bottom
 
 ## The decision
@@ -127,7 +127,34 @@ Two of these are small enough to plan around rather than ignore:
   personal repo, so this is fine — recorded because it silently blocks the import flow if the repo
   ever moves to an org.
 
+## Ratified 2026-08-26 — the extraction call runs on Supabase Edge Functions
+
+- Ratified by: owner (SailorDave17), 2026-08-26, at the filing gate of the extraction-bet
+  grooming run (`wf_d7976608-913`; epic #217)
+- Recorded here by #201, whose purpose is that no story is written against the premise that this
+  decision is still open
+
+**The LLM extraction call runs in a Supabase Edge Function.** The choice was first taken at the
+2026-08-06 grooming (recorded in `docs/refresh-charter.md`'s decision log) and ratified 2026-08-26,
+by which point it was no longer hypothetical: **this repo already ships two deployed Edge
+Functions** — `provision-member` and `calendar-connect` — with a committed deploy script
+(`npm run deploy:function`), a CORS test and a live probe in `check:live`. The extraction endpoint
+(#208, deployed by #209) joins an existing surface rather than creating one.
+
+**Rejected alternatives, and why:**
+
+- **Vercel Serverless functions** — a second deployment surface and a second secret store, for no
+  benefit the tree suggests. The Supabase auth context already exists at the Edge Function, the
+  secret sits next to the data, and one platform holds credentials.
+- **A client-side provider key** — the `VITE_` secret-key defect wearing a different hat. A secret
+  in the bundle is public; `src/lib/keyShape.js` exists because a secret key reached a published
+  bundle once already, and the build now refuses one.
+
 ## What is not done
+
+*(The 2026-08-04 record. Done 2026-08-05 — both accounts exist and the app has deployed against
+them since; see `docs/deploy-runbook.md`. Kept because the constraint list above is still what
+later stories design against.)*
 
 The accounts do not exist yet (owner-confirmed at pickup). Everything above is a decision and a
 constraint list; nothing is provisioned. The account steps are in `docs/deploy-runbook.md`, and ACs

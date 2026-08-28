@@ -776,7 +776,9 @@ The rules, in the order the client runs them:
 by #62 on 2026-08-11. It is left in full because its reasoning is still the reason the schema has the
 shape it has, and because the section immediately below — *why not real per-member auth users* — is
 the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
-the Edge Function that was unavailable is now the plan.
+the Edge Function that was unavailable is now the plan — and has since shipped: `provision-member`
+is deployed and mints exactly those accounts, so the "this app has no server" premise below is the
+one clause of the record that is no longer true of the app.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 

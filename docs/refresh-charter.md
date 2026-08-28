@@ -222,10 +222,17 @@ raised this as an open question on #34 rather than deciding it, and the owner to
 - **What it costs:** #42's corpus was scoped to capacity descriptions only. A bet that covers chore
   capture needs chore descriptions in the same corpus, scored by the same grader, or the measurement
   that decides whether the bet survives is silent about half of what it now claims.
-- **Why it was not built into #34:** there is no server-side compute in this repo, and an LLM
-  credential cannot reach a phone — `src/lib/keyShape.js` exists because a secret key reached a
-  published bundle once already. The route runs through #56, whose own AC 1 records that its platform
-  decision has not been taken.
+- **Why it was not built into #34:** an LLM credential cannot reach a phone — `src/lib/keyShape.js`
+  exists because a secret key reached a published bundle once already — so the call needs server-side
+  compute the client cannot hold. The platform for that compute is **decided**: Supabase Edge
+  Functions, ratified by the owner 2026-08-26 and recorded in `docs/hosting-decision.md`; the route
+  runs through #208 (the endpoint) and #209 (its deploy). *(This bullet said "there is no
+  server-side compute in this repo" and routed through #56, "whose own AC 1 records that its
+  platform decision has not been taken" — true when written on 2026-08-08, false since:
+  `provision-member` and `calendar-connect` both ship as deployed Edge Functions, with a committed
+  deploy script, a CORS test and a live probe. The stale premise misled a grooming run into pricing
+  a 2-day platform decision that was already taken; #56 closed superseded 2026-08-27, #208 is the
+  live endpoint story.)*
 
 Everything outside that path is deliberately boring, proven technology (owner directive: selectively
 bleeding-edge, one bet).
@@ -355,7 +362,10 @@ New open questions this creates (owed at grooming, not settled here):
   kids-data question.
 - **Where the read runs** — the Google credential must never reach the client bundle
   (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
-  same Edge Function surface #56 stands up.
+  Edge Function surface the shipped functions already use (`provision-member`,
+  `calendar-connect`), where #208 stands up the extraction endpoint. *(This line named #56, the
+  endpoint story #208 superseded — and the credential half has since landed exactly there:
+  `calendar-connect` ships deployed with the Google secret held server-side.)*
 
 ## Decision taken 2026-08-24 — the repeat catch-up bound is SEVEN days
 

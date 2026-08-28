@@ -131,7 +131,7 @@ path.
 
 **What is still not automated, and deliberately: applying a migration is not coupled to a merge.**
 Both routes are a separate act somebody chooses, in a stated order — apply, then promote
-`rebuild/v1` to `release`. #185 gave the paste a command; it did not give it a trigger. *That
+`develop` to `release`. #185 gave the paste a command; it did not give it a trigger. *That
 distinction is the whole reason this paragraph survives: coupling a merge to a schema change is a
 real decision rather than a tidy-up, and it has not been taken. The 2026-08-09 outage in
 [`docs/access-model.md`](docs/access-model.md) is what happens when the two are coupled the other
@@ -239,19 +239,22 @@ granted anything on.
 
 ## Branching — read this before you cut a branch
 
-This repository has **four branch roles**, and only one of them is where work goes. The names are
-misleading if you go by convention, so go by this table.
+**Changed 2026-08-27.** This repository had four branch roles from 2026-08-12; it is back to three.
+`rebuild/v1` — the integration branch from 2026-08-05 to 2026-08-27, and the reason `develop` used
+to be excluded here — is retired. Nothing was lost folding it back in: every commit it ever carried
+is an ancestor of `develop` (`git merge-base --is-ancestor origin/rebuild/v1 origin/develop`; the
+only difference is two `rebuild/v1 → develop` sync merges, #30 and #239). The deviation from the
+workspace's usual branch-off-develop model no longer applies either, now that `develop` holds the
+whole rebuild rather than 2020 dead code.
 
 | Branch | Role |
 |---|---|
-| **`rebuild/v1`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
-| `release` | **What Vercel builds production from.** Entered only by a pull request from `rebuild/v1` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
-| `main` | The **cutover target**. Holds the tag `legacy-final` and receives the rebuild in one merge at the end. Not a working branch. |
-| `develop` | The **2020 legacy tip** — dead code, kept for reference. Never branch from it. |
+| **`develop`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
+| `release` | **What Vercel builds production from.** Entered only by a pull request from `develop` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
+| `main` | The **cutover target**, tagged `legacy-final`. Not a working branch — but *measured* 2026-08-27, it also took a "Release to main" catch-up merge (#230) and sits behind `release`'s current tip; check `git log origin/main..origin/release` before assuming it is current. |
 
-A newcomer who branches from the default branch is correct. A newcomer who branches from `develop`
-because the name looks right is not, and nothing will stop them. Confirm the default with
-`gh repo view --json defaultBranchRef` rather than trusting any document, including this one.
+Confirm the default with `gh repo view --json defaultBranchRef` rather than trusting any document,
+including this one — it has been wrong here before (2026-08-05).
 
 Branch names follow `feature/<issue-number>-short-description`.
 
@@ -268,9 +271,11 @@ stale copy within a week.
   becomes a deployment, including the settings that were wrong the first time and how they were
   found.
 
-**Merging into `rebuild/v1` does not deploy anything.** Production is built from `release`, and
-moves only when a pull request from `rebuild/v1` into `release` is merged — deliberately, by the
-owner, after the migrations the branch assumes have been pasted into the live project.
+**Merging into `develop` does not deploy anything.** Production is built from `release`, and
+moves only when a pull request from `develop` into `release` is merged — deliberately, by the
+owner, after the migrations the branch assumes have been pasted into the live project. (Until
+2026-08-27 this paragraph read `rebuild/v1`, the integration branch's earlier name and the repo's
+earlier default — see *Branching* above.)
 
 That split is 2026-08-12 and it replaced the opposite arrangement, where production tracked
 `rebuild/v1` and **the merge was the deploy**. Migrations here are applied by hand (see above), so

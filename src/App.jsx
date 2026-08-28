@@ -41,11 +41,19 @@ import {
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
+  announcementFrom,
+  dismissFairnessNote,
+  readSplitSeen,
+  splitSnapshot,
+  writeSplitSeen,
+} from './lib/announce.js'
+import {
   completeConnect,
   listCalendarConnections,
   readConsentReturn,
   startConnect,
 } from './lib/calendar.js'
+import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -111,6 +119,19 @@ export default function App() {
   // other phones did not trigger it, and a persistent household-wide notice is
   // a notifications table this story deliberately does not build.
   const [notice, setNotice] = useState(null)
+  // #50 — the re-balance this member has not yet been told about, or null. Set
+  // by refresh() when the seen-marker says a re-balance landed since this
+  // member last looked AND minutes actually moved against what they were
+  // shown; cleared only by the dismiss button. refresh() never clears it — a
+  // tab switch after the statement appears must not eat the event.
+  const [announcement, setAnnouncement] = useState(null)
+  // #59 — has THIS member dismissed the note saying what the fairness number
+  // does not count? Server state, per member (owner decision at pickup), read
+  // from the same seen-marker row the announcement uses. `false` until a read
+  // says otherwise, which fails toward the note STANDING — the honest
+  // direction: an acknowledgement shown twice costs a tap, one silently
+  // hidden costs the charter's ambition 4.
+  const [fairnessNoteDismissed, setFairnessNoteDismissed] = useState(false)
   // #47 criterion 11 — which surface is on screen. `useState`, not a router and
   // not a state library: this app has neither, adding one to move between three
   // views would be the largest dependency in the repo, and the URL is already
@@ -141,7 +162,8 @@ export default function App() {
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
-    setChores(found ? await listChores(found.id) : [])
+    const choreRows = found ? await listChores(found.id) : []
+    setChores(choreRows)
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -153,7 +175,8 @@ export default function App() {
     // file this week's capacity under last week's key.
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
-    setOverrides(period ? await listCapacity(period, memberIds) : [])
+    const overrideRows = period ? await listCapacity(period, memberIds) : []
+    setOverrides(overrideRows)
     // #37 AC 9 — read from the server on every refresh, through the same path as
     // everything else, so a device holds no exclusion state of its own. What
     // another phone recorded is on this screen after the next mutation for the
@@ -165,7 +188,63 @@ export default function App() {
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
     setConnections(found ? await listCalendarConnections(memberIds) : [])
-    setUserId(await currentUserId())
+    const uid = await currentUserId()
+    setUserId(uid)
+
+    // #50 — is this member owed a statement about a re-balance they have not
+    // seen? Checked on EVERY refresh rather than only at boot, deliberately: a
+    // re-balance another phone applies mid-session must arrive as an event on
+    // this one too (AC 1 is the floor, not the ceiling), and — the sharper
+    // direction — a refresh that silently recorded the new state as seen
+    // without showing the statement would eat the event for good.
+    //
+    // The snapshot advances on every refresh, announcement or not, so "since
+    // you last looked" means since this member's last look rather than since
+    // some older anchor — which is what nets a two-step change to one move
+    // (AC 5) and keeps a week of ordinary chore churn out of the statement.
+    //
+    // Its own try/catch, and the failure is REPORTED rather than swallowed or
+    // rethrown: swallowed, a live project missing the 0020 paste would look
+    // healthy while every announcement silently died (a red nobody can see is
+    // how a paste stays forgotten — #53's reasoning); rethrown, it would fail
+    // the mutation this refresh follows, which did succeed.
+    if (found && period) {
+      try {
+        const me = findClaimedMember(roster, uid, found.id)
+        if (me) {
+          const current = splitSnapshot({
+            capacities: capacitiesFor(roster, overrideRows, period),
+            chores: choreRows,
+          })
+          const seen = await readSplitSeen(me.id)
+          // #59 — one read serves both: the row that carries what this member
+          // was last shown also carries whether they dismissed the fairness
+          // note. No row yet means never dismissed, which is exactly what a
+          // first look should see.
+          setFairnessNoteDismissed(Boolean(seen?.fairness_note_dismissed))
+          const news = announcementFrom({
+            seen,
+            current,
+            lastRebalance: found.last_rebalance ?? null,
+          })
+          if (news) setAnnouncement(news)
+          const marker = found.last_rebalance?.applied_at ?? null
+          // Skip the write when nothing moved and nothing new was seen — a tab
+          // switch is not a fact worth a round trip. String comparison is only
+          // an optimisation: a false mismatch costs one harmless re-write.
+          const unchanged =
+            seen &&
+            seen.seen_rebalance_at === marker &&
+            JSON.stringify(seen.snapshot) === JSON.stringify(current)
+          if (!unchanged) {
+            await writeSplitSeen({ memberId: me.id, snapshot: current, seenRebalanceAt: marker })
+          }
+        }
+      } catch (err) {
+        setError(err.message)
+      }
+    }
+
     return found
   }, [])
 
@@ -554,6 +633,18 @@ export default function App() {
   // single currentHousehold() read in refresh().
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
+  // #59 — record the dismissal against THIS member, then re-read like every
+  // other write, so what this phone shows is what the seen-marker row now
+  // says rather than an optimistic local flip. `me` is resolved within the
+  // household on screen (#160), so the dismissal cannot land on another
+  // household's row; with no claimed row the write refuses with a sentence
+  // rather than guessing whose dismissal it was.
+  const myMemberId = me?.id
+  const handleDismissFairnessNote = useCallback(
+    () => mutate(() => dismissFairnessNote(myMemberId)),
+    [mutate, myMemberId],
+  )
+
   return (
     <main className="shell">
       <h1 className="shell__title">Taskr</h1>
@@ -615,6 +706,20 @@ export default function App() {
         />
       ) : null}
 
+      {/* #50 — the re-balance, announced. ABOVE the tabs and outside every
+          surface, because it is an event about the household rather than a
+          feature of any one view: whichever tab the member is on when it
+          lands, the statement is in front of them. It stays until dismissed
+          (refresh never clears it) and is not shown again after that — the
+          seen-marker advanced when it was shown. */}
+      {status === 'joined' && household && announcement ? (
+        <Announcement
+          announcement={announcement}
+          members={members}
+          onDismiss={() => setAnnouncement(null)}
+        />
+      ) : null}
+
       {/* #47 criterion 11 — the three surfaces, and the only way between them.
           A `nav` with buttons rather than links, because there is nothing to
           link TO: one document, no router, and an anchor with no href is worse
@@ -650,6 +755,8 @@ export default function App() {
           exclusions={exclusions}
           lastRebalance={household?.last_rebalance ?? null}
           error={error}
+          fairnessNoteDismissed={fairnessNoteDismissed}
+          onDismissFairnessNote={handleDismissFairnessNote}
         />
       ) : null}
 

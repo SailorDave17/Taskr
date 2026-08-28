@@ -182,6 +182,33 @@ const CLIENT_OPERATIONS = [
     site: 'calendar.js:233 listCalendarConnections()',
     sql: 'select id, member_id, scope, connected_at from public.calendar_connections limit 0',
   },
+  {
+    table: 'member_split_seen',
+    op: 'select',
+    site: 'announce.js readSplitSeen()',
+    sql: 'select member_id, snapshot, seen_rebalance_at, fairness_note_dismissed from public.member_split_seen limit 0',
+  },
+  {
+    table: 'member_split_seen',
+    op: 'insert',
+    site: 'announce.js writeSplitSeen() upsert',
+    sql: `insert into public.member_split_seen (member_id, snapshot, seen_rebalance_at) select gen_random_uuid(), '{}'::jsonb, null where false`,
+  },
+  {
+    table: 'member_split_seen',
+    op: 'update',
+    site: 'announce.js writeSplitSeen() upsert',
+    sql: `update public.member_split_seen set snapshot = '{}'::jsonb, seen_rebalance_at = null where false`,
+  },
+  // #59 — the dismissal write touches ONE column the upsert above never
+  // carries, granted by 0021 rather than 0020, so it is a separate operation
+  // rather than a wider spelling of the one above.
+  {
+    table: 'member_split_seen',
+    op: 'update',
+    site: 'announce.js dismissFairnessNote()',
+    sql: 'update public.member_split_seen set fairness_note_dismissed = true where false',
+  },
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {

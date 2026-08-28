@@ -1,4 +1,5 @@
 import PropTypes from 'prop-types'
+import { useState } from 'react'
 import { allocate, assess, minutesOf } from '../lib/allocation.js'
 import { toAllocatorChores } from '../lib/chores.js'
 import { isExcluded } from '../lib/exclusions.js'
@@ -227,8 +228,10 @@ Verdict.propTypes = {
  * actually carrying — a live question, freeing everything, asked fresh each
  * render (#47). This one reports what the last run DID: two different
  * questions, each honest, and folding them into one sentence would make the
- * stored facts look recomputed. The announcement story owns any richer
- * presentation; this line is the verdict travelling, no more.
+ * stored facts look recomputed. The richer presentation exists now — #50's
+ * `Announcement`, the event shown once above the tabs — and this line still
+ * stands beside it on purpose: the event is seen once and dismissed, while a
+ * member who arrives days later needs the run's footnote to still be here.
  */
 function LastRebalance({ verdict, nameOf }) {
   if (!verdict) return null
@@ -257,7 +260,84 @@ LastRebalance.propTypes = {
   nameOf: PropTypes.func.isRequired,
 }
 
-export default function Split({ members, chores, capacities, exclusions, lastRebalance, error }) {
+/**
+ * What the fairness number does not count — story #59, the charter's
+ * ambition 4 ("the invisible half is at least acknowledged").
+ *
+ * ONE LINE, and the wording is criteria rather than taste:
+ *
+ *   - It attributes the uncounted work to NOBODY (AC 2). No name, no figure,
+ *     no rank appears in the sentence, because the moment it says who does the
+ *     noticing it has modelled the dimension — which is the open charter
+ *     decision this story exists NOT to answer, and the direct route to the
+ *     leaderboard the design direction forbids.
+ *   - It promises NOTHING (AC 4). No "yet", no "coming", no future tense about
+ *     a feature. Deciding later to model noticing properly must not make this
+ *     copy retroactively a lie — so the copy is a present-tense statement of
+ *     what the number is, which stays true whatever ships after it.
+ *
+ * The statement stands until THIS MEMBER dismisses it, and the dismissal is
+ * per member on the server (owner decision at pickup): another phone must not
+ * close a statement this member has not read, and a reinstall must not reopen
+ * one they have. After dismissal it is reachable on demand (AC 3) — the
+ * disclosure toggle below, whose open/closed state is deliberately local and
+ * unpersisted, because "show it to me again" is a moment, not a fact about
+ * the member.
+ */
+function FairnessNote({ dismissed, onDismiss }) {
+  const [open, setOpen] = useState(false)
+
+  const statement = (
+    <p className="split__note" data-testid="fairness-note">
+      The split counts time spent doing the work. Noticing, planning and
+      remembering it is work it does not count.
+    </p>
+  )
+
+  if (!dismissed) {
+    return (
+      <div className="split__note-block">
+        {statement}
+        {/* Not "Got it": #50's announcement uses that label and can stand on
+            the same screen, and two identically named buttons doing different
+            things is an ambiguity a screen reader cannot resolve. */}
+        <button type="button" className="button button--quiet" onClick={onDismiss}>
+          Noted
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="split__note-block">
+      <button
+        type="button"
+        className="button button--quiet"
+        aria-expanded={open}
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+      >
+        What the split counts
+      </button>
+      {open ? statement : null}
+    </div>
+  )
+}
+
+FairnessNote.propTypes = {
+  dismissed: PropTypes.bool.isRequired,
+  onDismiss: PropTypes.func.isRequired,
+}
+
+export default function Split({
+  members,
+  chores,
+  capacities,
+  exclusions,
+  lastRebalance,
+  error,
+  fairnessNoteDismissed,
+  onDismissFairnessNote,
+}) {
   const { actual, reachable, reason } = verdictFor({ capacities, chores, exclusions })
 
   const nameOf = (memberId) => members.find((m) => m.id === memberId)?.display_name ?? 'Someone'
@@ -290,6 +370,12 @@ export default function Split({ members, chores, capacities, exclusions, lastReb
         <Verdict actual={actual} reachable={reachable} reason={reason} nameOf={nameOf} />
 
         <LastRebalance verdict={lastRebalance} nameOf={nameOf} />
+
+        {/* #59 — directly under the verdict, because the verdict IS the
+            fairness claim and this line is the claim's own stated boundary.
+            A boundary behind a tab or at the bottom of the page is one the
+            person reading "The split is level." never sees. */}
+        <FairnessNote dismissed={fairnessNoteDismissed} onDismiss={onDismissFairnessNote} />
 
         {members.length === 0 ? (
           <p className="card__body">
@@ -387,4 +473,6 @@ Split.propTypes = {
   exclusions: PropTypes.array.isRequired,
   lastRebalance: PropTypes.object,
   error: PropTypes.string,
+  fairnessNoteDismissed: PropTypes.bool.isRequired,
+  onDismissFairnessNote: PropTypes.func.isRequired,
 }

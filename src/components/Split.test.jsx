@@ -1,5 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import Split from './Split.jsx'
 
 // The split surface — story #47.
@@ -55,6 +55,8 @@ const setup = (props = {}) =>
       capacities={capacities}
       chores={[]}
       exclusions={[]}
+      fairnessNoteDismissed={false}
+      onDismissFairnessNote={() => {}}
       {...props}
     />,
   )
@@ -660,5 +662,67 @@ describe('the last re-balance note (#49)', () => {
       }),
     })
     expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('#59 — the note saying what the fairness number does not count', () => {
+  const note = () => screen.getByTestId('fairness-note')
+  // Any household with people and work in it — the note is about the NUMBER,
+  // not about any particular split, so the fixture is deliberately ordinary.
+  const someWork = [chore('a', 90, 'm1'), chore('b', 45, 'm2')]
+
+  it('AC 1: stands on the surface and states what is counted and what is not', () => {
+    setup({ chores: someWork })
+    expect(note()).toHaveTextContent(/counts time spent doing/i)
+    expect(note()).toHaveTextContent(/noticing, planning and remembering/i)
+    expect(note()).toHaveTextContent(/does not count/i)
+  })
+
+  it('AC 2: attributes the uncounted work to nobody — no name, no figure, no rank', () => {
+    // The denial asserted over the WHOLE note, in the vocabulary a rewrite
+    // that modelled the noticing dimension would have to introduce: a member's
+    // name, a number of any kind, or a comparison word. A test that only
+    // checked the sentence above would stay green while a second sentence
+    // quietly scored somebody (cairn: a-copy-test-defends-the-sentence).
+    setup({ chores: someWork })
+    const text = note().textContent
+    for (const member of members) {
+      expect(text).not.toContain(member.display_name)
+    }
+    expect(text).not.toMatch(/\d/)
+    expect(text).not.toMatch(/%/)
+    expect(text).not.toMatch(/\b(most|more|less|behind|ahead|rank|score|top|bottom)\b/i)
+  })
+
+  it('AC 4: promises nothing about a future feature', () => {
+    // Deciding later to model the noticing dimension must not make this copy
+    // retroactively a lie — so no future tense and no roadmap vocabulary.
+    // `planned`/`plans` are banned; `planning` is the copy's own word for the
+    // uncounted work and is deliberately not.
+    setup({ chores: someWork })
+    expect(note().textContent).not.toMatch(
+      /\b(yet|soon|coming|will|until|one day|someday|eventually|future|roadmap|for now|planned|plans)\b/i,
+    )
+  })
+
+  it('AC 3: the dismiss control hands the dismissal to the app', () => {
+    const onDismiss = vi.fn()
+    setup({ chores: someWork, onDismissFairnessNote: onDismiss })
+    fireEvent.click(screen.getByRole('button', { name: /noted/i }))
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3: dismissed, it stops standing and is reachable on demand', () => {
+    setup({ chores: someWork, fairnessNoteDismissed: true })
+    expect(screen.queryByTestId('fairness-note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /noted/i })).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: /what the split counts/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+    expect(note()).toHaveTextContent(/does not count/i)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId('fairness-note')).not.toBeInTheDocument()
   })
 })

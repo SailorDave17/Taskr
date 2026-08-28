@@ -365,6 +365,13 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   Object.freeze({ table: 'chores', authenticated: 'd' }),
   Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
+  // #50, arriving with `0020`, which revokes wholesale and grants by column —
+  // so the expected table-level reading is an absence, like `households` above.
+  // *Measured 2026-08-28*, after `0020` was applied in #50's own session:
+  // no table-level grant, agreeing — the revoke visible in the catalog, which
+  // is the one instrument that can see it (check:live reads the same either
+  // way once the columns are granted).
+  Object.freeze({ table: 'member_split_seen', authenticated: null }),
   Object.freeze({ table: 'members', authenticated: 'd' }),
 ])
 

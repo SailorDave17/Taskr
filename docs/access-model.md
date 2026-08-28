@@ -7,8 +7,16 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0019` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-27 at 25 of 25*, by running the instrument after `0019` was applied under #235.
+- Status: **`0001`–`0020` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-28 at 26 of 26*, by running the instrument after `0020` was applied in #50's own
+  session with `npm run migrate:live` (md5 `180b5beb64655324e55a4eecad9d15fa` read back identical).
+  Before that application the same session measured **25 of 26** — every `0001`–`0019` subject
+  green, `member_split_seen` answering `PGRST205`, the new entry doing its job — so the excused row
+  stood for under an hour and drained on exactly the action it named. `npm run probe:live-grants`
+  agrees from the catalog side: `member_split_seen` carries **no table-level grant** for
+  `authenticated`, which is `0020`'s revoke visible where `check:live` cannot see it. The reading
+  before #50 widened the instrument: *measured 2026-08-27 at 25 of 25*, by running it after `0019`
+  was applied under #235.
   `0019` never entered the set, because this check is blind to it in both directions (see
   its bullet below); it is confirmed instead by `npm run probe:live-grants`, which reads **zero
   moved control rows** where it read exactly three before the paste.
@@ -37,7 +45,11 @@
   from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`, to 23 on
   2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge Function, to
   **24** the same day when #53 added the `catch_up_repeats` RPC, and to **25** on 2026-08-27 when
-  #49 added the `apply_assignments` RPC. `0013` does not move it, and that
+  #49 added the `apply_assignments` RPC, and to **26** when #50 added `member_split_seen` — the
+  per-member seen-marker behind the re-balance announcement, SELF-scoped rather than
+  household-scoped (a phone must not be able to mark another member's announcement as seen), with
+  select/insert/update granted by column in `0020` and nothing granted to `anon` or
+  `service_role`. `0013` does not move it, and that
   is the point of the bullet above rather than an oversight.
 
   *This Status line said `0012` had NOT been pasted until 2026-08-24, while the expected-red bullet
@@ -120,8 +132,17 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-27 at 25 of 25*, after `0018` was applied
-  (#231).** The two rows it held between #49's merge and that paste — `chores` answering `42703` on
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 26 of 26*, after `0020` was applied in
+  #50's own session.** The row it held while #50 was being built — `member_split_seen` answering
+  `PGRST205`, cleared only by applying `supabase/migrations/0020_split_seen.sql` — was *measured
+  standing at 25 of 26*, then drained the same session by `npm run migrate:live` (the route #185
+  built and #231/#235 proved), and both readings were taken rather than assumed. The application
+  came BEFORE the `release` promotion on purpose: the deployed client changes only on a promotion,
+  so the table existing first is the safe order.
+
+  Before #50 widened the instrument, the set was EMPTY — *measured 2026-08-27 at 25 of 25*, after
+  `0018` was applied
+  (#231). The two rows it held between #49's merge and that paste — `chores` answering `42703` on
   `assigned_source`, and `apply_assignments` answering `PGRST202` — both cleared on exactly the one
   action they named, and are moved into the history table below rather than left standing. The
   denominator moved from 24 to 25 when #49 added the `apply_assignments` probe. Before that, the set
@@ -161,8 +182,11 @@
   plain sight on 2026-08-09. With nothing excused, the instrument answers the only question worth
   asking in one bit.
 
-  **The excused-red set is EMPTY. *Measured 2026-08-27 at 25 of 25*, after `0018` was applied under
-  #231.** It held TWO rows between #49's merge and that application, and both are moved into
+  **The excused-red set held nothing between `0018`'s application and #50, held `0020`'s one row
+  within #50's session, and is EMPTY again — see the head of this bullet.** *Measured 2026-08-27 at
+  25 of 25* after `0018` was
+  applied under
+  #231. It held TWO rows between #49's merge and that application, and both are moved into
   history below rather than left standing — the same reasoning as every block under it, and the
   reason the rows were written to be deletable by one reading: while they stood, the check's
   authority over `chores` and over the RPC list was on loan.
@@ -415,7 +439,7 @@
   negative control. There is no excused moved row left, so any moved row now is a real finding.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted thirteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted fifteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
@@ -427,8 +451,10 @@
   24 of 24** with `0015` pasted that evening (#194), then **TWO at a measured 23 of 25** on
   2026-08-27 with #49's `0018` in the repo and unapplied, and **EMPTY again at a measured 25 of 25**
   later that day when `0018` was applied under #231 — the first inversion cleared by
-  `npm run migrate:live` rather than by a hand paste.
-  **`0016` (#198) is deliberately NOT one of the thirteen
+  `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
+  #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
+  was applied by `migrate:live` in the same session, the shortest-lived population yet.
+  **`0016` (#198) is deliberately NOT one of the fifteen
   inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
   could go red. The check was *re-measured* at 24 of 24 on 2026-08-27 after that paste — a

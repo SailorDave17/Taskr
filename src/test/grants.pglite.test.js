@@ -186,7 +186,7 @@ const CLIENT_OPERATIONS = [
     table: 'member_split_seen',
     op: 'select',
     site: 'announce.js readSplitSeen()',
-    sql: 'select member_id, snapshot, seen_rebalance_at from public.member_split_seen limit 0',
+    sql: 'select member_id, snapshot, seen_rebalance_at, fairness_note_dismissed from public.member_split_seen limit 0',
   },
   {
     table: 'member_split_seen',
@@ -199,6 +199,15 @@ const CLIENT_OPERATIONS = [
     op: 'update',
     site: 'announce.js writeSplitSeen() upsert',
     sql: `update public.member_split_seen set snapshot = '{}'::jsonb, seen_rebalance_at = null where false`,
+  },
+  // #59 — the dismissal write touches ONE column the upsert above never
+  // carries, granted by 0021 rather than 0020, so it is a separate operation
+  // rather than a wider spelling of the one above.
+  {
+    table: 'member_split_seen',
+    op: 'update',
+    site: 'announce.js dismissFairnessNote()',
+    sql: 'update public.member_split_seen set fairness_note_dismissed = true where false',
   },
 ]
 

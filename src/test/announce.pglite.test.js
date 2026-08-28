@@ -183,6 +183,58 @@ describe('what a member was last shown, run against a real Postgres', () => {
     expect(result.error).toMatch(/permission denied/i)
   })
 
+  // -------------------------------------------------------------------------
+  // #59 — the fairness note's dismissal, one flag on the same row
+  // -------------------------------------------------------------------------
+
+  /** The client's dismissal, exactly as PostgREST issues it — an update read
+   *  back with RETURNING, which needs the select grant on what it returns. */
+  const dismiss = (memberId) =>
+    db.query(
+      `update public.member_split_seen set fairness_note_dismissed = true
+        where member_id = $1
+        returning member_id, fairness_note_dismissed`,
+      [memberId],
+    )
+
+  const readDismissed = async (memberId) => {
+    const { rows } = await db.query(
+      `select fairness_note_dismissed from public.member_split_seen where member_id = $1`,
+      [memberId],
+    )
+    return rows[0]?.fairness_note_dismissed ?? null
+  }
+
+  it('#59: the flag defaults false — a first look has dismissed nothing', async () => {
+    await asDevice(db, personA, async () => {
+      await upsertSeen(organizerA, { members: [] }, null)
+      expect(await readDismissed(organizerA)).toBe(false)
+    })
+  })
+
+  it('#59 AC 3: a member dismisses their own note, and the routine seen-marker upsert does not un-dismiss it', async () => {
+    await asDevice(db, personA, async () => {
+      await upsertSeen(organizerA, { members: [] }, null)
+      const { rows } = await dismiss(organizerA)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].fairness_note_dismissed).toBe(true)
+
+      // The load-bearing half. Every refresh runs this upsert, so if its
+      // conflict-update touched the flag, a dismissal would survive exactly
+      // until the next tab switch — "does not reappear every time" (AC 3)
+      // would be false in the way no component test can see.
+      await upsertSeen(organizerA, { members: [] }, '2026-08-28T18:00:00Z')
+      expect(await readDismissed(organizerA)).toBe(true)
+    })
+  })
+
+  it('#59: cannot dismiss another member’s note — the update filters, and their flag stays false', async () => {
+    await asDevice(db, personA, () => upsertSeen(organizerA, { members: [] }, null))
+    const { rows } = await asDevice(db, personB, () => dismiss(organizerA))
+    expect(rows).toHaveLength(0)
+    expect(await asDevice(db, personA, () => readDismissed(organizerA))).toBe(false)
+  })
+
   it('anon holds nothing on the table', async () => {
     await db.exec('set role anon')
     try {

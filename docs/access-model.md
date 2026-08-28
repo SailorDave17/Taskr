@@ -77,7 +77,9 @@
     unless `0009` is applied — `beforeAll` puts one seeded account in two households, which the
     pre-`0009` global `members_claimed_by_key` forbids, and that is exactly how #127 was found.
     *Re-measured 2026-08-24: 31 of 31, no skips. Re-measured again 2026-08-28: **57 of 57**, no
-    skips, after #221 restored the seeded account.* **A suite that fails at setup under the old schema
+    skips, after #221 restored the seeded account — and **65 of 65** later the same day, once #38
+    added eight chore cases to it. The count moved because tests were added; none were removed.*
+    **A suite that fails at setup under the old schema
     is a stronger presence check than any probe**, because it cannot pass for the wrong reason.
     The 2026-08-28 re-measurement matters for a reason beyond the number: this confirmation had
     **lapsed without saying so**. The seeded account was cleared around 2026-08-25, so from then
@@ -657,6 +659,26 @@ sentences that named the function; these did not name it, so they survived. Two 
 disagreed, and the stale half was the one in the section a reader opens to find out what is missing.
 The step, and the check that proves it landed, are section 3 of `docs/deploy-runbook.md`.*
 
+### Can an anonymous session exist here, and what could it reach? — #246
+
+**No — `external.anonymous_users` is disabled on the live project** (owner decision 2026-08-28,
+recorded with its post-state on #246). Nothing needs it: the app has signed a person in since #62,
+and the last caller — `check:live`'s credential, which minted one permanent anonymous auth user per
+run and accumulated **45** of them before #246 traced the count back to it — now signs in as the
+seeded test account and revokes its session on exit. The decision is enforceable only in the
+dashboard (it is a project setting nothing in this repo sets), so the repo-side guard is narrower
+and real: `support/retiredVocabulary.test.js` scans both live suites and all shipping code with no
+exemption for the sign-in call, in CI, on every push.
+
+While the setting was on, what a memberless session could reach was *measured* rather than assumed
+(#246): every policy on every `public` table is `to authenticated` and scoped through
+`current_household_ids()` or `claimed_by = auth.uid()`, so a session with no member row read and
+wrote **no household's rows** — but it could execute every function granted to `authenticated`,
+including `create_household`, so anyone holding the world-readable publishable key could mint a
+session and start an empty household. That is the standing hazard the flip closes: a policy whose
+boundary is *being authenticated* is re-opened by every new way to become authenticated, and an
+open anonymous provider is the cheapest way there is.
+
 ### Recovery, both directions — #62 AC 7 and AC 8
 
 The story required these to be *decided and written down* rather than left to be discovered, so both
@@ -803,6 +825,29 @@ the stated reason. What it did not name:
 - **The one-time re-claim is not re-runnable**, and every other file here is. Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
+- **AND NEITHER IS ANY PRE-`0007` FILE, RE-PASTED ON ITS OWN, ONTO TODAY'S SCHEMA** — which is a
+  narrower claim than the bullet above and a wider hazard. *Measured 2026-08-28 under #38*, on a
+  pglite database carrying `0001`–`0021` and then handed one older file again:
+
+  | file | apply | what it leaves |
+  |---|---|---|
+  | `0003_chores.sql` | **FAILS** — `relation "public.household_devices" does not exist` | its five `chores` policies still name the dropped table; rolled back |
+  | `0004_chore_completion.sql` | **succeeds, silently** | `complete_chore` and `uncomplete_chore` revert to the retired model, and the next authenticated call raises `relation "public.household_devices" does not exist` |
+  | `0005_weekly_capacity.sql` | **FAILS** — same | rolled back |
+  | `0006_chore_assignment.sql` | **succeeds, silently** | `assign_chore` and `unassign_chore` revert the same way |
+
+  Both silent cases were proven end to end with a before/after control in one run: the RPC worked
+  before the re-apply and raised after it. The two that fail are the safe ones. **`0005` is the
+  worst of the four if its policies are ever satisfied**, because it also drops the live
+  three-argument `create_household` and installs a four-argument one whose body calls
+  `assert_valid_pin` and `generate_join_code` and writes `household_devices` and `members.pin_hash`
+  — all of which `0007` removed.
+
+  What is re-runnable is what `migrations.pglite.test.js` actually asserts and CI actually runs:
+  **the whole list, in order**. That is also the only re-run anybody has a reason to perform, and
+  `databaseThrough`'s docblock in `support/pgliteSupabase.js` has said so since it was written. This
+  bullet exists because #38's AC 1 asked for the other thing — each chore file pasted a second time
+  against the live project — and nothing in the repo said out loud that it must not be.
 
 Deliberately little, and the schema is why:
 
@@ -939,20 +984,24 @@ Prerequisites, all in the Supabase dashboard and all the owner's:
 
 1. **Apply the migration.** Paste `supabase/migrations/0001_household_and_roster.sql` into the SQL
    editor and run it. (There is no Supabase CLI on this machine, so there is no `supabase db push`.)
-2. **Enable anonymous sign-ins** — Authentication → Providers → Anonymous. This is **off by default**,
-   and with it off every test fails at sign-in with an error that does not obviously say so.
-3. Put the project URL and **anon** key in `.env.local` at the repo root (gitignored):
+2. **Create the seeded test account**, once — Authentication → Users → Add user → Create new user,
+   with **Auto Confirm User** ticked. Both live suites sign in as it; `.env.example` carries the
+   recipe and the warning about what a tidy-up must spare.
+3. Put the project URL, the **anon** key, and the seeded account's credentials in `.env.local` at
+   the repo root (gitignored):
 
    ```
    VITE_SUPABASE_URL=...
    VITE_SUPABASE_ANON_KEY=...
+   TASKR_TEST_EMAIL=...
+   TASKR_TEST_PASSWORD=...
    ```
 
 Then `npm run test:rls`.
 
-**Anonymous sign-in is rate-limited to 30 requests/hour per IP.** Each run creates two anonymous users,
-so roughly fifteen runs an hour from one network — and a whole household shares one home IP. The test
-detects this case and says so, because otherwise it presents as a policy failure in your own code.
+*(Step 2 said "Enable anonymous sign-ins" until #246, and a rate-limit paragraph stood here pricing
+30 anonymous requests/hour. Both are gone with the mechanism: no suite signs in anonymously any
+more, and the provider is disabled on the live project — see the #246 section above.)*
 
 **Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
 five member rows, and two auth users — the two provisioned members, whose addresses are
@@ -1141,8 +1190,10 @@ client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
 
 ### Updated 2026-08-06 — story #23, and what is left
 
-`0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
-not been applied" is about 0001 and is now historical. What is outstanding is narrower:
+`0001` **is** applied and anonymous sign-ins **are** on *(true on the day this entry was written;
+anonymous sign-ins were disabled 2026-08-28 by #246, nothing needing them any more)*; the sentence
+below about "the migration has not been applied" is about 0001 and is now historical. What is
+outstanding is narrower:
 
 - **`0002_member_pins_and_column_grants.sql` — now applied**, verified live by PR #65's suite; the
   rest of this bullet is historical. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure

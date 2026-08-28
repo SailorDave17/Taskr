@@ -69,7 +69,7 @@
 // from every file, so this check was green throughout and correct to be.
 
 import { createClient } from '@supabase/supabase-js'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { isSecretKey } from '../lib/keyShape.js'
 import {
@@ -85,6 +85,8 @@ import {
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+const seedEmail = process.env.TASKR_TEST_EMAIL
+const seedPassword = process.env.TASKR_TEST_PASSWORD
 
 // Loud, not skipped. If this file runs at all it must either answer the question
 // or fail saying why it could not.
@@ -95,6 +97,20 @@ if (!url || !anonKey) {
       'and run `npm run check:live`.\n' +
       'It is excluded from `npm test` on purpose: CI has no credentials, and a check ' +
       'that quietly passes when unconfigured is the failure it exists to prevent.',
+  )
+}
+
+// A separate message because the remedy is different: the keys are copied from
+// the dashboard, where this account has to be CREATED there, once. Same
+// credentials `test:rls` requires, for the same reason — see the sign-in
+// docblock below for why this file stopped minting its own.
+if (!seedEmail || !seedPassword) {
+  throw new Error(
+    'schema.integration.test.js signs in as the seeded test account (#246), and ' +
+      'TASKR_TEST_EMAIL / TASKR_TEST_PASSWORD are not set.\n' +
+      'They are the same credentials `npm run test:rls` already needs: one account, ' +
+      'created once in the dashboard with "Auto Confirm User" ticked. `.env.example` ' +
+      'carries the recipe. Nothing was probed.',
   )
 }
 
@@ -115,7 +131,7 @@ const supabase = createClient(url, anonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 
-// Sign in the way the app does, and for the reason the app's grants force.
+// Sign in as the seeded account, and for the reason the app's grants force.
 //
 // MEASURED 2026-08-10, and it is the finding that shaped this file: probing with
 // the publishable key alone runs as role `anon`, which `0002` and `0003` revoke
@@ -123,43 +139,64 @@ const supabase = createClient(url, anonKey, {
 // permission denied` against a project that was completely healthy. A check that
 // reports a working project as broken gets ignored, and one that cannot tell
 // "revoked from anon" from "migration never ran" is not answering #78's question
-// at all.
+// at all. So this file must ask its question on role `authenticated`, which is
+// the role the per-column grants are written for — and grants are keyed on the
+// role, not on who is holding it, so ANY signed-in user answers it.
 //
-// An anonymous sign-in is what puts this check on role `authenticated`, which is
-// the role the per-column grants are written for. That is still exactly the
-// right probe, and the REASON it is right changed with #62.
+// Until #246 the credential was an anonymous sign-in, and the cost this docblock
+// stated for it — each run creates one permanent auth user, with no
+// client-reachable way to delete it — turned out to be a live incident rather
+// than an accepted overhead. MEASURED 2026-08-28: 45 anonymous auth users on the
+// live project, every one minted by this file's own `beforeAll` (both
+// `check:live` and `test:rls` run this file); all 45 carried session user-agent
+// `node` from ONE IP, and one `check:live` run moved the count 44 → 45 with the
+// new row stamped a second after the run started. The hypotheses #246 opened
+// with — a stale pre-#62 client, an outside actor on the public key, a dashboard
+// action — died on that one read: a phone carries a browser user agent, an
+// outsider a different IP, and the dashboard mints no `node` sessions.
 //
-// It used to be "the same credentials the app uses": `household.js` called
-// `signInAnonymously()` itself before reading anything. It does not any more —
-// the app signs a PERSON in — so the justification is now narrower and worth
-// stating precisely. What this check tests is whether the tables, columns and
-// GRANTS exist, and grants are keyed on the role, not on who is holding it. An
-// anonymous user is a first-class `authenticated` user with no member row, so it
-// lands on the same grants and simply sees no rows — which is all this check
-// needs, since it reads zero rows on purpose.
+// So the credential is now the seeded account `test:rls` already requires:
+// TASKR_TEST_EMAIL / TASKR_TEST_PASSWORD, created once in the dashboard with
+// "Auto Confirm User" (recipe in `.env.example`). Same role, same grants, same
+// answer to every probe below — and ZERO residue, because the `afterAll` revokes
+// this run's session. The seeded account holds member rows in TEST households,
+// which changes nothing here: every probe is `limit(0)` and reads no rows.
 //
-// The consequence, corrected: if anonymous sign-ins are disabled on the project,
-// THIS CHECK breaks and the app does not. That sentence used to say the
-// opposite, truthfully, and #62 made it false — anonymous sign-in is now used by
-// nothing but this file. Disabling it is a reasonable thing for the owner to do
-// after #62, and it would take `npm run check:live` down with it.
-//
-// THE COST, stated because it is a write to production: each run creates one
-// anonymous auth user, and there is no client-reachable way to delete it. That is
-// the same accumulation `rls.integration.test.js` already accepts and documents;
-// tidying is a manual statement in the SQL editor. It creates no household and
-// reads no household's rows.
+// The consequence, inverted from the sentence that stood here before: anonymous
+// sign-in is now used by NOTHING in this repo — not the app (since #62), not
+// this check (since #246) — so `external.anonymous_users` is disabled on the
+// live project (owner decision 2026-08-28, recorded with its post-state on
+// #246). The vocabulary guard in `support/retiredVocabulary.test.js` now scans
+// this file with no exemption, so the call cannot quietly return.
 beforeAll(async () => {
-  const { error } = await supabase.auth.signInAnonymously()
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: seedEmail,
+    password: seedPassword,
+  })
   if (error) {
     throw new Error(
-      `could not sign in anonymously, so this check cannot ask its question on role ` +
-        `\`authenticated\`, which is the role the column grants are written for: ${error.message}. ` +
-        `Since #62 the app no longer signs in anonymously, so this is a limitation of the ` +
-        `CHECK rather than a fault in the project — if the provider has been turned off, this ` +
-        `check needs a real member's credentials instead.`,
+      `the seeded account could not sign in, so this check cannot ask its question on ` +
+        `role \`authenticated\`, which is the role the column grants are written for: ` +
+        `${error.message}. Check TASKR_TEST_EMAIL / TASKR_TEST_PASSWORD in .env.local — ` +
+        `.env.example says how the account is created. If the message mentions ` +
+        `confirmation, it was created without "Auto Confirm User".`,
     )
   }
+  if (!data?.session) {
+    throw new Error(
+      'sign-in returned no error and no session, so the probes below would run as ' +
+        '`anon` and report a healthy project as broken. Refusing instead.',
+    )
+  }
+})
+
+// Revoke THIS RUN's session, so a run leaves nothing behind. Scope 'local'
+// touches only the session the sign-in above created — never the seeded
+// account's other sessions, which a concurrently-running `test:rls` may hold.
+// #246 exists because this file used to leave one permanent auth user per run;
+// now the residue is zero users and zero sessions.
+afterAll(async () => {
+  await supabase.auth.signOut({ scope: 'local' })
 })
 
 /**

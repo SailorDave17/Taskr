@@ -659,6 +659,26 @@ sentences that named the function; these did not name it, so they survived. Two 
 disagreed, and the stale half was the one in the section a reader opens to find out what is missing.
 The step, and the check that proves it landed, are section 3 of `docs/deploy-runbook.md`.*
 
+### Can an anonymous session exist here, and what could it reach? — #246
+
+**No — `external.anonymous_users` is disabled on the live project** (owner decision 2026-08-28,
+recorded with its post-state on #246). Nothing needs it: the app has signed a person in since #62,
+and the last caller — `check:live`'s credential, which minted one permanent anonymous auth user per
+run and accumulated **45** of them before #246 traced the count back to it — now signs in as the
+seeded test account and revokes its session on exit. The decision is enforceable only in the
+dashboard (it is a project setting nothing in this repo sets), so the repo-side guard is narrower
+and real: `support/retiredVocabulary.test.js` scans both live suites and all shipping code with no
+exemption for the sign-in call, in CI, on every push.
+
+While the setting was on, what a memberless session could reach was *measured* rather than assumed
+(#246): every policy on every `public` table is `to authenticated` and scoped through
+`current_household_ids()` or `claimed_by = auth.uid()`, so a session with no member row read and
+wrote **no household's rows** — but it could execute every function granted to `authenticated`,
+including `create_household`, so anyone holding the world-readable publishable key could mint a
+session and start an empty household. That is the standing hazard the flip closes: a policy whose
+boundary is *being authenticated* is re-opened by every new way to become authenticated, and an
+open anonymous provider is the cheapest way there is.
+
 ### Recovery, both directions — #62 AC 7 and AC 8
 
 The story required these to be *decided and written down* rather than left to be discovered, so both
@@ -964,20 +984,24 @@ Prerequisites, all in the Supabase dashboard and all the owner's:
 
 1. **Apply the migration.** Paste `supabase/migrations/0001_household_and_roster.sql` into the SQL
    editor and run it. (There is no Supabase CLI on this machine, so there is no `supabase db push`.)
-2. **Enable anonymous sign-ins** — Authentication → Providers → Anonymous. This is **off by default**,
-   and with it off every test fails at sign-in with an error that does not obviously say so.
-3. Put the project URL and **anon** key in `.env.local` at the repo root (gitignored):
+2. **Create the seeded test account**, once — Authentication → Users → Add user → Create new user,
+   with **Auto Confirm User** ticked. Both live suites sign in as it; `.env.example` carries the
+   recipe and the warning about what a tidy-up must spare.
+3. Put the project URL, the **anon** key, and the seeded account's credentials in `.env.local` at
+   the repo root (gitignored):
 
    ```
    VITE_SUPABASE_URL=...
    VITE_SUPABASE_ANON_KEY=...
+   TASKR_TEST_EMAIL=...
+   TASKR_TEST_PASSWORD=...
    ```
 
 Then `npm run test:rls`.
 
-**Anonymous sign-in is rate-limited to 30 requests/hour per IP.** Each run creates two anonymous users,
-so roughly fifteen runs an hour from one network — and a whole household shares one home IP. The test
-detects this case and says so, because otherwise it presents as a policy failure in your own code.
+*(Step 2 said "Enable anonymous sign-ins" until #246, and a rate-limit paragraph stood here pricing
+30 anonymous requests/hour. Both are gone with the mechanism: no suite signs in anonymously any
+more, and the provider is disabled on the live project — see the #246 section above.)*
 
 **Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
 five member rows, and two auth users — the two provisioned members, whose addresses are
@@ -1166,8 +1190,10 @@ client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
 
 ### Updated 2026-08-06 — story #23, and what is left
 
-`0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
-not been applied" is about 0001 and is now historical. What is outstanding is narrower:
+`0001` **is** applied and anonymous sign-ins **are** on *(true on the day this entry was written;
+anonymous sign-ins were disabled 2026-08-28 by #246, nothing needing them any more)*; the sentence
+below about "the migration has not been applied" is about 0001 and is now historical. What is
+outstanding is narrower:
 
 - **`0002_member_pins_and_column_grants.sql` — now applied**, verified live by PR #65's suite; the
   rest of this bullet is historical. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure

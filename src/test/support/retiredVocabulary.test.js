@@ -309,15 +309,14 @@ describe('#88 AC 2 / #170 — the code no longer names the model 0007 retired', 
   // being banned, and the repair is an allowlist with a stated reason rather
   // than a looser pattern: loosening turns a guard into decoration, while an
   // exemption is something a reader can argue with.
+  // `schema.integration.test.js` held an exemption here until #246 — its
+  // anonymous sign-in was "purely a CREDENTIAL", which was true and still minted
+  // one permanent auth user per run: 45 accumulated on the live project before
+  // the count was traced back to it. The file signs in as the seeded account
+  // now, the exemption is gone, and this scan is what keeps the call from
+  // quietly returning. An exemption is something a reader can argue with; that
+  // one lost the argument.
   const EXEMPT = {
-    'src/test/schema.integration.test.js': {
-      signInAnonymously:
-        'not the retired MEMBERSHIP model. #115 uses an anonymous session purely as a ' +
-        'CREDENTIAL, to ask a schema question on role `authenticated` — it reads zero rows, ' +
-        'creates no household and claims nobody. The comment above that call was written ' +
-        'AFTER #62 and reasons about exactly this, including that disabling anonymous ' +
-        'sign-in would take the CHECK down and not the app.',
-    },
     // #170 — the widened corpus reaches the tests that PROVE the retirement, and
     // a negative assertion has to spell the thing it denies. This is the shape
     // cairn records as a criterion refusing its own guard: satisfying "the model

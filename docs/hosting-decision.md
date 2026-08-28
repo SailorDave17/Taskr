@@ -69,6 +69,11 @@ that in the code beats discovering it later as folklore.
 
 ### Auth for members without email — feeds the roster story (#5)
 
+*(Superseded twice since this was researched: #62 moved every member to a real per-member auth
+user — a synthetic `@taskr.invalid` address for people without email — and #246 then **disabled
+anonymous sign-ins on the project entirely**, nothing needing them any more. The platform facts
+below stay as the record of what was weighed in 2026-08-05; do not build on them.)*
+
 **Anonymous sign-ins are supported on the free plan**, and they exist for exactly this case: an
 authenticated session with no email, no password, and no PII. A child joins the household without an
 email address, and if they later get one the anonymous user can be *converted* — the user id is

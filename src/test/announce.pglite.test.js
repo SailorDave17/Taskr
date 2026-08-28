@@ -169,7 +169,19 @@ describe('what a member was last shown, run against a real Postgres', () => {
     expect(seen).toBeNull()
   })
 
-  it('cannot move a row to another member — member_id is not in the update grant', async () => {
+  // The claim here is unchanged and the MECHANISM behind it moved, so the test
+  // is rewritten rather than deleted. Until 0022, `member_id` was outside the
+  // update grant and this was refused as `permission denied` — but that was
+  // never what held the line, because 0020's policies are SELF-scoped: a member
+  // may not name a row that is not theirs, in the USING half or the WITH CHECK
+  // half. 0022 grants UPDATE on `member_id` because PostgREST's upsert names it
+  // in its SET list, and RLS goes on refusing exactly this, one layer down.
+  //
+  // Asserting the message rather than only the refusal is deliberate: a
+  // `permission denied` here after 0022 would mean the upsert path is broken
+  // again, which is the defect 0022 exists for, and the two failures must not
+  // be able to wear each other's clothes.
+  it('cannot move a row to another member — RLS refuses it, grant or no grant', async () => {
     await asDevice(db, personA, () => upsertSeen(organizerA, { members: [] }, null))
     const result = await asDevice(db, personA, () =>
       attempt(() =>
@@ -180,7 +192,7 @@ describe('what a member was last shown, run against a real Postgres', () => {
       ),
     )
     expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/permission denied/i)
+    expect(result.error).toMatch(/row-level security policy/i)
   })
 
   // -------------------------------------------------------------------------

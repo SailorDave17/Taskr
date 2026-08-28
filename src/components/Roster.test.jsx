@@ -1,11 +1,15 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import Roster from './Roster.jsx'
 
 // ACs 2 and 4 (people with budgets, edited and removed) and the "pick yourself"
 // half of AC 5. Names are synthetic — see #19.
 
-const household = { id: 'h1', name: 'Placeholder Household', join_code: 'ABCD2345' }
+const household = { id: 'h1', name: 'Placeholder Household' }
+
+const PERIOD = '2026-08-10'
 
 const roster = [
   { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: null },
@@ -17,10 +21,25 @@ function setup(overrides = {}) {
     onAdd: vi.fn().mockResolvedValue(undefined),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
-    onClaim: vi.fn().mockResolvedValue(undefined),
     onRefresh: vi.fn(),
+    onSignOut: vi.fn().mockResolvedValue(undefined),
+    // #46. The parameter this function already calls `overrides` is the PROP
+    // BAG; the Roster prop of the same name is the capacity override list, and
+    // `setup({ overrides: [...] })` sets exactly that. Confusing on first read
+    // and left alone rather than renamed, because renaming the parameter would
+    // touch every existing call in this file for no behavioural gain.
+    onSetCapacity: vi.fn().mockResolvedValue(undefined),
+    onClearCapacity: vi.fn().mockResolvedValue(undefined),
+    // #87 — provisioning. A spy rather than a stub returning undefined: the
+    // control chains `.then(close)` off it, so a non-promise would close the
+    // form for the wrong reason and hide a broken call.
+    onProvision: vi.fn().mockResolvedValue(undefined),
   }
-  render(<Roster household={household} members={roster} me={null} {...handlers} {...overrides} />)
+  // The week the fixture override belongs to. Passed explicitly rather than
+  // defaulted, because an override is only an override OF a period — matching on
+  // the person alone was a real bug this file's fixture caught.
+  const props = { periodStart: PERIOD, ...handlers }
+  render(<Roster household={household} members={roster} me={null} {...props} {...overrides} />)
   return handlers
 }
 
@@ -35,66 +54,54 @@ const rowFor = (name) => screen.getByText(name).closest('li')
  */
 const clickAndSettle = (element) => act(async () => void fireEvent.click(element))
 
-describe('the join credential', () => {
-  it('shows the code so the organizer can read it out — AC 1', () => {
+describe('the household header — #62', () => {
+  // Two whole describes stood here: one asserting the join code was on screen
+  // for the organizer to read out, and one covering the share sheet and
+  // clipboard fallbacks behind AC 1's "read out OR SEND".
+  //
+  // Both went with the code itself. Admission is an account provisioned for one
+  // named person, so there is nothing to read out and nothing to send. The
+  // screen's remaining job here is to say what it cannot yet do.
+
+  it('shows no join code, because there is none', () => {
     setup()
-    expect(screen.getByTestId('join-code')).toHaveTextContent('ABCD2345')
+    expect(screen.queryByTestId('join-code')).not.toBeInTheDocument()
+    // The old note conceded the code was "deterrence, not a lock". That
+    // concession is what #62 removed; asserting its absence keeps a copy-paste
+    // from quietly reinstating a claim that is no longer true.
+    expect(screen.queryByText(/deterrence, not\s+a lock/i)).not.toBeInTheDocument()
   })
 
-  it('states plainly that the code is deterrence, not a lock', () => {
-    setup()
-    expect(screen.getByText(/deterrence, not\s+a lock/i)).toBeInTheDocument()
-  })
-})
-
-describe('sending the code — AC 1’s "or send"', () => {
-  const shareButton = () => screen.getByRole('button', { name: /copy or send code/i })
-
-  afterEach(() => {
-    delete navigator.share
-    delete navigator.clipboard
+  it('tells the organizer how to give somebody a sign-in — #87', () => {
+    // Was "tells the organizer that provisioning is not built yet", asserting
+    // the note said `not built yet`. #87 built it, so that assertion is now the
+    // wrong way round and is REPLACED rather than deleted: the note still has a
+    // job, and an organizer who is told nothing here has to guess whether the
+    // button on each row is the thing that fixes "No sign-in yet".
+    setup({ isOrganizer: true })
+    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/sign-in from their row/i)
   })
 
-  it('shares through the OS share sheet where one exists', async () => {
-    const share = vi.fn().mockResolvedValue(undefined)
-    navigator.share = share
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // The message must carry the code itself, not just a link: the receiving
-    // phone types it into the join box.
-    expect(share).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('ABCD2345') }))
+  it('no longer claims provisioning is unbuilt — the placeholder must not outlive the gap', () => {
+    // #87 AC 6 names this explicitly. An honest placeholder that survives the
+    // thing it apologised for becomes a false statement that reads as
+    // documentation, and this one would send an organizer hunting for a tool
+    // that is now sitting on the row in front of them.
+    setup({ isOrganizer: true })
+    expect(screen.queryByText(/not built yet/i)).not.toBeInTheDocument()
   })
 
-  it('falls back to the clipboard, copying the bare code and nothing else', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    navigator.clipboard = { writeText }
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // The bare code, because it is pasted into a field that expects exactly it.
-    expect(writeText).toHaveBeenCalledWith('ABCD2345')
-    expect(await screen.findByText(/code copied/i)).toBeInTheDocument()
+  it('does not say it to anyone who cannot act on it', () => {
+    setup({ isOrganizer: false })
+    expect(screen.queryByTestId('provisioning-note')).not.toBeInTheDocument()
   })
 
-  it('says what to do instead when neither is available, rather than failing silently', async () => {
-    setup()
-    await clickAndSettle(shareButton())
-    expect(await screen.findByText(/select the code above/i)).toBeInTheDocument()
-  })
-
-  it('treats a cancelled share as a non-event, not an error', async () => {
-    navigator.share = vi.fn().mockRejectedValue(new Error('AbortError'))
-    setup()
-
-    await clickAndSettle(shareButton())
-
-    // Cancelling a share sheet is the commonest outcome of opening one by
-    // accident. It must not read as a failure.
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByTestId('join-code')).toHaveTextContent('ABCD2345')
+  it('offers a way to sign out, which device auth never needed', () => {
+    // A session is a PERSON now. On a shared tablet this is the only way to
+    // stop being them, and the only way to undo signing in as the wrong one.
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
+    expect(onSignOut).toHaveBeenCalled()
   })
 })
 
@@ -121,36 +128,32 @@ describe('showing the roster', () => {
   })
 })
 
-describe('picking who you are on this device — AC 5', () => {
-  it('offers unclaimed people when this device is nobody yet', () => {
-    setup()
-    expect(within(rowFor('Placeholder One')).getByRole('button', { name: /this is me/i })).toBeInTheDocument()
-  })
+describe('who you are, and who can get in — #62', () => {
+  // This block used to be "picking who you are on this device": a "This is me"
+  // button on every unclaimed row, because a phone had an identity and a person
+  // did not. You no longer pick yourself off a list — you sign in, and you
+  // arrive already being somebody. What the row still reports is whether an
+  // account exists for a person, which is the part an organizer can act on.
 
-  it('does not offer someone already claimed on another device', () => {
+  it('offers nobody a way to pick themselves off the roster', () => {
     setup()
-    expect(
-      within(rowFor('Placeholder Two')).queryByRole('button', { name: /this is me/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('offers nobody once this device already is someone', () => {
-    setup({ me: roster[0] })
     expect(screen.queryByRole('button', { name: /this is me/i })).not.toBeInTheDocument()
   })
 
-  it('marks which person this device is acting as', () => {
+  it('says who has a way in and who does not', () => {
+    setup()
+    expect(within(rowFor('Placeholder One')).getByTestId('access-m1')).toHaveTextContent(
+      /no sign-in yet/i,
+    )
+    expect(within(rowFor('Placeholder Two')).getByTestId('access-m2')).toHaveTextContent(
+      /signed in/i,
+    )
+  })
+
+  it('marks which person this phone is signed in as', () => {
     setup({ me: roster[0] })
     expect(within(rowFor('Placeholder One')).getByText(/· you/)).toBeInTheDocument()
     expect(within(rowFor('Placeholder Two')).queryByText(/· you/)).not.toBeInTheDocument()
-  })
-
-  it('claims by member id, not by name', async () => {
-    const { onClaim } = setup()
-    await clickAndSettle(
-      within(rowFor('Placeholder One')).getByRole('button', { name: /this is me/i }),
-    )
-    expect(onClaim).toHaveBeenCalledWith('m1')
   })
 })
 
@@ -258,13 +261,13 @@ describe('editing and removing — AC 4', () => {
   // Removing a person is destructive and there is no undo, so it takes two
   // deliberate taps. One tap on a phone in a pocket is not a decision.
   it('does not remove anyone on the first tap', () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     fireEvent.click(within(rowFor('Placeholder One')).getByRole('button', { name: /remove placeholder one/i }))
     expect(onRemove).not.toHaveBeenCalled()
   })
 
   it('removes only after the confirmation is tapped', async () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     const row = rowFor('Placeholder One')
     fireEvent.click(within(row).getByRole('button', { name: /remove placeholder one/i }))
     await clickAndSettle(within(row).getByRole('button', { name: /remove placeholder one\?/i }))
@@ -272,12 +275,87 @@ describe('editing and removing — AC 4', () => {
   })
 
   it('can be backed out of after the first tap', () => {
-    const { onRemove } = setup()
+    const { onRemove } = setup({ isOrganizer: true })
     const row = rowFor('Placeholder One')
     fireEvent.click(within(row).getByRole('button', { name: /remove placeholder one/i }))
     fireEvent.click(within(row).getByRole('button', { name: /^keep$/i }))
     expect(onRemove).not.toHaveBeenCalled()
     expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+  })
+})
+
+// #152 — removing a member is the organizer's alone.
+//
+// Before this, every member saw Remove on every row, and the database agreed:
+// `members_delete_same_household` refused only SELF-removal. So any second
+// claimed member could remove the organizer, which sets
+// `households.organizer_member_id` to NULL — and `create_household` is the only
+// thing that ever writes it, so provisioning ended for that household for good.
+//
+// These are the CLIENT half. The guard is the policy (0016), asserted over a
+// real Postgres in `organizer-removal.pglite.test.js`; nothing here would stop
+// a crafted request and nothing here is meant to.
+describe('only the organizer may remove a member — #152', () => {
+  it('offers Remove on no row at all to a member who is not the organizer', () => {
+    setup({ isOrganizer: false })
+    // Every row, not just somebody else's: a non-organizer may not remove
+    // themselves either, which 0007's clause already refused server-side.
+    expect(screen.queryAllByRole('button', { name: /^remove/i })).toHaveLength(0)
+  })
+
+  it('offers Remove on every OTHER row to the organizer', () => {
+    setup({ isOrganizer: true })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /remove placeholder one/i }),
+    ).toBeInTheDocument()
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', { name: /remove placeholder two/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not offer the organizer Remove on their OWN row', () => {
+    // 0007 refuses self-removal from every caller, the organizer included — so a
+    // Remove here is a control the database will always turn down. Same rule as
+    // hiding it from a non-organizer, applied to the other clause of the same
+    // policy, and the reason `me` is passed into the row at all.
+    setup({ isOrganizer: true, me: { id: 'm1', display_name: 'Placeholder One' } })
+    expect(
+      within(rowFor('Placeholder One')).queryByRole('button', { name: /remove placeholder one/i }),
+    ).toBeNull()
+    // POSITIVE CONTROL: the other row still offers it, so this is about WHOSE
+    // row it is and not about the organizer having lost the control entirely.
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', { name: /remove placeholder two/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('still offers Edit to a member who is not the organizer', () => {
+    // The asymmetry is deliberate and is the thing most likely to be "tidied"
+    // later by somebody gating both on one flag. Editing a name or a minutes
+    // figure is ordinary maintenance with an undo; removing a person is not.
+    setup({ isOrganizer: false })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /^edit$/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('says so plainly when the household has no organizer at all', () => {
+    // 0016 stops this state being created; it cannot repair one that exists.
+    // Rendering an ordinary roster with the organizer's tools silently missing
+    // reads as a permissions bug and sends somebody hunting the wrong fault.
+    setup({ isOrganizer: false, household: { id: 'h1', name: 'Placeholder Household' } })
+    expect(screen.getByTestId('no-organizer-note')).toBeInTheDocument()
+    expect(screen.getByTestId('no-organizer-note')).toHaveAttribute('role', 'status')
+  })
+
+  it('says nothing about a missing organizer when there is one', () => {
+    // POSITIVE CONTROL for the test above: without it, a note that never renders
+    // and a note that always renders are indistinguishable from a passing suite.
+    setup({
+      isOrganizer: true,
+      household: { id: 'h1', name: 'Placeholder Household', organizer_member_id: 'm1' },
+    })
+    expect(screen.queryByTestId('no-organizer-note')).toBeNull()
   })
 })
 
@@ -288,5 +366,509 @@ describe('seeing another phone’s changes — AC 2', () => {
     const { onRefresh } = setup()
     fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
     expect(onRefresh).toHaveBeenCalled()
+  })
+})
+
+// `per-member credentials — story #23` stood here: seventeen tests over the
+// organizer's Set PIN control, the PIN sign-in form, and the rule about which
+// rows offered which. All of it tested UI for RPCs that 0007 drops, so there is
+// no version of it that could be repaired rather than removed.
+//
+// What replaced the coverage, so this is a move rather than a loss:
+//   - that the old route is gone from the CLIENT — household.test.js, "exports
+//     no wrapper for any dropped RPC", with a positive control;
+//   - that it is gone from the DATABASE — migrations.pglite.test.js, "every
+//     retired function is absent from the catalog", also with a positive
+//     control;
+//   - that the new route is reachable at all — gate.test.js, which reads
+//     App.jsx, because no behavioural test can see whether a person has a path
+//     to the code;
+//   - that a member's access state is visible — the block above.
+//
+// What is NOT replaced, and is the honest gap: nothing here exercises an
+// organizer GIVING somebody access, because nothing does that yet. It needs the
+// Edge Function.
+
+// ---------------------------------------------------------------------------
+// #46 — this week's capacity, on the roster row.
+//
+// The row is where it belongs: capacity is a fact about a PERSON, and the
+// baseline is already here. capacity.test.js's allowlist comment said so before
+// this story existed — "Roster.jsx renders the BASELINE ... #46 is where that
+// screen starts showing this week's number, and it will come through
+// effectiveCapacity."
+// ---------------------------------------------------------------------------
+
+describe('this week’s capacity — #46', () => {
+  const override = {
+    id: 'c1',
+    member_id: roster[0].id,
+    period_start: PERIOD,
+    // Deliberately NOT roster[0]'s 120-minute baseline. An override equal to the
+    // baseline is a fixture on which "shows the override" and "ignores the
+    // override entirely" give the same answer, so the test would pass with the
+    // whole feature deleted. Same shape prove-tests records as: the constraint
+    // and the unconstrained rule agreeing on the chosen fixture.
+    minutes: 200,
+    source: 'manual',
+  }
+
+  const openFor = (name) =>
+    clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+
+  it('shows the usual number when nobody has said anything about this week', () => {
+    setup()
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+    expect(row).toHaveTextContent(/· usual/)
+  })
+
+  it('shows the override when there is one, and marks it as set', () => {
+    setup({ overrides: [override] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent('This week: 200 min')
+    expect(row).toHaveTextContent(/set for this week/)
+  })
+
+  it('keeps the BASELINE visible beside it, so the override can be checked', () => {
+    // An override that hid what it was overriding would make the figure
+    // impossible to sanity-check, and the product's whole claim is a fairness
+    // number anybody can check.
+    setup({ overrides: [override] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`${roster[0].weekly_minutes} min/week`)
+    expect(row).toHaveTextContent('This week: 200 min')
+  })
+
+  it('an override of ZERO shows as zero, not as the baseline', () => {
+    // The case the feature most exists for, and the one a truthiness check
+    // silently breaks — `override?.minutes || baseline` returns the baseline for
+    // somebody who has just said they have no time at all this week.
+    setup({ overrides: [{ ...override, minutes: 0 }] })
+    expect(rowFor(roster[0].display_name)).toHaveTextContent('This week: 0 min')
+  })
+
+
+  it('AC 2: an override for ANOTHER week does not show — it expires with its period', async () => {
+    // The assertion that makes the period check load-bearing. Every other test
+    // in this describe uses an override whose period MATCHES, so matching on the
+    // person alone gives the same answer on all of them — the constraint and the
+    // unconstrained rule agreeing on the fixture, which is a test that cannot
+    // fail on the property it names.
+    //
+    // Measured: without the period comparison this row reads "This week: 200
+    // min" from a week nobody said anything about, while the chore screen's load
+    // figures read the baseline, because capacitiesFor filters again. Two
+    // answers to one question on one screen, both plausible.
+    setup({ overrides: [{ ...override, period_start: '2026-08-03' }] })
+    const row = rowFor(roster[0].display_name)
+    expect(row).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+    expect(row).toHaveTextContent(/· usual/)
+    expect(row).not.toHaveTextContent('This week: 200 min')
+
+    // And nothing is offered to clear, because from this week's point of view
+    // there is nothing set.
+    await openFor(roster[0].display_name)
+    expect(
+      screen.queryByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not apply one person's override to anybody else", () => {
+    setup({ overrides: [override] })
+    expect(rowFor(roster[1].display_name)).toHaveTextContent(
+      `This week: ${roster[1].weekly_minutes} min`,
+    )
+    expect(rowFor(roster[1].display_name)).toHaveTextContent(/· usual/)
+  })
+
+  it('saves what was typed, through the handler', async () => {
+    const { onSetCapacity } = setup()
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '120' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120')
+  })
+
+  it('seeds the editor from the CURRENT value every time it opens', async () => {
+    // The row never unmounts while the household is on screen, so a useState
+    // initialiser would keep offering what this device saw at first render —
+    // and saving would write that stale number back over another phone's edit.
+    // Same fault and same fix as the chore editor.
+    setup({ overrides: [override] })
+    await openFor(roster[0].display_name)
+    expect(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+    ).toHaveValue(200)
+  })
+
+  it('refuses a value the database would refuse, with a sentence, before calling the handler', async () => {
+    const { onSetCapacity } = setup()
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '-5' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/cannot be negative/i)
+    expect(onSetCapacity, 'a refused value must never become a request').not.toHaveBeenCalled()
+  })
+
+  it('offers "use my usual" only when there is something to clear', async () => {
+    setup()
+    await openFor(roster[0].display_name)
+    expect(
+      screen.queryByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+      'nothing is overridden, so there is nothing to undo',
+    ).not.toBeInTheDocument()
+  })
+
+  it('and clears through the handler when there is', async () => {
+    const { onClearCapacity } = setup({ overrides: [override] })
+    await openFor(roster[0].display_name)
+    await clickAndSettle(
+      screen.getByRole('button', {
+        name: new RegExp(`use the usual weekly minutes for ${roster[0].display_name}`, 'i'),
+      }),
+    )
+    expect(onClearCapacity).toHaveBeenCalledWith(roster[0].id)
+  })
+
+  it('disables the controls while a write is in flight', async () => {
+    setup({ overrides: [override], busy: true })
+    expect(
+      screen.getByRole('button', {
+        name: new RegExp(`set this week for ${roster[0].display_name}`, 'i'),
+      }),
+    ).toBeDisabled()
+  })
+
+  it('a rejected save does not escape as an unhandled rejection', async () => {
+    let handlerAttached = false
+    const rejecting = () => {
+      const p = Promise.reject(new Error('refused'))
+      const then = p.then.bind(p)
+      p.then = (...a) => {
+        if (a[1]) handlerAttached = true
+        return then(...a)
+      }
+      return p
+    }
+    setup({ onSetCapacity: rejecting })
+    await openFor(roster[0].display_name)
+    fireEvent.change(
+      screen.getByLabelText(new RegExp(`minutes this week for ${roster[0].display_name}`, 'i')),
+      { target: { value: '120' } },
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+    expect(handlerAttached, 'the save ignored the promise it was given').toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 5 — a 360px phone.
+  //
+  // Stated as what this instrument CAN and CANNOT see, because the difference
+  // matters. jsdom applies no stylesheet and computes no layout, so "no
+  // horizontal overflow at 360px" is not measurable here and no assertion in
+  // this file should pretend otherwise — a green run would be evidence about
+  // jsdom, not about a phone.
+  //
+  // What is checkable here: the control is REACHABLE and OPERABLE — it exists,
+  // it has an accessible name, it is a real button and a real labelled input —
+  // and the stylesheet carries the rules that make wrapping rather than
+  // overflowing true. The visual confirmation belongs to #48, which looks at
+  // this surface on a real phone.
+  // -------------------------------------------------------------------------
+
+  describe('AC 5 — reachable and operable, with the overflow rules in place', () => {
+    it('the control is reachable by name and operable as a button', () => {
+      setup()
+      const trigger = screen.getByRole('button', {
+        name: new RegExp(`set this week for ${roster[0].display_name}`, 'i'),
+      })
+      expect(trigger).toBeInTheDocument()
+      expect(trigger).toBeEnabled()
+      expect(trigger.tagName).toBe('BUTTON')
+    })
+
+    it('the editor is a labelled numeric field, not a bare box', async () => {
+      setup()
+      await openFor(roster[0].display_name)
+      const field = screen.getByLabelText(
+        new RegExp(`minutes this week for ${roster[0].display_name}`, 'i'),
+      )
+      expect(field).toHaveAttribute('type', 'number')
+      // The bounds are on the element for assistive tech and the spinner; the
+      // REFUSAL is ours, in the submit handler, so the sentence is one wording
+      // on every browser. Chores.jsx records the measurement behind that.
+      expect(field).toHaveAttribute('min', '0')
+      expect(field).toHaveAttribute('max', '10080')
+    })
+
+    it('the stylesheet wraps the row rather than letting it overflow sideways', () => {
+      // A property of the CSS, not of the render — jsdom would pass this
+      // identically with no rules at all, which is exactly why it is asserted
+      // against the stylesheet text instead.
+      const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+      const block = css.slice(css.indexOf('.member__week {'), css.indexOf('.member__week-form'))
+      expect(block, 'the .member__week rules are no longer where this test looks').toContain(
+        'flex-wrap: wrap',
+      )
+      expect(block).toContain('min-width: 0')
+    })
+
+    it('POSITIVE CONTROL: the stylesheet slice is real, so the assertion above is not vacuous', () => {
+      const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+      expect(css).toContain('.member__week {')
+      expect(css.indexOf('.member__week {')).toBeLessThan(css.indexOf('.member__week-form'))
+    })
+  })
+})
+
+// #87 AC 6 — the row stops merely reporting "No sign-in yet" and gains the
+// control that fixes it.
+describe('#87 — giving somebody a sign-in', () => {
+  it('offers the control to an organizer, on the row of somebody who has none', () => {
+    setup({ isOrganizer: true })
+    const control = screen.getByTestId('provision-m1')
+    expect(control).toHaveTextContent(/give a sign-in/i)
+  })
+
+  it('offers a RESET on the row of somebody who already has one', () => {
+    // Same control, different verb. The discriminator is `claimed_by`, which is
+    // the only thing that says whether an account exists — m2 has one.
+    setup({ isOrganizer: true })
+    expect(screen.getByTestId('provision-m2')).toHaveTextContent(/reset sign-in/i)
+  })
+
+  it('does NOT offer it to a non-organizer, who the function would refuse anyway', () => {
+    // Manners, not security: the Edge Function checks `is_household_organizer`
+    // as the caller and refuses. Rendering a control that is always refused
+    // promises something the app cannot deliver.
+    setup({ isOrganizer: false })
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+  })
+
+  it('sends the typed credential, and says whether it is a reset', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), {
+      target: { value: 'kid-secret-1' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    // Third argument is the reset flag — false here, because m1 has no account.
+    expect(handlers.onProvision).toHaveBeenCalledWith('m1', 'kid-secret-1', false)
+  })
+
+  it('sends the reset flag for somebody who already has an account', async () => {
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m2'))
+    fireEvent.change(screen.getByTestId('provision-input-m2'), {
+      target: { value: 'kid-secret-2' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /reset it/i }))
+    })
+    expect(handlers.onProvision).toHaveBeenCalledWith('m2', 'kid-secret-2', true)
+  })
+
+  it('refuses a short credential WITHOUT calling the server', async () => {
+    // The floor is enforced in three places and this is the cheapest one. It is
+    // not the boundary — the Edge Function refuses too — but a round trip to be
+    // told "too short" is a worse experience than being told immediately.
+    const handlers = setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    fireEvent.change(screen.getByTestId('provision-input-m1'), { target: { value: 'abc' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give the sign-in/i }))
+    })
+    expect(handlers.onProvision).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least 6 characters/i)
+  })
+
+  it('tells the organizer to pass the credential on, because no email is sent', async () => {
+    // The one thing an organizer cannot discover by trying it: a provisioned
+    // member has a synthetic `.invalid` address, so nothing is ever delivered
+    // and the PIN exists nowhere else once this form closes.
+    setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    // Scoped to the row's form, and asserted on the half that appears ONLY
+    // there. The header note says "no email is sent" too, so a bare text query
+    // matches both and passes whether or not the form says anything — the
+    // assertion would have been about the wrong element.
+    expect(
+      within(rowFor('Placeholder One')).getByText(/nobody can look it up later/i),
+    ).toBeInTheDocument()
+  })
+})
+
+// #95 — connecting a Google Calendar, from the capacity screen.
+//
+// The whole of AC 1 is a ROUTING question — who is shown the action — and it has
+// two independent halves that fail differently, so each gets its own assertion
+// rather than one test that happens to cover both.
+//
+// What this file cannot see, and does not claim to: whether the Edge Function
+// would accept the call. It refuses a PIN member on the server as well, and that
+// refusal is the real boundary; this is manners, the same relationship
+// `SignInControl` has to the organizer check. The server half is proven in
+// supabase/functions/calendar-connect/handler.test.js.
+describe('#95 AC 1 — who is offered a calendar connection', () => {
+  const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+  const pinMember = { ...roster[0], email: null }
+
+  // The housemate has a REAL ADDRESS TOO, and that is the whole reason this
+  // fixture is written out rather than reusing `roster[1]`.
+  //
+  // Found by a mutation pass, round 1, and it is the most expensive thing the
+  // pass caught. `roster[1]` carries no `email`, so with it as the housemate the
+  // "not on somebody else's row" test below was satisfied by the REAL-EMAIL
+  // check inside `CalendarControl` and never exercised the `isMe` guard at all.
+  // *Measured*: deleting `isMe` from Roster.jsx reddened ZERO against a
+  // predicted 1 — every row in the household would have offered to connect a
+  // calendar to whoever was holding the phone, and the suite stayed green.
+  //
+  // Two guards producing one observable are one guard with a spare, and the
+  // spare is what keeps it green. Giving the housemate an address leaves `isMe`
+  // as the only thing that can be doing the work.
+  const housemateWithEmail = { ...roster[1], email: 'placeholder.two@example.test' }
+  const connectHandlers = { onConnectCalendar: vi.fn() }
+
+  const renderRoster = (props) =>
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: withEmail,
+      ...connectHandlers,
+      ...props,
+    })
+
+  it('offers it to a signed-in member with a real address, on their own row', () => {
+    renderRoster()
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('does NOT offer it on somebody else’s row, even when they COULD connect one', () => {
+    // Google would sign in whoever is holding the phone and attach THEIR
+    // calendar to a housemate's roster entry — a wrong answer that looks like a
+    // right one all the way to the end.
+    //
+    // The housemate has a real address on purpose (see the fixture above), so
+    // the only thing that can be keeping the control off their row is `isMe`.
+    renderRoster()
+    expect(
+      within(rowFor('Placeholder Two')).queryByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).not.toBeInTheDocument()
+    expect(within(rowFor('Placeholder Two')).queryByTestId('calendar-m2')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: that same housemate IS offered it on their own device', () => {
+    // Which is what makes the absence above a fact about WHOSE row it is rather
+    // than a fact about that person. Without it the assertion passes just as
+    // happily against a fixture the control could never render for.
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: housemateWithEmail,
+      ...connectHandlers,
+    })
+    expect(
+      within(rowFor('Placeholder Two')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('does NOT offer it to a PIN member — the action is ABSENT, not disabled', () => {
+    // `members.email` null is `0007`'s discriminator, and there is no Google
+    // identity behind an address with no mailbox. A disabled button is a promise
+    // the app cannot keep and sends a household looking for the setting that
+    // would enable it, so the control renders nothing at all.
+    //
+    // `me` IS this member, so `isMe` is true and the real-email check is the
+    // only guard left that can refuse — the mirror of the pairing above.
+    setup({ members: [pinMember, housemateWithEmail], me: pinMember, ...connectHandlers })
+    const row = rowFor('Placeholder One')
+    expect(row.textContent).not.toMatch(/google calendar/i)
+    expect(within(row).queryByTestId('calendar-m1')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: the same fixture DOES offer it once the address is there', () => {
+    // Without this, the absence above is satisfied by a control that never
+    // renders — a prop threaded wrong, a typo in a name — and the assertion
+    // would report the routing as correct while the feature was simply missing.
+    renderRoster()
+    expect(within(rowFor('Placeholder One')).getByTestId('calendar-m1')).toBeInTheDocument()
+  })
+
+  it('hands the press straight to App, which is what leaves for Google', () => {
+    // A fresh spy rather than the shared one above: `setup` returns only the
+    // handlers it made itself, so reading the shared `connectHandlers` would
+    // also carry every click from every earlier test in this describe.
+    const onConnectCalendar = vi.fn()
+    renderRoster({ onConnectCalendar })
+    fireEvent.click(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /connect google calendar/i }),
+    )
+    expect(onConnectCalendar).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('#95 AC 5 — a connected member sees so on reload', () => {
+  const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+  const connection = {
+    id: 'conn-1',
+    member_id: 'm1',
+    scope: 'https://www.googleapis.com/auth/calendar.freebusy',
+    connected_at: '2026-08-24T10:00:00Z',
+  }
+
+  it('says Calendar connected, from a row the SERVER supplied', () => {
+    // Not from anything this device remembers. A locally held flag would show
+    // connected on the phone that pressed the button and nothing on the phone
+    // that reloads — which is the state AC 5 is written against.
+    setup({
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      connections: [connection],
+      onConnectCalendar: vi.fn(),
+    })
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(
+      within(row).queryByRole('button', { name: /connect google calendar/i }),
+      'an already-connected member should not be asked again',
+    ).not.toBeInTheDocument()
+  })
+
+  it('ignores a connection belonging to somebody else', () => {
+    // The rows arrive as a household-wide list, so matching on the person is the
+    // whole of what makes this right. Matching on nothing — taking the first row
+    // — would light up the wrong member the moment two people connect.
+    setup({
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      connections: [{ ...connection, member_id: 'm2' }],
+      onConnectCalendar: vi.fn(),
+    })
+    expect(
+      within(rowFor('Placeholder One')).getByRole('button', {
+        name: /connect google calendar/i,
+      }),
+    ).toBeInTheDocument()
   })
 })

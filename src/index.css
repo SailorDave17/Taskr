@@ -116,6 +116,19 @@ body {
   color: var(--ink-dim);
 }
 
+/* #53 — the catch-up pass skipped occurrences older than the bound and the
+   household is being told. Informational, not a fault: same dim ink and left
+   rule as .chore__warning, and deliberately not the .error palette — nothing
+   here went wrong, the app declined to pile stale work onto the week. */
+.shell__notice {
+  margin: 0 0 1rem;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -135,6 +148,29 @@ body {
 
 .row--end {
   justify-content: flex-end;
+}
+
+/* Action rows - #82.
+
+   `.row` wraps and `.row--end` justifies each flex line INDEPENDENTLY, so one
+   button over the limit becomes a right-aligned orphan on a line of its own
+   rather than a group that moved down together. Measured on SM-S918U at 384
+   CSS px: the action row is 273.16px and four of the six button sets these two
+   screens can emit do not fit, the worst short by more than a third of the
+   row. So this is not a gap trim - trimming would fix exactly one of them.
+
+   Stretching whatever lands on a wrapped line makes that line read as a
+   deliberate action instead of a stray. Rows that already fit stay on one line
+   and are charged no extra height, which is why a blanket stack rule was
+   rejected: `Done | Edit | Remove` is every outstanding chore on the main
+   screen, and stacking it would add ~104px each.
+
+   Deliberately NOT hung off `.row--end`. That class is also on both PIN forms
+   (`Roster.jsx`), which were never part of the measurement - scoping the
+   stretch to an opt-in class is what keeps their submit buttons untouched. */
+
+.row--actions > .button {
+  flex: 1 1 auto;
 }
 
 .field {
@@ -180,6 +216,13 @@ body {
   border: 1px solid transparent;
   border-radius: 0.5rem;
   cursor: pointer;
+  /* #83 - a 40-character name with no spaces offers no soft wrap opportunity,
+     so the confirm label (`Remove {name}?`) measured 605px in a 273px row and
+     took the page with it. `anywhere` rather than `break-word` on purpose:
+     only `anywhere` reduces the intrinsic min-content width, which is what
+     lets a flex item actually shrink. Ordinary spaced names still break at
+     their spaces first, so nothing about them changes. */
+  overflow-wrap: anywhere;
 }
 
 .button:disabled {
@@ -255,6 +298,86 @@ body {
   opacity: 0.75;
 }
 
+/* Whether this person can sign in yet — story #62.
+
+   Quiet on purpose. For most of a household's life every row says "Signed in",
+   and a status that shouts is a status people stop reading; the one that matters
+   is "No sign-in yet", which is the state an organizer has to do something
+   about. Same weight and opacity as the budget line beside it, so it reads as
+   another fact about the person rather than as a warning. */
+.member__access {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+/* Connecting a Google Calendar — story #95.
+
+   Quiet, for `.member__access`'s reason one line up: once a member is connected
+   the row says so for the rest of the household's life, and a permanent notice
+   drawn at full weight is one people stop seeing. It appears on the signed-in
+   member's own row only, so it is never repeated down the list.
+
+   Displayed as a block so the control drops below this week's minutes rather
+   than competing with them for the same line — at 360px a name, a baseline, the
+   week's figure, a Change button and this do not fit across, and the minutes are
+   the number the screen is for. */
+.member__calendar {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+/* This week's capacity — story #46.
+
+   Sits directly under the baseline rather than replacing it: the override is
+   only checkable against the number it overrides, and the product's claim is a
+   fairness figure anybody can check.
+
+   Wraps rather than truncates. At 360px a name, a baseline, this week's figure
+   and a button do not fit on one line, and the figure is the part that must
+   stay readable — #46 AC 5 asks for vertical scroll alone with no horizontal
+   overflow, which is what `flex-wrap` plus `min-width: 0` buys. */
+
+.member__week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+  margin-top: 0.25rem;
+}
+
+.member__week-figure {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.member__week-mark {
+  /* "usual" and "set for this week" are the same weight and colour on purpose.
+     One is not better than the other, and styling the override as an exception
+     would make saying "I have less time" feel like an admission. */
+  opacity: 0.75;
+}
+
+/* #87 — the provisioning form, opened from a member row. Same shape as the
+   week form above it: it replaces the row's button in place rather than
+   opening a dialog, so the organizer stays on the roster they are reading. */
+.member__signin-form {
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.member__week-form {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.member__week-form .field__input {
+  min-height: 44px;
+}
+
 .error {
   margin: 0;
   padding: 0.75rem 1rem;
@@ -263,4 +386,499 @@ body {
   background: rgba(127, 43, 43, 0.35);
   border: 1px solid #7f2b2b;
   border-radius: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Chores — story #34.
+
+   Deliberately the same visual grammar as .member above rather than a new one:
+   a chore and a person are the two things a household edits, they sit in
+   adjacent cards on one screen, and two different card idioms would read as two
+   different apps. Same 44px touch targets, same one-handed sizing.
+
+   The minutes figure is the emphasised part, not the title. That is the whole
+   thesis on screen — a chore IS a quantity of time — and it is why the number
+   carries the accent colour while "due" stays dim.
+
+   The assignee control and the per-person figures arrived with #36. What is
+   still absent is a RANKING: no bar, no percentage, no ordering by load. Those
+   are #47's, and the charter's test is that a proposal satisfiable by a
+   screenshot of the 2020 all-users view has collapsed.
+   --------------------------------------------------------------------------- */
+
+.chore-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chore {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.chore--editing {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* PRE-EXISTING GAP, not introduced by #34. Roster.jsx has emitted
+   `member--editing` since #23 with no rule anywhere; the stylesheet-coverage
+   guard added in this story is what surfaced it. Given the same treatment as
+   .chore--editing rather than exempted, so the two cards keep one grammar. */
+.member--editing {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.chore__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.chore__title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.chore__cost {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+}
+
+/* The minutes are the point of the row, so they hold the accent rather than
+   the title — a chore is a quantity of work before it is a name. */
+.chore__cost > :first-child,
+.chore__cost {
+  font-variant-numeric: tabular-nums;
+}
+
+.chore__cost-human {
+  opacity: 0.75;
+}
+
+.chore__due {
+  opacity: 0.85;
+}
+
+/* Completed work — story #35.
+
+   Same card grammar as an outstanding chore, dimmed rather than restyled. It
+   stays VISIBLE so a household can see the week's work was actually done, and
+   it carries no streak, no rank, no score and no per-person total: red is for
+   work, never for people. Nothing here uses the .error palette, deliberately —
+   a completed chore is a good outcome and must not read as a warning. */
+
+.card__subheading {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.chore-done {
+  margin-top: 0.25rem;
+}
+
+.chore-list--done .chore {
+  opacity: 0.6;
+}
+
+.chore-list--done .chore__title {
+  text-decoration: line-through;
+}
+
+/* Assignment — story #36.
+
+   The select sits inside .chore__identity rather than in the button row: it is
+   part of what the chore IS this week, not an action taken on it, and putting it
+   among Done/Edit/Remove would make giving somebody two hours of work look like
+   the same weight of gesture as renaming a chore.
+
+   The `.chore-load*` rules that lived here went with #47. They styled the plain
+   per-person figures on this screen — no bar, no percentage, roster order — and
+   that presentation moved to `.split*` below, which draws the same people as a
+   share of their own capacity. The palette rule they carried moved with them:
+   an over-committed person is never painted red, because red is for work. */
+
+.chore__assignee {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.chore__assignee .field__input {
+  /* Sized to the content rather than the row, so a two-person household does not
+     get a full-width control that reads as the primary action. 44px minimum
+     height is the same touch target every other control here uses. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+}
+
+/* Who cannot do a chore — story #37.
+
+   Two elements, both quiet on purpose.
+
+   The NOTE is the one to look at hardest. It says a named person is holding work
+   they are marked as unable to do, which is the only place in this app where a
+   sentence is about a person and a problem at the same time — and the rule this
+   stylesheet has stated twice already is that RED IS FOR WORK, NEVER FOR PEOPLE.
+   So it does not use the .error palette, it does not use the accent, and it does
+   not get a warning colour: it is the same dim ink as the load figures, with a
+   left rule to separate it from the control above. The household decided this;
+   the screen is recording it, not objecting to it.
+
+   The CONTROL is styled below the assignee select and smaller than it, because
+   giving somebody a chore is the everyday act and saying they cannot do one is
+   the rare correction. Both keep the 44px touch target every other control here
+   uses — rare is not the same as fiddly. */
+
+.chore__warning {
+  margin: 0.375rem 0 0;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+/* #53 — the weekday picker for a weekly repeat. A fieldset so the legend
+   labels the group for assistive tech; the row wraps on a 360px phone rather
+   than shrinking below the 44px touch target the other controls keep. */
+.chore-weekdays {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.chore-weekdays__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.chore-weekdays__day {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* The row's account of its schedule — same dim ink as the due date, because a
+   repeat is a fact about the chore, not a state to be alarmed by. */
+.chore__repeat {
+  color: var(--ink-dim);
+}
+
+/* #12 — what a completed chore actually cost, beside what was expected. */
+.chore__took {
+  color: var(--ink-dim);
+}
+
+/* #12 — expected vs average-actual on a repeat anchor. Quiet like the repeat
+   line: feedback is information, never an alarm — red stays reserved for
+   work, and this is about work already done. */
+.chore__feedback {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #12 — the took-minutes adjuster on a done row: a field and a save, inline,
+   sized like the other row controls. */
+.chore__actual {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.chore__actual-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chore__actual-field .field__input {
+  width: 6rem;
+}
+
+.chore__exclusions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.chore__exclusion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chore__exclusion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.5rem;
+}
+
+.chore__exclusion-name {
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+.chore__exclusion-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chore__exclusion-add .field__input {
+  /* Sized to the content rather than the row, exactly as .chore__assignee is:
+     a full-width control here would read as the primary action on the chore,
+     which is the opposite of what this is. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   The three surfaces, and the way between them — story #47, criterion 11.
+
+   Buttons rather than links, so they inherit nothing from `.button`: a tab is
+   not an action, and giving it the accent would make three call-to-actions sit
+   above every screen.
+
+   `flex-wrap` is load-bearing at 360px rather than defensive. Three tabs fit
+   comfortably today; a fourth surface, or a longer word than "Chores" in some
+   future wording, would otherwise push the row wider than the viewport — and a
+   nav that overflows horizontally takes the whole page with it. Wrapping costs
+   a line of height and cannot overflow.
+   --------------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.5rem;
+}
+
+.tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tab:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Styled off the attribute a screen reader already reads, rather than off a
+   second class name that would have to be kept in step with it. One state, one
+   spelling. */
+.tab[aria-current='page'] {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   The split — story #47.
+
+   The charter's design idea: each person's load as a share of THEIR OWN
+   capacity, so fair means every bar is level however different the people are.
+
+   Two palette rules are constraints rather than taste, and both are stated
+   elsewhere in this file for other elements:
+
+     RED IS FOR WORK, NEVER FOR PEOPLE. An over-committed member is drawn in
+     exactly the same colours as everybody else; the figures beside the bar say
+     "40 min over" and the styling does not shout it. There is no
+     `.split__row--over`, deliberately — the moment one exists, somebody will
+     colour it.
+
+     NOTHING RANKS. Rows are identical, in roster order, with no position
+     number, no medal and no emphasis on the fullest bar. A smaller fair share
+     must look correct rather than like losing.
+   --------------------------------------------------------------------------- */
+
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* The one sentence the household came to read, so it sits above the bars and
+   carries the accent — the only accent on the surface. */
+.split__verdict {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.split__verdict--level {
+  color: var(--accent);
+  filter: brightness(1.6);
+}
+
+/* What the last automatic re-balance reported (#49 AC 7) — quieter than the
+   verdict above on purpose: it is the run's footnote, not the household's
+   answer. */
+.split__rebalance {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.split__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  /* A column, always. A row of bars would be a comparison between people laid
+     out side by side, and on a 360px phone with six members it would also be
+     the horizontal scroll criterion 10 forbids. */
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.split__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.split__identity {
+  display: flex;
+  /* Wraps rather than shrinking: at 360px a long name beside a long figure
+     would otherwise squeeze one of them below legibility, or push the row wider
+     than the screen. */
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.125rem 0.5rem;
+  min-width: 0;
+}
+
+.split__name {
+  font-weight: 600;
+  min-width: 0;
+  /* A name with no space in it has no wrap opportunity, and a 30-character one
+     would otherwise set the width of the whole page. Same rule, same reason, as
+     `.button` carries for #83. */
+  overflow-wrap: anywhere;
+}
+
+.split__figures {
+  color: var(--ink-dim);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The track. `overflow: hidden` is what makes the fills unable to leave it —
+   a member at 140% of their capacity gets a full bar rather than one that grows
+   past the viewport, and the number beside it is what says how far over they
+   are. */
+.split__bar {
+  display: flex;
+  width: 100%;
+  height: 0.75rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.split__fill {
+  display: block;
+  height: 100%;
+}
+
+/* Done and outstanding are one hue at two weights — criterion 7 asks that they
+   be visually distinct, not that they be different colours. Two hues would
+   invite reading one of them as a warning, which is the palette rule above. */
+.split__fill--done {
+  background: var(--accent);
+  filter: brightness(1.5);
+}
+
+.split__fill--open {
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.split__breakdown {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Work nobody holds — criterion 9. Quiet, because it is a fact about the week
+   rather than a fault, and it is on the same screen as the bars precisely so it
+   cannot be missed. */
+.split__attention {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.split__attention-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.125rem 0.5rem;
+  min-width: 0;
+}
+
+.split__attention-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.split__attention-cost {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
 }

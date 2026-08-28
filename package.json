@@ -12,7 +12,15 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:rls": "vitest run --config vitest.integration.config.js",
-    "icons": "node scripts/generate-icons.mjs"
+    "test:functions": "vitest run --config vitest.functions.config.js",
+    "check:live": "vitest run --config vitest.integration.config.js src/test/schema.integration.test.js",
+    "deploy:function": "node scripts/deploy-function.mjs",
+    "migrate:live": "node scripts/migrate-live.mjs",
+    "probe:live-grants": "node scripts/probe-live-grants.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "allocation:corpus": "node scripts/allocation-corpus-report.mjs",
+    "rebalance:corpus": "node scripts/rebalance-churn-report.mjs",
+    "extraction:corpus": "node scripts/extraction-corpus-report.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.1",
@@ -21,6 +29,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "@eslint/js": "^9.17.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -31,6 +40,7 @@
     "eslint-plugin-react-hooks": "^5.1.0",
     "globals": "^15.14.0",
     "jsdom": "^25.0.1",
+    "pgsql-parser": "^18.2.3",
     "vite": "^6.0.7",
     "vite-plugin-pwa": "^0.21.1",
     "vitest": "^2.1.8"

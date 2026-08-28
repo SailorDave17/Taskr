@@ -15,6 +15,15 @@ import { assertPublishableKey } from './src/lib/keyShape.js'
 // the build is the only signal available at the point it can still be stopped.
 assertPublishableKey(process.env.VITE_SUPABASE_ANON_KEY, 'the production build')
 
+// #95 — the same guard over the second value a dashboard now holds. A Google
+// OAuth client ID is public by design and belongs in the bundle; its sibling,
+// the client SECRET, is one line away on the same Google console screen and
+// begins `GOCSPX-`. Pasting the wrong one produces a build that WORKS, and
+// publishes a credential that can mint access to every connected calendar.
+// Nothing else in the pipeline would notice — which is the same argument, and
+// the same measured incident shape, as the line above.
+assertPublishableKey(process.env.VITE_GOOGLE_CLIENT_ID, 'the production build')
+
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent
 // rather than added speculatively; see docs/hosting-decision.md.
@@ -67,6 +76,49 @@ export default defineConfig({
     // as a gate with zero tests in it. The exclusion is stated in-band, in
     // src/test/rls.integration.test.js and docs/access-model.md, so a reader
     // counting the checks does not mistake four for five.
-    exclude: [...configDefaults.exclude, '**/*.integration.test.js'],
+    // The same argument covers `*.functions.test.js` (#87), which drives the
+    // Edge Function against a LOCAL Supabase stack — it needs Docker, Postgres,
+    // GoTrue and a service_role key, none of which CI has. It is loud rather
+    // than skipped for the same reason: its beforeAll FAILS with instructions
+    // when the stack is down. `npm run test:functions`, against
+    // vitest.functions.config.js. It is a third runner rather than joining the
+    // integration one because that config includes rls.integration.test.js,
+    // which needs a hosted project and a seeded account while this one needs a
+    // LOCAL stack and a service_role key — two different environments, so one
+    // runner would be unsatisfiable by either. (#88 migrated that file off the
+    // retired model on 2026-08-21; it is no longer known-red, and this reason
+    // is the one that survives.)
+    exclude: [
+      ...configDefaults.exclude,
+      '**/*.integration.test.js',
+      '**/*.functions.test.js',
+    ],
+    // Pin a NON-UTC zone. Dates here are calendar dates (`chores.due_on`), and
+    // the classic fault is a Date round-trip that parses YYYY-MM-DD as UTC
+    // midnight and formats it back with local getters — returning the previous
+    // day everywhere behind UTC, and INVISIBLE in UTC itself.
+    //
+    // Measured 2026-08-08 (#34): mutating normalizeDueDate to do exactly that
+    // reddened 3 tests on a GMT-0400 machine and ZERO under TZ=UTC. CI runs
+    // UTC, so without this pin the guard exists and cannot fire on the runner
+    // that actually gates the branch — the same defect shape as a suite with
+    // zero tests in it, which is why the pin sits beside passWithNoTests and is
+    // asserted by src/test/gate.test.js rather than left to trust.
+    //
+    // Marquesas rather than America/New_York since #75, for three properties at
+    // once. It is BEHIND UTC, which is the side of UTC where the local-getter
+    // fault shows at all — the issue floated Pacific/Chatham (+12:45), and
+    // measured, UTC midnight in Chatham is 12:45 the SAME day, so the very bug
+    // this pin exists to expose is invisible there. It is 30 minutes off the
+    // hour, which whole-hour zones cannot check. And no developer machine is
+    // plausibly in it, which is the #75 fix itself: the positive control in
+    // gate.test.js compares the process zone against this value, and that
+    // comparison only discriminates when the machine's own zone is something
+    // else. America/New_York was the one zone guaranteed to defeat it here.
+    //
+    // Measured 2026-08-24 (#75): the same normalizeDueDate mutation under this
+    // pin reddens 5 tests (the suite has grown since #34) and the same run
+    // under TZ=UTC still reddens ZERO — the bar the zone change had to clear.
+    env: { TZ: 'Pacific/Marquesas' },
   },
 })

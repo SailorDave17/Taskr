@@ -1,0 +1,184 @@
+-- The privileges `authenticated` holds that no migration ever granted — #227.
+--
+-- ===========================================================================
+-- What this is, and why it is NOT a copy of 0017
+-- ===========================================================================
+--
+-- `0017` (#186) asked what `anon` holds that nothing asked for, and could
+-- answer wholesale, because the correct answer for `anon` is NOTHING. Here the
+-- correct answer is a SUBSET: `authenticated` is the role every signed-in
+-- member holds, and getting the subset wrong breaks the app for all of them
+-- rather than for nobody.
+--
+-- 0017's acceptance criterion 5 also made `authenticated` the CONTROL for the
+-- revoke it performed — "`authenticated`'s entries are unchanged on both" — so
+-- the two roles could not be done in one file without destroying the only
+-- reading that could show 0017 hit the role it aimed at. That control did real
+-- work: mutating 0017's households revoke to `from anon, authenticated`
+-- reddened 15 tests. This file is the deliberate second half.
+--
+-- ===========================================================================
+-- The audit — per table, per privilege letter — #227 AC 1
+-- ===========================================================================
+--
+-- *Measured 2026-08-27* against the live project: `pg_class.relacl` for every
+-- relation in `public`, `pg_attribute.attacl` for every column, and every
+-- GRANT/REVOKE statement in this directory extracted by STATEMENT rather than
+-- by line, because these statements span lines and a line grep undercounts
+-- them — the households column grants do not appear in one at all.
+--
+-- Letters: a=INSERT r=SELECT w=UPDATE d=DELETE D=TRUNCATE x=REFERENCES
+--          t=TRIGGER m=MAINTAIN
+--
+--   households   live ardDxtm
+--     a  inherited — no migration grants it. `create_household()` is SECURITY
+--                    DEFINER (0007), so the client never needed it.
+--     r  inherited — 0013 and 0018 grant column-level SELECT; NOTHING grants
+--                    it at table level. See the next section: this letter is
+--                    the consequential one.
+--     d  inherited — no migration grants it, and #227's own table does not
+--                    list it. That table is 0017's audit of a DIFFERENT role,
+--                    so it is a sample rather than a finding, which is what
+--                    AC 1 means by auditing it instead of inheriting it.
+--     D x t m      inherited.
+--     w  correctly absent — 0005 revokes it at table level and grants
+--                    `update (name, timezone)` instead.
+--
+--   members      live dDxtm
+--     d  GRANTED by 0013, for `members_delete_same_household`.
+--     D x t m      inherited. 0002 and 0007 revoke `select, insert, update`,
+--                  which is narrow, so these four ride through it.
+--
+--   chores       live dDxtm
+--     d  GRANTED by 0013, for `chores_delete_same_household`.
+--     D x t m      inherited, past 0003's equally narrow revoke.
+--
+--   chore_exclusions  live d   — correct, and audited rather than assumed.
+--   member_capacity   live d   — correct.
+--     Both are `revoke all ... from authenticated, anon` followed by a
+--     `grant delete` (0010, 0005). A WHOLESALE revoke strips the inherited
+--     four; that is the only reason these two are already right, and it is the
+--     whole difference between them and the three above.
+--
+--   calendar_connections  live (none)  — correct, 0011 revokes all.
+--   calendar_tokens       live (none)  — correct, 0011 revokes all.
+--
+-- ===========================================================================
+-- The finding that is worth more than the tidy-up
+-- ===========================================================================
+--
+-- `households` carries table-level SELECT for `authenticated`, and a
+-- table-level SELECT SUBSUMES every column-level one. So on the live project
+-- the column scoping 0013 set up and 0018 extended IS NOT IN FORCE on that
+-- table: a signed-in member can read every column of `households` whether or
+-- not a migration granted it.
+--
+-- It is harmless TODAY, and only by coincidence — *measured*, all seven
+-- columns of `households` carry `authenticated=r` individually, so the set the
+-- column grants describe and the set the table-level letter allows are the
+-- same set. What is broken is the MECHANISM: the next column added to
+-- `households` and deliberately left ungranted would be readable anyway,
+-- silently, and the migration withholding it would look correct. That is the
+-- capability 0013 exists to provide, and this one letter quietly voids it.
+--
+-- The other two inherited letters on that table, `a` and `d`, are held in
+-- check by row-level security and by nothing else: `0001` enables RLS on
+-- `households`, and there is no INSERT policy and no DELETE policy on it for
+-- any role. That is defence in depth nobody decided on, which is 0017's
+-- argument exactly — a privilege nobody granted is a privilege nobody reviews,
+-- and the next policy change is made by someone who assumes the grant layer is
+-- narrow because every other table's is.
+--
+-- ===========================================================================
+-- REFERENCES — decided, not left to fall out of a wholesale statement — AC 2
+-- ===========================================================================
+--
+-- `src/test/grants.pglite.test.js` carries an argument for LEAVING it: the
+-- role has no CREATE on schema `public`, so it can create no table, so it can
+-- point no foreign key at ours and REFERENCES reaches nothing. That argument
+-- was made about `anon`, and this file may not simply inherit it.
+--
+-- *Measured 2026-08-27*, `pg_namespace.nspacl` on the live project. Across all
+-- eight non-system schemas `authenticated` holds `U` and never `C`; in
+-- `public` it is `authenticated=U/pg_database_owner`. It owns none of the
+-- seven tables. So the argument does transfer: the privilege is unexercisable
+-- as the project stands.
+--
+-- It is revoked anyway, and the reason is the one that makes this file
+-- necessary at all. The property that keeps REFERENCES inert is a schema ACL
+-- set by the PLATFORM — no file in this repo controls it and no check here
+-- watches it. Leaning on that would re-make, one level up, the mistake this
+-- story exists to correct: a privilege that is safe because of something
+-- nobody here decided. The decision is recorded either way, as AC 2 asks, and
+-- reversing it costs one `grant`.
+--
+-- ===========================================================================
+-- Why NARROW, and why the order inside section 1 is load-bearing — AC 3
+-- ===========================================================================
+--
+-- A table-level REVOKE also removes the matching COLUMN-level grants. So
+-- `revoke select on public.households from authenticated` takes 0013's five
+-- column grants and 0018's two with it, and `currentHousehold()`'s
+-- `select('*')` fails outright until they are put back. The re-grant below is
+-- part of the statement rather than tidying after it, and it lives in this
+-- file rather than a later one for that reason.
+--
+-- `update` is deliberately NOT named in the households revoke. 0005 already
+-- removed it at table level, and not naming it is what leaves
+-- `update (name, timezone)` untouched — one fewer thing to restore correctly.
+--
+-- `members` and `chores` need no re-grant at all: the four letters revoked
+-- there have no column-level form in use, and SELECT, INSERT and UPDATE are
+-- not named, so every column grant on those two tables is untouched.
+--
+-- ===========================================================================
+-- What can and cannot see this
+-- ===========================================================================
+--
+-- `npm run check:live` is blind to it, and that is the claim rather than a
+-- gap: it asks what the client can read as `authenticated`, and the answer is
+-- identical either side of this file. A no-op for the app is the whole point.
+--
+-- The pglite harness sees the END STATE but not the removal. Its default
+-- privileges are the platform's modern tight set (`Dxtm`), so `households`
+-- there never had `a`, `r` or `d` to lose, while `members` and `chores` match
+-- the live project exactly at `dDxtm`. Both environments converge on the same
+-- end state here, which is what makes that state assertable in CI.
+--
+-- What the harness DOES prove is the load-bearing half: drop the re-grant
+-- below and the `households` `select('*')` positive control goes red there,
+-- because the column grants really are stripped by the revoke above it.
+--
+-- `npm run probe:live-grants` is the instrument that can see the removal, by
+-- reading the catalog. Its `MEASURED_TABLE_ACLS` is updated to the post-paste
+-- values in the same change, so it disagrees with the live project until this
+-- file is applied — the excused red recorded in `docs/access-model.md`,
+-- cleared by exactly one action and by nothing else.
+
+-- ---------------------------------------------------------------------------
+-- 1. households — remove everything inherited, restore the column reads
+-- ---------------------------------------------------------------------------
+
+revoke insert, select, delete, truncate, references, trigger, maintain
+  on public.households from authenticated;
+
+-- Exactly 0013's five columns and 0018's two. Spelled out rather than derived,
+-- because the list IS the access rule: a column added later and left out of it
+-- is a column no member can read, which is the mechanism this file restores.
+grant select (id, name, created_at, organizer_member_id, timezone,
+              assignments_version, last_rebalance)
+  on public.households to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. members — keep the DELETE 0013 granted, drop the four that rode through
+-- ---------------------------------------------------------------------------
+
+revoke truncate, references, trigger, maintain
+  on public.members from authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. chores — same shape, same reason
+-- ---------------------------------------------------------------------------
+
+revoke truncate, references, trigger, maintain
+  on public.chores from authenticated;

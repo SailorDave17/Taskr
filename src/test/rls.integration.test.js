@@ -164,6 +164,37 @@
 // address is `<members.id>@taskr.invalid` under a household whose name begins
 // `TEST 88`.
 //
+// ── WHAT A TIDY-UP MUST SPARE ─── #221 ─────────────────────────────────────
+//
+// THE SEEDED ACCOUNT IS INDISTINGUISHABLE FROM THE RESIDUE IT CREATES, and
+// that is not a warning about carelessness — it falls out of the paragraph
+// directly above. The account organizes every `TEST 88` household, so since
+// `0009` it holds a member row in each one. A tidy-up that deletes the test
+// households, their members and the auth users under them takes the seeded
+// account with it, unless whoever is doing it knows to keep that one.
+//
+// It has happened once, and it was expensive out of proportion to the cost of
+// the rows: the account was cleared around 2026-08-25 and this suite could not
+// reach its first assertion for four days. That is worse than a broken test,
+// because `npm run test:rls` is the ONLY instrument that has ever confirmed
+// `0009` reached the live project — `check:live` is structurally blind to a
+// migration made only of indexes. Nothing announced the loss, and a `beforeAll`
+// failure is reported by vitest as tests SKIPPED: `numFailedTests: 0`,
+// `success: false`. It exits non-zero with nothing named as failing, which
+// reads as an environment hiccup rather than as a dead suite.
+//
+// Two tests then went stale unseen inside that window and only surfaced when
+// the account was restored on 2026-08-28 — see the `#221 CORRECTED THE
+// SUBJECT` and `#221 MOVED THE ACTOR` notes below. A dead instrument does not
+// merely stop reporting; it lets its own subject drift.
+//
+// So: when tidying, KEEP the account behind `TASKR_TEST_EMAIL`. Recreating it
+// is Authentication -> Users -> Add user -> Create new user with **Auto Confirm
+// User** ticked, using the exact values already in `.env.local`; `.env.example`
+// carries the same instruction. Confirm it from the catalog rather than from
+// the dashboard's user search, which cairn records returning "No users found"
+// for an address demonstrably present.
+//
 // ── WHY IT IS NOT IN CI ────────────────────────────────────────────────────
 //
 // It needs credentials and a network, which the CI gate deliberately has
@@ -782,13 +813,61 @@ describe('row-level security under per-member sign-in, exercised over the wire',
 
       // Half two, and this is the one carrying the weight. Reading the column
       // does not widen WHICH ROWS come back: every row still belongs to a
-      // household this caller is in, so no outsider row is reachable even with
+      // household this caller is in, so no unrelated row is reachable even with
       // the wildcard now permitted.
+      //
+      // #221 CORRECTED THE SUBJECT. This asserted that `outside` was
+      // unreachable from `organizer`, and that is wrong about this file's own
+      // fixture: `beforeAll` says in as many words that BOTH households are
+      // organized by the seeded account, so it holds a claimed row in each and
+      // `outside` is reachable BY DESIGN. *Measured 2026-08-28 against the live
+      // project:* one claimed row for the seed in each of the run's two
+      // households. The assertion was written by #159 on 2026-08-26 and never
+      // once executed — the seeded account had been cleared the day before, so
+      // this suite could not reach its first assertion for four days.
+      //
+      // The claim is now made two ways, neither contradicted by the fixture.
+      // From the organizer: every household reached is one this caller holds a
+      // claimed member row in. That set is DERIVED from the same client rather
+      // than spelled out, and the reason is a second correction inside #221 —
+      // the first attempt asserted the set was exactly `inside` and `outside`,
+      // which is true on a virgin project and false on every run after it. The
+      // seeded account accumulates a member row in EVERY household this suite
+      // has ever made, growing by two per run; the COST OF A RUN section above
+      // says so in as many words. *Measured:* the second run of the day found
+      // exactly two extra — the first run's pair. An assertion that passes once
+      // and then fails forever is worse than one that never passed, so the
+      // subject is the property rather than the fixture.
+      //
+      // The live project also holds a real household this account is not in, so
+      // a predicate that stopped scoping would widen this set and be caught.
+      const { data: mine, error: mineError } = await organizer
+        .from('members')
+        .select('household_id')
+        .eq('claimed_by', organizerInside.claimed_by)
+      expect(mineError, `reading own memberships failed: ${mineError?.message}`).toBeNull()
+      const ownHouseholds = new Set(mine.map((r) => r.household_id))
+
       const { data: wild, error: wildError } = await organizer.from('members').select('*')
       expect(wildError, 'select(*) is permitted after 0014 — that is the recorded cost').toBeNull()
+      expect(wild.length, 'an empty read satisfies every "does not contain" below').toBeGreaterThan(0)
       const households = new Set(wild.map((r) => r.household_id))
       expect(households.has(inside.id)).toBe(true)
-      expect(households.has(outside.id)).toBe(false)
+      expect(
+        [...households].filter((id) => !ownHouseholds.has(id)),
+        'select(*) reached a household this caller is not a member of',
+      ).toEqual([])
+
+      // And from a caller that genuinely is NOT in `inside`, which is the
+      // sharper half, because the organizer belongs to everything this run
+      // made. The non-empty check in front of it is what stops a broken read
+      // from passing: a result with no rows contains no forbidden row either.
+      const { data: theirs, error: theirError } = await outsider.from('members').select('*')
+      expect(theirError, `the outsider's own read failed: ${theirError?.message}`).toBeNull()
+      expect(theirs.length, 'an outsider who reads nothing proves nothing').toBeGreaterThan(0)
+      const theirHouseholds = new Set(theirs.map((r) => r.household_id))
+      expect(theirHouseholds.has(outside.id)).toBe(true)
+      expect(theirHouseholds.has(inside.id)).toBe(false)
     })
 
     it('cannot backdate a capacity row by writing created_at at insert time', async () => {
@@ -886,10 +965,29 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       expect(still).toHaveLength(1)
     })
 
-    it('POSITIVE CONTROL: but they CAN remove somebody else in the household', async () => {
+    it('POSITIVE CONTROL: but the ORGANIZER can remove somebody else', async () => {
       // Without this the assertion above is satisfied by a project where the
       // delete policy is missing entirely and nobody can delete anything —
       // which looks identical from outside and is a different, worse bug.
+      //
+      // #221 MOVED THE ACTOR, and the reason is a rule change rather than a
+      // mistake. This control was written on 2026-08-21 (#88) with `insider`
+      // doing the removing, and it was correct then: the policy permitted ANY
+      // member of the household. `0016` (#152) added
+      // `is_household_organizer(household_id)` on 2026-08-26, so a plain member
+      // can no longer remove anybody and the control began asserting a rule
+      // that no longer exists. Nothing caught it for two days because the
+      // seeded account had been cleared and this suite could not run at all.
+      // *Measured 2026-08-28 from the live catalog:*
+      //   ((household_id IN (SELECT current_household_ids()))
+      //     AND (claimed_by IS DISTINCT FROM (SELECT auth.uid()))
+      //     AND is_household_organizer(household_id))
+      //
+      // The control's PURPOSE survives the change untouched — it exists to
+      // separate "self-removal is refused" from "no delete works at all" — so
+      // the actor moves and the claim stays. The refusal of the non-organizer
+      // is asserted below rather than left implied, because after `0016` that
+      // is the more surprising half.
       const { data: spare, error: addError } = await organizer
         .from('members')
         .insert({ household_id: inside.id, display_name: 'Spare' })
@@ -897,7 +995,19 @@ describe('row-level security under per-member sign-in, exercised over the wire',
         .single()
       expect(addError, `seeding a removable member failed: ${addError?.message}`).toBeNull()
 
-      const { data: removed, error } = await insider
+      // A plain member of the same household may NOT — that is `0016`'s rule,
+      // and a permitted read of a refused delete comes back as an empty array
+      // rather than an error, exactly as self-removal does above.
+      const { data: refused, error: refusedError } = await insider
+        .from('members')
+        .delete()
+        .eq('id', spare.id)
+        .select(MEMBER_COLUMNS)
+      expect(refusedError, `expected a permitted read of a refused delete: ${refusedError?.code}`).toBeNull()
+      expect(refused, 'a non-organizer removed a member — 0016 is not on this project').toEqual([])
+
+      // The organizer may, which is what keeps the assertion above honest.
+      const { data: removed, error } = await organizer
         .from('members')
         .delete()
         .eq('id', spare.id)

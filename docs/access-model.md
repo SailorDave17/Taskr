@@ -68,8 +68,16 @@
     cannot see an index: see the blindness bullet below. That suite cannot reach its first assertion
     unless `0009` is applied — `beforeAll` puts one seeded account in two households, which the
     pre-`0009` global `members_claimed_by_key` forbids, and that is exactly how #127 was found.
-    *Re-measured 2026-08-24: 31 of 31, no skips.* **A suite that fails at setup under the old schema
+    *Re-measured 2026-08-24: 31 of 31, no skips. Re-measured again 2026-08-28: **57 of 57**, no
+    skips, after #221 restored the seeded account.* **A suite that fails at setup under the old schema
     is a stronger presence check than any probe**, because it cannot pass for the wrong reason.
+    The 2026-08-28 re-measurement matters for a reason beyond the number: this confirmation had
+    **lapsed without saying so**. The seeded account was cleared around 2026-08-25, so from then
+    until #221 the sentence above was still true as history and the instrument behind it could not
+    run — and because a `beforeAll` failure is reported by vitest as tests SKIPPED, the lapse
+    presented as an environment hiccup rather than as a dead suite. **The one confirming instrument
+    for this whole class of migration can stop working without any artefact changing**, so its
+    liveness is worth checking on the same occasions its verdict is relied on.
   - **`0010`** (#37) — the exclusions table and the two eligibility functions. **Pasted 2026-08-24,
     verified over the wire**: `chore_exclusions` answers with exactly its four granted columns, and
     that assertion had been red by design from the merge until the paste.
@@ -935,13 +943,40 @@ Then `npm run test:rls`.
 so roughly fifteen runs an hour from one network — and a whole household shares one home IP. The test
 detects this case and says so, because otherwise it presents as a policy failure in your own code.
 
-**Cleanup.** Each run leaves one household named `TEST <timestamp>` and two anonymous users. There is
-deliberately no client-reachable way to delete a household, so tidying is a manual statement in the SQL
-editor:
+**Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
+five member rows, and two auth users — the two provisioned members, whose addresses are
+`<members.id>@taskr.invalid`. There is deliberately no client-reachable way to delete a household, so
+tidying is a manual statement in the SQL editor:
 
 ```sql
-delete from public.households where name like 'TEST %';
+delete from public.households where name like 'TEST 88 %';
 ```
+
+*(Corrected 2026-08-28 by #221. This said one household and two ANONYMOUS users, which was the
+device-auth era: #88 moved the suite to per-member sign-in on 2026-08-21 and the suite's own header
+recorded the new figures that day. The correction reached the suite and not this page, which is the
+document a person tidying up actually opens. Five member rows, not four — the fifth is created by a
+test body rather than by `beforeAll`, so a count derived by reading setup cannot see it.)*
+
+> **A tidy-up must SPARE the account behind `TASKR_TEST_EMAIL`.** Read the paragraph above once more
+> before running anything: the seeded account **organizes every `TEST 88` household**, so since `0009`
+> it holds a member row in each one. The `delete` shown here cascades to those member rows and leaves
+> the account itself standing — but a tidy-up that *also* clears the test auth users takes the seeded
+> account with them, because from inside the data it is indistinguishable from the residue it creates.
+>
+> That has happened once. The account was cleared around **2026-08-25** and `npm run test:rls` could
+> not reach its first assertion for four days. It cost more than the rows implied, for two reasons.
+> **`test:rls` is the only instrument that has ever confirmed `0009` reached the live project** —
+> `check:live` is structurally blind to a migration made only of indexes, and this page says so above.
+> And **nothing announced the loss**: a vitest `beforeAll` failure is reported as tests *skipped*
+> (`numFailedTests: 0`, `success: false`), so the run exits non-zero with nothing named as failing,
+> which reads as an environment hiccup rather than as a dead suite. Two tests then drifted out of date
+> unseen inside that window and only surfaced when the account was restored.
+>
+> **To restore it:** Authentication -> Users -> Add user -> Create new user, tick **Auto Confirm
+> User**, using the exact values already in `.env.local`. Confirm it from the catalog rather than from
+> the dashboard's user search — that search has been observed returning *"No users found"* for an
+> address present in the unfiltered list seconds earlier, so it cannot prove an absence.
 
 ## What is not done
 

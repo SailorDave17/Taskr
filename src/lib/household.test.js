@@ -24,7 +24,16 @@ let invokeResult = null
  * terminal method.
  */
 function makeQuery(table) {
-  const result = () => results[table] ?? { data: null, error: null }
+  // A table's scripted result may be an ARRAY, consumed one entry per
+  // resolution — #247's removeMember issues a read and then a delete against
+  // the same table in one call, and the two must be able to answer
+  // differently. A plain object keeps the old behaviour: every resolution
+  // answers the same.
+  const result = () => {
+    const scripted = results[table]
+    if (Array.isArray(scripted)) return scripted.shift() ?? { data: null, error: null }
+    return scripted ?? { data: null, error: null }
+  }
   const q = {
     select(cols) {
       calls.push({ op: 'select', table, cols })
@@ -131,6 +140,7 @@ const {
   normalizeMemberEmail,
   normalizeMinutes,
   provisionMember,
+  removeMember,
   signInAddressFor,
   resetMemberCredential,
   signIn,
@@ -777,22 +787,24 @@ describe('the roster read', () => {
 
 })
 
-describe('provisioning a sign-in - #87, and how it fails - #112', () => {
-  // Stand-ins for the SDK's error classes. `callProvisioning` branches on
-  // `name`, which is what the real classes set, and constructing the real ones
-  // would mean importing the client this file deliberately fakes.
-  function fetchError() {
-    const error = new Error('Failed to send a request to the Edge Function')
-    error.name = 'FunctionsFetchError'
-    return error
-  }
+// Stand-ins for the SDK's error classes, shared by the #87 and #247 describes.
+// `callProvisioning` branches on `name`, which is what the real classes set,
+// and constructing the real ones would mean importing the client this file
+// deliberately fakes.
+function fetchError() {
+  const error = new Error('Failed to send a request to the Edge Function')
+  error.name = 'FunctionsFetchError'
+  return error
+}
 
-  function httpError(body) {
-    const error = new Error('Edge Function returned a non-2xx status code')
-    error.name = 'FunctionsHttpError'
-    error.context = { json: () => Promise.resolve(body) }
-    return error
-  }
+function httpError(body) {
+  const error = new Error('Edge Function returned a non-2xx status code')
+  error.name = 'FunctionsHttpError'
+  error.context = { json: () => Promise.resolve(body) }
+  return error
+}
+
+describe('provisioning a sign-in - #87, and how it fails - #112', () => {
 
   async function failureFrom(call) {
     let thrown = null
@@ -876,5 +888,87 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
       name: 'provision-member',
       body: { action: 'provision', memberId: 'm1', password: 'a good one' },
     })
+  })
+})
+
+describe('removing a member takes their sign-in with it - #247', () => {
+  // What this file CAN prove is the client's half: which calls are made, in
+  // what order, and what the caller is told. Whether the function really
+  // deletes the auth user — and refuses to when another household still claims
+  // it — is `src/test/provisioning.functions.test.js`, over a real stack.
+  const row = (claimedBy) => ({
+    data: { id: 'm1', display_name: 'Placeholder One', claimed_by: claimedBy },
+    error: null,
+  })
+  const ok = { data: null, error: null }
+
+  it('revokes the sign-in FIRST and deletes the row second - the recoverable order', async () => {
+    results.members = [row('person-a'), ok]
+    invokeResult = {
+      data: { ok: true, action: 'revoke', memberId: 'm1', deleted: true },
+      error: null,
+    }
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    // Order is load-bearing: `members_claimed_by_fkey` is ON DELETE SET NULL,
+    // so auth-first leaves a "No sign-in yet" row if the second half dies,
+    // where row-first leaves an account that can still sign in — the orphan
+    // #247 was filed about.
+    const ops = calls
+      .filter((c) => c.op === 'invoke' || (c.op === 'delete' && c.table === 'members'))
+      .map((c) => c.op)
+    expect(ops).toEqual(['invoke', 'delete'])
+    // No password travels with a revoke — there is no credential to set.
+    expect(calls.find((c) => c.op === 'invoke').body).toEqual({
+      action: 'revoke',
+      memberId: 'm1',
+    })
+  })
+
+  it('AC 3: a member with no sign-in is removed with no auth call at all', async () => {
+    results.members = [row(null), ok]
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    expect(calls.filter((c) => c.op === 'invoke')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete' && c.table === 'members')).toHaveLength(1)
+  })
+
+  it('AC 4: a failed revoke does not stop the removal, and the warning states both facts', async () => {
+    results.members = [row('person-a'), ok]
+    invokeResult = {
+      data: null,
+      error: httpError({ error: 'This function is not configured.' }),
+    }
+
+    const result = await removeMember('m1')
+
+    // The removal itself went through...
+    expect(calls.filter((c) => c.op === 'delete' && c.table === 'members')).toHaveLength(1)
+    // ...and the warning carries both facts plus the function's own sentence,
+    // so the organizer neither retries the removal nor mistakes which half
+    // failed.
+    expect(result.warning).toMatch(/Placeholder One was removed/)
+    expect(result.warning).toMatch(/sign-in was NOT deleted/)
+    expect(result.warning).toMatch(/This function is not configured\./)
+  })
+
+  it('a row that is already gone is left alone - no revoke, no delete', async () => {
+    results.members = [{ data: null, error: null }]
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    expect(calls.filter((c) => c.op === 'invoke')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([])
+  })
+
+  it('a failed row delete still throws - that half really did fail', async () => {
+    results.members = [row(null), { data: null, error: { message: 'permission denied' } }]
+
+    await expect(removeMember('m1')).rejects.toThrow(/removing the person: permission denied/)
   })
 })

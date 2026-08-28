@@ -1,4 +1,7 @@
-// Provision and reset a member's credential — the half of #62 that needs a server.
+// Provision, reset and revoke a member's credential — the half of #62 that
+// needs a server. `revoke` (#247) is the un-minting: it is what makes removing
+// somebody from the roster end their access, instead of leaving an account
+// that can still sign in and start a household of its own.
 //
 // WHY THIS EXISTS AT ALL
 //
@@ -115,13 +118,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const memberId = String(body.memberId ?? '')
   const password = String(body.password ?? '')
 
-  if (action !== 'provision' && action !== 'reset') {
-    return refuse('action must be "provision" or "reset".', 400)
+  if (action !== 'provision' && action !== 'reset' && action !== 'revoke') {
+    return refuse('action must be "provision", "reset" or "revoke".', 400)
   }
   if (!memberId) return refuse('memberId is required.', 400)
   // Supabase's own floor is 6. Stated here rather than left to the admin API so
-  // the refusal is a sentence the organizer can act on.
-  if (password.length < 6) {
+  // the refusal is a sentence the organizer can act on. Revoke takes no
+  // password: deleting a sign-in has no credential to set.
+  if (action !== 'revoke' && password.length < 6) {
     return refuse('That credential is too short — use at least 6 characters.', 400)
   }
 
@@ -212,7 +216,75 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return refuse('Only the household organizer can do that.', 403)
   }
 
-  // ---- 3: the two things that genuinely need service_role --------------------
+  // ---- 3: the things that genuinely need service_role ------------------------
+
+  if (action === 'revoke') {
+    // #247/#262 — the auth half of removing somebody from the roster. The
+    // member ROW is deliberately NOT deleted here: the client deletes it
+    // through RLS after this answers, so `members_delete_same_household`
+    // (0016) stays the guard for the row — and removing somebody with no
+    // sign-in never depends on this function being deployed or reachable.
+    //
+    // The client calls this FIRST and deletes the row second, and that order
+    // is load-bearing: `members_claimed_by_fkey` is ON DELETE SET NULL, so a
+    // removal that dies between the halves leaves a member with "No sign-in
+    // yet" — a state the roster renders and the organizer can recover from
+    // with Give a sign-in. The other order leaves an account that can still
+    // sign in with no member row naming it, which is the orphan #247 is about.
+    if (!member.claimed_by) {
+      // Not reset's 409. Reset needs a target to act on; revoke's goal is an
+      // absence, and the absence already holds — so a removal racing another
+      // device's revoke stays quiet instead of warning about an account that
+      // does not exist.
+      return json({
+        ok: true,
+        action: 'revoke',
+        memberId: member.id,
+        deleted: false,
+        kept: 'no-sign-in',
+      })
+    }
+
+    // #262's constraint. Since 0009 one person can hold member rows in TWO
+    // households, claimed by ONE auth account — so deleting the account here
+    // could end their access to a household this caller organizes nothing in.
+    // The account goes only when THIS row is its last claim. The same rule
+    // covers a member with a real email address: the account was minted for
+    // the member rows that claim it, and when the last claim goes, what is
+    // left is a key to nothing plus the power to start a household — exactly
+    // the defect. Read as service_role, necessarily: the caller cannot see
+    // other households, and this is a blast-radius question, not an
+    // authorization one — authorization was the caller-scoped checks above.
+    //
+    // No write can race this check into deleting a shared account: the only
+    // path that sets `claimed_by` is this function's own provision branch,
+    // and it always attaches a FRESHLY created auth user, never an existing
+    // one.
+    const { data: otherClaims, error: otherClaimsError } = await asService
+      .from('members')
+      .select('id')
+      .eq('claimed_by', member.claimed_by)
+      .neq('id', member.id)
+      .limit(1)
+    if (otherClaimsError) {
+      return refuse('Could not check whether that sign-in is used elsewhere.', 400)
+    }
+    if ((otherClaims ?? []).length > 0) {
+      return json({
+        ok: true,
+        action: 'revoke',
+        memberId: member.id,
+        deleted: false,
+        kept: 'claimed-elsewhere',
+      })
+    }
+
+    const { error: deleteError } = await asService.auth.admin.deleteUser(member.claimed_by)
+    if (deleteError) {
+      return refuse(`Could not delete that sign-in: ${deleteError.message}`, 400)
+    }
+    return json({ ok: true, action: 'revoke', memberId: member.id, deleted: true })
+  }
 
   if (action === 'reset') {
     if (!member.claimed_by) {

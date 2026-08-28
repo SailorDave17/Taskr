@@ -539,9 +539,61 @@ export async function updateMember(id, { displayName, weeklyMinutes, email }) {
   )
 }
 
-/** Remove a person from the roster — AC 4. */
+/**
+ * Remove a person from the roster — #5 AC 4, and since #247 their sign-in goes
+ * with them.
+ *
+ * Two halves, in the safe order. The AUTH half runs first, through the Edge
+ * Function's `revoke` action (#247/#262): `members_claimed_by_fkey` is ON
+ * DELETE SET NULL, so a removal that dies between the halves leaves a member
+ * showing "No sign-in yet" — a state the roster already renders and the
+ * organizer recovers from with Give a sign-in. Row first would leave an
+ * account that can still sign in with no member row naming it, which is the
+ * orphan #247 was filed about.
+ *
+ * The ROW half stays a client delete through RLS (0016), not a service_role
+ * delete inside the function — the database remains the thing saying no about
+ * the row, and removing somebody with no sign-in never touches the function
+ * at all, so it keeps working when the function is unreachable.
+ *
+ * A revoke failure does NOT stop the removal (#247 AC 4). The person is
+ * removed and the failure comes back as `warning` — two separate facts, so
+ * the organizer is not misled into "the removal failed" and a retry. It is
+ * returned rather than thrown because the removal itself succeeded, and the
+ * caller decides how to show it.
+ *
+ * The function may also legitimately KEEP the account — when another member
+ * row claims it (one person, two households, #159) there is nothing to warn
+ * about: removal from this household is complete and the sign-in belongs to a
+ * household this organizer has no say over.
+ */
 export async function removeMember(id) {
+  const member = unwrap(
+    await getSupabase()
+      .from('members')
+      .select('id, display_name, claimed_by')
+      .eq('id', id)
+      .maybeSingle(),
+    'reading the person',
+  )
+  // Already gone — a double-tap, or another device got there first. Nothing to
+  // revoke and nothing to delete.
+  if (!member) return { warning: null }
+
+  let warning = null
+  if (member.claimed_by) {
+    try {
+      await callProvisioning('revoke', { memberId: id })
+    } catch (err) {
+      warning =
+        `${member.display_name} was removed from the household, but their ` +
+        `sign-in was NOT deleted: ${err.message} That account can still sign ` +
+        'in until it is deleted.'
+    }
+  }
+
   unwrap(await getSupabase().from('members').delete().eq('id', id), 'removing the person')
+  return { warning }
 }
 
 // `claimMember`, `setMemberPin` and `claimMemberWithPin` were here until #62.
@@ -599,12 +651,16 @@ function describeProvisioningFailure(action, error) {
 async function callProvisioning(action, { memberId, password }) {
   const trimmed = String(password ?? '')
   if (!memberId) throw new Error('Pick a person first.')
-  if (trimmed.length < 6) {
+  // Revoke takes no password — deleting a sign-in has no credential to set —
+  // so the floor applies only to the actions that mint one.
+  if (action !== 'revoke' && trimmed.length < 6) {
     throw new Error('That credential is too short — use at least 6 characters.')
   }
 
+  const body =
+    action === 'revoke' ? { action, memberId } : { action, memberId, password: trimmed }
   const { data, error } = await getSupabase().functions.invoke(PROVISION_FUNCTION, {
-    body: { action, memberId, password: trimmed },
+    body,
   })
 
   if (error) {

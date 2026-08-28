@@ -7,8 +7,27 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0021` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-28 at 26 of 26*, by running the instrument after `0021` was applied in #59's own
+- Status: **`0001`–`0022` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
+  ACCOUNT can still sign in. That is the first time this denominator has moved on something a
+  migration cannot change, and nothing became excusable: the two rows are green whenever the
+  account works.
+  **`0022` on 2026-08-28**, applied with `npm run migrate:live` (md5
+  `13ce80f76fe0b15d5cbeb85b4e2a7a06` read back identical) in the session that found the defect.
+  It is the FOURTH migration this check cannot speak for, and the reason is the same shape as
+  `0013`'s: `0022` is made of column grants and one trigger, and `check:live` reads tables,
+  columns, RPCs and functions. The blindness is verified rather than assumed — `0022` creates no
+  table, adds no column, and its one function (`member_capacity_identity_is_fixed`) is named
+  nowhere in `src/lib/liveSchema.js`, `LIVE_RPCS` included. It read **28 of 28 after** the paste;
+  the before-reading was NOT taken, so that half is reasoned from the two artefacts and not
+  measured, which is why it is said here rather than left to be inferred. What testifies
+  instead is `npm run probe:live-grants`, which gained four expectation rows in the same change
+  (`member_split_seen.member_id`, and `member_capacity`'s `household_id`, `member_id` and
+  `period_start`, all `arw`): they read **MOVED before the apply and ok after**, 10 of 10 agreeing
+  with the negative control included. Unlike `0013`, whose paste production genuinely could not
+  testify to because it was a no-op there, `0022` changed real state and the catalog says so.
+  The reading before #250's two rows was *measured 2026-08-28 at 26 of 26*, by running the instrument
+  after `0021` was applied in #59's own
   session with `npm run migrate:live` (md5 `addd7e14b36383cee3b9282f36f9bcb4` read back identical).
   `0021` widened an existing entry rather than adding one — the `member_split_seen` column list grew
   by the fairness note's dismissal flag — so the denominator did NOT move, and the entry would have
@@ -150,7 +169,13 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-28 at 26 of 26*, after `0021` was applied in
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after #250 gave the check two
+  rows about the seeded test account.** Those two are the first entries here whose subject is not the
+  live project at all — they ask whether `TASKR_TEST_EMAIL` can still sign in, because the account
+  behind it was deleted around 2026-08-25 and `npm run test:rls` threw in a `beforeAll` for four days
+  while reporting `numFailedTests: 0`. They can never be excused: an excused sign-in row would be a
+  check that has agreed not to notice it is dead. The reading before them, and the last one whose
+  denominator a migration could move: ***measured 2026-08-28 at 26 of 26*, after `0021` was applied in
   #59's own session — and measured the same day at the same figure after `0020` was applied in
   #50's.** `0021` never entered the set: it widens the `member_split_seen` column list (the
   fairness note's dismissal flag), which would have answered `42703` until applied, and the apply
@@ -475,6 +500,11 @@
   `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
   #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
   was applied by `migrate:live` in the same session, the shortest-lived population yet.
+  **#250 is deliberately NOT a sixteenth inversion either, and for the opposite reason to `0016`'s.**
+  It moved the denominator 26 → 28 while the set stayed EMPTY, because its two rows are about the
+  seeded test account rather than about the live project — the first time this number has moved on
+  something no migration could ever change. A denominator that moves is not an inversion; a
+  population that moves is.
   **`0016` (#198) is deliberately NOT one of the fifteen
   inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
@@ -746,7 +776,9 @@ The rules, in the order the client runs them:
 by #62 on 2026-08-11. It is left in full because its reasoning is still the reason the schema has the
 shape it has, and because the section immediately below — *why not real per-member auth users* — is
 the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
-the Edge Function that was unavailable is now the plan.
+the Edge Function that was unavailable is now the plan — and has since shipped: `provision-member`
+is deployed and mints exactly those accounts, so the "this app has no server" premise below is the
+one clause of the record that is no longer true of the app.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 

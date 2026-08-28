@@ -123,6 +123,42 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: null,
     source: '0012 — deliberately never granted (NEGATIVE CONTROL)',
   }),
+  // `0022`, 2026-08-28. The four columns a PostgREST upsert needs privileges on
+  // that nothing about the app's behaviour would suggest: it names EVERY payload
+  // column in its `DO UPDATE SET` list — the conflict target included — so each
+  // needs UPDATE because it is a SET target and SELECT because `EXCLUDED."col"`
+  // reads it. Without them the split surface and every capacity edit were
+  // refused `permission denied` on the live project.
+  //
+  // These rows are here because `check:live` is BLIND to `0022` in both
+  // directions — it reads tables, columns, RPCs and functions, and `0022` adds
+  // grants and a trigger — so this probe is the only instrument that can say
+  // whether the migration reached the project. They are RED until it is pasted,
+  // which is the deliberate red this table's own docblock describes.
+  Object.freeze({
+    table: 'member_split_seen',
+    column: 'member_id',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0020’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'household_id',
+    privileges: 'arw',
+    source: '0022 — `rw` is 0022’s; `a` is 0005’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'member_id',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0005’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'period_start',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0005’s',
+  }),
 ])
 
 /** The role every expectation above is about. */

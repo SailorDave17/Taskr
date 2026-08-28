@@ -76,6 +76,15 @@ select not exists (
 -- PIN. `.invalid` is reserved by RFC 2606 and can never resolve, so a synthetic
 -- address cannot accidentally reach a real inbox.
 --
+-- CORRECTED 2026-08-28 (#242): "they never see or type" was the intention here
+-- and was never achievable. Sign-in is `signInWithPassword`, so the address is
+-- half the credential and somebody has to type it — and because nothing ever
+-- collected an address, EVERY member's was the synthetic form, displayed on no
+-- screen. The organizer was told to pass on a name and a PIN, and the person
+-- could not get in. The sentence is left standing rather than rewritten because
+-- this file is the record of what was decided on the day; what changed is that
+-- the roster now collects a real address and shows whichever one applies.
+--
 -- Unique across the table rather than per household: it maps 1:1 to a Supabase
 -- auth user, and auth emails are global.
 alter table public.members

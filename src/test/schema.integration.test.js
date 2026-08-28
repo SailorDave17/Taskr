@@ -79,6 +79,7 @@ import {
   describeEdgeFunctionError,
   describeRpcError,
   describeSchemaError,
+  describeSignInError,
   probeEdgeFunction,
   rpcProbeArgs,
 } from '../lib/liveSchema.js'
@@ -168,26 +169,129 @@ const supabase = createClient(url, anonKey, {
 // live project (owner decision 2026-08-28, recorded with its post-state on
 // #246). The vocabulary guard in `support/retiredVocabulary.test.js` now scans
 // this file with no exemption, so the call cannot quietly return.
+//
+// #250 — CAPTURED, NEVER THROWN, and that one word is the whole change.
+//
+// This hook used to throw on a failed sign-in. It was correct, and it was
+// SILENT: vitest reports a `beforeAll` failure as its tests SKIPPED, so the run
+// came back 26 total / 0 FAILED / 26 pending / `success: false`, naming nothing.
+// Measured on this file on 2026-08-28, immediately before this change, by
+// pointing TASKR_TEST_PASSWORD at a wrong value. That output reads as an
+// environment hiccup rather than as a dead instrument — which is how the
+// account's deletion around 2026-08-25 went unnoticed for FOUR DAYS while
+// `npm run test:rls` threw here on every run.
+//
+// So the sign-in still happens here, because it has to happen before any probe,
+// and its RESULT is asserted in a counted test below, where a failure is a named
+// red carrying the fix. Recreating the account took about four minutes; the four
+// days were the expensive part, and two of the RLS suite's own tests went stale
+// inside the window — one written on 2026-08-26 and never once executed, one
+// falsified by `0016` the same day.
+const signIn = { error: null, session: null }
+
 beforeAll(async () => {
   const { data, error } = await supabase.auth.signInWithPassword({
     email: seedEmail,
     password: seedPassword,
   })
-  if (error) {
+  signIn.error = error ?? null
+  signIn.session = data?.session ?? null
+})
+
+/**
+ * Refuse to probe as the wrong caller — #250 AC 3.
+ *
+ * The option NOT available is letting these run anyway. Without a session they
+ * run as `anon`, which `0002` and `0003` revoke wholesale, so `members`,
+ * `chores` and `member_capacity` answer `42501` and `describeSchemaError`
+ * reports a GRANT FAILURE against a completely healthy project — measured
+ * 2026-08-10, and recorded in the sign-in docblock above. A check that reports a
+ * working project as broken gets ignored.
+ *
+ * Owner decision 2026-08-28, taken against skipping them at run time. That
+ * option reads better in a terminal — one red and twenty-five skips rather than
+ * twenty-two reds — and it buys a new way for this file to pass while asking
+ * almost nothing: a guard whose condition ever inverted would make a HEALTHY run
+ * report one pass, twenty-five skips, and exit 0. This is the one file in the
+ * repo whose whole job is to be unfoolable, so it fails closed and takes the
+ * noise. Every one of those reds names the single real cause and says in as many
+ * words that it is not a finding about the live project.
+ */
+function requireSession() {
+  if (!signIn.session) {
     throw new Error(
-      `the seeded account could not sign in, so this check cannot ask its question on ` +
-        `role \`authenticated\`, which is the role the column grants are written for: ` +
-        `${error.message}. Check TASKR_TEST_EMAIL / TASKR_TEST_PASSWORD in .env.local — ` +
-        `.env.example says how the account is created. If the message mentions ` +
-        `confirmation, it was created without "Auto Confirm User".`,
+      'NOT ASKED — the seeded account has no session, so this probe would run as `anon` ' +
+        'and report a healthy project as broken. This is NOT a finding about the live ' +
+        'project: the cause, and its fix, are on the #250 sign-in row above.',
     )
   }
-  if (!data?.session) {
-    throw new Error(
-      'sign-in returned no error and no session, so the probes below would run as ' +
-        '`anon` and report a healthy project as broken. Refusing instead.',
+}
+
+describe('#250 — the seeded test account still works, said out loud', () => {
+  // AC 1. A COUNTED ROW, which is the entire point: the failure this replaces
+  // was a `beforeAll` throw, and vitest reports that as skips with
+  // `numFailedTests: 0`. A row can go red; a hook cannot.
+  it('signs in, so this run can ask its questions at all', () => {
+    const line = describeSignInError(seedEmail, signIn.error, signIn.session)
+
+    // THROWN rather than diffed, and the reason is presentation rather than
+    // taste. MEASURED during this story's own mutation pass: the house
+    // `expect(classify() ?? 'ok').toBe('ok')` idiom renders in the summary line
+    // as `expected 'the seeded test account (test@tester.…' to be 'ok'` —
+    // vitest truncates a serialized value at about forty characters, so the
+    // account, the classification and the fix are all cut off. The full text is
+    // still in the detail block below, but the summary line is where a person
+    // reading twenty-two reds actually looks, and on this row the message IS the
+    // deliverable. A thrown Error prints whole in both places.
+    if (line) throw new Error(line)
+
+    // Not a tautology, and worth stating because it looks like one: the
+    // classifier returns null whenever a session object is present, so a session
+    // carrying no access token would pass it and fail here. Everything below
+    // sends that token.
+    expect(signIn.session?.access_token, 'a green row here must mean a real session').toBeTruthy()
+  })
+
+  // AC 3, REWRITTEN — and the rewrite is recorded rather than quiet.
+  //
+  // As filed at 15:53Z on 2026-08-28 this criterion asked that the rest of
+  // `check:live` be "demonstrably still asking its questions as the ANONYMOUS
+  // caller", with the new probe on its own client so it could not replace that
+  // session. That was true of this file when it was written and false three
+  // hours later: PR #263 (#246) merged at 19:09Z the same day and made the
+  // SEEDED ACCOUNT the credential for the whole file, precisely because the
+  // anonymous sign-in had minted 45 permanent auth users. Two things now refuse
+  // the criterion's literal form — `signInAnonymously` is retired vocabulary and
+  // this file is scanned for it with no exemption, and
+  // `external.anonymous_users` is disabled on the live project.
+  //
+  // The MECHANISM died; the REASON did not, and the reason is the whole value: a
+  // check answering about the wrong subject stays green. So the claim is kept
+  // and re-pointed at the caller this file actually has. Owner decision
+  // 2026-08-28, taken against marking it moot.
+  //
+  // It asks the SERVER who the client is rather than reading back what the
+  // sign-in returned — `getUser()` is a round trip against the session the
+  // probes below will use, so it cannot agree with itself the way a local read
+  // would.
+  it('and every probe below asks as THAT account, on role `authenticated` — #250 AC 3', async () => {
+    requireSession()
+
+    const { data, error } = await supabase.auth.getUser()
+    expect(error, 'the session the probes below will use is not usable').toBeNull()
+    expect(data.user?.email, 'the probes below are running as somebody else').toBe(seedEmail)
+
+    // The role is what the per-column grants are keyed on, and it is a claim in
+    // the access token rather than a property of the account — so it is read
+    // from the token this client is actually sending. `anon` here means every
+    // probe below is asking the question this file exists NOT to ask.
+    const claims = JSON.parse(
+      Buffer.from(signIn.session.access_token.split('.')[1], 'base64url').toString('utf8'),
     )
-  }
+    expect(claims.role, 'the probes below are not on the role the column grants are written for').toBe(
+      'authenticated',
+    )
+  })
 })
 
 // Revoke THIS RUN's session, so a run leaves nothing behind. Scope 'local'
@@ -239,6 +343,7 @@ describe('#78 — the live project has every table and column this app reads', (
   // says which migration is missing without anyone opening the file.
   for (const { table, columns } of LIVE_SCHEMA) {
     it(`${table} exists, with every column the app selects`, async () => {
+      requireSession()
       const error = await probe(table, columns)
       expect(describeSchemaError(table, columns, error) ?? 'ok').toBe('ok')
     })
@@ -252,6 +357,7 @@ describe('#78 AC 2 — POSITIVE CONTROL: this check can actually fail', () => {
   // A green run above means nothing unless these two go red on demand.
 
   it('fails on a table that does not exist, and names it', async () => {
+    requireSession()
     const table = 'taskr_no_such_table_positive_control'
     const error = await probe(table, '*')
     expect(error, 'a missing table must be an error, not an empty result').toBeTruthy()
@@ -267,6 +373,7 @@ describe('#78 AC 2 — POSITIVE CONTROL: this check can actually fail', () => {
     // The sharper half. `0004` and `0006` both add COLUMNS to a table that
     // already exists, so a table-existence check alone would have missed both
     // and this control is what proves the column half is live.
+    requireSession()
     const column = 'taskr_no_such_column_positive_control'
     const error = await probe('members', `id, ${column}`)
     expect(error, 'a missing column must be an error, not an empty result').toBeTruthy()
@@ -316,6 +423,7 @@ describe('#85 — the live project has every function this app calls', () => {
     // reached past it would stay green while every probe below started POSTing.
     // Dropping the option makes this the test that fails, which is the only
     // arrangement where AC 3 is guarded rather than asserted.
+    requireSession()
     const error = await probeRpc('complete_chore', ['chore_id'])
     expect(error?.code, 'the probe is no longer read-only — every probe below now WRITES').toBe(
       '25006',
@@ -327,6 +435,7 @@ describe('#85 — the live project has every function this app calls', () => {
   // which one is missing without opening a file.
   for (const { fn, args } of LIVE_RPCS) {
     it(`${fn}(${args.join(', ')}) exists, with the arguments the app passes`, async () => {
+      requireSession()
       const error = await probeRpc(fn, args)
       expect(describeRpcError(fn, args, error) ?? 'ok').toBe('ok')
     })
@@ -339,6 +448,7 @@ describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () =>
   // the code, a classification that returns null for everything.
 
   it('fails on a function that does not exist, and names it', async () => {
+    requireSession()
     const fn = 'taskr_no_such_function_positive_control'
     const error = await probeRpc(fn, ['chore_id'])
     expect(error, 'a missing function must be an error, not an empty result').toBeTruthy()
@@ -359,6 +469,7 @@ describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () =>
     // does not, because PostgREST resolves by argument names. A signature that
     // drifts away from the client is exactly the live failure this check is for,
     // and a name-only check would call it healthy.
+    requireSession()
     const error = await probeRpc('complete_chore', ['chore'])
     expect(error, 'a changed signature must be an error, not an empty result').toBeTruthy()
     expect(error.code).toBe('PGRST202')
@@ -413,13 +524,13 @@ describe('#115 AC 5 - POSITIVE CONTROL: the Edge Function check can actually fai
 })
 
 describe('#78 — the probe reads schema, never a household', () => {
-  let result
-
-  beforeAll(async () => {
-    result = await supabase.from('members').select('id').limit(0)
-  })
-
-  it('returns no rows, so running this reveals nobody', () => {
+  // #250 moved this query out of a nested `beforeAll` and into the test. That
+  // hook was a second copy of the failure this story exists to remove: a throw
+  // in it reports as a SKIP, so the one assertion that says this check reveals
+  // nobody could stop being asked without anything going red.
+  it('returns no rows, so running this reveals nobody', async () => {
+    requireSession()
+    const result = await supabase.from('members').select('id').limit(0)
     // Asserted rather than commented because it is why this is safe to run
     // against production whenever anyone wants to. Note the honest scope: the
     // run DOES create an anonymous auth user (see the sign-in above). What it

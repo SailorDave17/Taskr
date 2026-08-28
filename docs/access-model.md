@@ -8,7 +8,11 @@
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
 - Status: **`0001`–`0021` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-28 at 26 of 26*, by running the instrument after `0021` was applied in #59's own
+  *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
+  ACCOUNT can still sign in. That is the first time this denominator has moved on something a
+  migration cannot change, and nothing became excusable: the two rows are green whenever the account
+  works. The reading before them was *measured 2026-08-28 at 26 of 26*, by running the instrument
+  after `0021` was applied in #59's own
   session with `npm run migrate:live` (md5 `addd7e14b36383cee3b9282f36f9bcb4` read back identical).
   `0021` widened an existing entry rather than adding one — the `member_split_seen` column list grew
   by the fairness note's dismissal flag — so the denominator did NOT move, and the entry would have
@@ -150,7 +154,13 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-28 at 26 of 26*, after `0021` was applied in
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after #250 gave the check two
+  rows about the seeded test account.** Those two are the first entries here whose subject is not the
+  live project at all — they ask whether `TASKR_TEST_EMAIL` can still sign in, because the account
+  behind it was deleted around 2026-08-25 and `npm run test:rls` threw in a `beforeAll` for four days
+  while reporting `numFailedTests: 0`. They can never be excused: an excused sign-in row would be a
+  check that has agreed not to notice it is dead. The reading before them, and the last one whose
+  denominator a migration could move: ***measured 2026-08-28 at 26 of 26*, after `0021` was applied in
   #59's own session — and measured the same day at the same figure after `0020` was applied in
   #50's.** `0021` never entered the set: it widens the `member_split_seen` column list (the
   fairness note's dismissal flag), which would have answered `42703` until applied, and the apply
@@ -475,6 +485,11 @@
   `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
   #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
   was applied by `migrate:live` in the same session, the shortest-lived population yet.
+  **#250 is deliberately NOT a sixteenth inversion either, and for the opposite reason to `0016`'s.**
+  It moved the denominator 26 → 28 while the set stayed EMPTY, because its two rows are about the
+  seeded test account rather than about the live project — the first time this number has moved on
+  something no migration could ever change. A denominator that moves is not an inversion; a
+  population that moves is.
   **`0016` (#198) is deliberately NOT one of the fifteen
   inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that

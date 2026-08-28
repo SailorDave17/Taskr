@@ -7,9 +7,15 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0020` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-28 at 26 of 26*, by running the instrument after `0020` was applied in #50's own
-  session with `npm run migrate:live` (md5 `180b5beb64655324e55a4eecad9d15fa` read back identical).
+- Status: **`0001`–`0021` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-28 at 26 of 26*, by running the instrument after `0021` was applied in #59's own
+  session with `npm run migrate:live` (md5 `addd7e14b36383cee3b9282f36f9bcb4` read back identical).
+  `0021` widened an existing entry rather than adding one — the `member_split_seen` column list grew
+  by the fairness note's dismissal flag — so the denominator did NOT move, and the entry would have
+  answered `42703` on the new column until the apply; it never stood as an excused red because the
+  apply landed in the same session, before the merge. The reading before that: *measured 2026-08-28
+  at 26 of 26* after `0020` was applied in #50's own session the same way
+  (md5 `180b5beb64655324e55a4eecad9d15fa` read back identical).
   Before that application the same session measured **25 of 26** — every `0001`–`0019` subject
   green, `member_split_seen` answering `PGRST205`, the new entry doing its job — so the excused row
   stood for under an hour and drained on exactly the action it named. `npm run probe:live-grants`
@@ -31,7 +37,8 @@
   **`0015` on 2026-08-26 (#194)**, **`0016` on 2026-08-27 (#198)**, **`0017` and `0018` on
   2026-08-27**, and **`0019` on 2026-08-27 (#235)** — `0018` applied under #231 with
   `npm run migrate:live`, `0019` the same way under #235, and `0017` confirmed already
-  applied by the grant catalog in the same pass rather than by a paste anybody recorded.
+  applied by the grant catalog in the same pass rather than by a paste anybody recorded, and
+  **`0021` on 2026-08-28 (#59)**, applied with `npm run migrate:live` in the story's own session.
   `0013` (the inherited grants, #91) and `0016` (the organizer-only removal rule, #152) never
   appeared in the expected-red set below, because
   `check:live` is structurally blind to both — and each paste was **verified anyway**, by an
@@ -48,7 +55,8 @@
   #49 added the `apply_assignments` RPC, and to **26** when #50 added `member_split_seen` — the
   per-member seen-marker behind the re-balance announcement, SELF-scoped rather than
   household-scoped (a phone must not be able to mark another member's announcement as seen), with
-  select/insert/update granted by column in `0020` and nothing granted to `anon` or
+  select/insert/update granted by column in `0020` — plus `0021`'s fairness-note dismissal flag
+  (#59), select and update only — and nothing granted to `anon` or
   `service_role`. `0013` does not move it, and that
   is the point of the bullet above rather than an oversight.
 
@@ -140,8 +148,11 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-28 at 26 of 26*, after `0020` was applied in
-  #50's own session.** The row it held while #50 was being built — `member_split_seen` answering
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 26 of 26*, after `0021` was applied in
+  #59's own session — and measured the same day at the same figure after `0020` was applied in
+  #50's.** `0021` never entered the set: it widens the `member_split_seen` column list (the
+  fairness note's dismissal flag), which would have answered `42703` until applied, and the apply
+  landed in the same session as the code that reads it. The row it held while #50 was being built — `member_split_seen` answering
   `PGRST205`, cleared only by applying `supabase/migrations/0020_split_seen.sql` — was *measured
   standing at 25 of 26*, then drained the same session by `npm run migrate:live` (the route #185
   built and #231/#235 proved), and both readings were taken rather than assumed. The application

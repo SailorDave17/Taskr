@@ -44,10 +44,13 @@ function unwrap({ data, error }, whatWeWereDoing) {
   return data
 }
 
-// Matches the select grant in 0020 exactly. Like `member_capacity`, the table
-// withholds `household_id` — it is scoped by the member set — so `select('*')`
-// would be refused and the explicit list is the whole surface.
-export const SPLIT_SEEN_COLUMNS = 'member_id, snapshot, seen_rebalance_at'
+// Matches the select grants in 0020 and 0021 exactly. Like `member_capacity`,
+// the table withholds `household_id` — it is scoped by the member set — so
+// `select('*')` would be refused and the explicit list is the whole surface.
+// `fairness_note_dismissed` is #59's: whether this member has dismissed the
+// standing statement of what the fairness number does not count.
+export const SPLIT_SEEN_COLUMNS =
+  'member_id, snapshot, seen_rebalance_at, fairness_note_dismissed'
 
 /**
  * The split as a member is being shown it, in the shape the seen-marker stores.
@@ -173,4 +176,38 @@ export async function writeSplitSeen({ memberId, snapshot, seenRebalanceAt = nul
       ),
     'recording what you were shown',
   )
+}
+
+/**
+ * Record that this member has dismissed the fairness note — #59 AC 3.
+ *
+ * A plain UPDATE, not an upsert, and the difference is deliberate: the
+ * seen-marker row already exists by the time the note is on screen (the
+ * ordinary refresh wrote it before the split rendered), and an upsert here
+ * would have to carry a `snapshot` it does not have. The payload deliberately
+ * does NOT appear in `writeSplitSeen`'s upsert either, so the routine
+ * seen-marker write can never un-dismiss or re-dismiss anything — the two
+ * writes touch disjoint columns of one row.
+ *
+ * The write is read back with `select`, because an update matching zero rows
+ * does not throw — it reports success having changed nothing (#23's vacuous
+ * positive control, measured). Zero rows here means the seen-marker row this
+ * write depends on is missing, and the member deserves a sentence rather than
+ * a dismissal that silently did not land.
+ */
+export async function dismissFairnessNote(memberId) {
+  if (!memberId) throw new Error('Whose dismissal? Recording it must name a member.')
+  const rows = unwrap(
+    await getSupabase()
+      .from('member_split_seen')
+      .update({ fairness_note_dismissed: true })
+      .eq('member_id', memberId)
+      .select('member_id, fairness_note_dismissed'),
+    'recording the dismissal',
+  )
+  if (!rows || rows.length === 0) {
+    throw new Error(
+      'The dismissal did not land — there is no seen-marker row to record it on yet. Try again after the split reloads.',
+    )
+  }
 }

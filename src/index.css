@@ -813,6 +813,25 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* What the fairness number does not count (#59) — the claim's own boundary,
+   sitting under the verdict it bounds. Same quiet register as the re-balance
+   footnote: an acknowledgement, never an alert, and no palette that could read
+   as a problem state attached to a person. */
+.split__note-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.split__note {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
 .split__list {
   list-style: none;
   margin: 0;

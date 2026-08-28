@@ -73,6 +73,7 @@ const reassignApi = {
 const announceApi = {
   readSplitSeen: vi.fn(),
   writeSplitSeen: vi.fn(),
+  dismissFairnessNote: vi.fn(),
 }
 
 // #37 — only the three IMPURE exclusion functions are stubbed. `isExcluded`,
@@ -203,6 +204,7 @@ beforeEach(() => {
   // nothing. Tests about the announcement override this.
   announceApi.readSplitSeen.mockResolvedValue(null)
   announceApi.writeSplitSeen.mockResolvedValue(undefined)
+  announceApi.dismissFairnessNote.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
@@ -1328,6 +1330,67 @@ describe('#50 — a re-balance is announced as an event', () => {
       snapshot: currentSnapshot(),
       seenRebalanceAt: APPLIED_AT,
     })
+  })
+})
+
+// #59 — the fairness note's dismissal, at the level only App can answer: WHOSE
+// dismissal the write records, and that the standing/dismissed state comes from
+// the SERVER's seen-marker row rather than from a local flag. The wording and
+// the on-demand toggle are Split.test.jsx's subject.
+describe('#59 — the fairness note is dismissed per member, on the server', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  const members = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null },
+  ]
+
+  const seenRow = (dismissed) => ({
+    member_id: 'm1',
+    snapshot: { members: [] },
+    seen_rebalance_at: null,
+    fairness_note_dismissed: dismissed,
+  })
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(members)
+  })
+
+  it('stands when this member has never dismissed it', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('fairness-note')).toHaveTextContent(/does not count/i)
+  })
+
+  it('does not stand when the server says this member dismissed it', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(seenRow(true))
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.queryByTestId('fairness-note')).toBeNull()
+    expect(screen.getByRole('button', { name: /what the split counts/i })).toBeInTheDocument()
+  })
+
+  it('dismissing records THIS member and re-reads, after which the note stops standing', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    // The server accepts the dismissal; the re-read that follows reports it.
+    // Armed by changing the mock, not `mockResolvedValueOnce` — the read count
+    // is refresh()'s business, not this test's (#37's lesson).
+    announceApi.readSplitSeen.mockResolvedValue(seenRow(true))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /noted/i })))
+
+    // The ARGUMENT, not just the call: the layer that chooses whose dismissal
+    // this is is exactly the layer nothing else asserts about.
+    expect(announceApi.dismissFairnessNote).toHaveBeenCalledWith('m1')
+    expect(screen.queryByTestId('fairness-note')).toBeNull()
+    expect(screen.getByRole('button', { name: /what the split counts/i })).toBeInTheDocument()
   })
 })
 

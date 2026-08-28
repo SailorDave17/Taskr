@@ -42,6 +42,7 @@ import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
+  dismissFairnessNote,
   readSplitSeen,
   splitSnapshot,
   writeSplitSeen,
@@ -124,6 +125,13 @@ export default function App() {
   // shown; cleared only by the dismiss button. refresh() never clears it — a
   // tab switch after the statement appears must not eat the event.
   const [announcement, setAnnouncement] = useState(null)
+  // #59 — has THIS member dismissed the note saying what the fairness number
+  // does not count? Server state, per member (owner decision at pickup), read
+  // from the same seen-marker row the announcement uses. `false` until a read
+  // says otherwise, which fails toward the note STANDING — the honest
+  // direction: an acknowledgement shown twice costs a tap, one silently
+  // hidden costs the charter's ambition 4.
+  const [fairnessNoteDismissed, setFairnessNoteDismissed] = useState(false)
   // #47 criterion 11 — which surface is on screen. `useState`, not a router and
   // not a state library: this app has neither, adding one to move between three
   // views would be the largest dependency in the repo, and the URL is already
@@ -209,6 +217,11 @@ export default function App() {
             chores: choreRows,
           })
           const seen = await readSplitSeen(me.id)
+          // #59 — one read serves both: the row that carries what this member
+          // was last shown also carries whether they dismissed the fairness
+          // note. No row yet means never dismissed, which is exactly what a
+          // first look should see.
+          setFairnessNoteDismissed(Boolean(seen?.fairness_note_dismissed))
           const news = announcementFrom({
             seen,
             current,
@@ -620,6 +633,18 @@ export default function App() {
   // single currentHousehold() read in refresh().
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
+  // #59 — record the dismissal against THIS member, then re-read like every
+  // other write, so what this phone shows is what the seen-marker row now
+  // says rather than an optimistic local flip. `me` is resolved within the
+  // household on screen (#160), so the dismissal cannot land on another
+  // household's row; with no claimed row the write refuses with a sentence
+  // rather than guessing whose dismissal it was.
+  const myMemberId = me?.id
+  const handleDismissFairnessNote = useCallback(
+    () => mutate(() => dismissFairnessNote(myMemberId)),
+    [mutate, myMemberId],
+  )
+
   return (
     <main className="shell">
       <h1 className="shell__title">Taskr</h1>
@@ -730,6 +755,8 @@ export default function App() {
           exclusions={exclusions}
           lastRebalance={household?.last_rebalance ?? null}
           error={error}
+          fairnessNoteDismissed={fairnessNoteDismissed}
+          onDismissFairnessNote={handleDismissFairnessNote}
         />
       ) : null}
 

@@ -175,7 +175,50 @@ describe('adding someone — AC 2', () => {
     })
     await clickAndSettle(screen.getByRole('button', { name: /add to household/i }))
 
-    expect(onAdd).toHaveBeenCalledWith({ displayName: 'Placeholder Three', weeklyMinutes: '90' })
+    expect(onAdd).toHaveBeenCalledWith({
+      displayName: 'Placeholder Three',
+      weeklyMinutes: '90',
+      email: '',
+    })
+  })
+
+  // #242 — the field that makes the sign-in usable. Asserted as the WHOLE
+  // payload rather than with `objectContaining`, deliberately: this call is the
+  // only place the typed address becomes a write, and a partial match would
+  // still pass if the field were wired to the wrong key.
+  it('adds the email address that was typed, which is what the sign-in needs', async () => {
+    const { onAdd } = setup()
+    const form = screen.getByRole('button', { name: /add to household/i }).closest('form')
+
+    fireEvent.change(within(form).getByLabelText(/^name$/i), {
+      target: { value: 'Placeholder Three' },
+    })
+    fireEvent.change(within(form).getByLabelText(/email address/i), {
+      target: { value: 'placeholder.three@example.com' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /add to household/i }))
+
+    expect(onAdd).toHaveBeenCalledWith({
+      displayName: 'Placeholder Three',
+      weeklyMinutes: 0,
+      email: 'placeholder.three@example.com',
+    })
+  })
+
+  it('clears the address too, so the next person does not inherit it', async () => {
+    const { onAdd } = setup()
+    const form = screen.getByRole('button', { name: /add to household/i }).closest('form')
+
+    fireEvent.change(within(form).getByLabelText(/^name$/i), {
+      target: { value: 'Placeholder Three' },
+    })
+    fireEvent.change(within(form).getByLabelText(/email address/i), {
+      target: { value: 'placeholder.three@example.com' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /add to household/i }))
+
+    expect(onAdd).toHaveBeenCalled()
+    expect(within(form).getByLabelText(/email address/i)).toHaveValue('')
   })
 
   it('clears the form after a person is added, so the next one starts empty', async () => {
@@ -223,7 +266,11 @@ describe('adding someone — AC 2', () => {
     })
     await clickAndSettle(screen.getByRole('button', { name: /add to household/i }))
 
-    expect(onAdd).toHaveBeenCalledWith({ displayName: 'Placeholder Three', weeklyMinutes: 0 })
+    expect(onAdd).toHaveBeenCalledWith({
+      displayName: 'Placeholder Three',
+      weeklyMinutes: 0,
+      email: '',
+    })
   })
 })
 
@@ -243,7 +290,38 @@ describe('editing and removing — AC 4', () => {
     expect(onSave).toHaveBeenCalledWith('m1', {
       displayName: 'Placeholder One Renamed',
       weeklyMinutes: '200',
+      email: '',
     })
+  })
+
+  // #242 — `0007` granted `members.email` as updatable and argued for exactly
+  // this ("an organizer correcting a typo in an address is ordinary roster
+  // maintenance"); nothing has ever written through that grant. This is also
+  // the only route for a member added before the field existed, which is every
+  // member on the live project.
+  it('saves a corrected email address, which is what the grant was written for', async () => {
+    const { onSave } = setup()
+    fireEvent.click(within(rowFor('Placeholder One')).getByRole('button', { name: /^edit$/i }))
+
+    fireEvent.change(screen.getByLabelText(/email address for placeholder one/i), {
+      target: { value: 'placeholder.one@example.com' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(onSave).toHaveBeenCalledWith('m1', {
+      displayName: 'Placeholder One',
+      weeklyMinutes: '120',
+      email: 'placeholder.one@example.com',
+    })
+  })
+
+  it('starts the address field at what the row already holds, so a save is not a wipe', () => {
+    setup({ members: [{ ...roster[0], email: 'placeholder.one@example.com' }] })
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+
+    expect(screen.getByLabelText(/email address for placeholder one/i)).toHaveValue(
+      'placeholder.one@example.com',
+    )
   })
 
   it('abandons an edit without saving it', () => {
@@ -707,8 +785,51 @@ describe('#87 — giving somebody a sign-in', () => {
     // matches both and passes whether or not the form says anything — the
     // assertion would have been about the wrong element.
     expect(
-      within(rowFor('Placeholder One')).getByText(/nobody can look it up later/i),
+      within(rowFor('Placeholder One')).getByText(/nobody can look the pin up later/i),
     ).toBeInTheDocument()
+  })
+
+  // #242 — the two halves of the credential, on the screen where the organizer
+  // decides what to say. Until this story the sentence here named the person's
+  // NAME, which no sign-in has ever accepted: `signIn` is `signInWithPassword`,
+  // so without the address the organizer hands over half a credential and the
+  // member cannot get in.
+  //
+  // Each case is its own assertion because they fail differently and for
+  // different people — a real address is a typo away from working, and a
+  // synthetic one is unguessable, so an organizer who is shown neither has no
+  // route at all.
+  it('#242: names the synthetic address a PIN member will actually sign in with', () => {
+    setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+
+    expect(screen.getByTestId('provision-address-m1')).toHaveTextContent(
+      'm1@taskr.invalid',
+    )
+  })
+
+  it('#242: names the real address instead, once the row has one', () => {
+    setup({
+      isOrganizer: true,
+      members: [{ ...roster[0], email: 'placeholder.one@example.com' }],
+    })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+
+    const note = screen.getByTestId('provision-address-m1')
+    expect(note).toHaveTextContent('placeholder.one@example.com')
+    expect(note).not.toHaveTextContent('taskr.invalid')
+  })
+
+  it('#242: no screen tells the organizer that a name is what gets typed', () => {
+    setup({ isOrganizer: true })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+
+    // The DENIAL, not the subject. The corrected sentences say "address"; a
+    // reader restoring the old model would write "name" again, and only this
+    // catches that. Asserted over the whole rendered screen rather than one
+    // element, because the false claim lived in TWO places and a per-element
+    // assertion would have covered one of them.
+    expect(document.body.textContent).not.toMatch(/sign in with (their|your) (own )?name/i)
   })
 })
 

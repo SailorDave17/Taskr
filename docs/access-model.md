@@ -572,9 +572,27 @@ Two supersessions, and the second undoes an assumption the first was built on.
   database no longer knows or cares.
 - **`members.email` is the discriminator, and its nullability is the whole design.** A member with a
   real address signs in with it and carries a longer secret; a member without one gets a synthetic
-  `<members.id>@taskr.invalid` address they never see or type, and a PIN. `.invalid` is reserved by
+  `<members.id>@taskr.invalid` address and a PIN. `.invalid` is reserved by
   RFC 2606, so a synthetic address can never reach a real inbox. There is deliberately **no separate
   `is_child` flag**, because a second field can disagree with the first.
+
+  **Corrected 2026-08-28 (#242).** This read *"an address they never see or type"* until then, and so
+  did `0007`'s own column comment, which now carries a dated correction beneath the original sentence
+  rather than a rewrite — an applied migration is the record of what was decided on the day, and the
+  sentence was an accurate statement of the intention at the time. *(Nothing mechanical required that:
+  `migrate:live` md5s a file only to check the statement it is applying survived the wire, and `0007`
+  is not applied again. The reason is editorial.)* It was never achievable. Sign-in
+  is `signInWithPassword`, so the address is **half the credential** and somebody has to type it; there
+  is no name-based lookup and there has not been one since #62 retired the join code. What made it
+  invisible is that the sentence describes the MEMBER's experience and is false about the ORGANIZER's:
+  the person handing the credential over has to read the address out, and nothing put it on a screen.
+
+  Two consequences that are still true and worth keeping separate from the correction. A synthetic
+  address really does reach no inbox, so the PIN travels by voice or text and nothing can be reset by
+  email. And an address, once an account is minted at it, does not move: `provision-member` reads this
+  column when it MINTS and refuses once `claimed_by` is set, so editing the roster afterwards changes
+  who the row says the person is and not what they type. Re-pointing an existing account is a Supabase
+  dashboard action.
 - **`members.id` still does not move.** No history migrates. That was true before #62 and is the
   reason #62 was cheap — see *What it costs to change later*, which predicted this change and priced
   it correctly.

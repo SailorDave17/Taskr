@@ -41,10 +41,16 @@ wrong.
    live"* two acts the owner sequences: work merges into `rebuild/v1` and deploys nothing;
    production moves only when `release` does.
 
-   **The promotion step is therefore a pull request from `rebuild/v1` into `release`**, merged by
-   the owner after the migrations that branch assumes have been pasted. `githooks/owner-only` lists
-   `release` for that reason — a local push to it is refused, because a push to `release` is a
-   production release.
+   **The promotion step is therefore a pull request into `release`**, merged by the owner after the
+   migrations that branch assumes have been pasted. `githooks/owner-only` lists `release` for that
+   reason — a local push to it is refused, because a push to `release` is a production release.
+
+   **Changed again 2026-08-27: the source branch is `develop`, not `rebuild/v1`.** The repo's GitHub
+   default branch moved to `develop` the same day, and story PRs go there too now — see *Branching*
+   in the README. `rebuild/v1` retired; every commit it ever carried is an ancestor of `develop`
+   (measured: `git merge-base --is-ancestor origin/rebuild/v1 origin/develop`), so nothing below this
+   paragraph needed rewriting to account for it — the mechanics of the `release` promotion are
+   unchanged, only which branch it promotes *from*.
 
    **This step is real and it has been missed once already.** *Measured 2026-08-05*: Vercel had it
    set to **`main`**, so pushes to `rebuild/v1` produced **Preview** deployments and the production

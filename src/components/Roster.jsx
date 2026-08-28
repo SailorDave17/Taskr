@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
-import { formatMinutes } from '../lib/household.js'
+import { formatMinutes, signInAddressFor } from '../lib/household.js'
 import {
   MAX_CAPACITY_MINUTES,
   MIN_CAPACITY_MINUTES,
@@ -297,12 +297,27 @@ function SignInControl({ member, busy, onProvision }) {
         />
       </label>
       {/* Said once, here, rather than in a note somewhere else on the screen:
-          this is the moment the organizer needs to know the person never sees
-          an email, because it is the moment they decide what to tell them. */}
-      <p className="card__note">
-        Tell {member.display_name} this — they sign in with their name and this
-        PIN. No email is sent, and nobody can look it up later.
+          this is the moment the organizer decides what to tell them, so it is
+          the moment they need BOTH halves of the credential.
+
+          Until #242 this sentence said they sign in with their NAME and this
+          PIN. That was false from the day #62 landed — `signIn` is
+          `signInWithPassword`, so the address is half the credential and no
+          name-based lookup has ever existed. An organizer following it handed
+          over a name and a PIN, and the person could not get in: the address
+          the account was minted at is a UUID that appeared on no screen. */}
+      <p className="card__note" data-testid={`provision-address-${member.id}`}>
+        Tell {member.display_name} both of these — they sign in with{' '}
+        <strong>{signInAddressFor(member)}</strong> and this PIN. No email is
+        sent, and nobody can look the PIN up later.
       </p>
+      {isRealEmailMember(member) ? null : (
+        <p className="card__note">
+          That address is one Taskr made up, because {member.display_name} has no
+          email on their row. It works, and it is long — give them an address
+          above and this becomes something they can type.
+        </p>
+      )}
       {complaint ? (
         <p className="error" role="alert">
           {complaint}
@@ -350,11 +365,13 @@ function MemberRow({
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
   const [minutes, setMinutes] = useState(String(member.weekly_minutes))
+  const [email, setEmail] = useState(member.email ?? '')
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
   function cancel() {
     setName(member.display_name)
     setMinutes(String(member.weekly_minutes))
+    setEmail(member.email ?? '')
     setEditing(false)
   }
 
@@ -365,7 +382,11 @@ function MemberRow({
           className="stack"
           onSubmit={(e) => {
             e.preventDefault()
-            onSave(member.id, { displayName: name, weeklyMinutes: minutes }).then(
+            onSave(member.id, {
+              displayName: name,
+              weeklyMinutes: minutes,
+              email,
+            }).then(
               () => setEditing(false),
               () => {},
             )
@@ -381,6 +402,38 @@ function MemberRow({
               aria-label={`Name for ${member.display_name}`}
             />
           </label>
+          {/* #242 — `0007` granted this column as updatable and argued for it in
+              as many words ("an organizer correcting a typo in an address is
+              ordinary roster maintenance"); nothing has ever been able to write
+              through that grant. It is here as well as on the add form because
+              the row that most needs an address is one added before there was a
+              field to type it into.
+
+              On a member who already has a sign-in this changes the ROSTER, not
+              the account: `provision-member` reads this column when it mints and
+              refuses once `claimed_by` is set, so an address already in use is
+              only movable in the Supabase dashboard. The note below says so
+              rather than leaving the organizer to find out by being locked
+              out. */}
+          <label className="field">
+            <span className="field__label">Email address</span>
+            <input
+              className="field__input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="off"
+              placeholder="Leave blank if they have none"
+              aria-label={`Email address for ${member.display_name}`}
+            />
+          </label>
+          {member.claimed_by ? (
+            <p className="card__note">
+              {member.display_name} already has a sign-in, so changing this does
+              not change the address they sign in with — that one is fixed at the
+              moment the sign-in was given.
+            </p>
+          ) : null}
           <label className="field">
             <span className="field__label">Available minutes per week</span>
             <input
@@ -585,6 +638,7 @@ export default function Roster({
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
+  const [email, setEmail] = useState('')
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -643,9 +697,9 @@ export default function Roster({
             replacement is not prose — it is the control itself. */}
         {isOrganizer ? (
           <p className="card__note" data-testid="provisioning-note">
-            Add people here, then give each of them a sign-in from their row.
-            They sign in with their own name and a PIN you set — tell them what
-            it is, because no email is sent.
+            Add people here with their email address, then give each of them a
+            sign-in from their row. They sign in with that address and a PIN you
+            set — tell them the PIN yourself, because no email is sent.
           </p>
         ) : null}
         {/* #152 — a household whose organizer row is gone. 0016 stops this being
@@ -733,10 +787,11 @@ export default function Roster({
           className="stack"
           onSubmit={(e) => {
             e.preventDefault()
-            onAdd({ displayName: name, weeklyMinutes: minutes || 0 }).then(
+            onAdd({ displayName: name, weeklyMinutes: minutes || 0, email }).then(
               () => {
                 setName('')
                 setMinutes('')
+                setEmail('')
               },
               () => {},
             )
@@ -764,6 +819,32 @@ export default function Roster({
               placeholder="120"
             />
           </label>
+          {/* #242 — the field the sign-in has always needed and nothing ever
+              collected. Optional, because a young child with no inbox is a real
+              member of a real household and the synthetic address still works
+              for them; the note says what leaving it blank costs, at the moment
+              it is being decided.
+
+              #191 makes an address mandatory and retires this whole add path in
+              favour of an invitation. This is the interim, and it is deliberate:
+              #191 lands behind #171, #172, #177 and the router in #175, and
+              until then nobody can be admitted at all. */}
+          <label className="field">
+            <span className="field__label">Email address</span>
+            <input
+              className="field__input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="alex@example.com"
+              autoComplete="off"
+            />
+          </label>
+          <p className="card__note">
+            This is what they type to sign in. Leave it blank only for somebody
+            with no email of their own — Taskr will make an address up for them,
+            and it is long and awkward to pass on.
+          </p>
           <button className="button" type="submit" disabled={busy || !name.trim()}>
             Add to household
           </button>

@@ -106,8 +106,14 @@ const CLIENT_OPERATIONS = [
   },
   {
     table: 'members',
+    op: 'select',
+    site: 'household.js removeMember() pre-delete read — #247',
+    sql: 'select id, display_name, claimed_by from public.members limit 0',
+  },
+  {
+    table: 'members',
     op: 'delete',
-    site: 'household.js:337 removeMember()',
+    site: 'household.js removeMember()',
     sql: 'delete from public.members where false',
   },
   {

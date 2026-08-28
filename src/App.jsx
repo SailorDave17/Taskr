@@ -448,7 +448,19 @@ export default function App() {
       }),
     [mutate, members, household],
   )
-  const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
+  // #247 — a removal can succeed while its auth half does not: the person is
+  // gone and their sign-in survived, two separate facts. The warning is set
+  // AFTER mutate() resolves, i.e. after the refresh, so the screen never shows
+  // the person still listed under a message saying they were removed — and the
+  // removal itself is never reported as a failure, which would invite a retry.
+  const handleRemove = useCallback(
+    (id) =>
+      mutate(() => removeMember(id)).then((result) => {
+        if (result?.warning) setError(result.warning)
+        return result
+      }),
+    [mutate],
+  )
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
   // the row's "Signed in" state comes from `claimed_by` rather than from an

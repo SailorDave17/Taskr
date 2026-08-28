@@ -456,3 +456,183 @@ describe('#87 — provisioning a member, against a real stack', () => {
     expect(result.body.error).toMatch(/no sign-in yet/i)
   })
 })
+
+describe('#247 — revoking a sign-in when a member is removed', () => {
+  it('AC 1 — the whole removal, end to end: the account is deleted and cannot sign in', async () => {
+    const h = await makeHousehold()
+    const provisioned = await callFunction(h.organizerToken, {
+      action: 'provision',
+      memberId: h.member.id,
+      password: 'kid-secret-1',
+    })
+    expect(provisioned.status, `provision failed: ${JSON.stringify(provisioned.body)}`).toBe(200)
+    const authId = provisioned.body.claimedBy
+    const address = `${h.member.id}@taskr.invalid`
+
+    // POSITIVE CONTROL, inside this test rather than borrowed from a sibling:
+    // the credential works BEFORE the revoke, so the refusal below is the
+    // revoke's doing and not a broken fixture's.
+    const before = await freshClient().auth.signInWithPassword({
+      email: address,
+      password: 'kid-secret-1',
+    })
+    expect(before.error, `the account never worked: ${before.error?.message}`).toBeNull()
+
+    // The client's sequence, in the client's order: auth half first. No
+    // password travels with a revoke.
+    const revoked = await callFunction(h.organizerToken, {
+      action: 'revoke',
+      memberId: h.member.id,
+    })
+    expect(revoked.status, `revoke failed: ${JSON.stringify(revoked.body)}`).toBe(200)
+    expect(revoked.body.deleted).toBe(true)
+
+    // Gone by the admin API's account of it...
+    const after = await serviceClient().auth.admin.getUserById(authId)
+    expect(after.data?.user ?? null, 'the auth user still exists after revoke').toBeNull()
+
+    // ...and by the door itself.
+    const attempt = await freshClient().auth.signInWithPassword({
+      email: address,
+      password: 'kid-secret-1',
+    })
+    expect(attempt.error, 'a revoked account can still sign in').toBeTruthy()
+
+    // The FK released the row (ON DELETE SET NULL) — the state the ordering
+    // note calls recoverable — and the row half then completes through RLS,
+    // exactly as the client does it.
+    const { data: released } = await h.organizer
+      .from('members')
+      .select('claimed_by')
+      .eq('id', h.member.id)
+      .single()
+    expect(released.claimed_by, 'the member row still claims the deleted user').toBeNull()
+
+    await h.organizer.from('members').delete().eq('id', h.member.id)
+    // Verified through service_role: an RLS-refused delete removes 0 rows and
+    // reports NO error, so the client's own error is not evidence here.
+    const { data: goneRow } = await serviceClient()
+      .from('members')
+      .select('id')
+      .eq('id', h.member.id)
+      .maybeSingle()
+    expect(goneRow, 'the member row survived the removal').toBeNull()
+  })
+
+  it('#262 — keeps the account when another household still claims it', async () => {
+    const mine = await makeHousehold()
+    const theirs = await makeHousehold()
+    const provisioned = await callFunction(mine.organizerToken, {
+      action: 'provision',
+      memberId: mine.member.id,
+      password: 'kid-secret-1',
+    })
+    expect(provisioned.status).toBe(200)
+    const authId = provisioned.body.claimedBy
+
+    // The same service-role attach the #161 fixture uses: no public path
+    // creates the one-person-two-households claim today, which is exactly why
+    // the guard has to exist before the affordance that will.
+    const other = await theirs.addMember('Housemate', 30)
+    const svc = serviceClient()
+    const { error: attachError } = await svc
+      .from('members')
+      .update({ claimed_by: authId })
+      .eq('id', other.id)
+    expect(attachError, `attaching the second claim failed: ${attachError?.message}`).toBeNull()
+
+    const revoked = await callFunction(mine.organizerToken, {
+      action: 'revoke',
+      memberId: mine.member.id,
+    })
+    expect(revoked.status, `revoke failed: ${JSON.stringify(revoked.body)}`).toBe(200)
+    expect(revoked.body.deleted).toBe(false)
+    expect(revoked.body.kept).toBe('claimed-elsewhere')
+
+    // The account survives: the other household's access was never this
+    // organizer's to end.
+    const still = await freshClient().auth.signInWithPassword({
+      email: `${mine.member.id}@taskr.invalid`,
+      password: 'kid-secret-1',
+    })
+    expect(still.error, `the shared account was deleted: ${still.error?.message}`).toBeNull()
+    const { data: otherRow } = await svc
+      .from('members')
+      .select('claimed_by')
+      .eq('id', other.id)
+      .single()
+    expect(otherRow.claimed_by, "the other household's claim was disturbed").toBe(authId)
+  })
+
+  it('AC 3 (function half) — a member with no sign-in revokes as a quiet ok, not an error', async () => {
+    // The client never calls this for an unclaimed member; this covers the
+    // race where another device revoked first. The goal is an absence and the
+    // absence holds, so the answer is ok — reset's 409 shape would surface a
+    // scary warning about an account that does not exist.
+    const h = await makeHousehold()
+    const result = await callFunction(h.organizerToken, {
+      action: 'revoke',
+      memberId: h.member.id,
+    })
+    expect(result.status, `revoke refused: ${JSON.stringify(result.body)}`).toBe(200)
+    expect(result.body.deleted).toBe(false)
+    expect(result.body.kept).toBe('no-sign-in')
+  })
+
+  it('refuses a revoke from a non-organizer, and the account survives', async () => {
+    const h = await makeHousehold()
+    await callFunction(h.organizerToken, {
+      action: 'provision',
+      memberId: h.member.id,
+      password: 'kid-secret-1',
+    })
+    const sibling = await h.addMember('Sibling', 30)
+    await callFunction(h.organizerToken, {
+      action: 'provision',
+      memberId: sibling.id,
+      password: 'sibling-secret-1',
+    })
+
+    const kid = freshClient()
+    const { data: kidSession } = await kid.auth.signInWithPassword({
+      email: `${h.member.id}@taskr.invalid`,
+      password: 'kid-secret-1',
+    })
+
+    const result = await callFunction(kidSession.session.access_token, {
+      action: 'revoke',
+      memberId: sibling.id,
+    })
+    expect(result.status, "a non-organizer deleted somebody's sign-in").toBe(403)
+
+    const still = await freshClient().auth.signInWithPassword({
+      email: `${sibling.id}@taskr.invalid`,
+      password: 'sibling-secret-1',
+    })
+    expect(still.error, 'the refused revoke deleted the account anyway').toBeNull()
+  })
+
+  it("refuses a revoke aimed at another household's member, without revealing they exist", async () => {
+    const mine = await makeHousehold()
+    const theirs = await makeHousehold()
+    await callFunction(theirs.organizerToken, {
+      action: 'provision',
+      memberId: theirs.member.id,
+      password: 'kid-secret-1',
+    })
+
+    const result = await callFunction(mine.organizerToken, {
+      action: 'revoke',
+      memberId: theirs.member.id,
+    })
+    // 404, same as provision's shape: the caller-scoped read never found the
+    // row, so "not yours" and "does not exist" stay indistinguishable.
+    expect(result.status).toBe(404)
+
+    const still = await freshClient().auth.signInWithPassword({
+      email: `${theirs.member.id}@taskr.invalid`,
+      password: 'kid-secret-1',
+    })
+    expect(still.error, "a stranger revoked another household's sign-in").toBeNull()
+  })
+})

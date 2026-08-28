@@ -602,6 +602,78 @@ describe('#160 — identity and organizer within the active household', () => {
   })
 })
 
+describe('#247 — a removal that succeeds while its auth half does not', () => {
+  // The two-facts warning is composed in lib/household.js and TESTED there;
+  // what only this level can see is App's handleRemove — that the warning is
+  // surfaced at all, and surfaced AFTER the refresh, so the screen never says
+  // "removed" over a roster still listing the person. Deleting the `.then`
+  // that sets it must turn this red.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    organizer_member_id: 'm1',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', household_id: 'h1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const target = { id: 'm2', household_id: 'h1', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' }
+
+  it('shows the two-facts warning over a roster the person is already gone from', async () => {
+    const warning =
+      'Placeholder Two was removed from the household, but their sign-in was ' +
+      'NOT deleted: This function is not configured. That account can still ' +
+      'sign in until it is deleted.'
+    let removed = false
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
+    api.removeMember.mockImplementation(async () => {
+      removed = true
+      return { warning }
+    })
+
+    await renderApp('Who')
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })),
+    )
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })),
+    )
+
+    expect(api.removeMember).toHaveBeenCalledWith('m2')
+    // Both facts on screen…
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Placeholder Two was removed/)
+    expect(alert).toHaveTextContent(/sign-in was NOT deleted/)
+    // …and the roster agrees with the first of them: the person is gone.
+    const roster = within(screen.getByRole('region', { name: /who is in the household/i }))
+    expect(roster.queryByText('Placeholder Two')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: a removal with nothing to warn about shows no alert', async () => {
+    // Without this, the assertions above could be satisfied by an App that
+    // shows every removal as a warning — the state most removals end in is
+    // silence, and silence has to be shown reachable.
+    let removed = false
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
+    api.removeMember.mockImplementation(async () => {
+      removed = true
+      return { warning: null }
+    })
+
+    await renderApp('Who')
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })),
+    )
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })),
+    )
+
+    const roster = within(screen.getByRole('region', { name: /who is in the household/i }))
+    expect(roster.queryByText('Placeholder Two')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // #34 AC 6 — the screen re-reads from the server rather than patching state
 //

@@ -217,11 +217,13 @@ and touches nothing here. Until `provision-member` has run, an organizer who tri
 sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed.
 
-**A source change to an Edge Function needs a deploy of its own, and nothing in this repo will tell
-you it is owed.** Merging does not deploy a function, and neither does pasting a migration — those
-are the other two acts on this page that make production move, and it is easy to assume one of them
-carries this. `supabase/functions/**` reaches production only when `npm run deploy:function` runs, as
-a separate act, by somebody who remembered.
+**A source change to an Edge Function needs a deploy of its own, and `npm run check:deployed`
+reports when one is owed.** Merging does not deploy a function, and neither does pasting a migration —
+those are the other two acts on this page that make production move, and it is easy to assume one of
+them carries this. `supabase/functions/**` reaches production only when `npm run deploy:function`
+runs, as a separate act — and since #222 the omission is a red check rather than something somebody
+has to remember. *(This paragraph said "nothing in this repo will tell you it is owed" until #222,
+and it was true.)*
 
 *Measured 2026-08-27 (#196), which is why this is a paragraph and not a caution:* #161 changed the
 source of both functions and merged at 02:12Z. Production went on serving the 2026-08-24 build, and
@@ -229,19 +231,29 @@ source of both functions and merged at 02:12Z. Production went on serving the 20
 identically, with the excused-red set empty and correct both times.** Every instrument in this repo
 agreed that everything was fine while both fixes were absent from production.
 
-**No check here can report the omission. One command outside here can.** `check:live` asks whether a
+**`npm run check:deployed` reports the omission.** `check:live` asks whether a
 function is *there and callable*, which the superseded build answers just as well, so it is blind to
 this by construction rather than by oversight — and its blindness is invisible, because a green run
-is what a correctly deployed project looks like too. What is not blind is the platform's own record:
+is what a correctly deployed project looks like too. What is not blind is the platform's own record,
+and since #222 a script reads it: `check:deployed` compares each function's deployed `updated_at`
+against the last commit touching its source and **exits non-zero when a deploy is older**, naming
+`npm run deploy:function` as the fix. It needs `SUPABASE_ACCESS_TOKEN`; the same record reads by
+hand, with no token beyond a CLI login, as
 
 ```
 npx supabase functions list --project-ref <project ref>
 ```
 
+*(This paragraph opened "No check here can report the omission. One command outside here can" until
+#222, and it was true — the command above was the only instrument, held as prose. A command in prose
+is the failure `scripts/deploy-function.mjs`'s header records this repo paying for twice, so #222
+applied the same repair to the check that #112 applied to the deploy.)*
+
 Read three fields. `version` and `updated_at` say a deploy happened; **`ezbr_sha256` is the hash of
 the deployed bundle**, and it is the one that matters, because it separates *a deploy happened* from
 *a deploy happened and the code was different*. Compare `updated_at` against the merge time of the
-commit that changed the source: if the deploy is older, it is owed. On #196 both functions moved a
+commit that changed the source: if the deploy is older, it is owed — the comparison `check:deployed`
+automates, per function, against the last commit touching that function's directory. On #196 both functions moved a
 version and both hashes changed, and that pair is the only evidence anywhere in that story that the
 fixes are actually running.
 
@@ -338,8 +350,8 @@ taken on trust.
 
 Two caveats on reading it that way. On a **redeploy** the check is green on both sides, since it
 answers *is a function there and callable* and not *is this the build you just pushed* -
-`npx supabase functions list` answers that second question, and section 3 above says which three
-fields to read. And the count is deliberately not written here: it moves
+`npm run check:deployed` answers that second question, and section 3 above says which three
+fields it reads. And the count is deliberately not written here: it moves
 whenever a table, RPC or function is added, and a number in prose that nothing recomputes is the
 defect `check:live` exists to catch, one level up.
 

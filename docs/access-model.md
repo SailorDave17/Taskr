@@ -707,6 +707,39 @@ Two things that are deliberately true and worth stating rather than implying:
   is that they can now prove who they are to Supabase instead of to a person with database access.
   That is acceptable for a household app and would not be for anything else.
 
+### What removing a member does to their account — #247
+
+**Removal deletes the auth account too, when the account is theirs alone.** Until #247 it did not:
+`removeMember` was a plain delete on `public.members`, nothing anywhere deleted the auth user, and the
+result was an account with no member row that could still sign in and start a household of its own —
+one such orphan was found on the live project, minted for a member row that no longer exists. Row-level
+security held throughout (a memberless session reaches no household's rows), which is why that was a
+defect and not an incident.
+
+The rules, in the order the client runs them:
+
+- **The auth half goes first**, through `provision-member`'s `revoke` action, under the same
+  caller-scoped authorization as minting: the member is read through the caller's own JWT, the
+  organizer check is asked about the household on that member's row, and only then is `service_role`
+  touched. Auth-first is the recoverable order — `members_claimed_by_fkey` is `ON DELETE SET NULL`, so
+  a removal that dies between the halves leaves a member showing "No sign-in yet", a state the roster
+  renders and Give a sign-in repairs. Row-first would leave the orphan.
+- **The account is deleted only when this row is its last claim.** Since 0009 one person can hold
+  member rows in two households under one account, so the function first checks (as `service_role`,
+  necessarily — the caller cannot see other households) whether any other member row claims it.
+  Claimed elsewhere, the account survives and only this household's row goes: the other household's
+  access was never this organizer's to end. The same rule covers a member with a real email address —
+  the account was minted for the member rows that claim it, and when the last claim goes, what is left
+  is a key to nothing plus the power to start a household.
+- **A member with no sign-in never touches the function.** The row is deleted through RLS
+  (`members_delete_same_household`, 0016) exactly as before, so removal keeps working when the
+  function is unreachable.
+- **A failed revoke does not stop the removal.** The person is removed and the screen says both facts
+  separately — removed from the household, account NOT deleted — so nobody concludes the removal
+  failed and retries. The removal is deliberately not held hostage by the function: were removal to
+  abort on an unreachable function, an organizer could not remove anybody with a sign-in until
+  somebody redeployed it.
+
 ## Superseded: the PIN decision — 2026-08-06
 
 **Kept for the record. This is no longer what the app does — see *Read this first* above.** Retired

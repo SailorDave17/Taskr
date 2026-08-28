@@ -6,9 +6,9 @@ name: CI
 # recorded run that proves it.
 on:
   push:
-    branches: ['rebuild/**', 'feature/**']
+    branches: ['develop/**', 'feature/**']
   pull_request:
-    branches: ['rebuild/**']
+    branches: ['develop/**']
 
 permissions:
   contents: read

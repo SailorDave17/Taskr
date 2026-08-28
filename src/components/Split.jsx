@@ -227,8 +227,10 @@ Verdict.propTypes = {
  * actually carrying — a live question, freeing everything, asked fresh each
  * render (#47). This one reports what the last run DID: two different
  * questions, each honest, and folding them into one sentence would make the
- * stored facts look recomputed. The announcement story owns any richer
- * presentation; this line is the verdict travelling, no more.
+ * stored facts look recomputed. The richer presentation exists now — #50's
+ * `Announcement`, the event shown once above the tabs — and this line still
+ * stands beside it on purpose: the event is seen once and dismissed, while a
+ * member who arrives days later needs the run's footnote to still be here.
  */
 function LastRebalance({ verdict, nameOf }) {
   if (!verdict) return null

@@ -140,6 +140,7 @@ describe('what it asks for — AC 3', () => {
       'member_capacity',
       'chore_exclusions',
       'calendar_connections',
+      'member_split_seen',
     ])
   })
 

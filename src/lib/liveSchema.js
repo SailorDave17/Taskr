@@ -1,4 +1,5 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
+import { SPLIT_SEEN_COLUMNS } from './announce.js'
 import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
@@ -62,6 +63,14 @@ export const LIVE_SCHEMA = Object.freeze([
   // client is granted nothing at all on the token table — probing for it would
   // report a missing grant on a perfectly healthy project.
   Object.freeze({ table: 'calendar_connections', columns: CALENDAR_CONNECTION_COLUMNS }),
+  // #50, arriving with `0020` — RED on purpose until that migration reached the
+  // live project, exactly as the `chore_exclusions` and `calendar_connections`
+  // entries above were for theirs: the check exists because applying a
+  // migration is a step recorded nowhere else, and an entry withheld until
+  // after it would leave the window it covers uncovered. Measured doing that
+  // job in #50's own session — 25 of 26 with this entry the one red, then
+  // 26 of 26 after `npm run migrate:live` applied `0020` the same hour.
+  Object.freeze({ table: 'member_split_seen', columns: SPLIT_SEEN_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */

@@ -1,9 +1,11 @@
 # The extraction corpus, and what it measures
 
 - Story: #42 — score plain-language capacity extraction against a fixed corpus
+- Story: #202 — score a proposed chore's due date as its own axis
 - Command: `npm run extraction:corpus`
 - Corpus: [`src/lib/extraction.corpus.js`](../src/lib/extraction.corpus.js)
 - Grader: [`src/lib/extraction.js`](../src/lib/extraction.js)
+- Date rules: [`src/lib/dueDates.js`](../src/lib/dueDates.js)
 
 Every figure on this page is **re-derivable**. Run the command; a test in
 `src/lib/extraction.test.js` fails when this document and the command disagree, so the numbers here
@@ -94,6 +96,65 @@ different repairs, and one combined figure hides which happened.
 Divide by what it answered and an extractor that refuses everything it is unsure of scores 100% — it
 would be rewarded for narrowing the question until it could not get it wrong. Refusing an answerable
 description is a miss.
+
+## The due-date axis — #202, measured 2026-08-28
+
+The chore contract carries a due-date field, so the verdict must not be silent about it. The axis is
+**scored separately, with its own floor and ceiling** — never folded into the within-tolerance count,
+because the owner's accuracy threshold is named against the 0-of-50 to 50-of-50 scale and a new axis
+that moved it would silently reprice a decided bet.
+
+| Axis | Floor — answers with nothing | Ceiling — the corpus's own answers |
+|---|---|---|
+| due dates (chores only) | **0 of 25 exact**, 0 invented | **25 of 25 exact**, 0 invented |
+
+A chore description is **exact** on this axis when every expected job was found carrying exactly the
+right date — the right calendar date where the description states one, and *no date* where it does
+not. A refusal or an unparseable answer on an answerable description is a date miss for the same
+reason it is a tolerance miss: the denominator is what was answerable, never what was answered.
+
+**A description stating no date expects no date.** Decided at #202's filing gate: extraction never
+invents a date — the confirm form supplies one — so the corpus records the no-date outcome as an
+explicit `null` per job, and a date returned for one of those is tallied by name as **invented**,
+the trust-destroying direction.
+
+**10 of the 25 answerable chore descriptions state a date** and fifteen do not, and the split is
+load-bearing. The owner's verdict floor for this axis is **18 of 25** (a figure below it narrows the
+bet rather than killing it), so an extractor that never returns a date scores the fifteen undated
+descriptions and lands **under** the floor; were fewer than eight dated, the never-a-date strategy
+would meet the floor without reading a single date — the same do-nothing-scores-well fault the
+grader's negative control forced out of the minutes design. A test holds the bound.
+
+### How a stated date is scored
+
+The extractor returns the date **as the description states it** — `Tuesday`, `tomorrow`, `the 12th
+of september`, `2026-09-18` — and never resolves a phrase to a calendar date itself: date arithmetic
+is deterministic code's job, and asking a model to do it would put the corpus's hardest failure mode,
+an invented fact, inside the field that exists to avoid one. The grader normalises the stated form
+with `normalizeDueDate(stated, reference)` and compares the result to a hand-computed expectation.
+
+Every expected date was computed by hand against **2026-08-26** (`DUE_REFERENCE`, a Wednesday — the
+day the axis was decided). The normaliser's vocabulary is deliberately small and stated:
+
+| Stated form | Example | Resolves to |
+|---|---|---|
+| ISO date | `2026-09-18` | itself, validated |
+| weekday | `tuesday` | the next such day **on or after** the reference — said on a Tuesday, "Tuesday" means today |
+| relative | `today`, `tonight`, `tomorrow` | the reference's own date, or the day after |
+| bare day-and-month | `september 12`, `the 12th of september` | the next such date on or after the reference, year inferred |
+
+Anything else — `next tuesday` included, since English does not agree on which Tuesday that names —
+is **refused**, and the grader scores the refusal as a miss on this axis only: the minutes verdict
+stands, because *got the time right* and *got the date right* are different failures with different
+repairs. Everything is a string on both sides of the boundary; the reference may carry a time
+(`2026-08-26T23:59`) and its **date part is read as the local calendar date**, never through a
+`Date` round trip — at Pacific/Marquesas, the suite's pinned zone, one minute before local midnight
+is already tomorrow morning in UTC, and a round trip would answer "tomorrow" differently at 23:59
+than at noon.
+
+**Entity matching is unchanged by this story**: case and surrounding whitespace only, no stemming,
+no synonyms, no fuzzy distance. The date axis reads the entities the minutes axis matched, so its
+strictness is inherited rather than re-decided.
 
 ## What the grader deliberately does not do
 

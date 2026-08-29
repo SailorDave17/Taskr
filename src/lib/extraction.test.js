@@ -11,7 +11,8 @@ import {
   oracleExtractorFor,
   zeroExtractor,
 } from './extraction.js'
-import { CAST, CORPUS, WEEKDAY_WORDS } from './extraction.corpus.js'
+import { CAST, CORPUS, DUE_REFERENCE, WEEKDAY_WORDS } from './extraction.corpus.js'
+import { normalizeDueDate } from './dueDates.js'
 import { MAX_CAPACITY_MINUTES, MIN_CAPACITY_MINUTES } from './capacity.js'
 import { MAX_EXPECTED_MINUTES, MIN_EXPECTED_MINUTES } from './chores.js'
 
@@ -27,6 +28,7 @@ import { MAX_EXPECTED_MINUTES, MIN_EXPECTED_MINUTES } from './chores.js'
 
 const SOURCE = readFileSync(resolve(process.cwd(), 'src/lib/extraction.js'), 'utf8')
 const CORPUS_SOURCE = readFileSync(resolve(process.cwd(), 'src/lib/extraction.corpus.js'), 'utf8')
+const DUE_SOURCE = readFileSync(resolve(process.cwd(), 'src/lib/dueDates.js'), 'utf8')
 
 const capacityItems = CORPUS.filter((item) => item.kind === 'capacity')
 const choreItems = CORPUS.filter((item) => item.kind === 'chores')
@@ -278,10 +280,18 @@ describe('AC 3 — the grader reports error, tolerance, attribution and refusals
       /@supabase\/supabase-js|supabase\.js$|^react$|^react\//.test(spec),
     )
     expect(forbidden, `forbidden imports: ${forbidden.join(', ')}`).toEqual([])
-    // The grader imports nothing at all today, which is the strongest form of
-    // this claim and also the form that would pass vacuously if the scan broke
-    // — hence the positive control below.
-    expect(imports).toEqual([])
+    // The grader's whole import list, pinned. It was empty until #202, which
+    // is why normalizeDueDate lives in dueDates.js rather than in chores.js
+    // where it grew up: chores.js imports supabase.js, so importing the date
+    // rules from there would have handed the grader a route to the network.
+    // The transitive assertion below is what keeps the wall a wall — a leaf
+    // module on this list must STAY a leaf, or the pin here means nothing.
+    expect(imports).toEqual(['./dueDates.js'])
+  })
+
+  it('and the one module it imports is a leaf — it imports nothing at all', () => {
+    const imports = [...DUE_SOURCE.matchAll(/^\s*import\s[^\n]*?from\s+'([^']+)'/gm)].map((m) => m[1])
+    expect(imports, 'dueDates.js has grown an import — the no-network wall is transitive').toEqual([])
   })
 
   it('POSITIVE CONTROL: the import scan can see an import when there is one', () => {
@@ -298,10 +308,13 @@ describe('AC 3 — the grader reports error, tolerance, attribution and refusals
   it('never calls out, by any of the names a call would have', () => {
     // Comments stripped: this module's prose says at length that it makes no
     // network call, and scanning the raw file would make an accurate comment
-    // indistinguishable from the defect it describes.
-    const code = codeOf(SOURCE)
-    for (const name of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'process.env', 'import(']) {
-      expect(code, `the grader names ${name}`).not.toContain(name)
+    // indistinguishable from the defect it describes. dueDates.js is scanned
+    // too — it is inside the grader's import wall now, so a call from there IS
+    // a call from the grader.
+    for (const code of [codeOf(SOURCE), codeOf(DUE_SOURCE)]) {
+      for (const name of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'process.env', 'import(']) {
+        expect(code, `the grader names ${name}`).not.toContain(name)
+      }
     }
   })
 
@@ -645,8 +658,8 @@ describe('AC 7 — the run is meaningful in CI, with no account, key or network'
     ).toBeGreaterThan(0)
   })
 
-  it('reads no environment variable and no credential, in either file', () => {
-    for (const source of [codeOf(SOURCE), codeOf(CORPUS_SOURCE)]) {
+  it('reads no environment variable and no credential, in any of the three files', () => {
+    for (const source of [codeOf(SOURCE), codeOf(CORPUS_SOURCE), codeOf(DUE_SOURCE)]) {
       expect(source).not.toMatch(/process\.env/)
       expect(source).not.toMatch(/import\.meta\.env/)
       expect(source).not.toMatch(/VITE_/)
@@ -679,6 +692,259 @@ describe('AC 7 — the run is meaningful in CI, with no account, key or network'
       `${floor.overall.withinTolerance} of ${floor.overall.answerable}`,
     )
     expect(doc).toContain(`${floor.overall.unattributed} unattributed`)
+
+    // #202 — the due-date axis's recorded scale, pinned the same way. The
+    // strings are anchored to the axis's own vocabulary ("exact") so a
+    // matching pair of numbers from the OTHER scale cannot satisfy them —
+    // a doc-agreement row matched only by its values is satisfied by any
+    // other row that happens to share them.
+    expect(doc, 'the recorded due-date ceiling is not what the oracle scores').toContain(
+      `${ceiling.byKind.chores.dueExact} of ${ceiling.byKind.chores.dueApplicable} exact`,
+    )
+    expect(doc, 'the recorded due-date floor is not what the zero extractor scores').toContain(
+      `${floor.byKind.chores.dueExact} of ${floor.byKind.chores.dueApplicable} exact`,
+    )
+    const dated = choreItems.filter(
+      (item) => !item.ambiguous && Object.values(item.expect.due).some((value) => value !== null),
+    ).length
+    expect(doc, 'the recorded dated/undated split is not what the corpus holds').toContain(
+      `${dated} of the ${choreItems.filter((i) => !i.ambiguous).length} answerable chore descriptions state a date`,
+    )
+    expect(doc, 'the reference date the doc names is not the one the corpus pins').toContain(DUE_REFERENCE)
+  })
+})
+
+// #202 — the due-date axis. Everything below is new with that story; the
+// describes above are #42's and were left untouched on purpose, because AC 5
+// of #202 is precisely that the widening moved none of them.
+describe('#202 AC 1 — every answerable chore description carries a due expectation', () => {
+  const answerableChores = choreItems.filter((item) => !item.ambiguous)
+  const dated = answerableChores.filter((item) =>
+    Object.values(item.expect.due).some((value) => value !== null),
+  )
+  const undated = answerableChores.filter((item) =>
+    Object.values(item.expect.due).every((value) => value === null),
+  )
+
+  it('carries a due entry for exactly the entities the minutes expectation names', () => {
+    for (const item of answerableChores) {
+      expect(item.expect.due, `no due expectation for: ${item.text}`).toBeTruthy()
+      expect(Object.keys(item.expect.due).sort(), `due keys drift from entities in: ${item.text}`).toEqual(
+        Object.keys(item.expect.minutesByEntity).sort(),
+      )
+    }
+  })
+
+  it('states either a real calendar date or an explicit null, per entity', () => {
+    // The null is the documented no-date outcome: the description states no
+    // date, extraction returns none, the confirm form supplies it. It is
+    // explicit rather than an absent key because an absent key cannot say
+    // whether the author decided or forgot.
+    for (const item of answerableChores) {
+      for (const [entity, due] of Object.entries(item.expect.due)) {
+        if (due === null) continue
+        expect(due, `${entity} in "${item.text}"`).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+        // A hand-computed date before the reference would be a corpus bug: the
+        // normaliser resolves every stated form on or after the reference, so
+        // no extractor could ever match it. Within a year, for the same
+        // reason in the other direction.
+        expect(due >= DUE_REFERENCE, `${entity} is due before the reference in: ${item.text}`).toBe(true)
+        expect(due <= '2027-08-26', `${entity} is due implausibly far out in: ${item.text}`).toBe(true)
+      }
+    }
+  })
+
+  it('gives capacity descriptions no due expectation, because a week has no due date', () => {
+    for (const item of capacityItems.filter((i) => !i.ambiguous)) {
+      expect('due' in item.expect, `a capacity item carries a due map: ${item.text}`).toBe(false)
+    }
+  })
+
+  it('POSITIVE CONTROL: the corpus carries dated AND undated chore descriptions', () => {
+    // All-dated would make the no-date rule unmeasurable; all-undated would
+    // make the whole axis reachable by an extractor that never reads a date.
+    expect(dated.length, 'no chore description states a date').toBeGreaterThan(0)
+    expect(undated.length, 'every chore description states a date').toBeGreaterThan(0)
+  })
+
+  it('keeps the undated set SMALLER than the verdict floor', () => {
+    // The owner's floor for the axis is 18 of 25 (#202, filing gate). An
+    // extractor that never returns a date scores exactly the undated items,
+    // so undated must stay at 17 or fewer — one item more and the
+    // never-a-date strategy meets the floor without reading a single date,
+    // which is the do-nothing-scores-well fault the #42 negative control
+    // exists to keep out of this instrument.
+    expect(undated.length).toBeLessThanOrEqual(17)
+    expect(dated.length + undated.length).toBe(answerableChores.length)
+  })
+
+  it('agrees with the normaliser about every stated form the corpus uses', () => {
+    // The expected dates were computed BY HAND against DUE_REFERENCE (a
+    // Wednesday); these four re-derive one of each stated form through
+    // normalizeDueDate. Two independent derivations agreeing is the check —
+    // the corpus values were not produced by running this function.
+    const byText = new Map(CORPUS.map((item) => [item.text, item]))
+    const bins = byText.get('take the bins out on Tuesday night, five minutes.')
+    expect(normalizeDueDate('Tuesday', DUE_REFERENCE)).toBe(bins.expect.due['Take the bins out'])
+    const laundry = byText.get('fold the laundry tomorrow, twenty-five minutes.')
+    expect(normalizeDueDate('tomorrow', DUE_REFERENCE)).toBe(laundry.expect.due['Fold the laundry'])
+    const freezer = byText.get('defrost the freezer by the 12th of september, about an hour and a half.')
+    expect(normalizeDueDate('the 12th of september', DUE_REFERENCE)).toBe(
+      freezer.expect.due['Defrost the freezer'],
+    )
+    const alarms = byText.get('change the smoke alarm batteries, ten minutes, due 2026-09-18.')
+    expect(normalizeDueDate('2026-09-18', DUE_REFERENCE)).toBe(
+      alarms.expect.due['Change the smoke alarm batteries'],
+    )
+  })
+})
+
+describe('#202 — the due-date axis is graded on stated forms and never folded into tolerance', () => {
+  const byText = new Map(CORPUS.map((item) => [item.text, item]))
+  const bins = byText.get('take the bins out on Tuesday night, five minutes.')
+  const shopping = byText.get(
+    'do the weekly shop on Saturday, an hour and a half, and put the shopping away, fifteen minutes.',
+  )
+
+  /** The bins item answered with the right minutes and a chosen dueDate. */
+  function binsAnswerWith(dueDate) {
+    return {
+      kind: 'chores',
+      chores: [{ title: 'Take the bins out', expectedMinutes: 5, ...(dueDate === undefined ? {} : { dueDate }) }],
+    }
+  }
+
+  it('normalises the STATED form before comparing — a weekday matches its calendar date', () => {
+    // The extractor answers with the date as the text states it; resolving
+    // 'Tuesday' to 2026-09-01 is the grader's job, through normalizeDueDate
+    // and the item's own reference. This is the assertion that reddens if the
+    // grader starts comparing strings raw.
+    const result = gradeItem(bins, binsAnswerWith('Tuesday'))
+    expect(result.dueExact).toBe(true)
+    expect(result.outcome).toBe(OUTCOMES.WITHIN_TOLERANCE)
+  })
+
+  it('scores a wrong date as a date miss while the minutes verdict stands', () => {
+    const result = gradeItem(bins, binsAnswerWith('Wednesday'))
+    expect(result.dueExact).toBe(false)
+    // The separation is the point: the within-tolerance scale the owner's
+    // threshold is named against must not move because a date is wrong.
+    expect(result.outcome).toBe(OUTCOMES.WITHIN_TOLERANCE)
+  })
+
+  it('scores a missing date as a miss where the description states one', () => {
+    expect(gradeItem(bins, binsAnswerWith(undefined)).dueExact).toBe(false)
+    expect(gradeItem(bins, binsAnswerWith(null)).dueExact).toBe(false)
+  })
+
+  it('scores a stated form the normaliser refuses as a miss, not as malformed', () => {
+    const result = gradeItem(bins, binsAnswerWith('whenever'))
+    expect(result.dueExact).toBe(false)
+    expect(result.outcome).toBe(OUTCOMES.WITHIN_TOLERANCE)
+  })
+
+  it('counts an INVENTED date by name — a date on an entity whose description states none', () => {
+    // The shopping item is the mixed case: the Saturday belongs to the shop
+    // and the put-away is dateless. An extractor that smears the date across
+    // both has invented a fact, which is the trust-destroying direction.
+    const answer = {
+      kind: 'chores',
+      chores: [
+        { title: 'Do the weekly shop', expectedMinutes: 90, dueDate: 'Saturday' },
+        { title: 'Put the shopping away', expectedMinutes: 15, dueDate: 'Saturday' },
+      ],
+    }
+    const result = gradeItem(shopping, answer)
+    expect(result.dueExact).toBe(false)
+    expect(result.dueInvented).toEqual([normalizeEntity('Put the shopping away')])
+  })
+
+  it('grades the mixed item exact when the date lands on the right entity only', () => {
+    const answer = {
+      kind: 'chores',
+      chores: [
+        { title: 'Do the weekly shop', expectedMinutes: 90, dueDate: 'Saturday' },
+        { title: 'Put the shopping away', expectedMinutes: 15 },
+      ],
+    }
+    const result = gradeItem(shopping, answer)
+    expect(result.dueExact).toBe(true)
+    expect(result.dueInvented).toEqual([])
+  })
+
+  it('treats an empty-string dueDate as no date claimed, not as malformed', () => {
+    const undatedItem = byText.get('mow the lawn takes an hour.')
+    const result = gradeItem(undatedItem, {
+      kind: 'chores',
+      chores: [{ title: 'Mow the lawn', expectedMinutes: 60, dueDate: '' }],
+    })
+    expect(result.outcome).toBe(OUTCOMES.WITHIN_TOLERANCE)
+    expect(result.dueExact).toBe(true)
+  })
+
+  it('refuses a dueDate that is not a string as a malformed answer', () => {
+    expect(gradeItem(bins, binsAnswerWith(42)).outcome).toBe(OUTCOMES.MALFORMED)
+    expect(gradeItem(bins, binsAnswerWith(new Date())).outcome).toBe(OUTCOMES.MALFORMED)
+  })
+
+  it('scores a refusal of an answerable chore as a date miss in the denominator', async () => {
+    // Same rule as the within-tolerance denominator: divide by what was
+    // answerable, never by what the extractor chose to answer. A refusal on
+    // an applicable item still counts against the axis.
+    const report = await gradeExtraction(() => ({ kind: 'refusal', reason: 'always' }), CORPUS)
+    expect(report.byKind.chores.dueApplicable).toBe(25)
+    expect(report.byKind.chores.dueExact).toBe(0)
+  })
+
+  it('does not apply the axis to capacity descriptions or ambiguous chores', async () => {
+    const report = await gradeExtraction(oracleExtractorFor(CORPUS), CORPUS)
+    expect(report.byKind.capacity.dueApplicable).toBe(0)
+    expect(report.byKind.capacity.dueExact).toBe(0)
+    // 25 of 30 chore descriptions are answerable; the ambiguous five carry no
+    // expectation of any kind, dates included.
+    expect(report.byKind.chores.dueApplicable).toBe(25)
+    const ambiguousResults = report.items.filter((r) => r.ambiguous)
+    for (const result of ambiguousResults) expect(result.dueExact).toBeNull()
+  })
+
+  it('separates the axes over a whole run — perfect minutes, never a date', async () => {
+    // The never-a-date extractor: oracle minutes, no dueDate anywhere. It
+    // scores every undated item and no dated one — which the corpus keeps
+    // BELOW the 18-of-25 verdict floor — while the within-tolerance scale
+    // stays at its ceiling. One figure must not be readable from the other.
+    const oracle = oracleExtractorFor(CORPUS)
+    const neverDates = (request) => {
+      const answer = oracle(request)
+      if (answer.kind !== 'chores') return answer
+      return { kind: 'chores', chores: answer.chores.map(({ title, expectedMinutes }) => ({ title, expectedMinutes })) }
+    }
+    const report = await gradeExtraction(neverDates, CORPUS)
+    expect(report.byKind.chores.proportionWithinTolerance).toBe(1)
+    const undatedCount = choreItems.filter(
+      (item) => !item.ambiguous && Object.values(item.expect.due).every((value) => value === null),
+    ).length
+    expect(report.byKind.chores.dueExact).toBe(undatedCount)
+    expect(report.byKind.chores.dueExact).toBeLessThan(18)
+  })
+})
+
+describe('#202 AC 6 — the axis has its own floor and ceiling before any provider is asked', () => {
+  it('the zero extractor reaches the floor: nothing named, so every date is a miss', async () => {
+    // The empty-set trap, on this axis: the zero extractor matches no entity,
+    // and a walk over MATCHED entities would find nothing to be wrong about
+    // and score it perfect. The walk is over EXPECTED entities, so it scores
+    // zero — proved here rather than assumed.
+    const report = await gradeExtraction(zeroExtractor, CORPUS)
+    expect(report.byKind.chores.dueApplicable).toBe(25)
+    expect(report.byKind.chores.dueExact).toBe(0)
+    expect(report.byKind.chores.dueInvented).toBe(0)
+  })
+
+  it('the oracle reaches the ceiling: every date exact, none invented', async () => {
+    const report = await gradeExtraction(oracleExtractorFor(CORPUS), CORPUS)
+    expect(report.byKind.chores.dueExact).toBe(25)
+    expect(report.byKind.chores.dueApplicable).toBe(25)
+    expect(report.byKind.chores.dueInvented).toBe(0)
   })
 })
 

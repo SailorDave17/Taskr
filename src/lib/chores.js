@@ -13,6 +13,7 @@
 // whole thesis rests on.
 
 import { getSupabase } from './supabase.js'
+import { normalizeDueDate } from './dueDates.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -147,31 +148,16 @@ export function normalizeActualMinutes(value) {
 /**
  * A due date as the `date` column wants it: `YYYY-MM-DD`, no time, no zone.
  *
- * Deliberately string-in, string-out, and deliberately NOT via `new Date()`.
- * Parsing '2026-08-10' into a Date and formatting it back returns the previous
- * day for anyone west of UTC, because the parse is UTC-midnight and the format
- * is local — a chore due Monday would be stored as Sunday for half the world.
- * The column is a calendar date and this keeps it one all the way down.
+ * Lived here until #202, which moved it to dueDates.js — a leaf module — so
+ * the extraction grader can import it without inheriting this file's
+ * supabase.js import (extraction.test.js walls the grader off from anything
+ * that could reach the network). Re-exported rather than duplicated, because a
+ * second implementation of the same validation is the drift the move avoids.
+ * Every existing caller and its one-argument, ISO-only behaviour are
+ * unchanged; the widened phrase-plus-reference form is #202's and is
+ * documented at the definition.
  */
-export function normalizeDueDate(value) {
-  const text = String(value ?? '').trim()
-  if (!text) throw new Error('When is this chore due?')
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error('A due date needs to look like 2026-08-10.')
-
-  const [year, month, day] = text.split('-').map(Number)
-  if (month < 1 || month > 12) throw new Error('That is not a real month.')
-  // Round-trip through UTC to reject 31 February and friends, which the regex
-  // above is happy with. UTC on both sides, so no zone can shift the answer.
-  const asUtc = new Date(Date.UTC(year, month - 1, day))
-  if (
-    asUtc.getUTCFullYear() !== year ||
-    asUtc.getUTCMonth() !== month - 1 ||
-    asUtc.getUTCDate() !== day
-  ) {
-    throw new Error('That is not a real date.')
-  }
-  return text
-}
+export { normalizeDueDate }
 
 /**
  * A schedule the columns will accept — #53 AC 6: structured, never free text.

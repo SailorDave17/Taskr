@@ -72,6 +72,29 @@
 // an extractor that answers one of these with a confident number is counted
 // separately from one that is merely wide, because the charter's kill condition
 // is trust and those two damage it differently.
+//
+// THE DUE-DATE AXIS — #202
+//
+// Every answerable chore item carries a `due` map: entity -> the expected due
+// date as a hand-computed `YYYY-MM-DD` against DUE_REFERENCE below, or `null`
+// where the description states no date. The null is EXPLICIT on purpose — an
+// absent key cannot say whether the author decided there is no date or forgot
+// to look, and "a chore description stating no date returns no date" is a
+// decision (#202, filing gate: extraction never invents a date; the confirm
+// form supplies it).
+//
+// TEN of the twenty-five answerable chore descriptions state a date and
+// FIFTEEN do not, and the split is load-bearing rather than incidental: the
+// owner's verdict floor for the axis is 18 of 25 (#202, filing gate), so an
+// extractor that never returns a date at all scores the fifteen undated items
+// and lands at 15 — UNDER the floor. Were fewer than eight items dated, the
+// never-a-date strategy would meet the floor without reading a single date,
+// which is the do-nothing-scores-well design fault the #42 grader's negative
+// control exists to keep out. extraction.test.js asserts the bound.
+//
+// The dated ten spread the four stated forms the normaliser accepts — a
+// weekday, a relative phrase, a bare day-and-month, and an ISO date — so the
+// axis is exercised end to end on every form, not only in unit tests.
 
 /**
  * Every person this corpus names. Closed on purpose — `extraction.test.js`
@@ -89,6 +112,18 @@ export const WEEKDAY_WORDS = Object.freeze([
   'Saturday',
   'Sunday',
 ])
+
+/**
+ * The reference date every expected due date below was hand-computed against —
+ * the day the axis was decided at #202's filing gate, a WEDNESDAY.
+ *
+ * The grader resolves an extractor's stated date ('Tuesday', 'tomorrow')
+ * against this, and compares the result to the hand-written `due` values. It
+ * is a property of the corpus rather than of the grader because the expected
+ * dates are corpus data: change this without recomputing every `due` entry and
+ * the expectations are silently about a different week.
+ */
+export const DUE_REFERENCE = '2026-08-26'
 
 /**
  * Thirty descriptions of a household week, each yielding minutes per person.
@@ -267,37 +302,65 @@ const CHORES = [
   {
     text: 'clean the bathroom, about half an hour.',
     why: 'the issue comment names this exact shape as the archetype: one job, one hedged duration, no person anywhere in it.',
-    expect: { minutesByEntity: { 'Clean the bathroom': 30 }, toleranceMinutes: 10 },
+    expect: {
+      minutesByEntity: { 'Clean the bathroom': 30 },
+      toleranceMinutes: 10,
+      due: { 'Clean the bathroom': null },
+    },
   },
   {
     text: 'mow the lawn takes an hour.',
     why: 'the duration is phrased as a property of the job rather than appended to it, so the number is not where the previous item put it.',
-    expect: { minutesByEntity: { 'Mow the lawn': 60 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Mow the lawn': 60 },
+      toleranceMinutes: 0,
+      due: { 'Mow the lawn': null },
+    },
   },
   {
     text: 'take the bins out on Tuesday night, five minutes.',
-    why: 'carries a day, which is due-date information rather than duration. An extractor that folds the day into the answer has added a field nobody asked for.',
-    expect: { minutesByEntity: { 'Take the bins out': 5 }, toleranceMinutes: 0 },
+    why: 'carries a weekday, the plainest dated form. This why said "a field nobody asked for" until #202 — the due date IS a field now, and the weekday resolves on-or-after the reference: said on a Wednesday, Tuesday means next week.',
+    expect: {
+      minutesByEntity: { 'Take the bins out': 5 },
+      toleranceMinutes: 0,
+      due: { 'Take the bins out': '2026-09-01' },
+    },
   },
   {
     text: 'vacuum the downstairs, twenty minutes.',
     why: 'a plainly stated single job, held as a control on the harder ones around it.',
-    expect: { minutesByEntity: { 'Vacuum the downstairs': 20 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Vacuum the downstairs': 20 },
+      toleranceMinutes: 0,
+      due: { 'Vacuum the downstairs': null },
+    },
   },
   {
     text: 'change the bed sheets, fifteen minutes a bed and there are three beds.',
     why: 'one job whose duration is a product. Fifteen times three, and the answer is neither number in the text.',
-    expect: { minutesByEntity: { 'Change the bed sheets': 45 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Change the bed sheets': 45 },
+      toleranceMinutes: 0,
+      due: { 'Change the bed sheets': null },
+    },
   },
   {
     text: 'wash the dishes after dinner, ten minutes, and wipe the counters, another five.',
     why: 'two jobs in one sentence. The first test of whether the extractor splits at all, rather than returning one job with the total.',
-    expect: { minutesByEntity: { 'Wash the dishes': 10, 'Wipe the counters': 5 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Wash the dishes': 10, 'Wipe the counters': 5 },
+      toleranceMinutes: 0,
+      due: { 'Wash the dishes': null, 'Wipe the counters': null },
+    },
   },
   {
-    text: 'do the weekly shop, an hour and a half, and put the shopping away, fifteen minutes.',
-    why: 'two jobs, two unit styles, and two jobs about the same shopping — which is where an extractor is most tempted to merge them into one.',
-    expect: { minutesByEntity: { 'Do the weekly shop': 90, 'Put the shopping away': 15 }, toleranceMinutes: 0 },
+    text: 'do the weekly shop on Saturday, an hour and a half, and put the shopping away, fifteen minutes.',
+    why: 'two jobs, two unit styles, and two jobs about the same shopping — which is where an extractor is most tempted to merge them into one. The date attaches to the SHOP only: reading it onto the put-away too is an invented date, which is the mixed case the due axis needs.',
+    expect: {
+      minutesByEntity: { 'Do the weekly shop': 90, 'Put the shopping away': 15 },
+      toleranceMinutes: 0,
+      due: { 'Do the weekly shop': '2026-08-29', 'Put the shopping away': null },
+    },
   },
   {
     text: 'the usual: dishes, laundry, vacuuming.',
@@ -310,29 +373,49 @@ const CHORES = [
     ambiguous: 'no duration, and the job itself has no stated boundary',
   },
   {
-    text: 'walk the dog, twenty minutes.',
-    why: 'a short, unambiguous job. Deliberately does not say how often: a repeat is #53 territory and reading one out of this text would be an invented field.',
-    expect: { minutesByEntity: { 'Walk the dog': 20 }, toleranceMinutes: 0 },
+    text: 'walk the dog today, twenty minutes.',
+    why: 'a short, unambiguous job. Deliberately does not say how often: a repeat is #53 territory and reading one out of this text would be an invented field. "today" resolves to the reference date itself.',
+    expect: {
+      minutesByEntity: { 'Walk the dog': 20 },
+      toleranceMinutes: 0,
+      due: { 'Walk the dog': '2026-08-26' },
+    },
   },
   {
     text: 'clean the oven, that is a good two hours.',
     why: 'a hedge that reads as emphasis rather than uncertainty. "a good two hours" means at least two, so two is the figure and the tolerance carries the rest.',
-    expect: { minutesByEntity: { 'Clean the oven': 120 }, toleranceMinutes: 15 },
+    expect: {
+      minutesByEntity: { 'Clean the oven': 120 },
+      toleranceMinutes: 15,
+      due: { 'Clean the oven': null },
+    },
   },
   {
-    text: 'fold the laundry, twenty-five minutes.',
-    why: 'a non-round figure. An extractor that snaps everything to fifteen-minute steps fails here and passes almost everywhere else.',
-    expect: { minutesByEntity: { 'Fold the laundry': 25 }, toleranceMinutes: 0 },
+    text: 'fold the laundry tomorrow, twenty-five minutes.',
+    why: 'a non-round figure. An extractor that snaps everything to fifteen-minute steps fails here and passes almost everywhere else. "tomorrow" is the relative form whose resolution the midnight test pins — it must mean the same day at 23:59 as at noon.',
+    expect: {
+      minutesByEntity: { 'Fold the laundry': 25 },
+      toleranceMinutes: 0,
+      due: { 'Fold the laundry': '2026-08-27' },
+    },
   },
   {
-    text: 'water the plants, five minutes, and feed the fish, two minutes.',
-    why: 'two jobs at the very bottom of the range. chores.js sets MIN_EXPECTED_MINUTES at 1, so both are storable, and a rounding step of five would break the second.',
-    expect: { minutesByEntity: { 'Water the plants': 5, 'Feed the fish': 2 }, toleranceMinutes: 0 },
+    text: 'water the plants, five minutes, and feed the fish, two minutes, both today.',
+    why: 'two jobs at the very bottom of the range. chores.js sets MIN_EXPECTED_MINUTES at 1, so both are storable, and a rounding step of five would break the second. "both today" dates the pair with one phrase — the opposite attachment to the shopping item, where the date belongs to one job only.',
+    expect: {
+      minutesByEntity: { 'Water the plants': 5, 'Feed the fish': 2 },
+      toleranceMinutes: 0,
+      due: { 'Water the plants': '2026-08-26', 'Feed the fish': '2026-08-26' },
+    },
   },
   {
-    text: 'hoover the stairs, ten minutes.',
-    why: 'the same activity as the vacuuming item under a different verb, so the corpus does not quietly reward a fixed vocabulary.',
-    expect: { minutesByEntity: { 'Hoover the stairs': 10 }, toleranceMinutes: 0 },
+    text: 'hoover the stairs on Sunday, ten minutes.',
+    why: 'the same activity as the vacuuming item under a different verb, so the corpus does not quietly reward a fixed vocabulary. Sunday is the last ISO weekday, which is where an off-by-one in the day arithmetic wraps.',
+    expect: {
+      minutesByEntity: { 'Hoover the stairs': 10 },
+      toleranceMinutes: 0,
+      due: { 'Hoover the stairs': '2026-08-30' },
+    },
   },
   {
     text: 'tidy up.',
@@ -342,27 +425,47 @@ const CHORES = [
   {
     text: 'scrub the kitchen floor, three quarters of an hour.',
     why: 'a fraction of an hour spelled as a fraction of an hour, which is the phrasing most likely to come back as three or as four.',
-    expect: { minutesByEntity: { 'Scrub the kitchen floor': 45 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Scrub the kitchen floor': 45 },
+      toleranceMinutes: 0,
+      due: { 'Scrub the kitchen floor': null },
+    },
   },
   {
-    text: 'clean the windows, roughly two hours for the whole house.',
-    why: 'a hedge plus a scope clause. The scope changes nothing about the number and is there to be ignored.',
-    expect: { minutesByEntity: { 'Clean the windows': 120 }, toleranceMinutes: 20 },
+    text: 'clean the windows by Friday, roughly two hours for the whole house.',
+    why: 'a hedge plus a scope clause. The scope changes nothing about the number and is there to be ignored. "by Friday" is a deadline phrased with a preposition — the date is the Friday, and the preposition stays in the prose rather than reaching the stated date.',
+    expect: {
+      minutesByEntity: { 'Clean the windows': 120 },
+      toleranceMinutes: 20,
+      due: { 'Clean the windows': '2026-08-28' },
+    },
   },
   {
     text: 'empty the dishwasher, four minutes.',
     why: 'the shortest job in the corpus, and the one closest to chores.js refusing it outright.',
-    expect: { minutesByEntity: { 'Empty the dishwasher': 4 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Empty the dishwasher': 4 },
+      toleranceMinutes: 0,
+      due: { 'Empty the dishwasher': null },
+    },
   },
   {
     text: 'weed the front bed, somewhere between thirty and fifty minutes.',
     why: 'a range on the chore side, scored by the same midpoint-and-half-the-range rule the capacity ranges use.',
-    expect: { minutesByEntity: { 'Weed the front bed': 40 }, toleranceMinutes: 10 },
+    expect: {
+      minutesByEntity: { 'Weed the front bed': 40 },
+      toleranceMinutes: 10,
+      due: { 'Weed the front bed': null },
+    },
   },
   {
     text: 'iron the shirts, five minutes a shirt, six shirts.',
     why: 'a second product, phrased in the opposite order to the bed sheets item so the pattern cannot be matched positionally.',
-    expect: { minutesByEntity: { 'Iron the shirts': 30 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Iron the shirts': 30 },
+      toleranceMinutes: 0,
+      due: { 'Iron the shirts': null },
+    },
   },
   {
     text: 'make the packed lunches, ten minutes; sweep the porch, five; and take the recycling out, five.',
@@ -374,12 +477,21 @@ const CHORES = [
         'Take the recycling out': 5,
       },
       toleranceMinutes: 0,
+      due: {
+        'Make the packed lunches': null,
+        'Sweep the porch': null,
+        'Take the recycling out': null,
+      },
     },
   },
   {
-    text: 'defrost the freezer, about an hour and a half.',
-    why: 'a hedged compound duration — the hedge and the fraction are separate chances to be wrong.',
-    expect: { minutesByEntity: { 'Defrost the freezer': 90 }, toleranceMinutes: 15 },
+    text: 'defrost the freezer by the 12th of september, about an hour and a half.',
+    why: 'a hedged compound duration — the hedge and the fraction are separate chances to be wrong. The date is a bare day-and-month with no year, written the way a person types it: lower case, an ordinal, and the year left for the normaliser to infer.',
+    expect: {
+      minutesByEntity: { 'Defrost the freezer': 90 },
+      toleranceMinutes: 15,
+      due: { 'Defrost the freezer': '2026-09-12' },
+    },
   },
   {
     text: 'deal with the shed at some point, could be an afternoon or could be ten minutes.',
@@ -389,22 +501,38 @@ const CHORES = [
   {
     text: 'clean the car inside and out, ninety minutes.',
     why: 'a title with a trailing qualifier that belongs to the job rather than to the duration, so the title boundary is the thing being tested.',
-    expect: { minutesByEntity: { 'Clean the car inside and out': 90 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Clean the car inside and out': 90 },
+      toleranceMinutes: 0,
+      due: { 'Clean the car inside and out': null },
+    },
   },
   {
-    text: 'change the smoke alarm batteries, ten minutes.',
-    why: 'the longest title in the corpus. A strict title match is only fair if the corpus contains titles long enough to be truncated, and this is one.',
-    expect: { minutesByEntity: { 'Change the smoke alarm batteries': 10 }, toleranceMinutes: 0 },
+    text: 'change the smoke alarm batteries, ten minutes, due 2026-09-18.',
+    why: 'the longest title in the corpus. A strict title match is only fair if the corpus contains titles long enough to be truncated, and this is one. The date arrives already in ISO — the canonical form, which a pasted reminder produces and the normaliser must pass through unchanged.',
+    expect: {
+      minutesByEntity: { 'Change the smoke alarm batteries': 10 },
+      toleranceMinutes: 0,
+      due: { 'Change the smoke alarm batteries': '2026-09-18' },
+    },
   },
   {
     text: 'prune the hedge, half a day, so call it four hours.',
     why: 'a vague unit that the text then converts itself. The conversion is present, so this is answerable, and the hedge sets the tolerance.',
-    expect: { minutesByEntity: { 'Prune the hedge': 240 }, toleranceMinutes: 30 },
+    expect: {
+      minutesByEntity: { 'Prune the hedge': 240 },
+      toleranceMinutes: 30,
+      due: { 'Prune the hedge': null },
+    },
   },
   {
-    text: 'wash the bedding, forty minutes including hanging it out.',
-    why: 'a second activity folded into one job by the description itself. Splitting it into two would be misattribution, not thoroughness.',
-    expect: { minutesByEntity: { 'Wash the bedding': 40 }, toleranceMinutes: 0 },
+    text: 'wash the bedding on Monday, forty minutes including hanging it out.',
+    why: 'a second activity folded into one job by the description itself. Splitting it into two would be misattribution, not thoroughness. Monday is the first ISO weekday — the other end of the wrap the Sunday item checks.',
+    expect: {
+      minutesByEntity: { 'Wash the bedding': 40 },
+      toleranceMinutes: 0,
+      due: { 'Wash the bedding': '2026-08-31' },
+    },
   },
   {
     text: 'something needs doing about the loft.',
@@ -413,18 +541,33 @@ const CHORES = [
   },
   {
     text: 'clear the gutters, two hours, and it needs doing before the weather turns.',
-    why: 'a trailing clause carrying urgency but no minutes. Urgency is not a field this contract has, so anything read out of it is invention.',
-    expect: { minutesByEntity: { 'Clear the gutters': 120 }, toleranceMinutes: 0 },
+    why: 'a trailing clause carrying urgency but no minutes and no date. Urgency is not a field this contract has — and since #202 gave the contract a due-date field, this is the item that tempts a date invention hardest: "before the weather turns" names no day, so the only correct due date is none.',
+    expect: {
+      minutesByEntity: { 'Clear the gutters': 120 },
+      toleranceMinutes: 0,
+      due: { 'Clear the gutters': null },
+    },
   },
   {
     text: 'do the ironing for an hour and a quarter.',
     why: 'the same laundry area as two earlier items with a different job and a different figure, so the corpus cannot be passed by recognising a topic.',
-    expect: { minutesByEntity: { 'Do the ironing': 75 }, toleranceMinutes: 0 },
+    expect: {
+      minutesByEntity: { 'Do the ironing': 75 },
+      toleranceMinutes: 0,
+      due: { 'Do the ironing': null },
+    },
   },
 ]
 
-/** Every description, capacity first. Order is fixed so a run is reproducible. */
+/**
+ * Every description, capacity first. Order is fixed so a run is reproducible.
+ *
+ * Chore items are stamped with the corpus's due reference here, mechanically,
+ * so `gradeItem(item, answer)` keeps its two-argument shape: the reference the
+ * grader resolves a stated date against travels WITH the item whose expected
+ * dates were computed from it, and cannot be paired with the wrong corpus.
+ */
 export const CORPUS = Object.freeze([
   ...CAPACITY.map((item) => ({ ...item, kind: 'capacity' })),
-  ...CHORES.map((item) => ({ ...item, kind: 'chores' })),
+  ...CHORES.map((item) => ({ ...item, kind: 'chores', dueReference: DUE_REFERENCE })),
 ])

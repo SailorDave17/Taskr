@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CATCH_UP_BOUND_DAYS,
   CHORE_COLUMNS,
+  CHORE_SOURCES,
+  DEFAULT_CHORE_SOURCE,
   ESTIMATE_DEVIATION_THRESHOLD,
   MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE,
   actualsSummary,
@@ -152,8 +154,9 @@ describe('the readable column list', () => {
     // returning a narrower row, so this list is load-bearing rather than tidy.
     // 0004 added the two completion columns as readable, 0006 added
     // assigned_member_id, 0012 the three repeat columns a screen renders,
-    // 0015 the actual (#12), and 0018 assigned_source (#49); if this list and
-    // the grant ever disagree, every read fails with a permission error.
+    // 0015 the actual (#12), 0018 assigned_source (#49) and 0023 source
+    // (#211); if this list and the grant ever disagree, every read fails with a
+    // permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
       'actual_minutes',
       'assigned_member_id',
@@ -168,8 +171,25 @@ describe('the readable column list', () => {
       'id',
       'repeat_kind',
       'repeat_weekdays',
+      'source',
       'title',
     ])
+  })
+
+  // #211 — the two provenance columns on this row, asserted apart.
+  //
+  // `source` and `assigned_source` are different facts about different events,
+  // and the whole case for reusing the shorter name rests on them sharing no
+  // vocabulary. A sorted-list assertion above would be satisfied by either one
+  // alone if the other were dropped by a careless edit, because both strings are
+  // present and neither is a substring test — so this states the pair.
+  it('reads both provenance columns, which are different facts', () => {
+    const columns = CHORE_COLUMNS.split(',').map((c) => c.trim())
+    expect(columns).toContain('source')
+    expect(columns).toContain('assigned_source')
+    expect(CHORE_SOURCES).toEqual(['manual', 'extraction'])
+    expect(CHORE_SOURCES).not.toContain('auto')
+    expect(DEFAULT_CHORE_SOURCE).toBe('manual')
   })
 
   // #159 — rewritten, not deleted, and the subject is reversed on purpose.

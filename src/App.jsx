@@ -19,6 +19,7 @@ import {
 } from './lib/household.js'
 import {
   addChore,
+  addChores,
   assignChore,
   catchUpRepeats,
   completeChore,
@@ -530,6 +531,15 @@ export default function App() {
     (chore) => mutate(() => addChore({ ...chore, householdId: household?.id })),
     [mutate, household],
   )
+  // #220 — the batch confirm. One mutate() around the whole pass, so the
+  // refresh runs once after every row has been attempted and shows exactly the
+  // rows that landed. addChores reports per-row outcomes instead of throwing,
+  // so a refused row does not stop mutate() from refreshing — the screen shows
+  // the saved chores while the panel keeps the rest.
+  const handleAddChores = useCallback(
+    (rows) => mutate(() => addChores(rows, { householdId: household?.id })),
+    [mutate, household],
+  )
   const handleSaveChore = useCallback((id, patch) => mutate(() => updateChore(id, patch)), [mutate])
   const handleRemoveChore = useCallback((id) => mutate(() => removeChore(id)), [mutate])
   // #35 — completion goes through an RPC because the SERVER sets the clock, not
@@ -803,6 +813,7 @@ export default function App() {
           busy={busy}
           error={error}
           onAdd={handleAddChore}
+          onAddMany={handleAddChores}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

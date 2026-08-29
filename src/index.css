@@ -623,6 +623,29 @@ body {
   color: var(--ink-dim);
 }
 
+/* #220 — batch entry. The panel keeps the card grammar; a draft row borrows
+   the editing card's border because that is what it is — a chore being
+   written, just not yet anywhere but on this screen. */
+.chore-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.chore-draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chore-draft {
+  border-style: dashed;
+}
+
 /* The row's account of its schedule — same dim ink as the due date, because a
    repeat is a fact about the chore, not a state to be alarmed by. */
 .chore__repeat {

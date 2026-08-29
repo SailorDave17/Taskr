@@ -159,6 +159,29 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'arw',
     source: '0022 — `w` is 0022’s; `ar` is 0005’s',
   }),
+  // `0023`, 2026-08-28 (#211). Chore provenance, and this row exists for HALF a
+  // reason rather than the whole one — which is worth stating, because every
+  // other row above is here because `check:live` is blind to its migration and
+  // this one is not.
+  //
+  // `check:live` reads `chores` with `CHORE_COLUMNS`, so the SELECT half of this
+  // grant is exactly what it caught: a *measured* 27 of 28 before the apply,
+  // `chores` answering `42703 column chores.source does not exist`, and 28 of 28
+  // after. Nothing there can see the INSERT half, because that check only reads —
+  // so `a` is the letter this row is really for, and `r` rides along because a
+  // privilege string is how this table expresses itself.
+  //
+  // `w` is ABSENT on purpose and the absence is the interesting assertion: an
+  // origin is a fact about an event that already happened, so `0023` grants
+  // INSERT and never UPDATE. A future migration that widened it would move this
+  // row to `arw` and be caught here — which is a thing no client-side probe can
+  // do, since a client that never tries the write cannot report being allowed it.
+  Object.freeze({
+    table: 'chores',
+    column: 'source',
+    privileges: 'ar',
+    source: '0023 (#211) — `a` is the half check:live cannot see; `w` withheld',
+  }),
 ])
 
 /** The role every expectation above is about. */

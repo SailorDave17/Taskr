@@ -22,6 +22,7 @@
 // gated on an owner-only dashboard action.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CHORE_SOURCES } from '../lib/chores.js'
 import {
   MIGRATIONS,
   asDevice,
@@ -433,16 +434,21 @@ describe('chores, run against a real Postgres', () => {
         return rows.map((r) => r.column_name)
       }
 
-      // Widened by 0004 (completion), 0006 (assignment), 0012 (repeats) and
-      // 0015 (actuals, #12), each making its columns READABLE; 0012 is the
-      // first to widen the INSERT set, because a repeat is DECLARED where the
-      // chore is created, and 0015 the first to widen the UPDATE set since
-      // 0003 — an actual is adjustable after the fact, and actuals.pglite
-      // proves it stays out of INSERT. The convention holds: additive by
-      // column, and no later story revokes a shipped grant. `repeat_since`,
-      // the watermark and `generated_from` are absent from insert and update —
-      // the trigger and the catch-up pass are their only authors, and
-      // repeats.pglite.test.js proves the refusals.
+      // Widened by 0004 (completion), 0006 (assignment), 0012 (repeats), 0015
+      // (actuals, #12) and 0023 (provenance, #211), each making its columns
+      // READABLE; 0012 is the first to widen the INSERT set, because a repeat
+      // is DECLARED where the chore is created, and 0015 the first to widen the
+      // UPDATE set since 0003 — an actual is adjustable after the fact, and
+      // actuals.pglite proves it stays out of INSERT. The convention holds:
+      // additive by column, and no later story revokes a shipped grant.
+      // `repeat_since`, the watermark and `generated_from` are absent from
+      // insert and update — the trigger and the catch-up pass are their only
+      // authors, and repeats.pglite.test.js proves the refusals.
+      //
+      // `source` (0023) is the second column after `repeat_kind` to join INSERT
+      // and stay out of UPDATE, and the reason is the same one stated the other
+      // way round: an origin is a fact about an event that already happened, so
+      // there is a moment to state it and no later moment to correct it.
       expect(await granted('SELECT')).toEqual([
         'actual_minutes',
         'assigned_member_id',
@@ -457,6 +463,7 @@ describe('chores, run against a real Postgres', () => {
         'id',
         'repeat_kind',
         'repeat_weekdays',
+        'source',
         'title',
       ])
       expect(await granted('INSERT')).toEqual([
@@ -465,6 +472,7 @@ describe('chores, run against a real Postgres', () => {
         'household_id',
         'repeat_kind',
         'repeat_weekdays',
+        'source',
         'title',
       ])
       expect(await granted('UPDATE')).toEqual([
@@ -540,6 +548,158 @@ describe('chores, run against a real Postgres', () => {
           order by column_name`,
       )
       expect(rows.map((r) => r.column_name)).toEqual(['due_on', 'expected_minutes', 'title'])
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // #211 — where a chore came from
+  //
+  // A separate section rather than lines folded into AC 1 and AC 5 above,
+  // because those are #34's criteria and this is a different story's. The
+  // grant-set assertion in AC 5 is deliberately NOT duplicated here: it is the
+  // named test #211 AC 2 points at, and a second copy would mean a widening
+  // reddens two tests and gets read as two findings.
+  // -------------------------------------------------------------------------
+
+  describe('#211 — a chore records whether it was typed or extracted', () => {
+    it('defaults to manual, so a chore created without saying anything is recorded as typed', async () => {
+      const row = await asDevice(db, deviceA, async () => {
+        const { rows } = await db.query(
+          `insert into public.chores (household_id, title, expected_minutes, due_on)
+           values ($1, 'Dishes', 20, '2026-08-10') returning source`,
+          [householdA.id],
+        )
+        return rows[0]
+      })
+      expect(row.source).toBe('manual')
+    })
+
+    it('accepts extraction, which is the value the capture path will write', async () => {
+      const row = await asDevice(db, deviceA, async () => {
+        const { rows } = await db.query(
+          `insert into public.chores (household_id, title, expected_minutes, due_on, source)
+           values ($1, 'Dishes', 20, '2026-08-10', 'extraction') returning source`,
+          [householdA.id],
+        )
+        return rows[0]
+      })
+      expect(row.source).toBe('extraction')
+    })
+
+    it('refuses a word outside the vocabulary, by the named constraint', async () => {
+      const refused = await attempt(() =>
+        asDevice(db, deviceA, () =>
+          db.query(
+            `insert into public.chores (household_id, title, expected_minutes, due_on, source)
+             values ($1, 'Dishes', 20, '2026-08-10', 'imported')`,
+            [householdA.id],
+          ),
+        ),
+      )
+      expect(refused.error).not.toBeNull()
+      // Asserted against the constraint NAME, never the message: Postgres writes
+      // its own message text and that text is not a contract (0003's rule).
+      expect(refused.error).toContain('chores_source_known')
+    })
+
+    it('refuses auto — assigned_source vocabulary is not this column vocabulary', async () => {
+      // The whole argument for reusing the name `source` rests on the two
+      // columns sharing no word, so a value read out of the wrong one is a wrong
+      // ANSWER rather than a plausible one. This is that claim, tested, in the
+      // direction that matters: 'auto' is legal in assigned_source and must not
+      // be legal here.
+      const refused = await attempt(() =>
+        asDevice(db, deviceA, () =>
+          db.query(
+            `insert into public.chores (household_id, title, expected_minutes, due_on, source)
+             values ($1, 'Dishes', 20, '2026-08-10', 'auto')`,
+            [householdA.id],
+          ),
+        ),
+      )
+      expect(refused.error).not.toBeNull()
+      expect(refused.error).toContain('chores_source_known')
+
+      // POSITIVE CONTROL, and it is what stops the assertion above meaning
+      // "some insert failed": the same word IS accepted by the column it belongs
+      // to, on the same table, in the same database.
+      const chore = await insertChore(deviceA, { householdId: householdA.id })
+      const assigned = await attempt(() =>
+        db.query(`update public.chores set assigned_source = 'auto' where id = $1`, [
+          chore.value.id,
+        ]),
+      )
+      expect(assigned.error).toBeNull()
+    })
+
+    it('holds CHORE_SOURCES equal to what the constraint admits, so the two copies cannot drift', async () => {
+      // The vocabulary exists in two places by necessity — a check constraint in
+      // Postgres and a frozen array the client imports — and nothing but this
+      // binds them. Derived from the catalog rather than spelled out, so adding
+      // a value to the constraint without adding it to the constant reddens
+      // here rather than surfacing as a refused insert months later.
+      const { rows } = await db.query(
+        `select pg_get_constraintdef(oid) as def from pg_constraint
+          where conname = 'chores_source_known'`,
+      )
+      expect(rows).toHaveLength(1)
+      const admitted = [...rows[0].def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
+      expect(admitted).toEqual([...CHORE_SOURCES].sort())
+    })
+
+    it('cannot be updated after the fact — an origin is a fact about an event, not a field', async () => {
+      const chore = await insertChore(deviceA, { householdId: householdA.id })
+      const refused = await attempt(() =>
+        asDevice(db, deviceA, () =>
+          db.query(`update public.chores set source = 'extraction' where id = $1`, [
+            chore.value.id,
+          ]),
+        ),
+      )
+      expect(refused.error).not.toBeNull()
+      expect(refused.error).toMatch(/permission denied/i)
+
+      // POSITIVE CONTROL: the same device, same row, same statement shape, on a
+      // column that IS in the update grant. Without this the refusal above is
+      // consistent with the device being unable to update anything at all.
+      const allowed = await attempt(() =>
+        asDevice(db, deviceA, () =>
+          db.query(`update public.chores set title = 'Washing up' where id = $1`, [
+            chore.value.id,
+          ]),
+        ),
+      )
+      expect(allowed.error).toBeNull()
+    })
+
+    it('0023 applies a second time without error, because a re-application is the normal path', async () => {
+      // Built THROUGH 0023 rather than on the full stack, which for this file is
+      // the same database — it is the last migration today. Written this way so
+      // it stays honest when 0024 exists: re-pasting a superseded file on top of
+      // a newer one is not the path anybody takes, and AC 7 above records what
+      // it cost to learn that.
+      const at0023 = await databaseThrough('0023_chore_provenance.sql')
+      const second = await attempt(() => at0023.exec(migrationSql('0023_chore_provenance.sql')))
+      expect(second.error).toBeNull()
+
+      // And the re-run left the column, the constraint and the grants as they
+      // were — a file that errors on its second run is loud, one that succeeds
+      // while changing something is not.
+      const { rows: cols } = await at0023.query(
+        `select column_default, is_nullable from information_schema.columns
+          where table_schema = 'public' and table_name = 'chores' and column_name = 'source'`,
+      )
+      expect(cols).toHaveLength(1)
+      expect(cols[0].is_nullable).toBe('NO')
+      expect(cols[0].column_default).toContain('manual')
+
+      const { rows: grants } = await at0023.query(
+        `select privilege_type from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'chores'
+            and grantee = 'authenticated' and column_name = 'source'
+          order by privilege_type`,
+      )
+      expect(grants.map((r) => r.privilege_type)).toEqual(['INSERT', 'SELECT'])
     })
   })
 })

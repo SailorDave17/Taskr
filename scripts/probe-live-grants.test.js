@@ -313,7 +313,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names, plus 0022', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022 and 0023', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -328,6 +328,13 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'member_capacity.household_id=arw',
       'member_capacity.member_id=arw',
       'member_capacity.period_start=arw',
+      // 0023, 2026-08-28 (#211). The one row here whose migration `check:live`
+      // is NOT blind to — it caught the SELECT half as a 42703 before the apply.
+      // It earns its place on the INSERT half, which only reads and so cannot
+      // see, and on the absence of `w`: a later migration widening this column
+      // to updatable would move the row and be reported, where no client-side
+      // probe can report being allowed a write it never attempts.
+      'chores.source=ar',
     ])
   })
 })

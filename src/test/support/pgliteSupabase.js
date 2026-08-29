@@ -109,6 +109,7 @@ export const MIGRATIONS = [
   '0020_split_seen.sql',
   '0021_fairness_note_dismissed.sql',
   '0022_an_upsert_writes_every_column_it_names.sql',
+  '0023_chore_provenance.sql',
 ]
 
 export function migrationSql(name) {

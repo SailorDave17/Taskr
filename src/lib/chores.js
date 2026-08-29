@@ -50,7 +50,26 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes, source'
+
+/**
+ * How a chore came to exist — `chores_source_known` in `0023`, story #211.
+ *
+ * Provenance, never privilege: nothing keys off this value, and a wrong one
+ * costs an answer rather than an access decision. It exists so the extraction
+ * bet (epic #217) can be judged on data — `docs/refresh-charter.md` makes trust
+ * in extracted numbers a kill condition, and a kill condition nothing measures
+ * is a sentence rather than a test.
+ *
+ * NOT to be confused with `assigned_source`, which is on the same row and
+ * records how the ASSIGNMENT was decided ('manual' | 'auto' | null). The two
+ * vocabularies deliberately share no word, so a value read from the wrong column
+ * is a wrong answer rather than a plausible one.
+ */
+export const CHORE_SOURCES = Object.freeze(['manual', 'extraction'])
+
+/** What a chore's origin is when nobody says otherwise. */
+export const DEFAULT_CHORE_SOURCE = 'manual'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -236,7 +255,27 @@ export async function listChores(householdId) {
  * outside `current_household_ids()`, so this is defence in depth over a database
  * guard rather than the guard (#159 AC 5).
  */
-export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, householdId }) {
+export async function addChore({
+  title,
+  expectedMinutes,
+  dueOn,
+  repeatKind,
+  repeatWeekdays,
+  householdId,
+  // #211 — where the chore came from. Defaulted rather than required, so every
+  // existing call site keeps its current meaning without being edited: App.jsx
+  // spreads a form object that names no source, and a typed chore is exactly
+  // what 'manual' means. The extraction path (#213) is the one caller that will
+  // pass anything else.
+  //
+  // Validated by the check constraint in 0023 and NOT here, which is
+  // `setCapacity`'s shape for the same column and the same reason: this is
+  // provenance, so a bad value costs an answer rather than an access decision,
+  // and a second copy of the vocabulary in a client-side guard is a second copy
+  // to drift. `chores.pglite.test.js` holds CHORE_SOURCES equal to what the
+  // constraint admits, which is the binding that keeps the two honest.
+  source = DEFAULT_CHORE_SOURCE,
+}) {
   const cleanTitle = normalizeTitle(title)
   const minutes = normalizeExpectedMinutes(expectedMinutes)
   const due = normalizeDueDate(dueOn)
@@ -257,6 +296,12 @@ export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repe
         due_on: due,
         repeat_kind: repeat.repeat_kind,
         repeat_weekdays: repeat.repeat_weekdays,
+        // Written explicitly rather than left to the column's DEFAULT. The two
+        // are identical for a typed chore, and stating it is what makes the
+        // insert path a thing a mutation can remove and a test can miss — the
+        // column default would silently supply 'manual' and every assertion
+        // would go on passing while the client had stopped saying anything.
+        source,
       })
       .select(CHORE_COLUMNS)
       .single(),

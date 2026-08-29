@@ -7,11 +7,25 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0022` are ALL applied to the live project, and the expected-red set is EMPTY** —
+- Status: **`0001`–`0023` are ALL applied to the live project, and the expected-red set is EMPTY** —
   *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
   ACCOUNT can still sign in. That is the first time this denominator has moved on something a
   migration cannot change, and nothing became excusable: the two rows are green whenever the
   account works.
+  **`0023` on 2026-08-28 (#211)**, applied with `npm run migrate:live` (md5
+  `3f1df4ec58d79025b12f7f612ff759e4` read back identical, 8982 characters, 5 statements) in the
+  story's own session. This is the first migration here whose before-reading AND after-reading were
+  both taken, which is the gap `0022`'s entry below records rather than papers over: *measured at
+  **27 of 28** with `chores` answering `42703` — `column chores.source does not exist` — and at
+  **28 of 28** immediately after*. The denominator did not move, because `0023` widens the existing
+  `chores` column list rather than adding an entry; the row it would have held never became an
+  excused red, because the apply landed in the same session as the code that reads the column.
+  `npm run probe:live-grants` has NO row for `chores.source` and needs none — unlike `0013`, `0019`
+  and `0022`, this check is not blind to `0023`: the SELECT grant is exactly what made the red
+  above, so the instrument that would excuse it is the instrument that caught it. **The one half no
+  live instrument covers is the INSERT grant**, since `check:live` only reads; that is proven
+  against a real Postgres by `src/test/chores.pglite.test.js` and is stated here as a known gap
+  rather than left to be inferred from an empty excused-red set.
   **`0022` on 2026-08-28**, applied with `npm run migrate:live` (md5
   `13ce80f76fe0b15d5cbeb85b4e2a7a06` read back identical) in the session that found the defect.
   It is the FOURTH migration this check cannot speak for, and the reason is the same shape as
@@ -169,8 +183,15 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after #250 gave the check two
-  rows about the seeded test account.** Those two are the first entries here whose subject is not the
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after `0023` was applied in
+  #211's own session, and at the same figure before it for #250's two seeded-account rows.**
+  `0023` (`chores.source`, #211) is the second migration running to be applied inside the story that
+  needed it, so like `0021` it never entered this set — but unlike `0021` both readings were taken:
+  *27 of 28 before, `chores` answering `42703` on `chores.source`; 28 of 28 after*. That before-reading
+  is cheap and is worth making a habit of, because it is the only thing separating "the apply worked"
+  from "the entry was never going to be red anyway" — `0022`'s entry above has to reason its
+  before-state from two artefacts for want of one command.
+  #250's two rows are the first entries here whose subject is not the
   live project at all — they ask whether `TASKR_TEST_EMAIL` can still sign in, because the account
   behind it was deleted around 2026-08-25 and `npm run test:rls` threw in a `beforeAll` for four days
   while reporting `numFailedTests: 0`. They can never be excused: an excused sign-in row would be a

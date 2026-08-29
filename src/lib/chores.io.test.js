@@ -159,6 +159,12 @@ describe('addChore', () => {
       // explicitly, so the row's schedule is stated rather than inherited.
       repeat_kind: 'none',
       repeat_weekdays: null,
+      // #211 — and a caller that says nothing about where the chore came from
+      // writes 'manual' explicitly, for the same reason. The column's DEFAULT
+      // would supply the identical value, which is exactly why this is asserted
+      // on the outgoing ROW rather than on a row read back: only the payload can
+      // tell "the client stated it" apart from "the database filled it in".
+      source: 'manual',
     })
     // Written out rather than derived from the input, so the implementation
     // cannot quietly redefine what "normalized" means.
@@ -176,6 +182,49 @@ describe('addChore', () => {
   // household past the named argument. That, plus 0003's with-check refusing any
   // id outside current_household_ids(), is what stops a caller writing anywhere
   // it likes (#159 AC 5).
+  // #211 AC 4 — the default is what keeps every existing call site meaning what
+  // it meant. App.jsx spreads a form object that names no source, so if this
+  // parameter were required rather than defaulted the story would have had to
+  // edit a call site it has no business touching.
+  it('records an extracted chore as extraction when the caller says so', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({
+      title: 'Dishes',
+      expectedMinutes: 20,
+      dueOn: '2026-08-10',
+      householdId: HOUSEHOLD.id,
+      source: 'extraction',
+    })
+
+    const insert = opsOn('chores').find((c) => c.op === 'insert')
+    expect(insert.row.source).toBe('extraction')
+  })
+
+  it('reads the chore back with source among the columns, or the write is unverifiable', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: HOUSEHOLD.id })
+
+    const select = opsOn('chores').find((c) => c.op === 'select')
+    // SPLIT, never a substring test on the joined string, and the reason is
+    // measured rather than stylistic: this assertion was written as
+    // `expect(select.cols).toContain('source')` and a mutation removing `source`
+    // from CHORE_COLUMNS reddened 2 tests against a predicted 3 — this one
+    // stayed green, because `assigned_source` is always in the list and the
+    // string 'source' is a substring of it. The list contains two names where
+    // one ends with the other, so only membership of the parsed list means
+    // anything here.
+    const requested = select.cols.split(',').map((c) => c.trim())
+    expect(requested).toContain('source')
+    // And the neighbour that made the loose form vacuous, asserted alongside so
+    // a future reader can see why the split is not fussiness.
+    expect(requested).toContain('assigned_source')
+    // What the assertion is FOR: the INSERT's own returning list has to carry
+    // the column, which is the clause 0023's select grant exists to satisfy — a
+    // RETURNING naming an ungranted column is refused with a message naming the
+    // TABLE, so the failure would read as the insert being rejected rather than
+    // as a missing read grant.
+  })
+
   it('builds the row itself, so a stray household_id in the payload is ignored', async () => {
     results.chores = { data: ROW, error: null }
     await addChore({

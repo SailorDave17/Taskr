@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import PropTypes from 'prop-types'
+import ChoreDraftList from './ChoreDraftList.jsx'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
@@ -656,6 +657,7 @@ export default function Chores({
   busy,
   error,
   onAdd,
+  onAddMany,
   onSave,
   onRemove,
   onComplete,
@@ -676,6 +678,116 @@ export default function Chores({
   const [repeatKind, setRepeatKind] = useState('none')
   const [repeatDays, setRepeatDays] = useState([])
   const [complaint, setComplaint] = useState(null)
+
+  // #220 — enter several chores in one pass. The single form above stays the
+  // default path (AC 6); this panel is an addition behind its own button, and
+  // NOTHING is written until the list is confirmed: the drafts live only in
+  // this state until `confirmBatch` hands them to onAddMany.
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [drafts, setDrafts] = useState([])
+  // The partial-save summary — AC 5's "told which rows were saved". Null when
+  // there is nothing to say.
+  const [batchNotice, setBatchNotice] = useState(null)
+  const draftKey = useRef(1)
+
+  function freshDraft() {
+    return { key: `draft-${draftKey.current++}`, title: '', minutes: '', dueOn: '', problem: null }
+  }
+
+  function openBatch() {
+    // Two rows, not one: the panel exists for SEVERAL, and an untouched spare
+    // costs nothing because confirmBatch skips rows left entirely blank.
+    setDrafts([freshDraft(), freshDraft()])
+    setBatchNotice(null)
+    setBatchOpen(true)
+  }
+
+  function cancelBatch() {
+    // The drafts are unwritten by construction, so cancelling discards them.
+    setDrafts([])
+    setBatchNotice(null)
+    setBatchOpen(false)
+  }
+
+  const changeDraft = (key, patch) =>
+    setDrafts((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch, problem: null } : r)))
+  const removeDraft = (key) => setDrafts((rows) => rows.filter((r) => r.key !== key))
+
+  /**
+   * The same per-field validators the data layer calls — AC 3. Returning the
+   * message keeps "marked with the reason" testable, exactly as `validate`
+   * above argues for the single form. No repeat fields: a batch row is title,
+   * minutes and due date, and addChore writes 'none' for a caller that says
+   * nothing about repeating.
+   */
+  function draftProblem({ title, minutes, dueOn }) {
+    try {
+      normalizeTitle(title)
+      normalizeExpectedMinutes(minutes)
+      normalizeDueDate(dueOn)
+      return null
+    } catch (err) {
+      return err.message
+    }
+  }
+
+  function confirmBatch(e) {
+    e.preventDefault()
+    // A row left entirely blank carries no intent and is dropped rather than
+    // refused — the spare row openBatch adds must not hold the batch hostage.
+    // A row with ANYTHING in it is validated in full.
+    const entered = drafts.filter(
+      (d) => d.title.trim() !== '' || String(d.minutes).trim() !== '' || d.dueOn.trim() !== '',
+    )
+    if (entered.length === 0) {
+      setBatchNotice('nothing entered yet — fill in at least one chore.')
+      return
+    }
+
+    // AC 3 — every entered row is checked BEFORE anything is written. One bad
+    // row marks itself and blocks the write; the others stay entered, edited
+    // rather than retyped. Writing the good rows here instead would turn a
+    // typo into a surprise partial save — partial is AC 5's territory, and it
+    // is reserved for the server refusing a row the client could not fault.
+    let anyBad = false
+    const checked = entered.map((row) => {
+      const problem = draftProblem(row)
+      if (problem) anyBad = true
+      return { ...row, problem }
+    })
+    setDrafts(checked)
+    setBatchNotice(null)
+    if (anyBad) return
+
+    onAddMany(
+      checked.map(({ title, minutes, dueOn }) => ({ title, expectedMinutes: minutes, dueOn })),
+    ).then(
+      (outcomes) => {
+        // One outcome per submitted row, in order — addChores' contract. Saved
+        // rows are PRUNED from the drafts, which is what makes re-confirming
+        // unable to duplicate them (AC 5): the next confirm submits only what
+        // is still listed.
+        const remaining = []
+        let saved = 0
+        outcomes.forEach((o, i) => {
+          if (o?.ok) saved += 1
+          else remaining.push({ ...checked[i], problem: o?.message ?? 'not saved' })
+        })
+        if (remaining.length === 0) {
+          cancelBatch()
+        } else {
+          setDrafts(remaining)
+          setBatchNotice(`${saved} of ${outcomes.length} saved — the rows still listed were not.`)
+        }
+      },
+      // onAddMany routes through App's mutate(), which rethrows only when the
+      // whole action failed (addChores itself reports per-row outcomes rather
+      // than throwing). mutate has already put that message on screen; the
+      // drafts stay listed, the same exposure the single form has when onAdd
+      // rejects.
+      () => {},
+    )
+  }
 
   const outstanding = chores.filter(isOutstanding)
   const done = chores.filter((c) => !isOutstanding(c))
@@ -888,6 +1000,52 @@ export default function Chores({
         </button>
       </form>
 
+      {/* #220 — the batch entry. An ADDITION behind its own control, never a
+          replacement: the single form above is untouched and stays the default
+          path (AC 6). The review list is ChoreDraftList, which #213 will feed
+          from extracted proposals — it takes rows as input and owns nothing
+          about where they came from (AC 7). */}
+      {batchOpen ? (
+        <section className="chore-batch" aria-labelledby="batch-heading">
+          <h3 id="batch-heading" className="card__subheading">
+            Add several at once
+          </h3>
+          <form className="stack" noValidate onSubmit={confirmBatch}>
+            <ChoreDraftList rows={drafts} busy={busy} onChange={changeDraft} onRemove={removeDraft} />
+            {batchNotice ? (
+              <p className="card__note" role="status" data-testid="batch-notice">
+                {batchNotice}
+              </p>
+            ) : null}
+            <div className="row">
+              <button
+                className="button button--quiet"
+                type="button"
+                disabled={busy}
+                onClick={() => setDrafts((rows) => [...rows, freshDraft()])}
+              >
+                Add another row
+              </button>
+              <button className="button" type="submit" disabled={busy}>
+                Add these chores
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                disabled={busy}
+                onClick={cancelBatch}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : (
+        <button className="button button--quiet" type="button" disabled={busy} onClick={openBatch}>
+          Add several at once
+        </button>
+      )}
+
       {/* A failed write used to report itself only inside the Roster card, in a
           different section of the page, because <Chores> was passed no `error`.
           The message belongs beside the form that caused it. `complaint` above
@@ -912,6 +1070,7 @@ Chores.propTypes = {
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
+  onAddMany: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,

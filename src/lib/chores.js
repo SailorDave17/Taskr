@@ -309,6 +309,40 @@ export async function addChore({
   )
 }
 
+/**
+ * Add several chores in one confirmed pass — #220.
+ *
+ * A loop over `addChore`, and that it is NOTHING MORE is the story's central
+ * decision (filed 2026-08-26): no bulk insert, no second write route, no new
+ * grant. Every row lands exactly as a singly-added chore does, so nothing
+ * downstream — the allocator, the repeat pass, `liveSchema.js` — can tell the
+ * two apart, and there is no second refusal behaviour to keep in step.
+ *
+ * SEQUENTIAL, deliberately. `created_at` then orders the rows in entry order
+ * (listChores breaks due-date ties on it), and a per-row outcome can name which
+ * rows landed when one is refused mid-batch — #220 AC 5's whole requirement.
+ *
+ * NEVER THROWS for a refused row. A thrown error could only say "something
+ * failed" after some rows are already durable; the outcome array says which.
+ * One outcome per input row, in the same order, `{ ok: true, chore }` or
+ * `{ ok: false, message }` — the caller prunes the saved rows so a re-confirm
+ * cannot duplicate them.
+ */
+export async function addChores(rows, { householdId } = {}) {
+  const outcomes = []
+  for (const row of rows) {
+    try {
+      // householdId is spread LAST so a stray one inside a row cannot override
+      // the household the caller is showing — the same defence addChore itself
+      // makes for the snake_case spelling.
+      outcomes.push({ ok: true, chore: await addChore({ ...row, householdId }) })
+    } catch (err) {
+      outcomes.push({ ok: false, message: err.message })
+    }
+  }
+  return outcomes
+}
+
 /** Edit a chore's title, minutes or due date — AC 6. */
 export async function updateChore(id, { title, expectedMinutes, dueOn }) {
   const patch = {}

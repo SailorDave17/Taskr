@@ -534,6 +534,15 @@ recorded in the decision log as tunable defaults". This is that record.
 - **Propagation on an accepted update is #54's ratified option (b) by construction** — the update is
   an ordinary estimate edit on the anchor, occurrences copy minutes at creation (0012), so the new
   value reaches future occurrences and never rewrites work already on somebody's list.
+- **Actuals never feed a budget directly** (owner, 2026-08-26, at the filing gate of the groom run
+  that filed #215). A recorded actual reaches a budget — an estimate, and through it the
+  allocation — only through an estimate correction a human accepts: the one-tap update above is
+  that path, and it is the only one. Rolling-actuals auto-correction is **rejected**, not
+  deferred, so a later session must not reintroduce it as an obvious improvement. The record and
+  the guard ship together — a source-level test in `src/lib/allocation.test.js` (#215) reddens if
+  the allocator reads an actual-minutes field anywhere but `minutesOf`. (`minutesOf` reading a
+  DONE chore's actual is the load side — #47 criterion 7 — not this decision's subject: load is
+  what the work cost, a budget is what a person or an estimate has to give.)
 
 ## Decision taken 2026-08-27 — concurrent re-assignments serialize through a version CAS
 
@@ -573,4 +582,6 @@ RPC" — and #49 is that RPC. Two mechanism choices inside it:
   read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
   It bears on whether #12's actuals ever become an input to capacity.~~ **Settled 2026-08-16 —
   see the decision section above.** The #12 sub-question (whether actuals feed capacity) is *not*
-  settled by it and stays open.
+  settled by it — it was settled separately on 2026-08-26: actuals never feed a budget directly,
+  only an estimate correction a human accepts (see the 2026-08-26 actuals decision above, and the
+  source-level guard #215 put beside it).

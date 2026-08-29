@@ -47,6 +47,20 @@ function score(label, summary) {
   )
   console.log(`    overconfident         ${summary.overconfident} of ${summary.ambiguous} ambiguous`)
   console.log(`    unparseable           ${summary.malformed}`)
+  // #202 — the due-date axis, its own figure with its own floor and ceiling,
+  // never folded into the within-tolerance count above: that scale is the one
+  // the owner's accuracy threshold is named against. Applies to chore
+  // descriptions only, so the capacity row reads a dash rather than a vacuous
+  // zero-of-zero.
+  if (summary.dueApplicable > 0) {
+    console.log(
+      `    due dates exact       ${String(summary.dueExact).padStart(3)} of ${String(
+        summary.dueApplicable,
+      ).padStart(3)}   (${pct(summary.dueExact, summary.dueApplicable)}), ${summary.dueInvented} invented`,
+    )
+  } else {
+    console.log('    due dates exact       —   (no due-date expectations in this kind)')
+  }
 }
 
 const floor = await gradeExtraction(zeroExtractor, CORPUS)
@@ -75,6 +89,9 @@ console.log(
     floor.overall.withinTolerance,
     floor.overall.answerable,
   )} to ${pct(ceiling.overall.withinTolerance, ceiling.overall.answerable)} within tolerance.`,
+)
+console.log(
+  `The due-date axis (#202), scored separately: ${floor.overall.dueExact} of ${floor.overall.dueApplicable} to ${ceiling.overall.dueExact} of ${ceiling.overall.dueApplicable} exact.`,
 )
 console.log('No network call, no API key, no provider account. #56 stands up the endpoint; #43 takes the verdict.')
 

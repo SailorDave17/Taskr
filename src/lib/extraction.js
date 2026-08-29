@@ -17,8 +17,17 @@
 // update and a chore capture are two different screens, not one guess.
 //
 //     ({ kind: 'capacity', text }) => { kind: 'capacity', minutesByPerson: {...} }
-//     ({ kind: 'chores',   text }) => { kind: 'chores', chores: [{ title, expectedMinutes }] }
+//     ({ kind: 'chores',   text }) => { kind: 'chores', chores: [{ title, expectedMinutes, dueDate? }] }
 //     (anything)                   => { kind: 'refusal', reason: '...' }
+//
+// `dueDate` (#202) is the date AS THE DESCRIPTION STATES IT — 'Tuesday',
+// 'tomorrow', 'the 12th of september', '2026-09-18' — or absent/null where the
+// description states none. The extractor never resolves a phrase to a calendar
+// date: date arithmetic is deterministic code's job (`normalizeDueDate`, in
+// dueDates.js), and asking a model to do it would put the corpus's hardest
+// failure mode — an invented fact — inside the field that exists to avoid one.
+// The grader normalises the stated form against the item's reference date and
+// compares the result to the corpus's hand-computed expectation.
 //
 // The oracle control below needs to recognise which item it was handed, and it
 // does so by KEYING ON THE TEXT rather than by being passed an id. That is why
@@ -33,6 +42,8 @@
 // score is the one thing this artefact exists to prevent. Items are graded
 // SEQUENTIALLY on purpose: a metered provider has a rate limit, and a run whose
 // order varies is a run whose failures are harder to reproduce.
+
+import { normalizeDueDate } from './dueDates.js'
 
 /** The two input kinds the bet covers. Widened from capacity-only 2026-08-08. */
 export const INPUT_KINDS = Object.freeze(['capacity', 'chores'])
@@ -98,11 +109,40 @@ export function entitiesOf(answer, expectedKind) {
   for (const chore of source) {
     if (!chore || typeof chore !== 'object') return null
     if (!Number.isFinite(chore.expectedMinutes)) return null
+    // #202: a stated due date is a string or it is not there. Any other type is
+    // a malformed answer, same as a non-finite minutes value — the shape is the
+    // contract, and tolerating a Date object here would let one cross the
+    // string boundary dueDates.js exists to hold.
+    if (chore.dueDate !== undefined && chore.dueDate !== null && typeof chore.dueDate !== 'string') {
+      return null
+    }
     const key = normalizeEntity(chore.title ?? '')
     if (!key || entities.has(key)) return null
     entities.set(key, chore.expectedMinutes)
   }
   return entities
+}
+
+/**
+ * The stated due dates of a chores answer, `entity -> string`, entities with
+ * no stated date absent — #202. Runs AFTER `entitiesOf` has validated the
+ * answer, so it assumes shape rather than re-refusing it. An empty or
+ * whitespace stated date counts as no date claimed: a provider spelling
+ * "no date" as `""` is answering honestly, not malformed.
+ */
+function statedDuesOf(answer) {
+  const dues = new Map()
+  for (const chore of answer.chores) {
+    const stated = typeof chore.dueDate === 'string' ? chore.dueDate.trim() : ''
+    if (stated) dues.set(normalizeEntity(chore.title ?? ''), stated)
+  }
+  return dues
+}
+
+/** Whether the due-date axis applies to an item: an answerable chore
+ * description whose corpus entry carries a `due` expectation. */
+function dueApplies(item) {
+  return item.kind === 'chores' && !item.ambiguous && Boolean(item.expect?.due)
 }
 
 /** The corpus item's own expectation, in the same `entity -> minutes` shape. */
@@ -129,6 +169,16 @@ function expectedEntitiesOf(item) {
  * `minutesWithinToleranceOnMatched`, because "got the numbers right on the
  * people it found" and "found the right people" are different failures with
  * different repairs, and one combined figure hides which of them happened.
+ *
+ * THE DUE-DATE AXIS (#202) IS ITS OWN FIGURE, NEVER FOLDED IN. The owner's
+ * accuracy threshold is named against the 0-of-50 to 50-of-50 within-tolerance
+ * scale, and a new axis that moved it would silently reprice a decided bet.
+ * `dueExact` is `null` where the axis does not apply (capacity, ambiguous, or
+ * an item with no `due` expectation), `true` only when EVERY expected entity
+ * was found carrying exactly the right date — the right calendar date where
+ * one is stated, no date where none is. A refusal or a malformed answer on an
+ * applicable item is a date miss for the same reason it is a tolerance miss:
+ * the denominator is what was answerable, not what was answered.
  */
 export function gradeItem(item, answer) {
   const base = {
@@ -141,6 +191,8 @@ export function gradeItem(item, answer) {
     misattributed: [],
     toleranceMinutes: item.ambiguous ? null : item.expect.toleranceMinutes,
     minutesWithinToleranceOnMatched: null,
+    dueExact: dueApplies(item) ? false : null,
+    dueInvented: [],
   }
 
   const refused = Boolean(answer) && typeof answer === 'object' && answer.kind === 'refusal'
@@ -173,6 +225,49 @@ export function gradeItem(item, answer) {
   const matchedWithin = worst <= item.expect.toleranceMinutes
   const exact = unattributed.length === 0 && misattributed.length === 0
 
+  // #202 — the due-date axis, walked over the EXPECTED entities so that an
+  // answer with no entities at all scores a miss on every one of them. Walk
+  // the matched entities instead and the do-nothing extractor's empty answer
+  // has nothing to be wrong about — the same vacuous-aggregate fault the
+  // within-tolerance rule closed for minutes, closed the same way for dates.
+  let dueExact = base.dueExact
+  const dueInvented = []
+  if (dueApplies(item)) {
+    const dues = statedDuesOf(answer)
+    dueExact = true
+    for (const [entity, expectedDue] of Object.entries(item.expect.due)) {
+      const key = normalizeEntity(entity)
+      if (!actual.has(key)) {
+        dueExact = false
+        continue
+      }
+      const stated = dues.get(key) ?? null
+      if (expectedDue === null) {
+        // The description states no date, so the only right answer is none —
+        // extraction never invents one (#202, decided at the filing gate). An
+        // invented date is tallied by name because it is the trust-destroying
+        // direction: it lands in the app looking like a fact.
+        if (stated !== null) {
+          dueInvented.push(key)
+          dueExact = false
+        }
+      } else if (stated === null) {
+        dueExact = false
+      } else {
+        // A stated form the normaliser refuses is a miss on this axis and ONLY
+        // this axis — the minutes may still be within tolerance, and folding a
+        // bad date into the minutes verdict would hide which failure happened.
+        let normalised = null
+        try {
+          normalised = normalizeDueDate(stated, item.dueReference)
+        } catch {
+          normalised = null
+        }
+        if (normalised !== expectedDue) dueExact = false
+      }
+    }
+  }
+
   return {
     ...base,
     outcome: exact && matchedWithin ? OUTCOMES.WITHIN_TOLERANCE : OUTCOMES.OUTSIDE_TOLERANCE,
@@ -181,6 +276,8 @@ export function gradeItem(item, answer) {
     unattributed,
     misattributed,
     minutesWithinToleranceOnMatched: matchedWithin,
+    dueExact,
+    dueInvented,
   }
 }
 
@@ -198,6 +295,9 @@ function emptySummary() {
     unattributed: 0,
     misattributed: 0,
     minutesWithinToleranceOnMatched: 0,
+    dueApplicable: 0,
+    dueExact: 0,
+    dueInvented: 0,
     refusals: { total: 0, onAmbiguous: 0, onAnswerable: 0 },
     overconfident: 0,
     malformed: 0,
@@ -208,6 +308,17 @@ function accumulate(summary, result) {
   summary.total += 1
   if (result.ambiguous) summary.ambiguous += 1
   else summary.answerable += 1
+
+  // #202 — tallied BEFORE the outcome branches return, because a refusal or a
+  // malformed answer on an applicable item is still a date miss: the axis
+  // divides by what was answerable, and an early return that skipped these
+  // would quietly shrink the denominator to what the extractor chose to
+  // answer — the exact vacuity the within-tolerance denominator rule names.
+  if (result.dueExact !== null) {
+    summary.dueApplicable += 1
+    if (result.dueExact) summary.dueExact += 1
+  }
+  summary.dueInvented += result.dueInvented.length
 
   if (result.outcome === OUTCOMES.REFUSED) {
     summary.refusals.total += 1
@@ -327,7 +438,14 @@ export function oracleExtractorFor(corpus) {
     }
     return {
       kind: 'chores',
-      chores: entries.map(([title, expectedMinutes]) => ({ title, expectedMinutes })),
+      chores: entries.map(([title, expectedMinutes]) => {
+        // #202: the oracle answers a dated entity with the expected calendar
+        // date itself — ISO is one of the stated forms the normaliser accepts,
+        // and it passes through unchanged. An undated entity gets no dueDate
+        // at all, which is the no-date answer the corpus expects for it.
+        const due = item.expect.due?.[title]
+        return due ? { title, expectedMinutes, dueDate: due } : { title, expectedMinutes }
+      }),
     }
   }
 }

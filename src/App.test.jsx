@@ -32,6 +32,10 @@ const api = {
 const choresApi = {
   listChores: vi.fn(),
   addChore: vi.fn(),
+  // #220 — the batch pass. Stubbed for the same reason addChore is: the real
+  // one loops over addChore, and at this level the claim is the WIRING — the
+  // household on screen travels with the rows.
+  addChores: vi.fn(),
   updateChore: vi.fn(),
   removeChore: vi.fn(),
   // #53 — the boot-time catch-up pass. formatSkippedNotice stays REAL
@@ -210,6 +214,7 @@ beforeEach(() => {
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
   choresApi.addChore.mockResolvedValue(undefined)
+  choresApi.addChores.mockResolvedValue([])
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
   choresApi.recordActualMinutes.mockResolvedValue(undefined)
@@ -745,6 +750,45 @@ describe('chores — the write path and the re-read', () => {
     // Order matters: a re-read issued BEFORE the write would return the old list
     // and look identical in a call count.
     expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#220: the batch confirm goes through addChores with the household on screen, then re-reads', async () => {
+    choresApi.addChores.mockResolvedValue([{ ok: true }])
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /add several at once/i })),
+    )
+    fireEvent.change(screen.getByLabelText(/title for chore 1/i), {
+      target: { value: 'sweep the porch' },
+    })
+    fireEvent.change(screen.getByLabelText(/expected minutes for chore 1/i), {
+      target: { value: '15' },
+    })
+    fireEvent.change(screen.getByLabelText(/due date for chore 1/i), {
+      target: { value: '2026-08-10' },
+    })
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /add these chores/i })),
+    )
+
+    // #159 AC 4's rule, applied to the new write: the household THIS SCREEN is
+    // showing travels with the rows, in the second argument the data layer
+    // spreads last so no row can override it.
+    expect(choresApi.addChores).toHaveBeenCalledWith(
+      [{ title: 'sweep the porch', expectedMinutes: '15', dueOn: '2026-08-10' }],
+      { householdId: household.id },
+    )
+    // One mutate() around the whole pass: a single re-read, issued after it.
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(choresApi.addChores.mock.invocationCallOrder[0]).toBeLessThan(
       choresApi.listChores.mock.invocationCallOrder[readsBefore],
     )
   })

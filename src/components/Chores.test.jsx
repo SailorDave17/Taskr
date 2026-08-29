@@ -52,6 +52,7 @@ const capacities = [
 function setup(overrides = {}) {
   const handlers = {
     onAdd: vi.fn().mockResolvedValue(undefined),
+    onAddMany: vi.fn().mockResolvedValue([]),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +82,7 @@ const clickAndSettle = (element) => act(async () => void fireEvent.click(element
 function setupRerenderable() {
   const handlers = {
     onAdd: vi.fn().mockResolvedValue(undefined),
+    onAddMany: vi.fn().mockResolvedValue([]),
     onSave: vi.fn().mockResolvedValue(undefined),
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
@@ -1032,5 +1034,226 @@ describe('#12 — expected-vs-actual capture and feedback', () => {
   it('AC 4 — three completions inside 25% offer nothing either', () => {
     setup({ chores: [anchor, occurrence('o1', 24), occurrence('o2', 24), occurrence('o3', 24)] })
     expect(screen.queryByRole('button', { name: /update estimate/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('batch entry — #220, several chores in one pass', () => {
+  const openBatch = () =>
+    clickAndSettle(screen.getByRole('button', { name: /add several at once/i }))
+  const confirmBatch = () =>
+    clickAndSettle(screen.getByRole('button', { name: /add these chores/i }))
+
+  /** Fill draft row at 1-based position. Any field may be omitted. */
+  function fillDraft(position, { title, minutes, due } = {}) {
+    if (title !== undefined) {
+      fireEvent.change(screen.getByLabelText(new RegExp(`title for chore ${position}$`, 'i')), {
+        target: { value: title },
+      })
+    }
+    if (minutes !== undefined) {
+      fireEvent.change(
+        screen.getByLabelText(new RegExp(`expected minutes for chore ${position}$`, 'i')),
+        { target: { value: minutes } },
+      )
+    }
+    if (due !== undefined) {
+      fireEvent.change(screen.getByLabelText(new RegExp(`due date for chore ${position}$`, 'i')), {
+        target: { value: due },
+      })
+    }
+  }
+
+  it('AC 6: closed by default — the single form is the default path, the batch an addition', () => {
+    setup()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 1: rows are entered and edited as a list, and NOTHING is written until the list is confirmed', async () => {
+    const handlers = setup()
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    fillDraft(2, { title: 'water the plants', minutes: '5', due: '2026-08-11' })
+    await clickAndSettle(screen.getByRole('button', { name: /add another row/i }))
+    fillDraft(3, { title: 'fold the laundry', minutes: '20', due: '2026-08-12' })
+
+    // Three rows entered, edited, on screen — and no write has happened.
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(3)
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(handlers.onAdd).not.toHaveBeenCalled()
+  })
+
+  it('confirming hands every entered row to the batch write, in entry order', async () => {
+    const handlers = setup()
+    handlers.onAddMany.mockResolvedValue([{ ok: true }, { ok: true }])
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    fillDraft(2, { title: 'water the plants', minutes: '5', due: '2026-08-11' })
+    await confirmBatch()
+
+    expect(handlers.onAddMany).toHaveBeenCalledTimes(1)
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'sweep the porch', expectedMinutes: '15', dueOn: '2026-08-10' },
+      { title: 'water the plants', expectedMinutes: '5', dueOn: '2026-08-11' },
+    ])
+    // Everything landed, so the panel closes and the button returns.
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+  })
+
+  it('AC 2: any row can be removed before confirming, and only the rest are written', async () => {
+    const handlers = setup()
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    fillDraft(2, { title: 'water the plants', minutes: '5', due: '2026-08-11' })
+    await clickAndSettle(screen.getByRole('button', { name: /remove chore 1 from the list/i }))
+    await confirmBatch()
+
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'water the plants', expectedMinutes: '5', dueOn: '2026-08-11' },
+    ])
+  })
+
+  it('AC 3: a row that fails validation is marked with the reason, the others stay entered, and nothing is written', async () => {
+    const handlers = setup()
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    // The bad value is an EMPTY due date, and the choice is forced rather than
+    // convenient: a date input cannot hold '2026-02-31' — jsdom and real
+    // browsers alike coerce an unreal date to the empty string — so the
+    // normalizer's own not-a-real-date refusal is unreachable through this
+    // control and lives in dueDates.test.js. Empty is what this UI can produce.
+    fillDraft(2, { title: 'water the plants', minutes: '5' })
+    await confirmBatch()
+
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    // The bad row carries the normalizer's own sentence, on that row.
+    expect(screen.getByRole('alert')).toHaveTextContent(/when is this chore due/i)
+    // And the good row is still entered, not discarded — the failure that
+    // would make this worse than the single form it augments.
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('sweep the porch')
+    expect(screen.getByLabelText(/title for chore 2/i)).toHaveValue('water the plants')
+  })
+
+  it('AC 3: fixing the marked row and re-confirming writes the batch', async () => {
+    const handlers = setup()
+    handlers.onAddMany.mockResolvedValue([{ ok: true }, { ok: true }])
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    fillDraft(2, { title: 'water the plants', minutes: '0', due: '2026-08-11' })
+    await confirmBatch()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    // OUR sentence, not merely the absence of a call — the same discrimination
+    // the single form's AC 2 test earned: without noValidate on the batch form,
+    // the browser's own min-constraint interception also blocks the submit, and
+    // the absence would be produced by a neighbour.
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least a minute/i)
+
+    fillDraft(2, { minutes: '5' })
+    await confirmBatch()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'sweep the porch', expectedMinutes: '15', dueOn: '2026-08-10' },
+      { title: 'water the plants', expectedMinutes: '5', dueOn: '2026-08-11' },
+    ])
+  })
+
+  it('a row left entirely blank is dropped rather than refused — the spare row costs nothing', async () => {
+    const handlers = setup()
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await openBatch()
+
+    // The panel opened with two rows; only the first is filled.
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    await confirmBatch()
+
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'sweep the porch', expectedMinutes: '15', dueOn: '2026-08-10' },
+    ])
+  })
+
+  it('confirming with nothing entered refuses with a sentence and writes nothing', async () => {
+    const handlers = setup()
+    await openBatch()
+    await confirmBatch()
+
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.getByTestId('batch-notice')).toHaveTextContent(/nothing entered yet/i)
+  })
+
+  it('AC 5: a partial failure says how many saved, keeps the refused rows marked, and re-confirming submits only those', async () => {
+    const handlers = setup()
+    // A neutral server refusal, deliberately NOT Postgres vocabulary: the AC 10
+    // gate refuses any component test whose stub speaks as the database, and
+    // this component only displays whatever sentence it is handed.
+    handlers.onAddMany
+      .mockResolvedValueOnce([
+        { ok: true, chore: { id: 'n1' } },
+        { ok: false, message: 'adding the chore: the server refused this row' },
+      ])
+      .mockResolvedValueOnce([{ ok: true, chore: { id: 'n2' } }])
+    await openBatch()
+
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    fillDraft(2, { title: 'water the plants', minutes: '5', due: '2026-08-11' })
+    await confirmBatch()
+
+    // Told which saved and which did not — the summary and the marked row.
+    expect(screen.getByTestId('batch-notice')).toHaveTextContent(/1 of 2 saved/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/the server refused this row/i)
+    // The saved row is GONE from the list — that is what makes re-confirming
+    // unable to duplicate it.
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('water the plants')
+
+    await confirmBatch()
+    expect(handlers.onAddMany).toHaveBeenLastCalledWith([
+      { title: 'water the plants', expectedMinutes: '5', dueOn: '2026-08-11' },
+    ])
+    // Everything is in now; the panel closes.
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+  })
+
+  it('cancelling discards the drafts — they were never written, so nothing has to be undone', async () => {
+    const handlers = setup()
+    await openBatch()
+    fillDraft(1, { title: 'sweep the porch', minutes: '15', due: '2026-08-10' })
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+
+    // Reopening starts fresh rather than resurrecting the discarded list.
+    await openBatch()
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('')
+  })
+
+  it('AC 6: the single form still adds one chore while the panel is open', async () => {
+    const handlers = setup()
+    handlers.onAddMany.mockResolvedValue([])
+    await openBatch()
+
+    // Queried WITHIN the single form's own element, because the draft rows
+    // reuse the same visible field labels and an unscoped query would match
+    // both — the collision is the panel's, not the form's, which is the point:
+    // the form itself is untouched.
+    const singleForm = screen.getByRole('button', { name: /add chore/i }).closest('form')
+    const form = within(singleForm)
+    fireEvent.change(form.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(form.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(form.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await submitAdd()
+    expect(handlers.onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+    })
   })
 })

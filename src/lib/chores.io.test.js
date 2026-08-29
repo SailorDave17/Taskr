@@ -25,7 +25,14 @@ let results = {}
 
 /** Chainable, thenable stand-in for supabase-js's query builder. */
 function makeQuery(table) {
-  const result = () => results[table] ?? { data: null, error: null }
+  // An ARRAY is a queue, consumed one result per resolution — #220's batch
+  // tests need call N to succeed while call N+1 is refused, which a single
+  // shared result cannot express. An object behaves as it always has.
+  const result = () => {
+    const r = results[table]
+    if (Array.isArray(r)) return r.shift() ?? { data: null, error: null }
+    return r ?? { data: null, error: null }
+  }
   const q = {
     select(cols) {
       calls.push({ op: 'select', table, cols })
@@ -76,6 +83,7 @@ vi.mock('./supabase.js', () => ({
 const {
   CHORE_COLUMNS,
   addChore,
+  addChores,
   assignChore,
   catchUpRepeats,
   completeChore,
@@ -272,6 +280,93 @@ describe('addChore', () => {
     await expect(
       addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: HOUSEHOLD.id }),
     ).rejects.toThrow(/adding the chore: new row violates row-level security/i)
+  })
+})
+
+describe('addChores — #220, several chores through the single-add path', () => {
+  const inserts = () => opsOn('chores').filter((c) => c.op === 'insert')
+
+  // AC 4's "indistinguishable from singly-added ones", asserted on the wire:
+  // the same raw form input goes once through addChore and once through
+  // addChores, and the two insert payloads must be byte-equal — normalization
+  // included, which is why the fixture arrives unnormalized.
+  it('lands a row as the identical insert a single add makes', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10', householdId: 'h1' })
+    const single = inserts()[0].row
+
+    calls.length = 0
+    await addChores([{ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10' }], {
+      householdId: 'h1',
+    })
+    expect(inserts()[0].row).toEqual(single)
+  })
+
+  it('issues one ordinary insert per row — never a bulk payload, never an RPC', async () => {
+    results.chores = { data: ROW, error: null }
+    const outcomes = await addChores(
+      [
+        { title: 'wash the towels', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'water the plants', expectedMinutes: 5, dueOn: '2026-08-11' },
+        { title: 'sweep the porch', expectedMinutes: 15, dueOn: '2026-08-12' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(inserts()).toHaveLength(3)
+    // Each insert carries ONE row object. supabase-js accepts an array for a
+    // bulk insert, and that shape appearing here would be the second write
+    // route the issue rules out.
+    inserts().forEach((c) => expect(Array.isArray(c.row)).toBe(false))
+    expect(calls.filter((c) => c.op === 'rpc')).toHaveLength(0)
+    expect(outcomes.map((o) => o.ok)).toEqual([true, true, true])
+  })
+
+  it('AC 5: reports per-row outcomes in entry order, and a refusal does not stop the rows behind it', async () => {
+    // A queue: first insert lands, second is refused by the server, third lands.
+    results.chores = [
+      { data: ROW, error: null },
+      { data: null, error: { message: 'new row violates row-level security policy' } },
+      { data: ROW, error: null },
+    ]
+    const outcomes = await addChores(
+      [
+        { title: 'wash the towels', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'water the plants', expectedMinutes: 5, dueOn: '2026-08-11' },
+        { title: 'sweep the porch', expectedMinutes: 15, dueOn: '2026-08-12' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(outcomes.map((o) => o.ok)).toEqual([true, false, true])
+    expect(outcomes[1].message).toMatch(/adding the chore: new row violates/i)
+    expect(inserts()).toHaveLength(3)
+  })
+
+  it('a row the validators refuse costs no request and fails only itself', async () => {
+    results.chores = { data: ROW, error: null }
+    const outcomes = await addChores(
+      [
+        { title: '', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'fold the laundry', expectedMinutes: 20, dueOn: '2026-08-10' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(outcomes[0].ok).toBe(false)
+    expect(outcomes[0].message).toMatch(/needs a name/i)
+    expect(outcomes[1].ok).toBe(true)
+    expect(inserts()).toHaveLength(1)
+  })
+
+  it('a stray householdId inside a row cannot override the one the caller is showing', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChores(
+      [{ title: 'walk the dog', expectedMinutes: 10, dueOn: '2026-08-10', householdId: 'smuggled-h9' }],
+      { householdId: 'h1' },
+    )
+
+    expect(inserts()[0].row.household_id).toBe('h1')
   })
 })
 

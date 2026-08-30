@@ -86,7 +86,48 @@ Tests  1 failed | 6 passed (7)
 `success`, none skipped. A build tool's own summary is not evidence that the thing you care about
 actually executed; the failure mode there is a *pass*, so nothing draws attention to it.
 
+## What triggers a run — corrected 2026-08-30 (#243)
+
+| Event | Branches |
+|---|---|
+| `push` | `develop`, `release`, `main`, `feature/**` |
+| `pull_request` | `develop`, `release`, `main` |
+
+**These are exact names, and the reason is a defect that shipped.** When the integration branch moved
+`rebuild/v1` -> `develop` on 2026-08-27, the trigger lists were updated by renaming `rebuild` to
+`develop` and keeping the `/**`. That glob was only ever correct because the old branch had a slash
+in it: `rebuild/**` matches `rebuild/v1`, while `develop/**` requires a literal `develop/` prefix and
+matches neither the branch `develop` nor a pull request into it.
+
+*Measured 2026-08-30, before the fix:*
+
+- **Zero** CI runs on branch `develop`, ever.
+- The most recent `pull_request`-event run was 2026-08-28T01:42Z, from the `rebuild/**` era. Every
+  run after it is a `feature/**` push.
+- PR #283 (`develop` -> `release`, the merge that deploys production) and PR #282
+  (`release` -> `main`) both merged carrying **only Vercel checks — no `Lint, test, build` at all.**
+
+**It looked fine, and that is the part worth remembering.** `gh pr checks` reports the checks
+attached to a pull request's head SHA whatever event produced them, so the `feature/**` push run
+shows up on the pull request and reads as a pass. What it is *not* is a run of the merge result: a
+push run tests the head commit in isolation, so a branch that is stale against `develop` can report
+green while the merge it is about to become would fail.
+
+`src/test/gate.test.js` now asserts this table against the branch model in `README.md`, including a
+control that fires on the exact broken list. Nothing in the suite read this file before, which is why
+`npm test` was green throughout — and #243's own AC 3 had named the risk in advance: *a trigger list
+is exactly the kind of claim that is satisfied by inspection and false in practice.*
+
 ## Branch protection — AC 5, and the honest answer
+
+> **The premise below expired and the conclusion has not been re-taken.** *Measured 2026-08-30*:
+> `gh repo view SailorDave17/Taskr --json visibility` now answers **PUBLIC**, and branch protection is
+> free on a public repository — so the 403 recorded here, and the "purchasing decision" it justified,
+> no longer describe this repo. Protection is now *available and unconfigured*, which is a different
+> statement from *unavailable*. Deliberately left unconfigured rather than switched on inside a CI
+> repair: enabling it changes who can push to `develop` and would start refusing the owner's own
+> direct pushes, which is a policy decision and not a side effect. Everything below is kept as the
+> record of why it was not done at the time.
 
 **Branch protection is not configured, and it is not configurable on this repository.** *Measured
 2026-08-04:*

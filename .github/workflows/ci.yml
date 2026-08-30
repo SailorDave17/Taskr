@@ -4,11 +4,23 @@ name: CI
 # there was no CI at all, so this pipeline is created from nothing rather than
 # extended. Every step here must be able to fail; see docs/ci-gate.md for the
 # recorded run that proves it.
+# BRANCH LISTS ARE EXACT NAMES, NOT GLOBS, AND THAT IS THE WHOLE BUG THIS
+# CARRIES. Until 2026-08-30 these read `develop/**`, produced by renaming
+# `rebuild/**` when the integration branch moved. The glob was only ever correct
+# because the OLD branch had a slash in it: `rebuild/**` matches `rebuild/v1`,
+# while `develop/**` requires a literal `develop/` prefix and so matches neither
+# the branch `develop` nor a pull request into it. Measured that day: ZERO runs
+# on `develop` ever, and the `develop -> release` promotion PR -- the merge that
+# deploys production -- carried Vercel checks and no test run at all.
+#
+# src/test/gate.test.js asserts this list against the branch model in README.md,
+# because a trigger list is exactly the kind of claim that is satisfied by
+# inspection and false in practice (#243 AC 3).
 on:
   push:
-    branches: ['develop/**', 'feature/**']
+    branches: ['develop', 'release', 'main', 'feature/**']
   pull_request:
-    branches: ['develop/**']
+    branches: ['develop', 'release', 'main']
 
 permissions:
   contents: read

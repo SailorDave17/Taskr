@@ -1620,3 +1620,115 @@ describe('#242 — the client and the Edge Function agree on the synthetic addre
     )
   })
 })
+
+// #243 — the CI triggers match the branch model, asserted rather than inspected.
+//
+// The defect this exists for: on 2026-08-28 the trigger lists were moved off the
+// retired `rebuild/v1` by renaming `rebuild` to `develop` and keeping the `/**`.
+// That glob was only ever correct because the OLD branch had a slash in it —
+// `rebuild/**` matches `rebuild/v1`, and `develop/**` matches neither `develop`
+// nor a pull request into it. *Measured 2026-08-30*: ZERO CI runs on `develop`
+// ever, and the `develop -> release` promotion PR — the merge that deploys
+// production — carried Vercel checks and no test run.
+//
+// Nothing in this suite read `ci.yml`, so `npm test` was blind to all of it, and
+// the story that made the change closed COMPLETED. #243's own AC 3 names the
+// reason in advance: *a trigger list is exactly the kind of claim that is
+// satisfied by inspection and false in practice*. A real run proves the list
+// works TODAY; this stops the next rename breaking it silently.
+describe('#243 — the CI triggers match the branch model', () => {
+  const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+  const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8')
+
+  // Comments are stripped because the block above DESCRIBES the broken globs in
+  // prose, and a scan over raw source would find `develop/**` in the very
+  // sentence explaining why it is wrong — the guard refusing its own
+  // documentation. The subject here is the trigger list, which is data.
+  const code = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+
+  /** The branch list for one event, as written. */
+  const triggerList = (event) => {
+    const match = code.match(new RegExp(`^\\s{2}${event}:\\s*\\n\\s+branches:\\s*\\[([^\\]]*)\\]`, 'm'))
+    if (!match) return null
+    return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+  }
+
+  const push = triggerList('push')
+  const pullRequest = triggerList('pull_request')
+
+  /** Every branch the README's Branching table names as a role. */
+  const modelBranches = (() => {
+    const section = readme.split('## Branching')[1].split('\n## ')[0]
+    return [...section.matchAll(/^\|\s*\*{0,2}`([^`]+)`\*{0,2}\s*\|/gm)].map((m) => m[1])
+  })()
+
+  it('POSITIVE CONTROL: both trigger lists and the branch table were actually parsed', () => {
+    // Without this every assertion below passes against a parse that returned
+    // nothing — an empty list satisfies "contains no bad glob" perfectly, which
+    // is the same shape as the defect being guarded.
+    expect(push, 'the push trigger list did not parse').not.toBeNull()
+    expect(pullRequest, 'the pull_request trigger list did not parse').not.toBeNull()
+    expect(push.length).toBeGreaterThan(0)
+    expect(pullRequest.length).toBeGreaterThan(0)
+    expect(modelBranches, 'the README Branching table did not parse').toEqual([
+      'develop',
+      'release',
+      'main',
+    ])
+  })
+
+  it('names every branch in the model EXACTLY, in both events', () => {
+    // Exact names, not globs: these three carry no slash, so any glob form
+    // matches nothing at all. A pull request into each of them is a merge
+    // somebody acts on — `develop` is where stories land, `release` is the
+    // production deploy, `main` is the cutover target.
+    for (const branch of modelBranches) {
+      expect(push, `push does not run on ${branch}`).toContain(branch)
+      expect(pullRequest, `no CI on a pull request into ${branch}`).toContain(branch)
+    }
+  })
+
+  it('uses a glob ONLY where the branch namespace really has a slash', () => {
+    // The recurrence guard, and the one that would have caught the rename. A
+    // `<name>/**` entry means "everything UNDER name/", so it is right for
+    // `feature/**` (branch names follow `feature/<issue>-...`) and silently
+    // matches nothing for a branch that is a bare name.
+    const globbed = [...push, ...pullRequest].filter((entry) => entry.endsWith('/**'))
+    const wrong = globbed.filter((entry) => modelBranches.includes(entry.slice(0, -3)))
+    expect(
+      wrong,
+      `these glob a branch that has no slash, so they match nothing: ${wrong.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('keeps the feature-branch run, which is where a story is checked first', () => {
+    expect(push, 'a feature branch push would no longer be built').toContain('feature/**')
+    expect(readme, 'the branch naming convention the glob depends on has moved').toContain(
+      'feature/<issue-number>-short-description',
+    )
+  })
+
+  it('POSITIVE CONTROL: the glob check fires on the exact mistake that was made', () => {
+    // Fed the list as it stood between 2026-08-28 and 2026-08-30. Without this,
+    // the assertion above passes identically against a filter that can never
+    // match anything — and it is the assertion whose whole job is to catch a
+    // shape no run on a green day will ever exercise.
+    const asShipped = ['develop/**', 'feature/**']
+    const wrong = asShipped
+      .filter((entry) => entry.endsWith('/**'))
+      .filter((entry) => modelBranches.includes(entry.slice(0, -3)))
+    expect(wrong).toEqual(['develop/**'])
+    // ...and it does NOT fire on the legitimate one, or it would refuse correct
+    // work and be deleted by whoever hits it next.
+    expect(
+      ['feature/**'].filter((e) => e.endsWith('/**') && modelBranches.includes(e.slice(0, -3))),
+    ).toEqual([])
+  })
+
+  it('no longer names the retired rebuild/v1 in either trigger — #243 AC 2', () => {
+    expect([...push, ...pullRequest].filter((entry) => entry.startsWith('rebuild'))).toEqual([])
+  })
+})

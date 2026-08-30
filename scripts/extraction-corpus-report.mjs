@@ -22,7 +22,7 @@ import { CORPUS } from '../src/lib/extraction.corpus.js'
 // score's spelling lives in exactly one file, so the transcript runner cannot
 // print the same figures a different way. The #202 due-date-axis commentary
 // moved there with the code it explains.
-import { pct, scoreLines, shapeLine } from './extraction-report-format.mjs'
+import { killConditionSection, pct, scoreLines, shapeLine } from './extraction-report-format.mjs'
 
 function score(label, summary) {
   for (const line of scoreLines(label, summary)) console.log(line)
@@ -46,6 +46,28 @@ console.log('')
 console.log("CEILING — the positive control: the corpus's own expected values (AC 5)")
 for (const kind of INPUT_KINDS) score(kind, ceiling.byKind[kind])
 score('all', ceiling.overall)
+
+// #204 — the kill conditions, printed against BOTH controls.
+//
+// The controls are not candidate extractors, so neither verdict is a verdict on
+// the bet. They are the two-sided control on the COMPARISON MECHANISM itself:
+// the floor must fail every axis that has a figure and the ceiling must clear
+// every one, so `npm test` exercises both outcomes on every run rather than
+// only the outcome that happens to be true today. A comparator that could only
+// print PASS would look identical to a working one until the day it mattered.
+//
+// Latency, cost and correction rate read "not measured" here and will keep
+// reading it until #205, #206 and the capture flow supply figures. That is the
+// point of printing them: an axis omitted from a report reads exactly like an
+// axis that passed.
+console.log('')
+console.log('KILL CONDITIONS — the comparison mechanism, on both controls (#204)')
+console.log('')
+console.log('  FLOOR — every axis with a figure must FAIL, or the comparator cannot express one')
+for (const line of killConditionSection({ graded: floor })) console.log(line)
+console.log('')
+console.log('  CEILING — every axis with a figure must PASS')
+for (const line of killConditionSection({ graded: ceiling })) console.log(line)
 
 console.log('')
 console.log('='.repeat(78))

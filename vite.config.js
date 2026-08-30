@@ -13,16 +13,19 @@ import { assertPublishableKey } from './src/lib/keyShape.js'
 // and shipped into a world-readable preview bundle. A secret key bypasses
 // row-level security, so the app worked perfectly and nothing failed. Failing
 // the build is the only signal available at the point it can still be stopped.
-assertPublishableKey(process.env.VITE_SUPABASE_ANON_KEY, 'the production build')
-
-// #95 — the same guard over the second value a dashboard now holds. A Google
-// OAuth client ID is public by design and belongs in the bundle; its sibling,
-// the client SECRET, is one line away on the same Google console screen and
-// begins `GOCSPX-`. Pasting the wrong one produces a build that WORKS, and
-// publishes a credential that can mint access to every connected calendar.
-// Nothing else in the pipeline would notice — which is the same argument, and
-// the same measured incident shape, as the line above.
-assertPublishableKey(process.env.VITE_GOOGLE_CLIENT_ID, 'the production build')
+//
+// #95 widened it to a second enumerated variable (a Google client SECRET is
+// one console line away from the client ID that legitimately lives in
+// `VITE_GOOGLE_CLIENT_ID`, and pasting the wrong one produces a build that
+// WORKS). #203 widened it again, from an enumerated list to EVERY
+// `VITE_`-prefixed variable: the Anthropic key the extraction adapter's
+// transport needs would arrive under a name no list here has heard of, and a
+// guard keyed on names covers exactly the mistakes already made. `VITE_` is
+// the property that makes a value reach the bundle, so `VITE_` is what the
+// guard keys on.
+for (const [name, value] of Object.entries(process.env)) {
+  if (name.startsWith('VITE_')) assertPublishableKey(value, `the production build (${name})`)
+}
 
 // The install target is Android Chrome only — the household is single-platform
 // (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent

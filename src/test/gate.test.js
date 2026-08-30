@@ -648,11 +648,20 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
   // two-character prefix is too weak to grep source with — it would match a
   // protocol-relative URL and a comment about integer division. A guard that
   // cries wolf gets run with --no-verify.
+  // The Anthropic pair arrives with #203, on the principle that story states
+  // outright: the guard should exist before the key does. `ANTHROPIC_API_KEY`
+  // is the name the extraction runner reads from its environment; `sk-ant-` is
+  // the value's prefix, here for the same reason `GOCSPX-` is — a value pasted
+  // straight into a client-bound line has no name attached to it at all.
+  // `src/lib/keyShape.js` refuses the value at build time; this refuses the
+  // spelling ever entering the tree the bundler reads.
   const FORBIDDEN = [
     /SUPABASE_SERVICE_ROLE_KEY/,
     /sb_secret_/,
     /GOOGLE_CLIENT_SECRET/,
     /GOCSPX-/,
+    /ANTHROPIC_API_KEY/,
+    /sk-ant-/,
   ]
 
   // A guard whose subject is SOURCE TEXT cannot tell the hazard from prose
@@ -676,7 +685,9 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     return file.slice(process.cwd().length + 1).split('\\').join('/')
   }
 
-  it('no file under src/ names the service_role key, outside the allowlist', () => {
+  // Shared by the clean-tree assertion and the planted-probe control below, so
+  // the control exercises the scan that actually guards, not a copy of it.
+  function forbiddenOffenders() {
     const offenders = []
     for (const file of filesUnder(srcDir)) {
       if (!/\.(js|jsx|ts|tsx)$/.test(file)) continue
@@ -687,7 +698,30 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
         offenders.push(relative)
       }
     }
+    return offenders
+  }
+
+  it('no file under src/ names the service_role key, outside the allowlist', () => {
+    const offenders = forbiddenOffenders()
     expect(offenders, `these files could inline a secret key: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: a planted provider key under src/ IS refused (#203)', () => {
+    // The control has to CREATE the condition, for the reason the #19 corpus
+    // probe control states: on a clean tree every occurrence of every pattern
+    // is allowlisted, so removing a pattern from FORBIDDEN reddens nothing —
+    // measured while proving #203's widening, 0 red against a hoped-for 1.
+    // This is what makes each entry's removal detectable at all.
+    const probe = resolve(process.cwd(), 'src/lib/.keyshape-probe.tmp.js')
+    writeFileSync(probe, "const planted = 'sk-ant-planted-probe'\n")
+    try {
+      expect(forbiddenOffenders()).toContain('src/lib/.keyshape-probe.tmp.js')
+    } finally {
+      rmSync(probe, { force: true })
+    }
+    // Prove the cleanup rather than assuming it — a leftover probe reddens the
+    // clean-tree assertion against the NEXT person's change.
+    expect(forbiddenOffenders()).not.toContain('src/lib/.keyshape-probe.tmp.js')
   })
 
   it('every allowlisted file still exists, so a rename cannot widen the exemption', () => {
@@ -736,6 +770,10 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
       'supabase/functions/provision-member/index.ts',
       'supabase/functions/calendar-connect/handler.ts',
       'supabase/functions/calendar-connect/handler.test.js',
+      // #203 — the extraction runner reads ANTHROPIC_API_KEY from its
+      // environment and its refusal message names the sk-ant- shape, which is
+      // what keeps both new patterns exercised.
+      'scripts/extraction-run.mjs',
     ]
       .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
       .join('\n')
@@ -1026,6 +1064,10 @@ describe('#19 — no real household name reaches version control', () => {
     'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Request-Headers': 'an HTTP header asserted by the CORS tests',
+    // #203 — the error name `AbortSignal.timeout` throws, replayed verbatim by
+    // the extraction adapter's recorded-timeout fixtures so the adapter's
+    // classification is exercised on the real spelling.
+    TimeoutError: 'the thrown-timeout name the extraction adapter fixtures replay',
     // #246 — the dashboard checkbox the seeded test account is created with,
     // quoted in the sign-in refusal of both live suites. The RLS suite's copy
     // sits inside a single-quoted string and is absorbed by the outer match;

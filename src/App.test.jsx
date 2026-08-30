@@ -32,6 +32,10 @@ const api = {
 const choresApi = {
   listChores: vi.fn(),
   addChore: vi.fn(),
+  // #220 — the batch pass. Stubbed for the same reason addChore is: the real
+  // one loops over addChore, and at this level the claim is the WIRING — the
+  // household on screen travels with the rows.
+  addChores: vi.fn(),
   updateChore: vi.fn(),
   removeChore: vi.fn(),
   // #53 — the boot-time catch-up pass. formatSkippedNotice stays REAL
@@ -54,6 +58,26 @@ const capacityApi = {
   listCapacity: vi.fn(),
   setCapacity: vi.fn(),
   clearCapacity: vi.fn(),
+}
+
+// #49 — the whole module is stubbed, including its exported constant: the
+// orchestrator reads the server through its own client calls, and this suite's
+// getSupabase throws on purpose. What App owes is WHEN it runs, which is
+// exactly what a stub records.
+const reassignApi = {
+  reassignHousehold: vi.fn(),
+  planReassignment: vi.fn(),
+  REASSIGN_MAX_ATTEMPTS: 3,
+}
+
+// #50 — only the two IMPURE seen-marker functions are stubbed. `splitSnapshot`
+// and `announcementFrom` stay real for the standing reason: pure, with their
+// own tests, and a stub of either could disagree with the arithmetic the bars
+// render from — which is the exact disagreement AC 4 forbids.
+const announceApi = {
+  readSplitSeen: vi.fn(),
+  writeSplitSeen: vi.fn(),
+  dismissFairnessNote: vi.fn(),
 }
 
 // #37 — only the three IMPURE exclusion functions are stubbed. `isExcluded`,
@@ -114,6 +138,13 @@ vi.mock('./lib/calendar.js', async () => {
   return { ...actual, ...calendarApi }
 })
 
+vi.mock('./lib/reassign.js', () => reassignApi)
+
+vi.mock('./lib/announce.js', async () => {
+  const actual = await vi.importActual('./lib/announce.js')
+  return { ...actual, ...announceApi }
+})
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -122,6 +153,12 @@ vi.mock('./lib/household.js', async () => {
 })
 
 const { default: App } = await import('./App.jsx')
+
+// The REAL pure halves, for building #50's expected snapshot the same way
+// refresh() does — through the mocked modules these would be the same
+// functions, but importActual says so instead of relying on it.
+const actualAnnounce = await vi.importActual('./lib/announce.js')
+const actualCapacity = await vi.importActual('./lib/capacity.js')
 
 /**
  * Render and let the boot effect settle inside act().
@@ -164,11 +201,20 @@ beforeEach(() => {
   capacityApi.listCapacity.mockResolvedValue([])
   capacityApi.setCapacity.mockResolvedValue(undefined)
   capacityApi.clearCapacity.mockResolvedValue(undefined)
+  reassignApi.reassignHousehold.mockReset()
+  reassignApi.reassignHousehold.mockResolvedValue({ applied: 0, assignments_version: 1 })
+  Object.values(announceApi).forEach((fn) => fn.mockReset())
+  // No seen-marker row yet — the ordinary first-look state, which announces
+  // nothing. Tests about the announcement override this.
+  announceApi.readSplitSeen.mockResolvedValue(null)
+  announceApi.writeSplitSeen.mockResolvedValue(undefined)
+  announceApi.dismissFairnessNote.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
   choresApi.addChore.mockResolvedValue(undefined)
+  choresApi.addChores.mockResolvedValue([])
   choresApi.updateChore.mockResolvedValue(undefined)
   choresApi.removeChore.mockResolvedValue(undefined)
   choresApi.recordActualMinutes.mockResolvedValue(undefined)
@@ -561,6 +607,78 @@ describe('#160 — identity and organizer within the active household', () => {
   })
 })
 
+describe('#247 — a removal that succeeds while its auth half does not', () => {
+  // The two-facts warning is composed in lib/household.js and TESTED there;
+  // what only this level can see is App's handleRemove — that the warning is
+  // surfaced at all, and surfaced AFTER the refresh, so the screen never says
+  // "removed" over a roster still listing the person. Deleting the `.then`
+  // that sets it must turn this red.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    organizer_member_id: 'm1',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', household_id: 'h1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const target = { id: 'm2', household_id: 'h1', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' }
+
+  it('shows the two-facts warning over a roster the person is already gone from', async () => {
+    const warning =
+      'Placeholder Two was removed from the household, but their sign-in was ' +
+      'NOT deleted: This function is not configured. That account can still ' +
+      'sign in until it is deleted.'
+    let removed = false
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
+    api.removeMember.mockImplementation(async () => {
+      removed = true
+      return { warning }
+    })
+
+    await renderApp('Who')
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })),
+    )
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })),
+    )
+
+    expect(api.removeMember).toHaveBeenCalledWith('m2')
+    // Both facts on screen…
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Placeholder Two was removed/)
+    expect(alert).toHaveTextContent(/sign-in was NOT deleted/)
+    // …and the roster agrees with the first of them: the person is gone.
+    const roster = within(screen.getByRole('region', { name: /who is in the household/i }))
+    expect(roster.queryByText('Placeholder Two')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: a removal with nothing to warn about shows no alert', async () => {
+    // Without this, the assertions above could be satisfied by an App that
+    // shows every removal as a warning — the state most removals end in is
+    // silence, and silence has to be shown reachable.
+    let removed = false
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
+    api.removeMember.mockImplementation(async () => {
+      removed = true
+      return { warning: null }
+    })
+
+    await renderApp('Who')
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })),
+    )
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })),
+    )
+
+    const roster = within(screen.getByRole('region', { name: /who is in the household/i }))
+    expect(roster.queryByText('Placeholder Two')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // #34 AC 6 — the screen re-reads from the server rather than patching state
 //
@@ -632,6 +750,45 @@ describe('chores — the write path and the re-read', () => {
     // Order matters: a re-read issued BEFORE the write would return the old list
     // and look identical in a call count.
     expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#220: the batch confirm goes through addChores with the household on screen, then re-reads', async () => {
+    choresApi.addChores.mockResolvedValue([{ ok: true }])
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /add several at once/i })),
+    )
+    fireEvent.change(screen.getByLabelText(/title for chore 1/i), {
+      target: { value: 'sweep the porch' },
+    })
+    fireEvent.change(screen.getByLabelText(/expected minutes for chore 1/i), {
+      target: { value: '15' },
+    })
+    fireEvent.change(screen.getByLabelText(/due date for chore 1/i), {
+      target: { value: '2026-08-10' },
+    })
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /add these chores/i })),
+    )
+
+    // #159 AC 4's rule, applied to the new write: the household THIS SCREEN is
+    // showing travels with the rows, in the second argument the data layer
+    // spreads last so no row can override it.
+    expect(choresApi.addChores).toHaveBeenCalledWith(
+      [{ title: 'sweep the porch', expectedMinutes: '15', dueOn: '2026-08-10' }],
+      { householdId: household.id },
+    )
+    // One mutate() around the whole pass: a single re-read, issued after it.
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(choresApi.addChores.mock.invocationCallOrder[0]).toBeLessThan(
       choresApi.listChores.mock.invocationCallOrder[readsBefore],
     )
   })
@@ -1054,6 +1211,302 @@ describe('capacity — this week, set by hand (#46)', () => {
     // one of them. The control's job is to prove the regex MATCHES, so the
     // threshold is the one that still means that.
     expect([...source.matchAll(/from\s+'([^']+)'/g)].length).toBeGreaterThan(0)
+  })
+
+  // -------------------------------------------------------------------------
+  // #49 — the assignments follow a capacity change on their own. What App owes
+  // is WHEN the re-assignment runs and for WHICH household; what it does is
+  // reassign.io.test.js's subject, and what the database enforces is
+  // reassignment.pglite.test.js's.
+  // -------------------------------------------------------------------------
+
+  it('#49 AC 2: setting this week’s capacity re-assigns, nobody pressing an assign button', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await saveMinutes('120')
+
+    // The household on screen, AFTER the write that changed it, BEFORE the
+    // refresh — so the re-read that follows shows the stored result rather
+    // than racing it.
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+    expect(capacityApi.setCapacity.mock.invocationCallOrder[0]).toBeLessThan(
+      reassignApi.reassignHousehold.mock.invocationCallOrder[0],
+    )
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(reassignApi.reassignHousehold.mock.invocationCallOrder[0]).toBeLessThan(
+      capacityApi.listCapacity.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#49: clearing an override re-assigns too — a week back to normal is a capacity change', async () => {
+    overrideThisWeek(120)
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await openTheWeekEditor()
+    await act(async () =>
+      void fireEvent.click(
+        screen.getByRole('button', { name: /use the usual weekly minutes for placeholder one/i }),
+      ),
+    )
+
+    expect(capacityApi.clearCapacity).toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('#49: a baseline edit that MOVES the minutes re-assigns; a name-only save does not', async () => {
+    // Owner decision at pickup: a weekly_minutes edit is a capacity change.
+    // The roster's save always sends the minutes field, so the discriminator
+    // is whether the value moved — a name fix must not overwrite
+    // `last_rebalance` with a run nothing prompted.
+    api.updateMember.mockResolvedValue({})
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^edit$/i })))
+    fireEvent.change(screen.getByLabelText(/name for placeholder one/i), {
+      target: { value: 'placeholder renamed' },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+    expect(api.updateMember).toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^edit$/i })))
+    fireEvent.change(screen.getByLabelText(/weekly minutes for/i), {
+      target: { value: '150' },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('#49 AC 7: the stored verdict reaches the split surface from the household row', async () => {
+    api.currentHousehold.mockResolvedValue({
+      ...household,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: true,
+        jobsMoved: 2,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: '2026-08-27T12:00:00Z',
+      },
+    })
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    // Rendered from the STORED verdict — no allocator call could produce this
+    // sentence here, because nothing on this screen knows what the last run's
+    // budget did.
+    expect(screen.getByTestId('rebalance-note')).toHaveTextContent(/moved 90 min/)
+    expect(screen.getByTestId('rebalance-note')).toHaveTextContent(/change/)
+  })
+})
+
+// #50 — the re-balance announced as an event, at the level only App can answer:
+// WHEN the statement appears, when it must not, and what advances the marker
+// that makes it an event seen once. The wording itself is Announcement.test.jsx's
+// subject; the arithmetic is announce.test.js's. `splitSnapshot` and
+// `announcementFrom` are REAL here (the mock spreads the actual module), so
+// these tests exercise the same pipeline a phone would.
+describe('#50 — a re-balance is announced as an event', () => {
+  const APPLIED_AT = '2026-08-27T18:00:00+00:00'
+
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+    last_rebalance: {
+      contested: true,
+      level: true,
+      reason: null,
+      boundByBudget: false,
+      jobsMoved: 1,
+      minutesMoved: 90,
+      changeBudgetMinutes: 120,
+      applied_at: APPLIED_AT,
+    },
+  }
+
+  const members = [
+    { id: 'm1', household_id: 'h1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', household_id: 'h1', display_name: 'Placeholder Two', weekly_minutes: 300, claimed_by: null },
+  ]
+
+  // The state NOW: both chores on Placeholder Two. What this member was last
+  // shown (the seen fixture below): c1 on Placeholder One, whose week was then
+  // 420 min — so the re-balance reads as 120 min less room and 90 min moved.
+  const chores = [
+    { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+    { id: 'c2', title: 'Placeholder Other Chore', expected_minutes: 50, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+  ]
+
+  const seenEarlier = {
+    member_id: 'm1',
+    snapshot: {
+      members: [
+        { id: 'm1', minutes: 90, capacityMinutes: 420 },
+        { id: 'm2', minutes: 50, capacityMinutes: 300 },
+      ],
+    },
+    seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+  }
+
+  /** The snapshot refresh() computes for these fixtures, built the same way. */
+  const currentSnapshot = () =>
+    actualAnnounce.splitSnapshot({
+      capacities: actualCapacity.capacitiesFor(
+        members,
+        [],
+        actualCapacity.periodStartFor(new Date(), household.timezone),
+      ),
+      chores,
+    })
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(members)
+    choresApi.listChores.mockResolvedValue(chores)
+  })
+
+  it('AC 1: opening the app on a re-balance this member has not seen shows the statement', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(seenEarlier)
+    await renderApp()
+
+    const region = await screen.findByTestId('rebalance-announcement')
+    expect(region).toHaveTextContent('Placeholder One’s week has 120 min less room')
+    expect(region).toHaveTextContent('90 min of chores moved off Placeholder One’s list')
+    expect(region).toHaveTextContent('Placeholder Two picked up 90 min')
+  })
+
+  it('advances the seen-marker to this re-balance when the statement is shown', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(seenEarlier)
+    await renderApp()
+    await screen.findByTestId('rebalance-announcement')
+
+    expect(announceApi.writeSplitSeen).toHaveBeenCalledWith({
+      memberId: 'm1',
+      snapshot: currentSnapshot(),
+      seenRebalanceAt: APPLIED_AT,
+    })
+  })
+
+  it('AC 7: opened again with no further change, the statement is not shown a second time', async () => {
+    // The row the write above left behind: marker at the re-balance, snapshot
+    // at what the member was shown. The same open now announces nothing — and
+    // writes nothing, because there is nothing new to record.
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: currentSnapshot(),
+      seen_rebalance_at: APPLIED_AT,
+    })
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+    expect(announceApi.writeSplitSeen).not.toHaveBeenCalled()
+  })
+
+  it('dismissing hides the statement, and a later refresh does not resurrect it', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(seenEarlier)
+    await renderApp()
+    await screen.findByTestId('rebalance-announcement')
+
+    // The marker has advanced on the server by now; later reads see it.
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: currentSnapshot(),
+      seen_rebalance_at: APPLIED_AT,
+    })
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /got it/i })))
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+
+    // A tab switch re-reads everything (#47 criterion 11); the event must not
+    // come back with it.
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+  })
+
+  it('a first look announces nothing and records the baseline the next statement diffs against', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+    expect(announceApi.writeSplitSeen).toHaveBeenCalledWith({
+      memberId: 'm1',
+      snapshot: currentSnapshot(),
+      seenRebalanceAt: APPLIED_AT,
+    })
+  })
+})
+
+// #59 — the fairness note's dismissal, at the level only App can answer: WHOSE
+// dismissal the write records, and that the standing/dismissed state comes from
+// the SERVER's seen-marker row rather than from a local flag. The wording and
+// the on-demand toggle are Split.test.jsx's subject.
+describe('#59 — the fairness note is dismissed per member, on the server', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+
+  const members = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null },
+  ]
+
+  const seenRow = (dismissed) => ({
+    member_id: 'm1',
+    snapshot: { members: [] },
+    seen_rebalance_at: null,
+    fairness_note_dismissed: dismissed,
+  })
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(members)
+  })
+
+  it('stands when this member has never dismissed it', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('fairness-note')).toHaveTextContent(/does not count/i)
+  })
+
+  it('does not stand when the server says this member dismissed it', async () => {
+    announceApi.readSplitSeen.mockResolvedValue(seenRow(true))
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.queryByTestId('fairness-note')).toBeNull()
+    expect(screen.getByRole('button', { name: /what the split counts/i })).toBeInTheDocument()
+  })
+
+  it('dismissing records THIS member and re-reads, after which the note stops standing', async () => {
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    // The server accepts the dismissal; the re-read that follows reports it.
+    // Armed by changing the mock, not `mockResolvedValueOnce` — the read count
+    // is refresh()'s business, not this test's (#37's lesson).
+    announceApi.readSplitSeen.mockResolvedValue(seenRow(true))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /noted/i })))
+
+    // The ARGUMENT, not just the call: the layer that chooses whose dismissal
+    // this is is exactly the layer nothing else asserts about.
+    expect(announceApi.dismissFairnessNote).toHaveBeenCalledWith('m1')
+    expect(screen.queryByTestId('fairness-note')).toBeNull()
+    expect(screen.getByRole('button', { name: /what the split counts/i })).toBeInTheDocument()
   })
 })
 

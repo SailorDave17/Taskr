@@ -7,12 +7,71 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0016` are ALL applied to the live project, and the expected-red set is
-  EMPTY** — *measured 2026-08-26 at 24 of 24, re-measured 2026-08-27 at 24 of 24 across the `0016`
+- Status: **`0001`–`0023` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
+  ACCOUNT can still sign in. That is the first time this denominator has moved on something a
+  migration cannot change, and nothing became excusable: the two rows are green whenever the
+  account works.
+  **`0023` on 2026-08-28 (#211)**, applied with `npm run migrate:live` (md5
+  `3f1df4ec58d79025b12f7f612ff759e4` read back identical, 8982 characters, 5 statements) in the
+  story's own session. This is the first migration here whose before-reading AND after-reading were
+  both taken, which is the gap `0022`'s entry below records rather than papers over: *measured at
+  **27 of 28** with `chores` answering `42703` — `column chores.source does not exist` — and at
+  **28 of 28** immediately after*. The denominator did not move, because `0023` widens the existing
+  `chores` column list rather than adding an entry; the row it would have held never became an
+  excused red, because the apply landed in the same session as the code that reads the column.
+  `npm run probe:live-grants` has NO row for `chores.source` and needs none — unlike `0013`, `0019`
+  and `0022`, this check is not blind to `0023`: the SELECT grant is exactly what made the red
+  above, so the instrument that would excuse it is the instrument that caught it. **The one half no
+  live instrument covers is the INSERT grant**, since `check:live` only reads; that is proven
+  against a real Postgres by `src/test/chores.pglite.test.js` and is stated here as a known gap
+  rather than left to be inferred from an empty excused-red set.
+  **`0022` on 2026-08-28**, applied with `npm run migrate:live` (md5
+  `13ce80f76fe0b15d5cbeb85b4e2a7a06` read back identical) in the session that found the defect.
+  It is the FOURTH migration this check cannot speak for, and the reason is the same shape as
+  `0013`'s: `0022` is made of column grants and one trigger, and `check:live` reads tables,
+  columns, RPCs and functions. The blindness is verified rather than assumed — `0022` creates no
+  table, adds no column, and its one function (`member_capacity_identity_is_fixed`) is named
+  nowhere in `src/lib/liveSchema.js`, `LIVE_RPCS` included. It read **28 of 28 after** the paste;
+  the before-reading was NOT taken, so that half is reasoned from the two artefacts and not
+  measured, which is why it is said here rather than left to be inferred. What testifies
+  instead is `npm run probe:live-grants`, which gained four expectation rows in the same change
+  (`member_split_seen.member_id`, and `member_capacity`'s `household_id`, `member_id` and
+  `period_start`, all `arw`): they read **MOVED before the apply and ok after**, 10 of 10 agreeing
+  with the negative control included. Unlike `0013`, whose paste production genuinely could not
+  testify to because it was a no-op there, `0022` changed real state and the catalog says so.
+  The reading before #250's two rows was *measured 2026-08-28 at 26 of 26*, by running the instrument
+  after `0021` was applied in #59's own
+  session with `npm run migrate:live` (md5 `addd7e14b36383cee3b9282f36f9bcb4` read back identical).
+  `0021` widened an existing entry rather than adding one — the `member_split_seen` column list grew
+  by the fairness note's dismissal flag — so the denominator did NOT move, and the entry would have
+  answered `42703` on the new column until the apply; it never stood as an excused red because the
+  apply landed in the same session, before the merge. The reading before that: *measured 2026-08-28
+  at 26 of 26* after `0020` was applied in #50's own session the same way
+  (md5 `180b5beb64655324e55a4eecad9d15fa` read back identical).
+  Before that application the same session measured **25 of 26** — every `0001`–`0019` subject
+  green, `member_split_seen` answering `PGRST205`, the new entry doing its job — so the excused row
+  stood for under an hour and drained on exactly the action it named. `npm run probe:live-grants`
+  agrees from the catalog side: `member_split_seen` carries **no table-level grant** for
+  `authenticated`, which is `0020`'s revoke visible where `check:live` cannot see it. The reading
+  before #50 widened the instrument: *measured 2026-08-27 at 25 of 25*, by running it after `0019`
+  was applied under #235.
+  `0019` never entered the set, because this check is blind to it in both directions (see
+  its bullet below); it is confirmed instead by `npm run probe:live-grants`, which reads **zero
+  moved control rows** where it read exactly three before the paste.
+  `0017` never entered the set because this check is blind to it (see its bullet below); it is
+  confirmed instead by `npm run probe:live-grants`, which reads **anon holds no table-level or
+  column-level privilege in `public` and may execute no function there** — 6 of 6 agreeing, negative
+  control included. Before those two, the set was EMPTY as well — *measured
+  2026-08-26 at 24 of 24, re-measured 2026-08-27 at 24 of 24 across the `0016`
   paste, which could not have moved it*. `0001`–`0008`
   as of 2026-08-20 (#108),
   `0009` on 2026-08-21, `0010`–`0012` on 2026-08-24, **`0013` and `0014` on 2026-08-26 (#150)**,
-  **`0015` on 2026-08-26 (#194)**, and **`0016` on 2026-08-27 (#198)**.
+  **`0015` on 2026-08-26 (#194)**, **`0016` on 2026-08-27 (#198)**, **`0017` and `0018` on
+  2026-08-27**, and **`0019` on 2026-08-27 (#235)** — `0018` applied under #231 with
+  `npm run migrate:live`, `0019` the same way under #235, and `0017` confirmed already
+  applied by the grant catalog in the same pass rather than by a paste anybody recorded, and
+  **`0021` on 2026-08-28 (#59)**, applied with `npm run migrate:live` in the story's own session.
   `0013` (the inherited grants, #91) and `0016` (the organizer-only removal rule, #152) never
   appeared in the expected-red set below, because
   `check:live` is structurally blind to both — and each paste was **verified anyway**, by an
@@ -24,8 +83,14 @@
   `0010` and `0011` are verified by `npm run check:live` — every table, every RPC, and (since #115)
   both Edge Functions; the rest are verified only by the paste succeeding. The denominator moved
   from 20 to 21 on 2026-08-21 when #37 added `chore_exclusions` to `LIVE_SCHEMA`, to 23 on
-  2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge Function, and to
-  **24** the same day when #53 added the `catch_up_repeats` RPC. `0013` does not move it, and that
+  2026-08-24 when #95 added `calendar_connections` and the `calendar-connect` Edge Function, to
+  **24** the same day when #53 added the `catch_up_repeats` RPC, and to **25** on 2026-08-27 when
+  #49 added the `apply_assignments` RPC, and to **26** when #50 added `member_split_seen` — the
+  per-member seen-marker behind the re-balance announcement, SELF-scoped rather than
+  household-scoped (a phone must not be able to mark another member's announcement as seen), with
+  select/insert/update granted by column in `0020` — plus `0021`'s fairness-note dismissal flag
+  (#59), select and update only — and nothing granted to `anon` or
+  `service_role`. `0013` does not move it, and that
   is the point of the bullet above rather than an oversight.
 
   *This Status line said `0012` had NOT been pasted until 2026-08-24, while the expected-red bullet
@@ -44,8 +109,18 @@
     cannot see an index: see the blindness bullet below. That suite cannot reach its first assertion
     unless `0009` is applied — `beforeAll` puts one seeded account in two households, which the
     pre-`0009` global `members_claimed_by_key` forbids, and that is exactly how #127 was found.
-    *Re-measured 2026-08-24: 31 of 31, no skips.* **A suite that fails at setup under the old schema
+    *Re-measured 2026-08-24: 31 of 31, no skips. Re-measured again 2026-08-28: **57 of 57**, no
+    skips, after #221 restored the seeded account — and **65 of 65** later the same day, once #38
+    added eight chore cases to it. The count moved because tests were added; none were removed.*
+    **A suite that fails at setup under the old schema
     is a stronger presence check than any probe**, because it cannot pass for the wrong reason.
+    The 2026-08-28 re-measurement matters for a reason beyond the number: this confirmation had
+    **lapsed without saying so**. The seeded account was cleared around 2026-08-25, so from then
+    until #221 the sentence above was still true as history and the instrument behind it could not
+    run — and because a `beforeAll` failure is reported by vitest as tests SKIPPED, the lapse
+    presented as an environment hiccup rather than as a dead suite. **The one confirming instrument
+    for this whole class of migration can stop working without any artefact changing**, so its
+    liveness is worth checking on the same occasions its verdict is relied on.
   - **`0010`** (#37) — the exclusions table and the two eligibility functions. **Pasted 2026-08-24,
     verified over the wire**: `chore_exclusions` answers with exactly its four granted columns, and
     that assertion had been red by design from the merge until the paste.
@@ -108,7 +183,37 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY, so ANY red is real.** *Measured 2026-08-26 at 24 of 24*, after
+- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after `0023` was applied in
+  #211's own session, and at the same figure before it for #250's two seeded-account rows.**
+  `0023` (`chores.source`, #211) is the second migration running to be applied inside the story that
+  needed it, so like `0021` it never entered this set — but unlike `0021` both readings were taken:
+  *27 of 28 before, `chores` answering `42703` on `chores.source`; 28 of 28 after*. That before-reading
+  is cheap and is worth making a habit of, because it is the only thing separating "the apply worked"
+  from "the entry was never going to be red anyway" — `0022`'s entry above has to reason its
+  before-state from two artefacts for want of one command.
+  #250's two rows are the first entries here whose subject is not the
+  live project at all — they ask whether `TASKR_TEST_EMAIL` can still sign in, because the account
+  behind it was deleted around 2026-08-25 and `npm run test:rls` threw in a `beforeAll` for four days
+  while reporting `numFailedTests: 0`. They can never be excused: an excused sign-in row would be a
+  check that has agreed not to notice it is dead. The reading before them, and the last one whose
+  denominator a migration could move: ***measured 2026-08-28 at 26 of 26*, after `0021` was applied in
+  #59's own session — and measured the same day at the same figure after `0020` was applied in
+  #50's.** `0021` never entered the set: it widens the `member_split_seen` column list (the
+  fairness note's dismissal flag), which would have answered `42703` until applied, and the apply
+  landed in the same session as the code that reads it. The row it held while #50 was being built — `member_split_seen` answering
+  `PGRST205`, cleared only by applying `supabase/migrations/0020_split_seen.sql` — was *measured
+  standing at 25 of 26*, then drained the same session by `npm run migrate:live` (the route #185
+  built and #231/#235 proved), and both readings were taken rather than assumed. The application
+  came BEFORE the `release` promotion on purpose: the deployed client changes only on a promotion,
+  so the table existing first is the safe order.
+
+  Before #50 widened the instrument, the set was EMPTY — *measured 2026-08-27 at 25 of 25*, after
+  `0018` was applied
+  (#231). The two rows it held between #49's merge and that paste — `chores` answering `42703` on
+  `assigned_source`, and `apply_assignments` answering `PGRST202` — both cleared on exactly the one
+  action they named, and are moved into the history table below rather than left standing. The
+  denominator moved from 24 to 25 when #49 added the `apply_assignments` probe. Before that, the set
+  was EMPTY — *measured 2026-08-26 at 24 of 24* after
   `0015` was pasted (#194), and *re-measured 2026-08-27 at 24 of 24* across the `0016` paste (#198),
   which is blind to this check and so could not have moved either number. It held one row for most of that day — `chores` until `0015` arrived,
   re-opened by #12 asking for a column the live project did not have yet — and the row was
@@ -144,16 +249,29 @@
   plain sight on 2026-08-09. With nothing excused, the instrument answers the only question worth
   asking in one bit.
 
-  **The excused-red set is EMPTY. *Measured 2026-08-26 at 24 of 24*, after `0015` was pasted
-  (#194), and *re-measured 2026-08-27 at 24 of 24* across the `0016` paste (#198).** It held one row for most of that day, re-opened by #12: `chores` answering
-  `42703 column chores.actual_minutes does not exist`, because the client had started asking for
-  the actuals column while `0015` sat unpasted. A `42703`, not a `42501` — an unknown column is
-  refused before the privilege check, so that red could not have been faked by a grant alone. With
-  nothing excused, ANY red, on any subject, is real.
+  **The excused-red set held nothing between `0018`'s application and #50, held `0020`'s one row
+  within #50's session, and is EMPTY again — see the head of this bullet.** *Measured 2026-08-27 at
+  25 of 25* after `0018` was
+  applied under
+  #231. It held TWO rows between #49's merge and that application, and both are moved into
+  history below rather than left standing — the same reasoning as every block under it, and the
+  reason the rows were written to be deletable by one reading: while they stood, the check's
+  authority over `chores` and over the RPC list was on loan.
 
-  | Expected red | Cleared by | Notes |
+  **The two rows that stood here between #49's merge and the `0018` application are moved into
+  history rather than left standing.** Both named the same single clearing action, and both cleared
+  on exactly it:
+
+  | Red that stood here | Cleared by | Held? |
   |---|---|---|
-  | *(none)* | — | The set is empty. Adding a row is a claim that has to name the single action that clears it. |
+  | `chores` refuses `assigned_source` (`42703`) | applying `supabase/migrations/0018_stored_reassignment.sql` (#231), after `0017` | Yes. Not a deploy, not a promotion to `release`, not another migration. |
+  | `apply_assignments` unresolved (`PGRST202`) | the same file (#231) | Yes, and together: one action created the column and the RPC, which is why the application was one story rather than two. |
+
+  Neither red could be faked by a grant, which is why they were worth excusing at all: a `42703` is
+  refused before the privilege check, and a `PGRST202` is PostgREST's own cache never resolving the
+  function. **`0018` was applied with `npm run migrate:live` rather than pasted by hand** — the route
+  #185 built — so the payload is confirmed from the far end as well as from the reading: Postgres
+  reported back 17314 characters and md5 `8d93ea98cfc53f9069a7f6811ca02511`, identical to the file.
 
   **The row that stood here between #12's merge and the `0015` paste is moved into history rather
   than left standing**, on the same reasoning as the two below it:
@@ -363,16 +481,32 @@
     produced "unobservable by design", which had to be withdrawn on 2026-08-26.
 
   **An empty excused-red set is a claim about the subjects the instrument has**, never about the
-  ones it does not — and with `0013`, `0016` and `0017` the gap is four migrations wide rather than
-  one. Three of the four are
-  confirmed, and none by this check: `0009` by `npm run test:rls` at setup, `0013` by the column
-  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198). `0017` is the fourth and is confirmed
-  by `npm run probe:live-grants` once it is pasted. **A gap covered
+  ones it does not — and with `0013`, `0016`, `0017` and now `0019` the gap is **five** migrations
+  wide rather than one. **All five are now
+  confirmed, and none by this check**: `0009` by `npm run test:rls` at setup, `0013` by the column
+  ACL in the catalog (#150), `0016` by the policy expression in the catalog (#198), `0017` by
+  `npm run probe:live-grants` reading `anon` holding nothing anywhere, and `0019` by that same
+  command reading zero moved control rows on 2026-08-27 (#235). **A gap covered
   somewhere else is still a gap here**, which is why this
   sentence stays standing after the confirmations rather than being deleted by them.
 
+  `0019` (#227) is the fifth, and it is worth saying WHY it is not an excused row four screens up,
+  because a reader who has just read that migration will look for one. It revokes the table-level
+  privileges `authenticated` holds on `households`, `members` and `chores` that no migration
+  granted, and re-grants the `households` column reads in the same file. `check:live` asks what the
+  client can read; the client reads the same columns either side of the paste, so the check reads
+  **25 of 25 before and after** and the excused-red set stays genuinely EMPTY. The instrument that
+  *can* see it is `npm run probe:live-grants`, whose `MEASURED_TABLE_ACLS` was moved to the
+  post-paste values in the same change — so **that** command reported exactly three moved control
+  rows until the paste, and its own output named all three and the single action that cleared them.
+  **It was applied on 2026-08-27 under #235**, by `npm run migrate:live`, which read the payload
+  back from Postgres at 10,409 characters and md5 `7639fbfc641338bdca8c30b8d72e0125` before
+  applying anything. Both readings were taken either side: `check:live` 25 of 25 before and after,
+  and `probe:live-grants` three moved rows before and **zero** after, 6 of 6 agreeing with its own
+  negative control. There is no excused moved row left, so any moved row now is a real finding.
+
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted eleven times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted fifteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
@@ -380,9 +514,20 @@
   measured 24 of 24** with `0012` pasted the same evening, then **TWO again at a measured 22 of 24**
   on 2026-08-26 when #159 merged with `0014` unpasted, then **EMPTY at a measured 24 of 24**,
   `0014` and `0013` both pasted that afternoon (#150), then **ONE again at a measured 23 of 24**
-  later the same day with #12's `0015` in the repo and unpasted, and now **EMPTY at a measured
-  24 of 24** with `0015` pasted that evening (#194). **`0016` (#198) is deliberately NOT a twelfth
-  inversion**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
+  later the same day with #12's `0015` in the repo and unpasted, then **EMPTY at a measured
+  24 of 24** with `0015` pasted that evening (#194), then **TWO at a measured 23 of 25** on
+  2026-08-27 with #49's `0018` in the repo and unapplied, and **EMPTY again at a measured 25 of 25**
+  later that day when `0018` was applied under #231 — the first inversion cleared by
+  `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
+  #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
+  was applied by `migrate:live` in the same session, the shortest-lived population yet.
+  **#250 is deliberately NOT a sixteenth inversion either, and for the opposite reason to `0016`'s.**
+  It moved the denominator 26 → 28 while the set stayed EMPTY, because its two rows are about the
+  seeded test account rather than about the live project — the first time this number has moved on
+  something no migration could ever change. A denominator that moves is not an inversion; a
+  population that moves is.
+  **`0016` (#198) is deliberately NOT one of the fifteen
+  inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
   could go red. The check was *re-measured* at 24 of 24 on 2026-08-27 after that paste — a
   re-measurement, not a transition. **Count the inversions from rows this table could have held,
@@ -525,9 +670,27 @@ Two supersessions, and the second undoes an assumption the first was built on.
   database no longer knows or cares.
 - **`members.email` is the discriminator, and its nullability is the whole design.** A member with a
   real address signs in with it and carries a longer secret; a member without one gets a synthetic
-  `<members.id>@taskr.invalid` address they never see or type, and a PIN. `.invalid` is reserved by
+  `<members.id>@taskr.invalid` address and a PIN. `.invalid` is reserved by
   RFC 2606, so a synthetic address can never reach a real inbox. There is deliberately **no separate
   `is_child` flag**, because a second field can disagree with the first.
+
+  **Corrected 2026-08-28 (#242).** This read *"an address they never see or type"* until then, and so
+  did `0007`'s own column comment, which now carries a dated correction beneath the original sentence
+  rather than a rewrite — an applied migration is the record of what was decided on the day, and the
+  sentence was an accurate statement of the intention at the time. *(Nothing mechanical required that:
+  `migrate:live` md5s a file only to check the statement it is applying survived the wire, and `0007`
+  is not applied again. The reason is editorial.)* It was never achievable. Sign-in
+  is `signInWithPassword`, so the address is **half the credential** and somebody has to type it; there
+  is no name-based lookup and there has not been one since #62 retired the join code. What made it
+  invisible is that the sentence describes the MEMBER's experience and is false about the ORGANIZER's:
+  the person handing the credential over has to read the address out, and nothing put it on a screen.
+
+  Two consequences that are still true and worth keeping separate from the correction. A synthetic
+  address really does reach no inbox, so the PIN travels by voice or text and nothing can be reset by
+  email. And an address, once an account is minted at it, does not move: `provision-member` reads this
+  column when it MINTS and refuses once `claimed_by` is set, so editing the roster afterwards changes
+  who the row says the person is and not what they type. Re-pointing an existing account is a Supabase
+  dashboard action.
 - **`members.id` still does not move.** No history migrates. That was true before #62 and is the
   reason #62 was cheap — see *What it costs to change later*, which predicted this change and priced
   it correctly.
@@ -546,6 +709,26 @@ day, while the header of this same page said `check:live` went green "immediatel
 sentences that named the function; these did not name it, so they survived. Two halves of one page
 disagreed, and the stale half was the one in the section a reader opens to find out what is missing.
 The step, and the check that proves it landed, are section 3 of `docs/deploy-runbook.md`.*
+
+### Can an anonymous session exist here, and what could it reach? — #246
+
+**No — `external.anonymous_users` is disabled on the live project** (owner decision 2026-08-28,
+recorded with its post-state on #246). Nothing needs it: the app has signed a person in since #62,
+and the last caller — `check:live`'s credential, which minted one permanent anonymous auth user per
+run and accumulated **45** of them before #246 traced the count back to it — now signs in as the
+seeded test account and revokes its session on exit. The decision is enforceable only in the
+dashboard (it is a project setting nothing in this repo sets), so the repo-side guard is narrower
+and real: `support/retiredVocabulary.test.js` scans both live suites and all shipping code with no
+exemption for the sign-in call, in CI, on every push.
+
+While the setting was on, what a memberless session could reach was *measured* rather than assumed
+(#246): every policy on every `public` table is `to authenticated` and scoped through
+`current_household_ids()` or `claimed_by = auth.uid()`, so a session with no member row read and
+wrote **no household's rows** — but it could execute every function granted to `authenticated`,
+including `create_household`, so anyone holding the world-readable publishable key could mint a
+session and start an empty household. That is the standing hazard the flip closes: a policy whose
+boundary is *being authenticated* is re-opened by every new way to become authenticated, and an
+open anonymous provider is the cheapest way there is.
 
 ### Recovery, both directions — #62 AC 7 and AC 8
 
@@ -575,13 +758,48 @@ Two things that are deliberately true and worth stating rather than implying:
   is that they can now prove who they are to Supabase instead of to a person with database access.
   That is acceptable for a household app and would not be for anything else.
 
+### What removing a member does to their account — #247
+
+**Removal deletes the auth account too, when the account is theirs alone.** Until #247 it did not:
+`removeMember` was a plain delete on `public.members`, nothing anywhere deleted the auth user, and the
+result was an account with no member row that could still sign in and start a household of its own —
+one such orphan was found on the live project, minted for a member row that no longer exists. Row-level
+security held throughout (a memberless session reaches no household's rows), which is why that was a
+defect and not an incident.
+
+The rules, in the order the client runs them:
+
+- **The auth half goes first**, through `provision-member`'s `revoke` action, under the same
+  caller-scoped authorization as minting: the member is read through the caller's own JWT, the
+  organizer check is asked about the household on that member's row, and only then is `service_role`
+  touched. Auth-first is the recoverable order — `members_claimed_by_fkey` is `ON DELETE SET NULL`, so
+  a removal that dies between the halves leaves a member showing "No sign-in yet", a state the roster
+  renders and Give a sign-in repairs. Row-first would leave the orphan.
+- **The account is deleted only when this row is its last claim.** Since 0009 one person can hold
+  member rows in two households under one account, so the function first checks (as `service_role`,
+  necessarily — the caller cannot see other households) whether any other member row claims it.
+  Claimed elsewhere, the account survives and only this household's row goes: the other household's
+  access was never this organizer's to end. The same rule covers a member with a real email address —
+  the account was minted for the member rows that claim it, and when the last claim goes, what is left
+  is a key to nothing plus the power to start a household.
+- **A member with no sign-in never touches the function.** The row is deleted through RLS
+  (`members_delete_same_household`, 0016) exactly as before, so removal keeps working when the
+  function is unreachable.
+- **A failed revoke does not stop the removal.** The person is removed and the screen says both facts
+  separately — removed from the household, account NOT deleted — so nobody concludes the removal
+  failed and retries. The removal is deliberately not held hostage by the function: were removal to
+  abort on an unreachable function, an organizer could not remove anybody with a sign-in until
+  somebody redeployed it.
+
 ## Superseded: the PIN decision — 2026-08-06
 
 **Kept for the record. This is no longer what the app does — see *Read this first* above.** Retired
 by #62 on 2026-08-11. It is left in full because its reasoning is still the reason the schema has the
 shape it has, and because the section immediately below — *why not real per-member auth users* — is
 the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
-the Edge Function that was unavailable is now the plan.
+the Edge Function that was unavailable is now the plan — and has since shipped: `provision-member`
+is deployed and mints exactly those accounts, so the "this app has no server" premise below is the
+one clause of the record that is no longer true of the app.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 
@@ -693,6 +911,29 @@ the stated reason. What it did not name:
 - **The one-time re-claim is not re-runnable**, and every other file here is. Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
+- **AND NEITHER IS ANY PRE-`0007` FILE, RE-PASTED ON ITS OWN, ONTO TODAY'S SCHEMA** — which is a
+  narrower claim than the bullet above and a wider hazard. *Measured 2026-08-28 under #38*, on a
+  pglite database carrying `0001`–`0021` and then handed one older file again:
+
+  | file | apply | what it leaves |
+  |---|---|---|
+  | `0003_chores.sql` | **FAILS** — `relation "public.household_devices" does not exist` | its five `chores` policies still name the dropped table; rolled back |
+  | `0004_chore_completion.sql` | **succeeds, silently** | `complete_chore` and `uncomplete_chore` revert to the retired model, and the next authenticated call raises `relation "public.household_devices" does not exist` |
+  | `0005_weekly_capacity.sql` | **FAILS** — same | rolled back |
+  | `0006_chore_assignment.sql` | **succeeds, silently** | `assign_chore` and `unassign_chore` revert the same way |
+
+  Both silent cases were proven end to end with a before/after control in one run: the RPC worked
+  before the re-apply and raised after it. The two that fail are the safe ones. **`0005` is the
+  worst of the four if its policies are ever satisfied**, because it also drops the live
+  three-argument `create_household` and installs a four-argument one whose body calls
+  `assert_valid_pin` and `generate_join_code` and writes `household_devices` and `members.pin_hash`
+  — all of which `0007` removed.
+
+  What is re-runnable is what `migrations.pglite.test.js` actually asserts and CI actually runs:
+  **the whole list, in order**. That is also the only re-run anybody has a reason to perform, and
+  `databaseThrough`'s docblock in `support/pgliteSupabase.js` has said so since it was written. This
+  bullet exists because #38's AC 1 asked for the other thing — each chore file pasted a second time
+  against the live project — and nothing in the repo said out loud that it must not be.
 
 Deliberately little, and the schema is why:
 
@@ -829,28 +1070,59 @@ Prerequisites, all in the Supabase dashboard and all the owner's:
 
 1. **Apply the migration.** Paste `supabase/migrations/0001_household_and_roster.sql` into the SQL
    editor and run it. (There is no Supabase CLI on this machine, so there is no `supabase db push`.)
-2. **Enable anonymous sign-ins** — Authentication → Providers → Anonymous. This is **off by default**,
-   and with it off every test fails at sign-in with an error that does not obviously say so.
-3. Put the project URL and **anon** key in `.env.local` at the repo root (gitignored):
+2. **Create the seeded test account**, once — Authentication → Users → Add user → Create new user,
+   with **Auto Confirm User** ticked. Both live suites sign in as it; `.env.example` carries the
+   recipe and the warning about what a tidy-up must spare.
+3. Put the project URL, the **anon** key, and the seeded account's credentials in `.env.local` at
+   the repo root (gitignored):
 
    ```
    VITE_SUPABASE_URL=...
    VITE_SUPABASE_ANON_KEY=...
+   TASKR_TEST_EMAIL=...
+   TASKR_TEST_PASSWORD=...
    ```
 
 Then `npm run test:rls`.
 
-**Anonymous sign-in is rate-limited to 30 requests/hour per IP.** Each run creates two anonymous users,
-so roughly fifteen runs an hour from one network — and a whole household shares one home IP. The test
-detects this case and says so, because otherwise it presents as a policy failure in your own code.
+*(Step 2 said "Enable anonymous sign-ins" until #246, and a rate-limit paragraph stood here pricing
+30 anonymous requests/hour. Both are gone with the mechanism: no suite signs in anonymously any
+more, and the provider is disabled on the live project — see the #246 section above.)*
 
-**Cleanup.** Each run leaves one household named `TEST <timestamp>` and two anonymous users. There is
-deliberately no client-reachable way to delete a household, so tidying is a manual statement in the SQL
-editor:
+**Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
+five member rows, and two auth users — the two provisioned members, whose addresses are
+`<members.id>@taskr.invalid`. There is deliberately no client-reachable way to delete a household, so
+tidying is a manual statement in the SQL editor:
 
 ```sql
-delete from public.households where name like 'TEST %';
+delete from public.households where name like 'TEST 88 %';
 ```
+
+*(Corrected 2026-08-28 by #221. This said one household and two ANONYMOUS users, which was the
+device-auth era: #88 moved the suite to per-member sign-in on 2026-08-21 and the suite's own header
+recorded the new figures that day. The correction reached the suite and not this page, which is the
+document a person tidying up actually opens. Five member rows, not four — the fifth is created by a
+test body rather than by `beforeAll`, so a count derived by reading setup cannot see it.)*
+
+> **A tidy-up must SPARE the account behind `TASKR_TEST_EMAIL`.** Read the paragraph above once more
+> before running anything: the seeded account **organizes every `TEST 88` household**, so since `0009`
+> it holds a member row in each one. The `delete` shown here cascades to those member rows and leaves
+> the account itself standing — but a tidy-up that *also* clears the test auth users takes the seeded
+> account with them, because from inside the data it is indistinguishable from the residue it creates.
+>
+> That has happened once. The account was cleared around **2026-08-25** and `npm run test:rls` could
+> not reach its first assertion for four days. It cost more than the rows implied, for two reasons.
+> **`test:rls` is the only instrument that has ever confirmed `0009` reached the live project** —
+> `check:live` is structurally blind to a migration made only of indexes, and this page says so above.
+> And **nothing announced the loss**: a vitest `beforeAll` failure is reported as tests *skipped*
+> (`numFailedTests: 0`, `success: false`), so the run exits non-zero with nothing named as failing,
+> which reads as an environment hiccup rather than as a dead suite. Two tests then drifted out of date
+> unseen inside that window and only surfaced when the account was restored.
+>
+> **To restore it:** Authentication -> Users -> Add user -> Create new user, tick **Auto Confirm
+> User**, using the exact values already in `.env.local`. Confirm it from the catalog rather than from
+> the dashboard's user search — that search has been observed returning *"No users found"* for an
+> address present in the unfiltered list seconds earlier, so it cannot prove an absence.
 
 ## What is not done
 
@@ -1004,8 +1276,10 @@ client-editable, so `assigned_member_id` and `completed_at` do not exist yet.
 
 ### Updated 2026-08-06 — story #23, and what is left
 
-`0001` **is** applied and anonymous sign-ins **are** on; the sentence below about "the migration has
-not been applied" is about 0001 and is now historical. What is outstanding is narrower:
+`0001` **is** applied and anonymous sign-ins **are** on *(true on the day this entry was written;
+anonymous sign-ins were disabled 2026-08-28 by #246, nothing needing them any more)*; the sentence
+below about "the migration has not been applied" is about 0001 and is now historical. What is
+outstanding is narrower:
 
 - **`0002_member_pins_and_column_grants.sql` — now applied**, verified live by PR #65's suite; the
   rest of this bullet is historical. It is re-runnable, and a test asserts that it is, because a re-paste after a partial failure

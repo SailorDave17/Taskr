@@ -143,6 +143,13 @@
 // `TEST 88 <timestamp> …`, FIVE member rows, and two auth users (the two
 // provisioned members). The seeded account is reused and never multiplies.
 //
+// #38 ADDED TO THAT, and says so here rather than leaving the next reader to
+// find it: FOUR chores instead of one, and ONE `chore_exclusions` row. The
+// three extra chores are the assigned, the completed and the excluded states
+// AC 3 asks about, and they are seeded rather than made inside a test for the
+// reason the paragraph below the fixture gives. Still no extra households,
+// members or auth users — the cost that actually accumulates is unchanged.
+//
 // Five, not the four #88 predicted. The fifth is `Not Yet Provisioned`, and the
 // reason the count was wrong is worth more than the count: it is created by a
 // TEST BODY rather than by `beforeAll`, so a cost derived by reading setup could
@@ -163,6 +170,37 @@
 // users the old file left, and unlike those they are identifiable: every
 // address is `<members.id>@taskr.invalid` under a household whose name begins
 // `TEST 88`.
+//
+// ── WHAT A TIDY-UP MUST SPARE ─── #221 ─────────────────────────────────────
+//
+// THE SEEDED ACCOUNT IS INDISTINGUISHABLE FROM THE RESIDUE IT CREATES, and
+// that is not a warning about carelessness — it falls out of the paragraph
+// directly above. The account organizes every `TEST 88` household, so since
+// `0009` it holds a member row in each one. A tidy-up that deletes the test
+// households, their members and the auth users under them takes the seeded
+// account with it, unless whoever is doing it knows to keep that one.
+//
+// It has happened once, and it was expensive out of proportion to the cost of
+// the rows: the account was cleared around 2026-08-25 and this suite could not
+// reach its first assertion for four days. That is worse than a broken test,
+// because `npm run test:rls` is the ONLY instrument that has ever confirmed
+// `0009` reached the live project — `check:live` is structurally blind to a
+// migration made only of indexes. Nothing announced the loss, and a `beforeAll`
+// failure is reported by vitest as tests SKIPPED: `numFailedTests: 0`,
+// `success: false`. It exits non-zero with nothing named as failing, which
+// reads as an environment hiccup rather than as a dead suite.
+//
+// Two tests then went stale unseen inside that window and only surfaced when
+// the account was restored on 2026-08-28 — see the `#221 CORRECTED THE
+// SUBJECT` and `#221 MOVED THE ACTOR` notes below. A dead instrument does not
+// merely stop reporting; it lets its own subject drift.
+//
+// So: when tidying, KEEP the account behind `TASKR_TEST_EMAIL`. Recreating it
+// is Authentication -> Users -> Add user -> Create new user with **Auto Confirm
+// User** ticked, using the exact values already in `.env.local`; `.env.example`
+// carries the same instruction. Confirm it from the catalog rather than from
+// the dashboard's user search, which cairn records returning "No users found"
+// for an address demonstrably present.
 //
 // ── WHY IT IS NOT IN CI ────────────────────────────────────────────────────
 //
@@ -268,6 +306,10 @@ const CAPACITY_COLUMNS = 'id, member_id, period_start, minutes, note, source, cr
 const CHORE_COLUMNS =
   'id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from'
 const HOUSEHOLD_COLUMNS = 'id, name, timezone, organizer_member_id, created_at'
+// #38. 0010 withholds `household_id` on this table for the same reason 0003
+// does on chores: it is written on insert and never read back, so `select('*')`
+// fails outright rather than quietly returning whatever exists.
+const EXCLUSION_COLUMNS = 'id, chore_id, member_id, created_at'
 
 /** A fresh client per person, so no two ever share a session. */
 function newClient() {
@@ -299,6 +341,13 @@ describe('row-level security under per-member sign-in, exercised over the wire',
   let outsiderAuthId
   let capacityId
   let choreId
+  // #38. Three more states of a chore, each seeded rather than made inside a
+  // test: an empty read against a table that never held the row is satisfied by
+  // a database that stored nothing, which is the same argument the capacity and
+  // chore seeds above already make.
+  let assignedChoreId
+  let completedChoreId
+  let exclusionChoreId
 
   /** Add a member and give them a sign-in, exactly as the app does. */
   async function provision(client, householdId, displayName, password) {
@@ -420,6 +469,57 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       .single()
     expect(choreError, `seeding a chore failed: ${choreError?.message}`).toBeNull()
     choreId = seededChore.id
+
+    // #38 AC 3 asks about chores, ASSIGNMENTS, COMPLETIONS and EXCLUSIONS. The
+    // first three live on `chores` — an assignment is `assigned_member_id` set,
+    // a completion is `completed_at` set — so they are states of a row rather
+    // than tables of their own, and each needs a row genuinely in that state
+    // before "the outsider sees none of them" says anything at all.
+    //
+    // Separate chores rather than one row driven through three states, because
+    // the existing `complete_chore` / `uncomplete_chore` test above owns
+    // `choreId` and leaves it uncompleted. A fixture two tests share is a
+    // fixture whose state depends on execution order.
+    async function seedChore(title) {
+      const { data, error } = await organizer
+        .from('chores')
+        .insert({
+          household_id: inside.id,
+          title,
+          expected_minutes: 20,
+          due_on: CAPACITY_PERIOD,
+        })
+        .select(CHORE_COLUMNS)
+        .single()
+      expect(error, `seeding "${title}" failed: ${error?.message}`).toBeNull()
+      return data.id
+    }
+
+    assignedChoreId = await seedChore('Assigned, by the live suite')
+    completedChoreId = await seedChore('Completed, by the live suite')
+    exclusionChoreId = await seedChore('Excluded, by the live suite')
+
+    // Through the RPCs, not by direct writes — which is the point. Neither
+    // column is in the client update grant, so these are the ONLY routes to
+    // either state, and a seed that reached them another way would be seeding a
+    // state the app cannot produce.
+    const { error: assignError } = await organizer.rpc('assign_chore', {
+      chore_id: assignedChoreId,
+      member_id: insiderMember.id,
+    })
+    expect(assignError, `assign_chore failed while seeding: ${assignError?.message}`).toBeNull()
+
+    const { error: completeError } = await organizer.rpc('complete_chore', {
+      chore_id: completedChoreId,
+    })
+    expect(completeError, `complete_chore failed while seeding: ${completeError?.message}`).toBeNull()
+
+    const { error: exclusionError } = await organizer.from('chore_exclusions').insert({
+      household_id: inside.id,
+      chore_id: exclusionChoreId,
+      member_id: insiderMember.id,
+    })
+    expect(exclusionError, `seeding an exclusion failed: ${exclusionError?.message}`).toBeNull()
 
     // 6. Both provisioned people sign in as themselves, over the wire.
     const { error: insiderSignIn } = await insider.auth.signInWithPassword({
@@ -677,6 +777,110 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       expect(completeError, 'completing another household’s chore should be refused').not.toBeNull()
       expect(completeError.message).toMatch(/no such chore in your household/i)
     })
+
+    // ── #38 AC 3 ────────────────────────────────────────────────────────────
+    //
+    // The criterion asks for chores, ASSIGNMENTS, COMPLETIONS and EXCLUSIONS,
+    // and it asks for the paired form in as many words: the identical query run
+    // by somebody who IS in the household must return the row, "so the empty
+    // result is a proven refusal rather than a broken fixture".
+    //
+    // That pairing is the whole design here. Each query below is issued twice
+    // from the same string against the same row — once as the outsider and once
+    // as the insider — so an empty outsider read can only mean the policy
+    // refused. A typo in a column name, a table that never got the seed, a
+    // client that is not really signed in: every one of those makes BOTH sides
+    // empty, and the insider half is what turns that into a failure instead of
+    // a pass.
+    async function bothSides(what, run) {
+      const theirs = await run(outsider)
+      const ours = await run(insider)
+      expect(theirs.error, `the outsider's ${what} read errored: ${theirs.error?.message}`).toBeNull()
+      expect(ours.error, `the insider's ${what} read errored: ${ours.error?.message}`).toBeNull()
+      expect(
+        ours.data.length,
+        `the insider sees no ${what} either — this fixture proves nothing`,
+      ).toBeGreaterThan(0)
+      expect(theirs.data, `the outsider reached our ${what}`).toEqual([])
+    }
+
+    it('sees no ASSIGNMENT of ours, though the insider is the person assigned', async () => {
+      // Sharper than it looks: the outsider is asking about a chore assigned to
+      // a member of ANOTHER household, so a policy that leaked on
+      // `assigned_member_id` rather than on `household_id` would show it.
+      await bothSides('assignment', (client) =>
+        client
+          .from('chores')
+          .select(CHORE_COLUMNS)
+          .eq('id', assignedChoreId)
+          .not('assigned_member_id', 'is', null),
+      )
+    })
+
+    it('sees no COMPLETION of ours', async () => {
+      await bothSides('completion', (client) =>
+        client
+          .from('chores')
+          .select(CHORE_COLUMNS)
+          .eq('id', completedChoreId)
+          .not('completed_at', 'is', null),
+      )
+    })
+
+    it('sees no EXCLUSION of ours', async () => {
+      await bothSides('exclusion', (client) =>
+        client.from('chore_exclusions').select(EXCLUSION_COLUMNS).eq('chore_id', exclusionChoreId),
+      )
+    })
+
+    it('and an UNFILTERED read of each contains our household nowhere in it', async () => {
+      // The form a per-id filter cannot make, and the one that would notice a
+      // policy dropped entirely rather than merely mis-scoped: ask for
+      // everything and check what comes back. The insider's read is what makes
+      // each assertion non-vacuous — it must contain the very row the
+      // outsider's must not.
+      const { data: theirChores, error: theirChoreError } = await outsider
+        .from('chores')
+        .select(CHORE_COLUMNS)
+      expect(theirChoreError, `the outsider's chore read errored: ${theirChoreError?.message}`).toBeNull()
+      const { data: ourChores, error: ourChoreError } = await insider
+        .from('chores')
+        .select(CHORE_COLUMNS)
+      expect(ourChoreError, `the insider's chore read errored: ${ourChoreError?.message}`).toBeNull()
+
+      const ourIds = new Set([choreId, assignedChoreId, completedChoreId, exclusionChoreId])
+      expect(
+        ourChores.filter((c) => ourIds.has(c.id)).length,
+        'the insider sees none of the chores this run seeded — the fixture, not the policy, is what this would be measuring',
+      ).toBe(ourIds.size)
+      expect(
+        theirChores.filter((c) => ourIds.has(c.id)),
+        'an unfiltered chore read reached another household',
+      ).toEqual([])
+
+      const { data: theirExclusions, error: theirExclusionError } = await outsider
+        .from('chore_exclusions')
+        .select(EXCLUSION_COLUMNS)
+      expect(
+        theirExclusionError,
+        `the outsider's exclusion read errored: ${theirExclusionError?.message}`,
+      ).toBeNull()
+      const { data: ourExclusions, error: ourExclusionError } = await insider
+        .from('chore_exclusions')
+        .select(EXCLUSION_COLUMNS)
+      expect(
+        ourExclusionError,
+        `the insider's exclusion read errored: ${ourExclusionError?.message}`,
+      ).toBeNull()
+      expect(
+        ourExclusions.some((e) => e.chore_id === exclusionChoreId),
+        'the insider sees no exclusion of ours — this assertion would be vacuous',
+      ).toBe(true)
+      expect(
+        theirExclusions.filter((e) => e.chore_id === exclusionChoreId),
+        'an unfiltered exclusion read reached another household',
+      ).toEqual([])
+    })
   })
 
   describe('and the refusal runs the other way too', () => {
@@ -782,13 +986,154 @@ describe('row-level security under per-member sign-in, exercised over the wire',
 
       // Half two, and this is the one carrying the weight. Reading the column
       // does not widen WHICH ROWS come back: every row still belongs to a
-      // household this caller is in, so no outsider row is reachable even with
+      // household this caller is in, so no unrelated row is reachable even with
       // the wildcard now permitted.
+      //
+      // #221 CORRECTED THE SUBJECT. This asserted that `outside` was
+      // unreachable from `organizer`, and that is wrong about this file's own
+      // fixture: `beforeAll` says in as many words that BOTH households are
+      // organized by the seeded account, so it holds a claimed row in each and
+      // `outside` is reachable BY DESIGN. *Measured 2026-08-28 against the live
+      // project:* one claimed row for the seed in each of the run's two
+      // households. The assertion was written by #159 on 2026-08-26 and never
+      // once executed — the seeded account had been cleared the day before, so
+      // this suite could not reach its first assertion for four days.
+      //
+      // The claim is now made two ways, neither contradicted by the fixture.
+      // From the organizer: every household reached is one this caller holds a
+      // claimed member row in. That set is DERIVED from the same client rather
+      // than spelled out, and the reason is a second correction inside #221 —
+      // the first attempt asserted the set was exactly `inside` and `outside`,
+      // which is true on a virgin project and false on every run after it. The
+      // seeded account accumulates a member row in EVERY household this suite
+      // has ever made, growing by two per run; the COST OF A RUN section above
+      // says so in as many words. *Measured:* the second run of the day found
+      // exactly two extra — the first run's pair. An assertion that passes once
+      // and then fails forever is worse than one that never passed, so the
+      // subject is the property rather than the fixture.
+      //
+      // The live project also holds a real household this account is not in, so
+      // a predicate that stopped scoping would widen this set and be caught.
+      const { data: mine, error: mineError } = await organizer
+        .from('members')
+        .select('household_id')
+        .eq('claimed_by', organizerInside.claimed_by)
+      expect(mineError, `reading own memberships failed: ${mineError?.message}`).toBeNull()
+      const ownHouseholds = new Set(mine.map((r) => r.household_id))
+
       const { data: wild, error: wildError } = await organizer.from('members').select('*')
       expect(wildError, 'select(*) is permitted after 0014 — that is the recorded cost').toBeNull()
+      expect(wild.length, 'an empty read satisfies every "does not contain" below').toBeGreaterThan(0)
       const households = new Set(wild.map((r) => r.household_id))
       expect(households.has(inside.id)).toBe(true)
-      expect(households.has(outside.id)).toBe(false)
+      expect(
+        [...households].filter((id) => !ownHouseholds.has(id)),
+        'select(*) reached a household this caller is not a member of',
+      ).toEqual([])
+
+      // And from a caller that genuinely is NOT in `inside`, which is the
+      // sharper half, because the organizer belongs to everything this run
+      // made. The non-empty check in front of it is what stops a broken read
+      // from passing: a result with no rows contains no forbidden row either.
+      const { data: theirs, error: theirError } = await outsider.from('members').select('*')
+      expect(theirError, `the outsider's own read failed: ${theirError?.message}`).toBeNull()
+      expect(theirs.length, 'an outsider who reads nothing proves nothing').toBeGreaterThan(0)
+      const theirHouseholds = new Set(theirs.map((r) => r.household_id))
+      expect(theirHouseholds.has(outside.id)).toBe(true)
+      expect(theirHouseholds.has(inside.id)).toBe(false)
+    })
+
+    // ── #38 AC 2 — the chore write rules, against Supabase itself ────────
+    //
+    // 0004 and 0006 each add a column that is READABLE and not WRITABLE, and
+    // each says in its own header that the rule is structural rather than
+    // procedural: a client that ignores `complete_chore` and `assign_chore` and
+    // writes the column directly must be refused by the GRANT, not by anybody
+    // remembering to call the right function. The pglite suite asserts the same
+    // thing, and cannot say whether Supabase agrees — its default-privileges
+    // stub is a claim ABOUT the platform rather than the platform.
+
+    it('POSITIVE CONTROL: the organizer CAN rename a chore', async () => {
+      // Same argument as the capacity control above. Without it, both refusals
+      // below are satisfied by a table nobody can write at all — including one
+      // whose grants were dropped entirely — and the suite would read as proof
+      // the chore grants are right.
+      const { data, error } = await organizer
+        .from('chores')
+        .update({ title: 'Renamed by the live suite' })
+        .eq('id', choreId)
+        .select(CHORE_COLUMNS)
+        .single()
+      expect(error, `the permitted update was refused: ${error?.message}`).toBeNull()
+      expect(data.title).toBe('Renamed by the live suite')
+    })
+
+    it('completed_at is not client-writable, so done-ness goes through complete_chore', async () => {
+      // The consequence if this grant were wrong is not abstract: a client
+      // could mark a chore done without going through `complete_chore`, which
+      // is the only thing that also writes `completed_by_member_id`. The row
+      // would then say the work happened and not say by whom.
+      const { error } = await organizer
+        .from('chores')
+        .update({ completed_at: new Date().toISOString() })
+        .eq('id', choreId)
+      expectGrantRefusal(error, 'writing completed_at directly')
+
+      const { data: still } = await organizer
+        .from('chores')
+        .select(CHORE_COLUMNS)
+        .eq('id', choreId)
+        .single()
+      expect(still.completed_at, 'the refused write must have changed nothing').toBeNull()
+    })
+
+    it('assigned_member_id is not client-writable, so allocation goes through assign_chore', async () => {
+      // 0006 states the stake: the composite foreign key stops a chore being
+      // pinned on somebody in ANOTHER household, but nothing stops a member
+      // reassigning work inside their own household except this grant. The
+      // value used is a real member in a real household — just not this
+      // chore's — so a refusal here cannot be the foreign key doing the work.
+      const { error } = await organizer
+        .from('chores')
+        .update({ assigned_member_id: organizerInside.id })
+        .eq('id', assignedChoreId)
+      expectGrantRefusal(error, 'writing assigned_member_id directly')
+
+      const { data: still } = await organizer
+        .from('chores')
+        .select(CHORE_COLUMNS)
+        .eq('id', assignedChoreId)
+        .single()
+      expect(
+        still.assigned_member_id,
+        'the refused write must have left the RPC-set assignment alone',
+      ).toBe(insiderMember.id)
+    })
+
+    it('POSITIVE CONTROL: but assign_chore and complete_chore DO set them', async () => {
+      // The other half of the pair, and it is what stops the two refusals above
+      // reading as "these columns can never be set". Both states were reached
+      // in `beforeAll` through the RPCs and nothing else; this asserts the rows
+      // actually carry them, so the refusals are about the ROUTE rather than
+      // about the outcome being unreachable.
+      const { data: assigned, error: assignedError } = await organizer
+        .from('chores')
+        .select(CHORE_COLUMNS)
+        .eq('id', assignedChoreId)
+        .single()
+      expect(assignedError, `reading the assigned chore failed: ${assignedError?.message}`).toBeNull()
+      expect(assigned.assigned_member_id, 'assign_chore did not stick').toBe(insiderMember.id)
+
+      const { data: done, error: doneError } = await organizer
+        .from('chores')
+        .select(CHORE_COLUMNS)
+        .eq('id', completedChoreId)
+        .single()
+      expect(doneError, `reading the completed chore failed: ${doneError?.message}`).toBeNull()
+      expect(done.completed_at, 'complete_chore did not stick').not.toBeNull()
+      // The column a direct write could never have filled in, which is the
+      // whole reason the route matters.
+      expect(done.completed_by_member_id, 'complete_chore must record WHO').toBe(organizerInside.id)
     })
 
     it('cannot backdate a capacity row by writing created_at at insert time', async () => {
@@ -886,10 +1231,29 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       expect(still).toHaveLength(1)
     })
 
-    it('POSITIVE CONTROL: but they CAN remove somebody else in the household', async () => {
+    it('POSITIVE CONTROL: but the ORGANIZER can remove somebody else', async () => {
       // Without this the assertion above is satisfied by a project where the
       // delete policy is missing entirely and nobody can delete anything —
       // which looks identical from outside and is a different, worse bug.
+      //
+      // #221 MOVED THE ACTOR, and the reason is a rule change rather than a
+      // mistake. This control was written on 2026-08-21 (#88) with `insider`
+      // doing the removing, and it was correct then: the policy permitted ANY
+      // member of the household. `0016` (#152) added
+      // `is_household_organizer(household_id)` on 2026-08-26, so a plain member
+      // can no longer remove anybody and the control began asserting a rule
+      // that no longer exists. Nothing caught it for two days because the
+      // seeded account had been cleared and this suite could not run at all.
+      // *Measured 2026-08-28 from the live catalog:*
+      //   ((household_id IN (SELECT current_household_ids()))
+      //     AND (claimed_by IS DISTINCT FROM (SELECT auth.uid()))
+      //     AND is_household_organizer(household_id))
+      //
+      // The control's PURPOSE survives the change untouched — it exists to
+      // separate "self-removal is refused" from "no delete works at all" — so
+      // the actor moves and the claim stays. The refusal of the non-organizer
+      // is asserted below rather than left implied, because after `0016` that
+      // is the more surprising half.
       const { data: spare, error: addError } = await organizer
         .from('members')
         .insert({ household_id: inside.id, display_name: 'Spare' })
@@ -897,7 +1261,19 @@ describe('row-level security under per-member sign-in, exercised over the wire',
         .single()
       expect(addError, `seeding a removable member failed: ${addError?.message}`).toBeNull()
 
-      const { data: removed, error } = await insider
+      // A plain member of the same household may NOT — that is `0016`'s rule,
+      // and a permitted read of a refused delete comes back as an empty array
+      // rather than an error, exactly as self-removal does above.
+      const { data: refused, error: refusedError } = await insider
+        .from('members')
+        .delete()
+        .eq('id', spare.id)
+        .select(MEMBER_COLUMNS)
+      expect(refusedError, `expected a permitted read of a refused delete: ${refusedError?.code}`).toBeNull()
+      expect(refused, 'a non-organizer removed a member — 0016 is not on this project').toEqual([])
+
+      // The organizer may, which is what keeps the assertion above honest.
+      const { data: removed, error } = await organizer
         .from('members')
         .delete()
         .eq('id', spare.id)

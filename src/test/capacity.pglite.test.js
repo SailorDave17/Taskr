@@ -309,17 +309,29 @@ describe('weekly capacity, run against a real Postgres', () => {
       expect(row).toEqual({ minutes: 45, note: 'exam week' })
     })
 
+    // Both REGRESSION claims below are UNCHANGED. What moved is the mechanism:
+    // until 0022 they were true because `member_id` and `period_start` were
+    // outside the update grant, and 0022 has to grant UPDATE on both, because
+    // PostgREST's upsert names every payload column in its SET list — the
+    // conflict target included. RLS does not cover the gap here the way it does
+    // on `member_split_seen`: `member_capacity_update_same_household` is
+    // HOUSEHOLD-scoped, so moving a row to a housemate satisfies it.
+    //
+    // So the invariant moved from a privilege to a rule — 0022's
+    // `member_capacity_identity_is_fixed` trigger — and these tests now assert
+    // the rule. That is the more durable home for it: a privilege stops holding
+    // the moment somebody widens a grant for an unrelated reason, which is
+    // precisely what happened.
     it('REGRESSION: cannot move an override to another person by UPDATE', async () => {
-      // member_id is not in the update grant. Without that, a household member
-      // could hand their own thin week to somebody else and the split would
-      // rebalance around a fact nobody stated.
+      // Without this, a household member could hand their own thin week to
+      // somebody else and the split would rebalance around a fact nobody stated.
       const result = await asDevice(db, organizerDevice, () =>
         attempt(() =>
           db.query(`update public.member_capacity set member_id = $1`, [organizer.id]),
         ),
       )
       expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/permission denied|column/i)
+      expect(result.error).toMatch(/cannot be moved to another person, week or household/i)
     })
 
     it('REGRESSION: cannot move an override to another week by UPDATE', async () => {
@@ -329,7 +341,39 @@ describe('weekly capacity, run against a real Postgres', () => {
         ),
       )
       expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/permission denied|column/i)
+      expect(result.error).toMatch(/cannot be moved to another person, week or household/i)
+    })
+
+    it('REGRESSION: cannot move an override to another household by UPDATE', async () => {
+      // The third identity column, asserted because 0022's trigger names it and
+      // an untested arm of a three-way condition is an untested arm.
+      const result = await asDevice(db, organizerDevice, () =>
+        attempt(() =>
+          db.query(`update public.member_capacity set household_id = gen_random_uuid()`),
+        ),
+      )
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/cannot be moved to another person, week or household/i)
+    })
+
+    it('a legitimate re-write of the SAME row passes the identity trigger', async () => {
+      // The positive control the three above need: a trigger that refused
+      // everything would satisfy all of them and break the feature. This is the
+      // upsert's own update half — every identity column re-stated at the value
+      // it already holds, which is what `EXCLUDED.col` resolves to on a matched
+      // row.
+      const result = await asDevice(db, organizerDevice, () =>
+        attempt(() =>
+          db.query(
+            `update public.member_capacity
+                set household_id = household_id,
+                    member_id = member_id,
+                    period_start = period_start,
+                    minutes = 55`,
+          ),
+        ),
+      )
+      expect(result.error).toBeNull()
     })
 
     it('REGRESSION: cannot backdate a row by writing created_at at INSERT time', async () => {
@@ -357,8 +401,14 @@ describe('weekly capacity, run against a real Postgres', () => {
       for (const row of rows) {
         ;(byPrivilege[row.privilege_type] ??= []).push(row.column_name)
       }
+      // 0022 widened two of these three, and both widenings are the upsert's
+      // doing rather than a feature's: SELECT on `household_id` because
+      // `EXCLUDED.household_id` READS it, and UPDATE on the three identity
+      // columns because they are SET targets. `created_at` and `id` stay out of
+      // both write sets, which is the line that has not moved.
       expect(byPrivilege.SELECT.sort()).toEqual([
         'created_at',
+        'household_id',
         'id',
         'member_id',
         'minutes',
@@ -374,12 +424,27 @@ describe('weekly capacity, run against a real Postgres', () => {
         'period_start',
         'source',
       ])
-      expect(byPrivilege.UPDATE.sort()).toEqual(['minutes', 'note', 'source'])
+      expect(byPrivilege.UPDATE.sort()).toEqual([
+        'household_id',
+        'member_id',
+        'minutes',
+        'note',
+        'period_start',
+        'source',
+      ])
     })
 
-    it('and `select(*)` fails outright rather than quietly omitting a column', async () => {
+    // The claim this made — that Postgres REFUSES a `select *` naming an
+    // ungranted column rather than quietly returning the rest — is unchanged
+    // and true. It just cannot be demonstrated on `member_capacity` any more:
+    // 0022 had to grant SELECT on `household_id`, and that was the last column
+    // of this table outside the read set. So the test keeps its subject and
+    // moves to a table that still withholds one. `chores.repeat_since` is
+    // deliberately granted to nobody (0012), and is the same negative control
+    // `npm run probe:live-grants` uses against the live project.
+    it('`select(*)` fails outright rather than quietly omitting an ungranted column', async () => {
       const result = await asDevice(db, organizerDevice, () =>
-        attempt(() => db.query(`select * from public.member_capacity`)),
+        attempt(() => db.query(`select * from public.chores`)),
       )
       expect(result.ok).toBe(false)
       expect(result.error).toMatch(/permission denied/i)

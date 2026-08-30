@@ -106,8 +106,14 @@ const CLIENT_OPERATIONS = [
   },
   {
     table: 'members',
+    op: 'select',
+    site: 'household.js removeMember() pre-delete read — #247',
+    sql: 'select id, display_name, claimed_by from public.members limit 0',
+  },
+  {
+    table: 'members',
     op: 'delete',
-    site: 'household.js:337 removeMember()',
+    site: 'household.js removeMember()',
     sql: 'delete from public.members where false',
   },
   {
@@ -181,6 +187,33 @@ const CLIENT_OPERATIONS = [
     op: 'select',
     site: 'calendar.js:233 listCalendarConnections()',
     sql: 'select id, member_id, scope, connected_at from public.calendar_connections limit 0',
+  },
+  {
+    table: 'member_split_seen',
+    op: 'select',
+    site: 'announce.js readSplitSeen()',
+    sql: 'select member_id, snapshot, seen_rebalance_at, fairness_note_dismissed from public.member_split_seen limit 0',
+  },
+  {
+    table: 'member_split_seen',
+    op: 'insert',
+    site: 'announce.js writeSplitSeen() upsert',
+    sql: `insert into public.member_split_seen (member_id, snapshot, seen_rebalance_at) select gen_random_uuid(), '{}'::jsonb, null where false`,
+  },
+  {
+    table: 'member_split_seen',
+    op: 'update',
+    site: 'announce.js writeSplitSeen() upsert',
+    sql: `update public.member_split_seen set snapshot = '{}'::jsonb, seen_rebalance_at = null where false`,
+  },
+  // #59 — the dismissal write touches ONE column the upsert above never
+  // carries, granted by 0021 rather than 0020, so it is a separate operation
+  // rather than a wider spelling of the one above.
+  {
+    table: 'member_split_seen',
+    op: 'update',
+    site: 'announce.js dismissFairnessNote()',
+    sql: 'update public.member_split_seen set fairness_note_dismissed = true where false',
   },
 ]
 
@@ -415,5 +448,81 @@ describe('#91 — the client privileges come from a migration, not from a defaul
       { privilege_type: 'SELECT', cols: 'claimed_by,display_name,email,household_id,id' },
       { privilege_type: 'UPDATE', cols: 'claimed_by' },
     ])
+  })
+
+  // ---------------------------------------------------------------------------
+  // #227 — and `authenticated` holds only what a migration granted it
+  // ---------------------------------------------------------------------------
+  //
+  // These read `pg_class.relacl` rather than `information_schema`, and the
+  // reason is the one this file's line 233 already records from the other side:
+  // MAINTAIN is a Postgres 17+ privilege the SQL standard does not define, so
+  // the standard catalog has no row for it. Four of the letters 0019 revokes
+  // are exactly the ones a standard view under-reports, so asserting through
+  // `information_schema` would let `m` survive silently. `relacl` is also the
+  // instrument `npm run probe:live-grants` uses against the live project, so
+  // this asserts the same string the production check does.
+
+  const authenticatedOn = async (db, table) => {
+    const { rows } = await db.query(
+      `select coalesce(relacl::text, '') as acl from pg_class
+        where relnamespace = 'public'::regnamespace and relname = $1`,
+      [table],
+    )
+    expect(rows.length, `no such relation: ${table}`).toBe(1)
+    const match = rows[0].acl.match(/(?:^|[{,])authenticated=([a-zA-Z*]*)\//)
+    return match ? match[1] : null
+  }
+
+  it('leaves authenticated NO table-level privilege on households — 0019 section 1', async () => {
+    // The consequential one. A table-level SELECT subsumes every column-level
+    // grant, so while it stood, 0013's and 0018's column lists were decoration
+    // on the live project: a column added and deliberately not granted would
+    // have been readable anyway. The live project had `ardDxtm` here; this
+    // harness never had `a`, `r` or `d` to lose, so what this proves is the END
+    // STATE both converge on, not the removal.
+    expect(await authenticatedOn(db, 'households')).toBeNull()
+  })
+
+  it('leaves members and chores holding exactly the DELETE 0013 granted', async () => {
+    // Here the harness and the live project agree exactly — both read `dDxtm`
+    // before 0019, because 0013 grants the `d` explicitly and the other four
+    // ride through 0002/0003/0007's narrow revokes. So this pair is a real
+    // before-and-after, not a convergence.
+    expect(await authenticatedOn(db, 'members')).toBe('d')
+    expect(await authenticatedOn(db, 'chores')).toBe('d')
+  })
+
+  it('POSITIVE CONTROL: the reading can report a privilege that is still there', async () => {
+    // Three of the four assertions above expect an absence, and two expect a
+    // one-letter string — both are what a broken parse returns. `member_capacity`
+    // and `chore_exclusions` are untouched by 0019 and must still read `d`,
+    // through the identical helper, or the helper is the thing being tested.
+    expect(await authenticatedOn(db, 'member_capacity')).toBe('d')
+    expect(await authenticatedOn(db, 'chore_exclusions')).toBe('d')
+
+    // And the parse must be able to return more than one letter, or `d` above
+    // proves nothing about the letters 0019 removed. service_role is untouched
+    // by every migration here after 0011 and carries the full set.
+    const { rows } = await db.query(
+      `select coalesce(relacl::text, '') as acl from pg_class
+        where relnamespace = 'public'::regnamespace and relname = 'households'`,
+    )
+    expect(rows[0].acl).toMatch(/service_role=[a-zA-Z]{4,}\//)
+  })
+
+  it('keeps the column UPDATE 0005 granted, because 0019 does not name update', async () => {
+    // The ordering claim in 0019's header, asserted rather than argued. Its
+    // households revoke names seven privileges and NOT `update`, which is what
+    // leaves `update (name, timezone)` standing with no re-grant. Name `update`
+    // there and this goes red while every other assertion in this block stays
+    // green — the whole cost of that mistake lands here.
+    const { rows } = await db.query(
+      `select column_name from information_schema.column_privileges
+        where table_schema = 'public' and table_name = 'households'
+          and grantee = 'authenticated' and privilege_type = 'UPDATE'
+        order by column_name`,
+    )
+    expect(rows.map((r) => r.column_name)).toEqual(['name', 'timezone'])
   })
 })

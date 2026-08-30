@@ -19,6 +19,7 @@ import {
 } from './lib/household.js'
 import {
   addChore,
+  addChores,
   assignChore,
   catchUpRepeats,
   completeChore,
@@ -31,6 +32,7 @@ import {
   updateChore,
 } from './lib/chores.js'
 import {
+  baselineMoved,
   capacitiesFor,
   clearCapacity,
   listCapacity,
@@ -38,12 +40,21 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import { reassignHousehold } from './lib/reassign.js'
+import {
+  announcementFrom,
+  dismissFairnessNote,
+  readSplitSeen,
+  splitSnapshot,
+  writeSplitSeen,
+} from './lib/announce.js'
 import {
   completeConnect,
   listCalendarConnections,
   readConsentReturn,
   startConnect,
 } from './lib/calendar.js'
+import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
@@ -109,6 +120,19 @@ export default function App() {
   // other phones did not trigger it, and a persistent household-wide notice is
   // a notifications table this story deliberately does not build.
   const [notice, setNotice] = useState(null)
+  // #50 — the re-balance this member has not yet been told about, or null. Set
+  // by refresh() when the seen-marker says a re-balance landed since this
+  // member last looked AND minutes actually moved against what they were
+  // shown; cleared only by the dismiss button. refresh() never clears it — a
+  // tab switch after the statement appears must not eat the event.
+  const [announcement, setAnnouncement] = useState(null)
+  // #59 — has THIS member dismissed the note saying what the fairness number
+  // does not count? Server state, per member (owner decision at pickup), read
+  // from the same seen-marker row the announcement uses. `false` until a read
+  // says otherwise, which fails toward the note STANDING — the honest
+  // direction: an acknowledgement shown twice costs a tap, one silently
+  // hidden costs the charter's ambition 4.
+  const [fairnessNoteDismissed, setFairnessNoteDismissed] = useState(false)
   // #47 criterion 11 — which surface is on screen. `useState`, not a router and
   // not a state library: this app has neither, adding one to move between three
   // views would be the largest dependency in the repo, and the URL is already
@@ -139,7 +163,8 @@ export default function App() {
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
-    setChores(found ? await listChores(found.id) : [])
+    const choreRows = found ? await listChores(found.id) : []
+    setChores(choreRows)
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -151,7 +176,8 @@ export default function App() {
     // file this week's capacity under last week's key.
     const period = found ? periodStartFor(new Date(), found.timezone) : null
     setPeriodStart(period)
-    setOverrides(period ? await listCapacity(period, memberIds) : [])
+    const overrideRows = period ? await listCapacity(period, memberIds) : []
+    setOverrides(overrideRows)
     // #37 AC 9 — read from the server on every refresh, through the same path as
     // everything else, so a device holds no exclusion state of its own. What
     // another phone recorded is on this screen after the next mutation for the
@@ -163,7 +189,63 @@ export default function App() {
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
     setConnections(found ? await listCalendarConnections(memberIds) : [])
-    setUserId(await currentUserId())
+    const uid = await currentUserId()
+    setUserId(uid)
+
+    // #50 — is this member owed a statement about a re-balance they have not
+    // seen? Checked on EVERY refresh rather than only at boot, deliberately: a
+    // re-balance another phone applies mid-session must arrive as an event on
+    // this one too (AC 1 is the floor, not the ceiling), and — the sharper
+    // direction — a refresh that silently recorded the new state as seen
+    // without showing the statement would eat the event for good.
+    //
+    // The snapshot advances on every refresh, announcement or not, so "since
+    // you last looked" means since this member's last look rather than since
+    // some older anchor — which is what nets a two-step change to one move
+    // (AC 5) and keeps a week of ordinary chore churn out of the statement.
+    //
+    // Its own try/catch, and the failure is REPORTED rather than swallowed or
+    // rethrown: swallowed, a live project missing the 0020 paste would look
+    // healthy while every announcement silently died (a red nobody can see is
+    // how a paste stays forgotten — #53's reasoning); rethrown, it would fail
+    // the mutation this refresh follows, which did succeed.
+    if (found && period) {
+      try {
+        const me = findClaimedMember(roster, uid, found.id)
+        if (me) {
+          const current = splitSnapshot({
+            capacities: capacitiesFor(roster, overrideRows, period),
+            chores: choreRows,
+          })
+          const seen = await readSplitSeen(me.id)
+          // #59 — one read serves both: the row that carries what this member
+          // was last shown also carries whether they dismissed the fairness
+          // note. No row yet means never dismissed, which is exactly what a
+          // first look should see.
+          setFairnessNoteDismissed(Boolean(seen?.fairness_note_dismissed))
+          const news = announcementFrom({
+            seen,
+            current,
+            lastRebalance: found.last_rebalance ?? null,
+          })
+          if (news) setAnnouncement(news)
+          const marker = found.last_rebalance?.applied_at ?? null
+          // Skip the write when nothing moved and nothing new was seen — a tab
+          // switch is not a fact worth a round trip. String comparison is only
+          // an optimisation: a false mismatch costs one harmless re-write.
+          const unchanged =
+            seen &&
+            seen.seen_rebalance_at === marker &&
+            JSON.stringify(seen.snapshot) === JSON.stringify(current)
+          if (!unchanged) {
+            await writeSplitSeen({ memberId: me.id, snapshot: current, seenRebalanceAt: marker })
+          }
+        }
+      } catch (err) {
+        setError(err.message)
+      }
+    }
+
     return found
   }, [])
 
@@ -348,8 +430,38 @@ export default function App() {
     (person) => mutate(() => addMember({ ...person, householdId: household?.id })),
     [mutate, household],
   )
-  const handleSave = useCallback((id, patch) => mutate(() => updateMember(id, patch)), [mutate])
-  const handleRemove = useCallback((id) => mutate(() => removeMember(id)), [mutate])
+  // #49 — a baseline edit is a capacity change (owner decision at pickup,
+  // extending the grooming decision's "on capacity change" to the roster's
+  // weekly_minutes), so the re-assignment runs before the refresh the same way
+  // it does for a weekly override. Gated on the value actually MOVING: the
+  // roster's save always sends `weeklyMinutes`, and a name-only edit must not
+  // overwrite `last_rebalance` with a run nothing prompted.
+  const handleSave = useCallback(
+    (id, patch) =>
+      mutate(async () => {
+        const moved = baselineMoved(
+          members.find((m) => m.id === id),
+          patch.weeklyMinutes,
+        )
+        const saved = await updateMember(id, patch)
+        if (moved) await reassignHousehold({ householdId: household?.id })
+        return saved
+      }),
+    [mutate, members, household],
+  )
+  // #247 — a removal can succeed while its auth half does not: the person is
+  // gone and their sign-in survived, two separate facts. The warning is set
+  // AFTER mutate() resolves, i.e. after the refresh, so the screen never shows
+  // the person still listed under a message saying they were removed — and the
+  // removal itself is never reported as a failure, which would invite a retry.
+  const handleRemove = useCallback(
+    (id) =>
+      mutate(() => removeMember(id)).then((result) => {
+        if (result?.warning) setError(result.warning)
+        return result
+      }),
+    [mutate],
+  )
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
   // the row's "Signed in" state comes from `claimed_by` rather than from an
@@ -419,6 +531,15 @@ export default function App() {
     (chore) => mutate(() => addChore({ ...chore, householdId: household?.id })),
     [mutate, household],
   )
+  // #220 — the batch confirm. One mutate() around the whole pass, so the
+  // refresh runs once after every row has been attempted and shows exactly the
+  // rows that landed. addChores reports per-row outcomes instead of throwing,
+  // so a refused row does not stop mutate() from refreshing — the screen shows
+  // the saved chores while the panel keeps the rest.
+  const handleAddChores = useCallback(
+    (rows) => mutate(() => addChores(rows, { householdId: household?.id })),
+    [mutate, household],
+  )
   const handleSaveChore = useCallback((id, patch) => mutate(() => updateChore(id, patch)), [mutate])
   const handleRemoveChore = useCallback((id) => mutate(() => removeChore(id)), [mutate])
   // #35 — completion goes through an RPC because the SERVER sets the clock, not
@@ -476,19 +597,32 @@ export default function App() {
   // database (AC 6): the manual road in is the floor the charter requires on day
   // one, and the extraction bet (#57) is an accelerator on top of it, never the
   // only way in. A test asserts that this path imports nothing else.
+  // #49 — the capacity write is what the grooming decision named as the
+  // trigger: the household's assignments follow it with nobody pressing an
+  // assign button and nobody asked to approve. `reassignHousehold` re-reads
+  // everything fresh, computes with the real allocator and applies through the
+  // one transactional RPC; `mutate()`'s refresh then shows the stored result,
+  // so what this device shows is what the next device to load will see.
   const handleSetCapacity = useCallback(
     (memberId, minutes) => {
       if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
-      return mutate(() => setCapacity({ memberId, periodStart, minutes, householdId: household?.id }))
+      return mutate(async () => {
+        const saved = await setCapacity({ memberId, periodStart, minutes, householdId: household?.id })
+        await reassignHousehold({ householdId: household?.id })
+        return saved
+      })
     },
     [mutate, periodStart, household],
   )
   const handleClearCapacity = useCallback(
     (memberId) => {
       if (!periodStart) return Promise.reject(new Error('No week to clear capacity for yet.'))
-      return mutate(() => clearCapacity(memberId, periodStart))
+      return mutate(async () => {
+        await clearCapacity(memberId, periodStart)
+        await reassignHousehold({ householdId: household?.id })
+      })
     },
-    [mutate, periodStart],
+    [mutate, periodStart, household],
   )
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
@@ -520,6 +654,18 @@ export default function App() {
   // organizer id. Both sides come from the same `household` state, set by the
   // single currentHousehold() read in refresh().
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
+
+  // #59 — record the dismissal against THIS member, then re-read like every
+  // other write, so what this phone shows is what the seen-marker row now
+  // says rather than an optimistic local flip. `me` is resolved within the
+  // household on screen (#160), so the dismissal cannot land on another
+  // household's row; with no claimed row the write refuses with a sentence
+  // rather than guessing whose dismissal it was.
+  const myMemberId = me?.id
+  const handleDismissFairnessNote = useCallback(
+    () => mutate(() => dismissFairnessNote(myMemberId)),
+    [mutate, myMemberId],
+  )
 
   return (
     <main className="shell">
@@ -582,6 +728,20 @@ export default function App() {
         />
       ) : null}
 
+      {/* #50 — the re-balance, announced. ABOVE the tabs and outside every
+          surface, because it is an event about the household rather than a
+          feature of any one view: whichever tab the member is on when it
+          lands, the statement is in front of them. It stays until dismissed
+          (refresh never clears it) and is not shown again after that — the
+          seen-marker advanced when it was shown. */}
+      {status === 'joined' && household && announcement ? (
+        <Announcement
+          announcement={announcement}
+          members={members}
+          onDismiss={() => setAnnouncement(null)}
+        />
+      ) : null}
+
       {/* #47 criterion 11 — the three surfaces, and the only way between them.
           A `nav` with buttons rather than links, because there is nothing to
           link TO: one document, no router, and an anchor with no href is worse
@@ -615,7 +775,10 @@ export default function App() {
           chores={chores}
           capacities={capacities}
           exclusions={exclusions}
+          lastRebalance={household?.last_rebalance ?? null}
           error={error}
+          fairnessNoteDismissed={fairnessNoteDismissed}
+          onDismissFairnessNote={handleDismissFairnessNote}
         />
       ) : null}
 
@@ -650,6 +813,7 @@ export default function App() {
           busy={busy}
           error={error}
           onAdd={handleAddChore}
+          onAddMany={handleAddChores}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

@@ -129,6 +129,51 @@ body {
   color: var(--ink-dim);
 }
 
+/* #50 — the re-balance, announced. An EVENT above whatever surface is on
+   screen, never a screen of its own: the charter's moment must be perceptible
+   as an event, and this is the sentence it arrives in. The accent marks that
+   something happened; nothing here uses the .error palette or any colour that
+   marks a member as a problem (AC 9) — a re-balance is the app working, and
+   red stays reserved for faults, never for people. */
+.announce {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.announce__statement {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.announce__cause {
+  font-weight: 600;
+}
+
+.announce__moves {
+  font-weight: 400;
+}
+
+.announce__verdict {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.announce__dismiss {
+  min-height: 2.75rem;
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -578,6 +623,29 @@ body {
   color: var(--ink-dim);
 }
 
+/* #220 — batch entry. The panel keeps the card grammar; a draft row borrows
+   the editing card's border because that is what it is — a chore being
+   written, just not yet anywhere but on this screen. */
+.chore-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.chore-draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chore-draft {
+  border-style: dashed;
+}
+
 /* The row's account of its schedule — same dim ink as the due date, because a
    repeat is a fact about the chore, not a state to be alarmed by. */
 .chore__repeat {
@@ -755,6 +823,36 @@ body {
 .split__verdict--level {
   color: var(--accent);
   filter: brightness(1.6);
+}
+
+/* What the last automatic re-balance reported (#49 AC 7) — quieter than the
+   verdict above on purpose: it is the run's footnote, not the household's
+   answer. */
+.split__rebalance {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* What the fairness number does not count (#59) — the claim's own boundary,
+   sitting under the verdict it bounds. Same quiet register as the re-balance
+   footnote: an acknowledgement, never an alert, and no palette that could read
+   as a problem state attached to a person. */
+.split__note-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.split__note {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
 }
 
 .split__list {

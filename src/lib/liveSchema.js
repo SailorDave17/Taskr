@@ -1,4 +1,5 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
+import { SPLIT_SEEN_COLUMNS } from './announce.js'
 import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
@@ -62,6 +63,14 @@ export const LIVE_SCHEMA = Object.freeze([
   // client is granted nothing at all on the token table — probing for it would
   // report a missing grant on a perfectly healthy project.
   Object.freeze({ table: 'calendar_connections', columns: CALENDAR_CONNECTION_COLUMNS }),
+  // #50, arriving with `0020` — RED on purpose until that migration reached the
+  // live project, exactly as the `chore_exclusions` and `calendar_connections`
+  // entries above were for theirs: the check exists because applying a
+  // migration is a step recorded nowhere else, and an entry withheld until
+  // after it would leave the window it covers uncovered. Measured doing that
+  // job in #50's own session — 25 of 26 with this entry the one red, then
+  // 26 of 26 after `npm run migrate:live` applied `0020` the same hour.
+  Object.freeze({ table: 'member_split_seen', columns: SPLIT_SEEN_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -115,6 +124,17 @@ export const LIVE_RPCS = Object.freeze([
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
+  // #49, arriving with `0018`. It was red on purpose until that file was applied
+  // — the same deliberate window every migration-borne entry here has had — and
+  // `0018` was applied on 2026-08-27 (#231), so this reads green now. The probe
+  // passes the nil UUID for all four arguments; `expected_version` is a bigint
+  // and `placements`/`verdict` are jsonb, so a resolved function refuses the
+  // CAST (`22P02`, Postgres answering) before it could check anything — which
+  // classifies as PRESENT, exactly like `25006` on the writers above.
+  Object.freeze({
+    fn: 'apply_assignments',
+    args: Object.freeze(['household_id', 'expected_version', 'placements', 'verdict']),
+  }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */
@@ -376,5 +396,91 @@ export function describeSchemaError(table, columns, error) {
   return (
     `${table}: ${known || 'unexpected error'} [${code}] — ${detail}` +
     `\n    asked for: ${columns}`
+  )
+}
+
+/**
+ * Did the seeded test account still sign in — #250.
+ *
+ * THE GAP THIS CLOSES, and it is about SILENCE rather than about auth. The
+ * account behind `TASKR_TEST_EMAIL` was deleted around 2026-08-25 as ordinary
+ * collateral of a tidy-up. `npm run test:rls` threw in its `beforeAll` for FOUR
+ * DAYS and nothing said so: vitest reports a `beforeAll` failure as its tests
+ * SKIPPED, so the run exits non-zero with `numFailedTests: 0` and nothing named
+ * as failing. Measured on this repo, on this file, before the change that added
+ * this function: 26 total, 0 failed, 26 pending, `success: false`. That reads as
+ * an environment hiccup, not as a dead instrument.
+ *
+ * Recreating the account took about four minutes. The four days were the
+ * expensive part, and they had a second cost: two of the RLS suite's own tests
+ * went stale INSIDE the window — one written on 2026-08-26 and never once
+ * executed, one falsified by `0016` the same day. A dead instrument does not
+ * merely stop reporting; it is the only thing that was going to notice, so its
+ * silence is also permission.
+ *
+ * WHY THIS IS A CLASSIFIER AND NOT AN `if`. The two states it separates have
+ * DIFFERENT FIXES, and they were separated by hand during #221:
+ *
+ * - `email_not_confirmed` — the account EXISTS and the password is RIGHT. It was
+ *   created without ticking "Auto Confirm User", so GoTrue is holding it for a
+ *   confirmation link nobody can read. Fix: confirm it, or recreate it with the
+ *   box ticked. Nothing is wrong with `.env.local`.
+ * - `invalid_credentials` — the account is ABSENT, or the password does not
+ *   match. GoTrue deliberately does not say which, so that one message covers
+ *   both. Fix: recreate the account, or correct `TASKR_TEST_PASSWORD`.
+ *
+ * Anything else is reported UNPROVEN rather than classified, for the reason
+ * `describeRpcError` gives above: an absent answer must not read as a clean one,
+ * and a network failure at this point says nothing about the account at all.
+ *
+ * The address is printed because #250 AC 2 asks that the failure NAME the
+ * account — with two accounts in play (`.env.local` and the dashboard) the whole
+ * question is which one you are looking at. The PASSWORD is never printed, and
+ * this function is never handed it.
+ */
+export const SEEDED_ACCOUNT_RECIPE =
+  'Authentication -> Users -> Add user -> Create new user, ticking "Auto Confirm User"'
+
+export function describeSignInError(email, error, session) {
+  const who = `the seeded test account (${email || 'TASKR_TEST_EMAIL is not set'})`
+
+  if (!error) {
+    // Sign-in reported success and handed back nothing. Every probe in
+    // `schema.integration.test.js` would then run as `anon`, which `0002` and
+    // `0003` revoke wholesale — so a healthy project would be reported broken.
+    // Refusing is the only honest answer.
+    if (!session) {
+      return (
+        `${who}: sign-in returned NO ERROR AND NO SESSION, so every probe below would ` +
+        `run as \`anon\` and report a healthy project as broken. Refusing rather than ` +
+        `probing as the wrong caller.`
+      )
+    }
+    return null
+  }
+
+  const code = error.code || 'unknown'
+  const detail = error.message || String(error)
+
+  const known = {
+    email_not_confirmed:
+      'the account EXISTS and the password is RIGHT — it was created without ticking ' +
+      '"Auto Confirm User", so GoTrue is holding it for a confirmation link no suite ' +
+      `can read. Nothing is wrong with .env.local. Fix: confirm it in the dashboard, or ` +
+      `delete and recreate it — ${SEEDED_ACCOUNT_RECIPE}`,
+    invalid_credentials:
+      'the account is ABSENT, or TASKR_TEST_PASSWORD does not match it — GoTrue answers ' +
+      'the same way for both on purpose. This is what a deleted account looks like, and ' +
+      'it is how the 2026-08-25 deletion presented four days later. Fix: check the ' +
+      `password, then recreate the account — ${SEEDED_ACCOUNT_RECIPE}`,
+  }[code]
+
+  if (known) return `${who}: ${known} [${code}] — ${detail}`
+
+  return (
+    `${who}: sign-in FAILED and this is not one of the two states with a known fix, so ` +
+    `the account's state is UNPROVEN — a network failure here says nothing about the ` +
+    `account [${code}] — ${detail}\n    if it is really gone, recreate it: ` +
+    `${SEEDED_ACCOUNT_RECIPE}`
   )
 }

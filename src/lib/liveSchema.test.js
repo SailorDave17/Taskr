@@ -21,6 +21,7 @@ import {
   RPC_PROBE_VALUE,
   describeRpcError,
   describeSchemaError,
+  describeSignInError,
   rpcProbeArgs,
 } from './liveSchema.js'
 
@@ -546,5 +547,106 @@ describe('#115 - the probe is a preflight, which is what makes it safe against p
     })
     expect(probe.status).toBeNull()
     expect(describeEdgeFunctionError('x', probe)).toContain('UNPROVEN')
+  })
+})
+
+describe('#250 — a dead seeded account is classified into the two states with different fixes', () => {
+  // This is the CI-runnable half of #250. `check:live` is not run by CI and
+  // cannot be — it needs credentials and a live project — so the classifier it
+  // calls lives here, where the gate does exercise it. Same split as every other
+  // list and message in this module: the live file asks the question, this file
+  // proves the answer is legible.
+
+  const EMAIL = 'suite@throwaway.example'
+
+  it('says the account is HELD FOR CONFIRMATION, and that .env.local is fine', () => {
+    // The half that is easy to misread as a wrong password, and it is the one
+    // where changing TASKR_TEST_PASSWORD does nothing: the account exists, the
+    // password matched, and it was created without ticking "Auto Confirm User".
+    const line = describeSignInError(EMAIL, {
+      code: 'email_not_confirmed',
+      message: 'Email not confirmed',
+    })
+    expect(line).toContain(EMAIL)
+    expect(line).toContain('email_not_confirmed')
+    expect(line).toContain('the password is RIGHT')
+    expect(line, 'this is the state where editing .env.local is wasted effort').toContain(
+      'Nothing is wrong with .env.local',
+    )
+    expect(line).toContain('Auto Confirm User')
+  })
+
+  it('says the account is ABSENT OR THE PASSWORD IS WRONG, and does not guess between them', () => {
+    // MEASURED 2026-08-28 against the live project by pointing
+    // TASKR_TEST_PASSWORD at a wrong value: GoTrue answers `invalid_credentials`
+    // / "Invalid login credentials". It answers the same way for an account that
+    // does not exist, deliberately, so the message must not claim to know which
+    // — and this is the state the 2026-08-25 deletion presented as.
+    const line = describeSignInError(EMAIL, {
+      code: 'invalid_credentials',
+      message: 'Invalid login credentials',
+    })
+    expect(line).toContain(EMAIL)
+    expect(line).toContain('invalid_credentials')
+    expect(line).toContain('ABSENT')
+    expect(line, 'GoTrue does not say which, so neither may we').toContain(
+      'the same way for both on purpose',
+    )
+  })
+
+  it('gives the two states DIFFERENT lines, which is the only reason to classify at all', () => {
+    // The control on the pair. Both branches producing a plausible line is not
+    // enough — a classifier that returned one message for both would pass every
+    // assertion above that names the account, because both contain the address.
+    const confirm = describeSignInError(EMAIL, { code: 'email_not_confirmed', message: 'x' })
+    const invalid = describeSignInError(EMAIL, { code: 'invalid_credentials', message: 'x' })
+    expect(confirm).not.toBe(invalid)
+    expect(confirm, 'the confirmation state must not send anyone to the password').not.toContain(
+      'TASKR_TEST_PASSWORD does not match',
+    )
+  })
+
+  it('carries the recreation step, because that is what the reader has to do next', () => {
+    for (const code of ['email_not_confirmed', 'invalid_credentials', 'over_request_rate_limit']) {
+      const line = describeSignInError(EMAIL, { code, message: 'x' })
+      expect(line, `${code} does not say how to recreate the account`).toContain(
+        'Authentication -> Users -> Add user -> Create new user',
+      )
+    }
+  })
+
+  it('reports an unrecognised failure as UNPROVEN rather than classifying it', () => {
+    // Same rule as `describeRpcError`: an absent answer must not read as a clean
+    // one, and a network failure here says nothing about the account. A rate
+    // limit is the realistic case — it is neither "gone" nor "wrong password".
+    const line = describeSignInError(EMAIL, {
+      code: 'over_request_rate_limit',
+      message: 'Request rate limit reached',
+    })
+    expect(line).toContain('UNPROVEN')
+    expect(line).toContain('over_request_rate_limit')
+  })
+
+  it('refuses a sign-in that returned no error AND no session', () => {
+    // The state that would otherwise be the worst outcome available: every probe
+    // in `schema.integration.test.js` runs as `anon`, `0002` and `0003` revoke
+    // that role wholesale, and a healthy project is reported broken.
+    const line = describeSignInError(EMAIL, null, null)
+    expect(line).toContain('NO ERROR AND NO SESSION')
+    expect(line).toContain('report a healthy project as broken')
+  })
+
+  it('returns null only when there is a session, so a green row means a real one', () => {
+    expect(describeSignInError(EMAIL, null, { access_token: 'x' })).toBeNull()
+  })
+
+  it('never prints a password, because it is never handed one', () => {
+    // The signature is the guard here rather than a filter: this function takes
+    // (email, error, session) and has no parameter a password could arrive in.
+    // Asserted because "names the account" and "prints the credential" are one
+    // careless template literal apart.
+    expect(describeSignInError.length, 'a fourth parameter would be the place a password lands').toBe(
+      3,
+    )
   })
 })

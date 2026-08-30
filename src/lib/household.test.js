@@ -24,7 +24,16 @@ let invokeResult = null
  * terminal method.
  */
 function makeQuery(table) {
-  const result = () => results[table] ?? { data: null, error: null }
+  // A table's scripted result may be an ARRAY, consumed one entry per
+  // resolution — #247's removeMember issues a read and then a delete against
+  // the same table in one call, and the two must be able to answer
+  // differently. A plain object keeps the old behaviour: every resolution
+  // answers the same.
+  const result = () => {
+    const scripted = results[table]
+    if (Array.isArray(scripted)) return scripted.shift() ?? { data: null, error: null }
+    return scripted ?? { data: null, error: null }
+  }
   const q = {
     select(cols) {
       calls.push({ op: 'select', table, cols })
@@ -128,8 +137,11 @@ const {
   findClaimedMember,
   formatMinutes,
   listMembers,
+  normalizeMemberEmail,
   normalizeMinutes,
   provisionMember,
+  removeMember,
+  signInAddressFor,
   resetMemberCredential,
   signIn,
   signOut,
@@ -427,6 +439,21 @@ describe('maintaining the roster', () => {
     results.members = { data: { id: 'm9' }, error: null }
   })
 
+  // The same shape the provisioning block below defines for itself, and kept
+  // local for the same reason it is local there: asserting that the call threw
+  // AT ALL is the half that stops every message assertion being skipped on a
+  // call that quietly succeeded.
+  async function failureFrom(call) {
+    let thrown = null
+    try {
+      await call()
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    return thrown
+  }
+
   // #159 AC 4 - rewritten, not deleted, and the title's claim is the part that
   // changed. It asserted the household came from "this device", which was one
   // unordered read standing in for a choice nobody had made. The caller names it
@@ -494,6 +521,120 @@ describe('maintaining the roster', () => {
   it('lists an empty roster as an empty array, never null', async () => {
     results.members = { data: null, error: null }
     await expect(listMembers('h1')).resolves.toEqual([])
+  })
+
+  // #242 — the address. `0007` granted `members.email` for insert AND update and
+  // nothing has ever written through either; these are the writes that do.
+  it('stores an address given at add time, which is what makes the sign-in typeable', async () => {
+    await addMember({
+      displayName: 'Placeholder One',
+      weeklyMinutes: 60,
+      householdId: 'h1',
+      email: 'placeholder.one@example.com',
+    })
+    const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
+    expect(insert.row.email).toBe('placeholder.one@example.com')
+  })
+
+  // The half that keeps the OLD insert byte for byte what it was: a caller that
+  // does not mention an address must not start writing nulls into the column.
+  // `0007`'s null means "no real inbox, so a synthetic address and a PIN", and a
+  // write is a different act from an omission even when the stored value agrees.
+  it('omits the column entirely when nobody typed an address', async () => {
+    await addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: 'h1' })
+    const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
+    expect(insert.row).not.toHaveProperty('email')
+  })
+
+  it('clears the address when the field is emptied, rather than ignoring the edit', async () => {
+    await updateMember('m9', { email: '   ' })
+    const update = calls.find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ email: null })
+  })
+
+  it('edits the address without touching the name or the budget', async () => {
+    await updateMember('m9', { email: 'placeholder.one@example.com' })
+    const update = calls.find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ email: 'placeholder.one@example.com' })
+  })
+
+  it('refuses an address that the check constraint would refuse, before the round trip', async () => {
+    await expect(updateMember('m9', { email: 'not-an-address' })).rejects.toThrow(/@/)
+    expect(calls.filter((c) => c.op === 'update')).toHaveLength(0)
+  })
+
+  // The two constraint violations `0007` can raise, translated. Without this the
+  // organizer is shown a Postgres string naming an index they have never heard
+  // of, on the one screen where they are trying to admit somebody.
+  it('names a colliding address rather than surfacing the index', async () => {
+    results.members = {
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "members_email_key"' },
+    }
+    const thrown = await failureFrom(() =>
+      addMember({
+        displayName: 'Placeholder One',
+        weeklyMinutes: 60,
+        householdId: 'h1',
+        email: 'placeholder.one@example.com',
+      }),
+    )
+    expect(thrown.message).toMatch(/already on a roster entry/i)
+    // Not "in this household": the index is on `lower(email)` across the WHOLE
+    // table, so the collision can be with somebody this organizer cannot see,
+    // and a message scoping it to their household sends them looking at a
+    // roster where the address is genuinely absent.
+    expect(thrown.message).not.toMatch(/this household/i)
+  })
+
+  it('names a malformed address the database refused, if one gets past the client', async () => {
+    results.members = {
+      data: null,
+      error: { code: '23514', message: 'violates check constraint "members_email_shape"' },
+    }
+    const thrown = await failureFrom(() => updateMember('m9', { email: 'placeholder.one@example.com' }))
+    expect(thrown.message).toMatch(/does not look like an email address/i)
+  })
+
+  // POSITIVE CONTROL. Every assertion above is about a failure being renamed, so
+  // all of them would pass against a layer that renamed EVERY failure — which
+  // would bury the message that says what actually went wrong.
+  it('POSITIVE CONTROL: leaves an unrelated failure saying what it was doing', async () => {
+    results.members = { data: null, error: { code: '08006', message: 'connection failure' } }
+    const thrown = await failureFrom(() => updateMember('m9', { weeklyMinutes: 30 }))
+    expect(thrown.message).toMatch(/saving the change: connection failure/i)
+  })
+})
+
+// #242 — the address a person types to sign in.
+//
+// There is no name-based sign-in and there never was, so this is half the
+// credential. `access-model.md` called the synthetic form an address they
+// "never see or type", which the sign-in form has never been able to honour:
+// `signIn` is `signInWithPassword`, so somebody has to type it.
+describe('the address a member signs in with', () => {
+  it('is the real one when the row has one', () => {
+    expect(signInAddressFor({ id: 'm1', email: 'placeholder.one@example.com' })).toBe(
+      'placeholder.one@example.com',
+    )
+  })
+
+  it('is the synthetic form when the row has none, which is every member so far', () => {
+    expect(signInAddressFor({ id: 'm1', email: null })).toBe('m1@taskr.invalid')
+  })
+
+  it('treats a blank address as none, so whitespace cannot produce an unusable one', () => {
+    expect(signInAddressFor({ id: 'm1', email: '   ' })).toBe('m1@taskr.invalid')
+  })
+
+  it('folds case, so the roster shows what the person will actually be able to type', () => {
+    expect(normalizeMemberEmail('  Placeholder.One@Example.COM ')).toBe(
+      'placeholder.one@example.com',
+    )
+  })
+
+  it('leaves the column alone when the caller is not talking about it', () => {
+    expect(normalizeMemberEmail(undefined)).toBeUndefined()
   })
 })
 
@@ -646,22 +787,24 @@ describe('the roster read', () => {
 
 })
 
-describe('provisioning a sign-in - #87, and how it fails - #112', () => {
-  // Stand-ins for the SDK's error classes. `callProvisioning` branches on
-  // `name`, which is what the real classes set, and constructing the real ones
-  // would mean importing the client this file deliberately fakes.
-  function fetchError() {
-    const error = new Error('Failed to send a request to the Edge Function')
-    error.name = 'FunctionsFetchError'
-    return error
-  }
+// Stand-ins for the SDK's error classes, shared by the #87 and #247 describes.
+// `callProvisioning` branches on `name`, which is what the real classes set,
+// and constructing the real ones would mean importing the client this file
+// deliberately fakes.
+function fetchError() {
+  const error = new Error('Failed to send a request to the Edge Function')
+  error.name = 'FunctionsFetchError'
+  return error
+}
 
-  function httpError(body) {
-    const error = new Error('Edge Function returned a non-2xx status code')
-    error.name = 'FunctionsHttpError'
-    error.context = { json: () => Promise.resolve(body) }
-    return error
-  }
+function httpError(body) {
+  const error = new Error('Edge Function returned a non-2xx status code')
+  error.name = 'FunctionsHttpError'
+  error.context = { json: () => Promise.resolve(body) }
+  return error
+}
+
+describe('provisioning a sign-in - #87, and how it fails - #112', () => {
 
   async function failureFrom(call) {
     let thrown = null
@@ -745,5 +888,87 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
       name: 'provision-member',
       body: { action: 'provision', memberId: 'm1', password: 'a good one' },
     })
+  })
+})
+
+describe('removing a member takes their sign-in with it - #247', () => {
+  // What this file CAN prove is the client's half: which calls are made, in
+  // what order, and what the caller is told. Whether the function really
+  // deletes the auth user — and refuses to when another household still claims
+  // it — is `src/test/provisioning.functions.test.js`, over a real stack.
+  const row = (claimedBy) => ({
+    data: { id: 'm1', display_name: 'Placeholder One', claimed_by: claimedBy },
+    error: null,
+  })
+  const ok = { data: null, error: null }
+
+  it('revokes the sign-in FIRST and deletes the row second - the recoverable order', async () => {
+    results.members = [row('person-a'), ok]
+    invokeResult = {
+      data: { ok: true, action: 'revoke', memberId: 'm1', deleted: true },
+      error: null,
+    }
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    // Order is load-bearing: `members_claimed_by_fkey` is ON DELETE SET NULL,
+    // so auth-first leaves a "No sign-in yet" row if the second half dies,
+    // where row-first leaves an account that can still sign in — the orphan
+    // #247 was filed about.
+    const ops = calls
+      .filter((c) => c.op === 'invoke' || (c.op === 'delete' && c.table === 'members'))
+      .map((c) => c.op)
+    expect(ops).toEqual(['invoke', 'delete'])
+    // No password travels with a revoke — there is no credential to set.
+    expect(calls.find((c) => c.op === 'invoke').body).toEqual({
+      action: 'revoke',
+      memberId: 'm1',
+    })
+  })
+
+  it('AC 3: a member with no sign-in is removed with no auth call at all', async () => {
+    results.members = [row(null), ok]
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    expect(calls.filter((c) => c.op === 'invoke')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete' && c.table === 'members')).toHaveLength(1)
+  })
+
+  it('AC 4: a failed revoke does not stop the removal, and the warning states both facts', async () => {
+    results.members = [row('person-a'), ok]
+    invokeResult = {
+      data: null,
+      error: httpError({ error: 'This function is not configured.' }),
+    }
+
+    const result = await removeMember('m1')
+
+    // The removal itself went through...
+    expect(calls.filter((c) => c.op === 'delete' && c.table === 'members')).toHaveLength(1)
+    // ...and the warning carries both facts plus the function's own sentence,
+    // so the organizer neither retries the removal nor mistakes which half
+    // failed.
+    expect(result.warning).toMatch(/Placeholder One was removed/)
+    expect(result.warning).toMatch(/sign-in was NOT deleted/)
+    expect(result.warning).toMatch(/This function is not configured\./)
+  })
+
+  it('a row that is already gone is left alone - no revoke, no delete', async () => {
+    results.members = [{ data: null, error: null }]
+
+    const result = await removeMember('m1')
+
+    expect(result.warning).toBeNull()
+    expect(calls.filter((c) => c.op === 'invoke')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([])
+  })
+
+  it('a failed row delete still throws - that half really did fail', async () => {
+    results.members = [row(null), { data: null, error: { message: 'permission denied' } }]
+
+    await expect(removeMember('m1')).rejects.toThrow(/removing the person: permission denied/)
   })
 })

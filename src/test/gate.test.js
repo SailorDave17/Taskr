@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process'
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
+import { signInAddressFor } from '../lib/household.js'
 
 // AC 4 of #4: "a test suite containing zero tests must FAIL rather than pass
 // vacuously — an explicit fail-on-empty setting".
@@ -970,6 +971,12 @@ describe('#19 — no real household name reaches version control', () => {
     // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
     'Placeholder Repeat': 'a chore title',
     'Placeholder Done Chore': 'a chore title',
+    // #49 — reassignment.pglite.test.js needs up to three distinguishable
+    // chores per scenario. Declared rather than lower-cased, same instinct as
+    // the #37 chores above: the vocabulary exists to put every name-shaped
+    // literal in a diff somebody can look at.
+    Laundry: 'a chore title in reassignment.pglite.test.js',
+    Vacuuming: 'a chore title in reassignment.pglite.test.js',
     Taskr: 'the application name',
     // #47 — the three tab labels. They are literals in App.test.jsx because
     // the tests click the real control by its accessible name, which is the
@@ -1019,6 +1026,12 @@ describe('#19 — no real household name reaches version control', () => {
     'Access-Control-Allow-Headers': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Allow-Methods': 'an HTTP header asserted by the CORS tests',
     'Access-Control-Request-Headers': 'an HTTP header asserted by the CORS tests',
+    // #246 — the dashboard checkbox the seeded test account is created with,
+    // quoted in the sign-in refusal of both live suites. The RLS suite's copy
+    // sits inside a single-quoted string and is absorbed by the outer match;
+    // schema.integration.test.js quotes it inside a template literal, where the
+    // scan sees it standalone. Declared rather than re-quoted to slip past.
+    'Auto Confirm User': 'the dashboard checkbox both live suites tell you to tick',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])
@@ -1500,5 +1513,68 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
     // mystery offender in the scan above.
     const self = readFileSync(resolve(process.cwd(), 'src/test/gate.test.js'), 'utf8')
     expect(TOKEN_SHAPE.test(self)).toBe(false)
+  })
+})
+
+// #242 — the sign-in address rule exists in two places, and cannot exist in one.
+//
+// `signInAddressFor` in `src/lib/household.js` is what the roster shows an
+// organizer; `syntheticAddressFor` in `supabase/functions/provision-member/
+// index.ts` is what actually mints the account. The function is Deno and runs on
+// somebody else's machine, so it cannot import the client's module and the rule
+// is genuinely duplicated.
+//
+// That duplication is the hazard this story created, and it is a bad one: the
+// roster would go on displaying a confident address that nothing signs in with,
+// and every test on both sides would stay green, because each half agrees with
+// itself. Nobody would find out until a real person could not get in — which is
+// exactly the failure #242 exists to repair, reintroduced by its own fix.
+//
+// So the copies cannot be merged and they can be stopped from drifting silently.
+// This reads the deployed source rather than the client's, deliberately: the
+// client's copy is the one under test everywhere else in the suite, and a guard
+// that reads it would be asserting a thing against itself.
+describe('#242 — the client and the Edge Function agree on the synthetic address', () => {
+  const FUNCTION_SOURCE = 'supabase/functions/provision-member/index.ts'
+
+  // Built rather than written out, so this file does not itself contain the
+  // literal it is hunting — the same reason the token block above builds its
+  // pattern. Written as a template with the id interpolated, which is the form
+  // BOTH copies use.
+  const DOMAIN = ['taskr', 'invalid'].join('.')
+
+  const functionSource = () => readFileSync(resolve(process.cwd(), FUNCTION_SOURCE), 'utf8')
+
+  it('POSITIVE CONTROL: the function source is readable and is the minting path', () => {
+    // Without this, every assertion below passes just as well against an empty
+    // string or a file that has been renamed out from under the guard — a scan
+    // of nothing finds no disagreement.
+    const source = functionSource()
+    expect(source.length).toBeGreaterThan(1000)
+    expect(source).toContain('createUser')
+  })
+
+  it('mints at the same address the roster tells the organizer to pass on', () => {
+    // The function derives the address from `members.id`; so does the client. A
+    // change to either side's domain, or to which column it prefers, breaks this
+    // rather than breaking a household.
+    expect(functionSource()).toContain(`@${DOMAIN}`)
+  })
+
+  it('still prefers a real address over the synthetic one, which is what #242 relies on', () => {
+    // The whole story rests on this line in the function: give a member a real
+    // address and the account is minted at it. If the coalesce is ever removed,
+    // the roster's email field silently stops reaching the sign-in and every
+    // client test stays green.
+    expect(functionSource()).toMatch(/member\.email\s*\?\?/)
+  })
+
+  it('and the client agrees, so the address on screen is the address that is minted', () => {
+    // Derived by CALLING the client's function rather than reading its source,
+    // so this compares behaviour on one side against the contract on the other.
+    expect(signInAddressFor({ id: 'abc', email: null })).toBe(`abc@${DOMAIN}`)
+    expect(signInAddressFor({ id: 'abc', email: 'someone@example.com' })).toBe(
+      'someone@example.com',
+    )
   })
 })

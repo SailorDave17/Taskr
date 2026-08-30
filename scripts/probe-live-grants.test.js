@@ -140,6 +140,7 @@ describe('what it asks for — AC 3', () => {
       'member_capacity',
       'chore_exclusions',
       'calendar_connections',
+      'member_split_seen',
     ])
   })
 
@@ -295,10 +296,13 @@ describe('reconciling against what #150 measured — AC 4', () => {
     // wrong grant means one ran and did something else.
     const rows = agreeing.filter((row) => row.column_name !== 'household_id')
     const differing = reconcile(rows).filter((verdict) => !verdict.agrees)
-    expect(differing).toHaveLength(2)
+    expect(differing).toHaveLength(3)
     expect(differing.every((verdict) => verdict.note === 'the column is not there')).toBe(true)
+    // `member_capacity.household_id` joined the expectation set in 0022 — the
+    // column PostgREST's upsert reads through `EXCLUDED."household_id"`.
     expect(differing.map((verdict) => verdict.key).sort()).toEqual([
       'chores.household_id',
+      'member_capacity.household_id',
       'members.household_id',
     ])
   })
@@ -309,7 +313,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022 and 0023', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -317,6 +321,20 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'members.household_id=ar',
       'chores.household_id=ar',
       'chores.repeat_since=null',
+      // 0022, 2026-08-28. Here rather than in `check:live` because that check is
+      // blind to a migration made of grants and a trigger — this probe is the
+      // only instrument that can say whether 0022 reached the project.
+      'member_split_seen.member_id=arw',
+      'member_capacity.household_id=arw',
+      'member_capacity.member_id=arw',
+      'member_capacity.period_start=arw',
+      // 0023, 2026-08-28 (#211). The one row here whose migration `check:live`
+      // is NOT blind to — it caught the SELECT half as a 42703 before the apply.
+      // It earns its place on the INSERT half, which only reads and so cannot
+      // see, and on the absence of `w`: a later migration widening this column
+      // to updatable would move the row and be reported, where no client-side
+      // probe can report being allowed a write it never attempts.
+      'chores.source=ar',
     ])
   })
 })

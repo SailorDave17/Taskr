@@ -180,12 +180,19 @@ describe('completing a chore, run against a real Postgres', () => {
       // the schema's, not this story's. What #35 actually claims is the two
       // completion columns being present, which is asserted by name below so the
       // point survives the next migration widening the list again.
+      //
+      // It has now survived four of them, `source` (0023, #211) being the
+      // latest. Worth knowing before the fifth: this whole-set assertion is the
+      // SECOND copy of the readable set — chores.pglite.test.js AC 5 holds the
+      // other — so a migration that widens the grant reddens two tests in two
+      // files, and both are the same finding rather than two.
       const readable = rows.map((r) => r.column_name)
       expect(readable).toContain('completed_at')
       expect(readable).toContain('completed_by_member_id')
       expect(readable).toEqual([
         'actual_minutes',
         'assigned_member_id',
+        'assigned_source',
         'completed_at',
         'completed_by_member_id',
         'created_at',
@@ -196,6 +203,7 @@ describe('completing a chore, run against a real Postgres', () => {
         'id',
         'repeat_kind',
         'repeat_weekdays',
+        'source',
         'title',
       ])
     })

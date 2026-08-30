@@ -25,7 +25,14 @@ let results = {}
 
 /** Chainable, thenable stand-in for supabase-js's query builder. */
 function makeQuery(table) {
-  const result = () => results[table] ?? { data: null, error: null }
+  // An ARRAY is a queue, consumed one result per resolution — #220's batch
+  // tests need call N to succeed while call N+1 is refused, which a single
+  // shared result cannot express. An object behaves as it always has.
+  const result = () => {
+    const r = results[table]
+    if (Array.isArray(r)) return r.shift() ?? { data: null, error: null }
+    return r ?? { data: null, error: null }
+  }
   const q = {
     select(cols) {
       calls.push({ op: 'select', table, cols })
@@ -76,6 +83,7 @@ vi.mock('./supabase.js', () => ({
 const {
   CHORE_COLUMNS,
   addChore,
+  addChores,
   assignChore,
   catchUpRepeats,
   completeChore,
@@ -159,6 +167,12 @@ describe('addChore', () => {
       // explicitly, so the row's schedule is stated rather than inherited.
       repeat_kind: 'none',
       repeat_weekdays: null,
+      // #211 — and a caller that says nothing about where the chore came from
+      // writes 'manual' explicitly, for the same reason. The column's DEFAULT
+      // would supply the identical value, which is exactly why this is asserted
+      // on the outgoing ROW rather than on a row read back: only the payload can
+      // tell "the client stated it" apart from "the database filled it in".
+      source: 'manual',
     })
     // Written out rather than derived from the input, so the implementation
     // cannot quietly redefine what "normalized" means.
@@ -176,6 +190,49 @@ describe('addChore', () => {
   // household past the named argument. That, plus 0003's with-check refusing any
   // id outside current_household_ids(), is what stops a caller writing anywhere
   // it likes (#159 AC 5).
+  // #211 AC 4 — the default is what keeps every existing call site meaning what
+  // it meant. App.jsx spreads a form object that names no source, so if this
+  // parameter were required rather than defaulted the story would have had to
+  // edit a call site it has no business touching.
+  it('records an extracted chore as extraction when the caller says so', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({
+      title: 'Dishes',
+      expectedMinutes: 20,
+      dueOn: '2026-08-10',
+      householdId: HOUSEHOLD.id,
+      source: 'extraction',
+    })
+
+    const insert = opsOn('chores').find((c) => c.op === 'insert')
+    expect(insert.row.source).toBe('extraction')
+  })
+
+  it('reads the chore back with source among the columns, or the write is unverifiable', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: HOUSEHOLD.id })
+
+    const select = opsOn('chores').find((c) => c.op === 'select')
+    // SPLIT, never a substring test on the joined string, and the reason is
+    // measured rather than stylistic: this assertion was written as
+    // `expect(select.cols).toContain('source')` and a mutation removing `source`
+    // from CHORE_COLUMNS reddened 2 tests against a predicted 3 — this one
+    // stayed green, because `assigned_source` is always in the list and the
+    // string 'source' is a substring of it. The list contains two names where
+    // one ends with the other, so only membership of the parsed list means
+    // anything here.
+    const requested = select.cols.split(',').map((c) => c.trim())
+    expect(requested).toContain('source')
+    // And the neighbour that made the loose form vacuous, asserted alongside so
+    // a future reader can see why the split is not fussiness.
+    expect(requested).toContain('assigned_source')
+    // What the assertion is FOR: the INSERT's own returning list has to carry
+    // the column, which is the clause 0023's select grant exists to satisfy — a
+    // RETURNING naming an ungranted column is refused with a message naming the
+    // TABLE, so the failure would read as the insert being rejected rather than
+    // as a missing read grant.
+  })
+
   it('builds the row itself, so a stray household_id in the payload is ignored', async () => {
     results.chores = { data: ROW, error: null }
     await addChore({
@@ -223,6 +280,93 @@ describe('addChore', () => {
     await expect(
       addChore({ title: 'Dishes', expectedMinutes: 20, dueOn: '2026-08-10', householdId: HOUSEHOLD.id }),
     ).rejects.toThrow(/adding the chore: new row violates row-level security/i)
+  })
+})
+
+describe('addChores — #220, several chores through the single-add path', () => {
+  const inserts = () => opsOn('chores').filter((c) => c.op === 'insert')
+
+  // AC 4's "indistinguishable from singly-added ones", asserted on the wire:
+  // the same raw form input goes once through addChore and once through
+  // addChores, and the two insert payloads must be byte-equal — normalization
+  // included, which is why the fixture arrives unnormalized.
+  it('lands a row as the identical insert a single add makes', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChore({ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10', householdId: 'h1' })
+    const single = inserts()[0].row
+
+    calls.length = 0
+    await addChores([{ title: '  Dishes  ', expectedMinutes: '20', dueOn: '2026-08-10' }], {
+      householdId: 'h1',
+    })
+    expect(inserts()[0].row).toEqual(single)
+  })
+
+  it('issues one ordinary insert per row — never a bulk payload, never an RPC', async () => {
+    results.chores = { data: ROW, error: null }
+    const outcomes = await addChores(
+      [
+        { title: 'wash the towels', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'water the plants', expectedMinutes: 5, dueOn: '2026-08-11' },
+        { title: 'sweep the porch', expectedMinutes: 15, dueOn: '2026-08-12' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(inserts()).toHaveLength(3)
+    // Each insert carries ONE row object. supabase-js accepts an array for a
+    // bulk insert, and that shape appearing here would be the second write
+    // route the issue rules out.
+    inserts().forEach((c) => expect(Array.isArray(c.row)).toBe(false))
+    expect(calls.filter((c) => c.op === 'rpc')).toHaveLength(0)
+    expect(outcomes.map((o) => o.ok)).toEqual([true, true, true])
+  })
+
+  it('AC 5: reports per-row outcomes in entry order, and a refusal does not stop the rows behind it', async () => {
+    // A queue: first insert lands, second is refused by the server, third lands.
+    results.chores = [
+      { data: ROW, error: null },
+      { data: null, error: { message: 'new row violates row-level security policy' } },
+      { data: ROW, error: null },
+    ]
+    const outcomes = await addChores(
+      [
+        { title: 'wash the towels', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'water the plants', expectedMinutes: 5, dueOn: '2026-08-11' },
+        { title: 'sweep the porch', expectedMinutes: 15, dueOn: '2026-08-12' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(outcomes.map((o) => o.ok)).toEqual([true, false, true])
+    expect(outcomes[1].message).toMatch(/adding the chore: new row violates/i)
+    expect(inserts()).toHaveLength(3)
+  })
+
+  it('a row the validators refuse costs no request and fails only itself', async () => {
+    results.chores = { data: ROW, error: null }
+    const outcomes = await addChores(
+      [
+        { title: '', expectedMinutes: 20, dueOn: '2026-08-10' },
+        { title: 'fold the laundry', expectedMinutes: 20, dueOn: '2026-08-10' },
+      ],
+      { householdId: 'h1' },
+    )
+
+    expect(outcomes[0].ok).toBe(false)
+    expect(outcomes[0].message).toMatch(/needs a name/i)
+    expect(outcomes[1].ok).toBe(true)
+    expect(inserts()).toHaveLength(1)
+  })
+
+  it('a stray householdId inside a row cannot override the one the caller is showing', async () => {
+    results.chores = { data: ROW, error: null }
+    await addChores(
+      [{ title: 'walk the dog', expectedMinutes: 10, dueOn: '2026-08-10', householdId: 'smuggled-h9' }],
+      { householdId: 'h1' },
+    )
+
+    expect(inserts()[0].row.household_id).toBe('h1')
   })
 })
 

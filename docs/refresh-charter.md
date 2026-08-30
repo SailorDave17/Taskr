@@ -222,10 +222,17 @@ raised this as an open question on #34 rather than deciding it, and the owner to
 - **What it costs:** #42's corpus was scoped to capacity descriptions only. A bet that covers chore
   capture needs chore descriptions in the same corpus, scored by the same grader, or the measurement
   that decides whether the bet survives is silent about half of what it now claims.
-- **Why it was not built into #34:** there is no server-side compute in this repo, and an LLM
-  credential cannot reach a phone — `src/lib/keyShape.js` exists because a secret key reached a
-  published bundle once already. The route runs through #56, whose own AC 1 records that its platform
-  decision has not been taken.
+- **Why it was not built into #34:** an LLM credential cannot reach a phone — `src/lib/keyShape.js`
+  exists because a secret key reached a published bundle once already — so the call needs server-side
+  compute the client cannot hold. The platform for that compute is **decided**: Supabase Edge
+  Functions, ratified by the owner 2026-08-26 and recorded in `docs/hosting-decision.md`; the route
+  runs through #208 (the endpoint) and #209 (its deploy). *(This bullet said "there is no
+  server-side compute in this repo" and routed through #56, "whose own AC 1 records that its
+  platform decision has not been taken" — true when written on 2026-08-08, false since:
+  `provision-member` and `calendar-connect` both ship as deployed Edge Functions, with a committed
+  deploy script, a CORS test and a live probe. The stale premise misled a grooming run into pricing
+  a 2-day platform decision that was already taken; #56 closed superseded 2026-08-27, #208 is the
+  live endpoint story.)*
 
 Everything outside that path is deliberately boring, proven technology (owner directive: selectively
 bleeding-edge, one bet).
@@ -355,7 +362,10 @@ New open questions this creates (owed at grooming, not settled here):
   kids-data question.
 - **Where the read runs** — the Google credential must never reach the client bundle
   (`src/lib/keyShape.js` exists because a secret shipped once already); the natural home is the
-  same Edge Function surface #56 stands up.
+  Edge Function surface the shipped functions already use (`provision-member`,
+  `calendar-connect`), where #208 stands up the extraction endpoint. *(This line named #56, the
+  endpoint story #208 superseded — and the credential half has since landed exactly there:
+  `calendar-connect` ships deployed with the Google secret held server-side.)*
 
 ## Decision taken 2026-08-24 — the repeat catch-up bound is SEVEN days
 
@@ -524,6 +534,45 @@ recorded in the decision log as tunable defaults". This is that record.
 - **Propagation on an accepted update is #54's ratified option (b) by construction** — the update is
   an ordinary estimate edit on the anchor, occurrences copy minutes at creation (0012), so the new
   value reaches future occurrences and never rewrites work already on somebody's list.
+- **Actuals never feed a budget directly** (owner, 2026-08-26, at the filing gate of the groom run
+  that filed #215). A recorded actual reaches a budget — an estimate, and through it the
+  allocation — only through an estimate correction a human accepts: the one-tap update above is
+  that path, and it is the only one. Rolling-actuals auto-correction is **rejected**, not
+  deferred, so a later session must not reintroduce it as an obvious improvement. The record and
+  the guard ship together — a source-level test in `src/lib/allocation.test.js` (#215) reddens if
+  the allocator reads an actual-minutes field anywhere but `minutesOf`. (`minutesOf` reading a
+  DONE chore's actual is the load side — #47 criterion 7 — not this decision's subject: load is
+  what the work cost, a budget is what a person or an estimate has to give.)
+
+## Decision taken 2026-08-27 — concurrent re-assignments serialize through a version CAS
+
+Taken at the gate of #49, whose criterion 6 required the concurrency mechanism to be "recorded in
+the decision log". This is that record. The grooming decision above (2026-08-06) had already fixed
+the shape — allocation STORED, an automatic re-derive on capacity change, "costs a transactional
+RPC" — and #49 is that RPC. Two mechanism choices inside it:
+
+- **The server applies; it never allocates.** The placement rule has exactly one implementation
+  (`src/lib/allocation.js`, #40 AC 9), so the client that observed the capacity change computes the
+  new allocation with the real module and hands the *result* to `apply_assignments` (migration
+  `0018`). Rejected: a plpgsql re-implementation — a second copy of the placement rule, drifting
+  the first time either changed, which is the exact drift this schema's own comments forbid for
+  `members.committed_minutes`. The trust envelope does not move: a member's client can already
+  place any chore on any member one `assign_chore` call at a time.
+- **Freshness is a compare-and-set on `households.assignments_version`**, bumped by triggers on
+  every table the allocator reads (chores, members, member_capacity, chore_exclusions). The RPC
+  locks the household row, refuses a result computed from any other version (errcode `TA049`), and
+  the refused device re-reads — now seeing both writes — recomputes and re-applies
+  (`reassignHousehold`, bounded at 3 attempts). Convergence is then a property of the allocator
+  being deterministic rather than of timing. Rejected: **last-write-wins** (a stale result computed
+  before the other device's capacity write would stand, and the split would answer a household
+  state that never existed) and **comparing the inputs themselves** (the RPC would need its own
+  copy of the capacity-resolution rule to check them — the same second-implementation drift as
+  above, one layer down).
+- **The trigger extension is the owner's, taken at pickup**: a baseline `weekly_minutes` edit on
+  the roster is a capacity change and re-runs the assignment, alongside the weekly override's set
+  and clear. Rejected: overrides-only (a baseline edit would visibly change the bars and silently
+  not move the split) and every-input-write (a re-balance on writes nobody experiences as a
+  capacity change, beyond what #49 asserts).
 
 ## Open decisions (still owed)
 
@@ -533,4 +582,6 @@ recorded in the decision log as tunable defaults". This is that record.
   read from a calendar. The bet makes the first cheap; the third is a scope decision, not a given.
   It bears on whether #12's actuals ever become an input to capacity.~~ **Settled 2026-08-16 —
   see the decision section above.** The #12 sub-question (whether actuals feed capacity) is *not*
-  settled by it and stays open.
+  settled by it — it was settled separately on 2026-08-26: actuals never feed a budget directly,
+  only an estimate correction a human accepts (see the 2026-08-26 actuals decision above, and the
+  source-level guard #215 put beside it).

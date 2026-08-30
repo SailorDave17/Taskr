@@ -42,6 +42,109 @@ function unwrap({ data, error }, whatWeWereDoing) {
 }
 
 /**
+ * The same, plus the two member-write failures that are worth naming — #242.
+ *
+ * Both come from constraints `0007` added with `members.email`, and both reach
+ * the organizer as a Postgres string if nothing translates them. Named here
+ * rather than in the component because the constraint is the authority and the
+ * component is not: the client's own check below is a courtesy that saves a
+ * round trip, and this is what happens when the database disagrees with it.
+ */
+function unwrapMemberWrite(result, whatWeWereDoing) {
+  try {
+    return unwrap(result, whatWeWereDoing)
+  } catch (err) {
+    const hint = describeMemberWriteFailure(err.cause)
+    if (!hint) throw err
+    const friendly = new Error(hint)
+    friendly.cause = err.cause
+    throw friendly
+  }
+}
+
+function describeMemberWriteFailure(error) {
+  const code = error?.code ?? ''
+  const text = `${error?.message ?? ''} ${error?.details ?? ''}`
+
+  // `members_email_key` is a unique index on `lower(email)` over the WHOLE
+  // table, not per household — deliberately, because the address ends up being
+  // an auth identity and GoTrue's own uniqueness is global too. So the sentence
+  // must not say "in this household": a collision with somebody in a household
+  // this organizer cannot see is exactly the case they cannot diagnose.
+  if (code === '23505' || /members_email_key|duplicate key/i.test(text)) {
+    return 'That email address is already on a roster entry. An address identifies one person across all of Taskr, so this one needs a different address.'
+  }
+  if (code === '23514' || /members_email_shape/i.test(text)) {
+    return 'That does not look like an email address — it needs an @ with a dot somewhere after it.'
+  }
+  return null
+}
+
+/**
+ * An address for a member row, or `undefined` to leave the column alone — #242.
+ *
+ * Three inputs, three answers, and the middle one is the one worth stating:
+ *
+ * - `undefined` → `undefined`. The caller is not talking about the address.
+ * - `''` or blank → `null`. The caller IS talking about it and is clearing it,
+ *   which is what null means on this column: no real inbox, so a synthetic
+ *   `<id>@taskr.invalid` address and a PIN (`0007`'s own column comment).
+ * - anything else → trimmed and lower-cased.
+ *
+ * Lower-cased because the uniqueness index is on `lower(email)` while the shape
+ * check is case-blind, so `Alex@` and `alex@` are one person to the database and
+ * two to a reader. Storing the folded form makes the roster agree with the index
+ * rather than merely not contradicting it — and GoTrue folds the address anyway
+ * when the Edge Function mints an account from it, so the alternative is a
+ * roster that displays something the person does not actually type.
+ *
+ * The shape mirrors `members_email_shape` from `0007`. It is a courtesy, not the
+ * guard: the constraint refuses the write whatever this function does, and
+ * `describeMemberWriteFailure` above is what a reader sees when it does.
+ */
+export function normalizeMemberEmail(value) {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const trimmed = String(value).trim()
+  if (!trimmed) return null
+  const folded = trimmed.toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(folded)) {
+    throw new Error('That does not look like an email address — it needs an @ with a dot somewhere after it.')
+  }
+  return folded
+}
+
+/**
+ * The address this member signs in with — #242.
+ *
+ * There is no name-based sign-in and there never was: `signIn` above calls
+ * `signInWithPassword`, so the address is half the credential. A member with a
+ * real address types it; a member without one signs in with the synthetic form,
+ * and the organizer has to be able to READ it or nobody can be admitted at all.
+ * `access-model.md` described that address as one they "never see or type",
+ * which was a design intention that the sign-in form has never been able to
+ * honour.
+ *
+ * THIS MIRRORS A RULE THAT LIVES IN THE EDGE FUNCTION. `provision-member` is
+ * Deno and cannot import this module, so `syntheticAddressFor` there and this
+ * are two copies of one rule. `gate.test.js` asserts they still agree — the
+ * copies cannot be merged, so the next best thing is that they cannot drift
+ * silently.
+ *
+ * On an already-provisioned member this is a PREDICTION of what the account was
+ * minted as rather than a reading of it: the address lives in `auth.users`,
+ * which no client may read. It is right for every account this app has ever
+ * minted, because `members.email` could not be set until now — and it is wrong
+ * the moment somebody changes an address in the Supabase dashboard, which is
+ * why the roster labels it as the address they were GIVEN rather than asserting
+ * what auth currently holds.
+ */
+export function signInAddressFor(member) {
+  const real = typeof member?.email === 'string' ? member.email.trim() : ''
+  return real || `${member?.id}@taskr.invalid`
+}
+
+/**
  * The signed-in session, or null. It no longer creates one — #62.
  *
  * Under device auth this was `ensureSession()`, and it signed the DEVICE in
@@ -376,18 +479,25 @@ export async function listMembers(householdId) {
  * outside `current_household_ids()` regardless — so this is defence in depth
  * over a database guard, not the guard itself (#159 AC 5).
  */
-export async function addMember({ displayName, weeklyMinutes, householdId }) {
+export async function addMember({ displayName, weeklyMinutes, householdId, email }) {
   const name = (displayName ?? '').trim()
   if (!name) throw new Error('A person needs a name.')
   if (!householdId) throw new Error('Which household? Adding a person must name one.')
 
-  return unwrap(
+  const address = normalizeMemberEmail(email)
+
+  return unwrapMemberWrite(
     await getSupabase()
       .from('members')
       .insert({
         household_id: householdId,
         display_name: name,
         weekly_minutes: normalizeMinutes(weeklyMinutes),
+        // Omitted entirely rather than sent as null when nobody typed one, so
+        // an insert from a caller that does not know about addresses is byte
+        // for byte the insert it was before #242. `undefined` is dropped by
+        // supabase-js; an explicit null would be a write.
+        ...(address === undefined ? {} : { email: address }),
       })
       .select(MEMBER_COLUMNS)
       .single(),
@@ -395,8 +505,23 @@ export async function addMember({ displayName, weeklyMinutes, householdId }) {
   )
 }
 
-/** Edit a person's name or weekly minutes — AC 4. */
-export async function updateMember(id, { displayName, weeklyMinutes }) {
+/**
+ * Edit a person's name, weekly minutes or email address — AC 4, and #242.
+ *
+ * `email` joins the patch because `0007` granted it as UPDATE-able for exactly
+ * this case, and its own comment argues for it: "an organizer correcting a typo
+ * in an address is ordinary roster maintenance". *Measured on the live project
+ * 2026-08-28*, `members.email` carries `authenticated=arw`, so this needs no
+ * migration — the grant has been there since #62 with nothing to write through
+ * it.
+ *
+ * Changing the address here does NOT move the account an already-provisioned
+ * member signs in with. `provision-member` reads `members.email` when it MINTS,
+ * and refuses once `claimed_by` is set; nothing re-points an existing auth user.
+ * So on a claimed row this is a record of who they are, and the sign-in address
+ * they already hold is whatever it was minted as.
+ */
+export async function updateMember(id, { displayName, weeklyMinutes, email }) {
   const patch = {}
   if (displayName !== undefined) {
     const name = displayName.trim()
@@ -405,15 +530,70 @@ export async function updateMember(id, { displayName, weeklyMinutes }) {
   }
   if (weeklyMinutes !== undefined) patch.weekly_minutes = normalizeMinutes(weeklyMinutes)
 
-  return unwrap(
+  const address = normalizeMemberEmail(email)
+  if (address !== undefined) patch.email = address
+
+  return unwrapMemberWrite(
     await getSupabase().from('members').update(patch).eq('id', id).select(MEMBER_COLUMNS).single(),
     'saving the change',
   )
 }
 
-/** Remove a person from the roster — AC 4. */
+/**
+ * Remove a person from the roster — #5 AC 4, and since #247 their sign-in goes
+ * with them.
+ *
+ * Two halves, in the safe order. The AUTH half runs first, through the Edge
+ * Function's `revoke` action (#247/#262): `members_claimed_by_fkey` is ON
+ * DELETE SET NULL, so a removal that dies between the halves leaves a member
+ * showing "No sign-in yet" — a state the roster already renders and the
+ * organizer recovers from with Give a sign-in. Row first would leave an
+ * account that can still sign in with no member row naming it, which is the
+ * orphan #247 was filed about.
+ *
+ * The ROW half stays a client delete through RLS (0016), not a service_role
+ * delete inside the function — the database remains the thing saying no about
+ * the row, and removing somebody with no sign-in never touches the function
+ * at all, so it keeps working when the function is unreachable.
+ *
+ * A revoke failure does NOT stop the removal (#247 AC 4). The person is
+ * removed and the failure comes back as `warning` — two separate facts, so
+ * the organizer is not misled into "the removal failed" and a retry. It is
+ * returned rather than thrown because the removal itself succeeded, and the
+ * caller decides how to show it.
+ *
+ * The function may also legitimately KEEP the account — when another member
+ * row claims it (one person, two households, #159) there is nothing to warn
+ * about: removal from this household is complete and the sign-in belongs to a
+ * household this organizer has no say over.
+ */
 export async function removeMember(id) {
+  const member = unwrap(
+    await getSupabase()
+      .from('members')
+      .select('id, display_name, claimed_by')
+      .eq('id', id)
+      .maybeSingle(),
+    'reading the person',
+  )
+  // Already gone — a double-tap, or another device got there first. Nothing to
+  // revoke and nothing to delete.
+  if (!member) return { warning: null }
+
+  let warning = null
+  if (member.claimed_by) {
+    try {
+      await callProvisioning('revoke', { memberId: id })
+    } catch (err) {
+      warning =
+        `${member.display_name} was removed from the household, but their ` +
+        `sign-in was NOT deleted: ${err.message} That account can still sign ` +
+        'in until it is deleted.'
+    }
+  }
+
   unwrap(await getSupabase().from('members').delete().eq('id', id), 'removing the person')
+  return { warning }
 }
 
 // `claimMember`, `setMemberPin` and `claimMemberWithPin` were here until #62.
@@ -471,12 +651,16 @@ function describeProvisioningFailure(action, error) {
 async function callProvisioning(action, { memberId, password }) {
   const trimmed = String(password ?? '')
   if (!memberId) throw new Error('Pick a person first.')
-  if (trimmed.length < 6) {
+  // Revoke takes no password — deleting a sign-in has no credential to set —
+  // so the floor applies only to the actions that mint one.
+  if (action !== 'revoke' && trimmed.length < 6) {
     throw new Error('That credential is too short — use at least 6 characters.')
   }
 
+  const body =
+    action === 'revoke' ? { action, memberId } : { action, memberId, password: trimmed }
   const { data, error } = await getSupabase().functions.invoke(PROVISION_FUNCTION, {
-    body: { action, memberId, password: trimmed },
+    body,
   })
 
   if (error) {

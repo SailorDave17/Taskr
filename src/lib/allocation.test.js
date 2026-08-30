@@ -877,3 +877,65 @@ describe('#12 AC 5 — allocation still consumes the ratified unit', () => {
     expect(doneLoad.assignedMinutes).toBe(90)
   })
 })
+
+// ---------------------------------------------------------------------------
+// #215 — recorded actuals never feed a capacity input.
+// ---------------------------------------------------------------------------
+
+describe('#215 — recorded actuals never feed a capacity input', () => {
+  // A SOURCE assertion, and the weakness is stated on purpose rather than
+  // dressed up: every actual on the live project is NULL today (the column
+  // arrived with #12 and backfills nothing), so a behavioural probe passes
+  // whichever form the code takes. The describe above shows it concretely —
+  // its wild-actuals fixture happens to produce identical assignments whether
+  // the scoring reads expected or actual minutes, so only the shape of the
+  // code can carry this claim until real observations accumulate.
+  //
+  // The claim (charter decision log, 2026-08-26): actuals reach a budget only
+  // through an estimate correction a human accepts — never the allocator's own
+  // arithmetic. `minutesOf` is the ONE function entitled to read an actual,
+  // and that is the load side of DONE work (#47 criterion 7), not a capacity
+  // input: load is what the work cost, capacity is what a person has to give.
+  // Any other function touching an actual-minutes field is rolling-actuals
+  // correction arriving as an obvious improvement, which the decision log
+  // REJECTS rather than defers.
+
+  /**
+   * The comment-stripped source, cut at every top-level function declaration.
+   * Comments are stripped FIRST, so a docblock explaining this very rule
+   * cannot trip the scan — the hazard `codeOf`'s own docblock records.
+   */
+  function topLevelSegments(code) {
+    const declarations = [...code.matchAll(/^(?:export )?function (\w+)/gm)]
+    const segments = new Map()
+    segments.set('(before the first function)', code.slice(0, declarations[0]?.index ?? code.length))
+    for (let i = 0; i < declarations.length; i += 1) {
+      const end = declarations[i + 1]?.index ?? code.length
+      segments.set(declarations[i][1], code.slice(declarations[i].index, end))
+    }
+    return segments
+  }
+
+  it('no function but minutesOf touches an actual-minutes field', () => {
+    const segments = topLevelSegments(codeOf(SOURCE))
+    // Substring on purpose: an absence claim wants the widest net, so
+    // `actualMinutes`, `actual_minutes` and any new spelling all match.
+    const offenders = [...segments.entries()]
+      .filter(([name, body]) => name !== 'minutesOf' && /actual/i.test(body))
+      .map(([name]) => name)
+    expect(offenders, `actuals read outside minutesOf, in: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the segmentation confines the needle it exempts', () => {
+    // The empty-offenders assertion above means nothing unless the needle is
+    // findable at all and the segment boundaries actually hold it. A stripper
+    // or segmenter that ate the middle of the file would leave these segments
+    // empty or missing — which is the shape of the failure, not the artefact.
+    const segments = topLevelSegments(codeOf(SOURCE))
+    expect(segments.get('minutesOf')).toMatch(/actualMinutes/)
+    // The right text landed in the right segments, and the segmentation
+    // reached the last function in the file rather than stopping early.
+    expect(segments.get('place')).toMatch(/expectedMinutes/)
+    expect(segments.get('assertChores')).toMatch(/expectedMinutes/)
+  })
+})

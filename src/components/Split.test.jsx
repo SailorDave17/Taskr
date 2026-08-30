@@ -1,5 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import Split from './Split.jsx'
 
 // The split surface — story #47.
@@ -55,6 +55,8 @@ const setup = (props = {}) =>
       capacities={capacities}
       chores={[]}
       exclusions={[]}
+      fairnessNoteDismissed={false}
+      onDismissFairnessNote={() => {}}
       {...props}
     />,
   )
@@ -580,5 +582,147 @@ describe('#159 AC 6 — one household on screen, whatever else exists', () => {
     // computed over a roster that is not this household's.
     expect(pollutedRows).toBeGreaterThan(scopedRows)
     expect(pollutedVerdict).not.toBe(scopedVerdict)
+  })
+})
+
+// #49 AC 7 — what the last automatic re-balance reported, rendered from the
+// verdict the run STORED rather than from any computation here. The wiring
+// that fetches it is App's (App.test.jsx); what the run stores is the pglite
+// suite's; this covers only what the screen says for a given stored verdict.
+describe('the last re-balance note (#49)', () => {
+  const verdict = (extra = {}) => ({
+    contested: true,
+    level: true,
+    reason: null,
+    boundByBudget: false,
+    jobsMoved: 0,
+    minutesMoved: 0,
+    changeBudgetMinutes: 120,
+    applied_at: '2026-08-27T12:00:00Z',
+    ...extra,
+  })
+
+  it('says nothing when no run has been stored', () => {
+    setup({ lastRebalance: null })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+
+  it('says nothing about an uneventful run — a note that always fires is an absent note', () => {
+    setup({ lastRebalance: verdict() })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+
+  it('states the budget refusal in the stored run’s own minutes', () => {
+    setup({
+      lastRebalance: verdict({ boundByBudget: true, jobsMoved: 2, minutesMoved: 90 }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('moved 90 min')
+    expect(note).toHaveTextContent('change budget (120 min)')
+  })
+
+  it('states the stored unreachable reason, naming the person and both numbers', () => {
+    setup({
+      lastRebalance: verdict({
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('Placeholder Two')
+    expect(note).toHaveTextContent('25 min')
+    expect(note).toHaveTextContent('90 min')
+  })
+
+  it('lets the budget sentence win when both facts are true of one run', () => {
+    // A run can be budget-bound AND end off level. The budget is the one the
+    // household can act on this week, so it is the sentence — two notes would
+    // bury both.
+    setup({
+      lastRebalance: verdict({
+        boundByBudget: true,
+        minutesMoved: 30,
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    const note = screen.getByTestId('rebalance-note')
+    expect(note).toHaveTextContent('change budget')
+    expect(note).not.toHaveTextContent('fair share')
+  })
+
+  it('does not render a stale reason as unreachable when the run was not contested', () => {
+    // One person with capacity: `level` is vacuously true and `reason` null,
+    // but a malformed verdict could carry both — the guard is on contested.
+    setup({
+      lastRebalance: verdict({
+        contested: false,
+        level: false,
+        reason: { memberId: 'm2', fairShareMinutes: 25, smallestJobMinutes: 90 },
+      }),
+    })
+    expect(screen.queryByTestId('rebalance-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('#59 — the note saying what the fairness number does not count', () => {
+  const note = () => screen.getByTestId('fairness-note')
+  // Any household with people and work in it — the note is about the NUMBER,
+  // not about any particular split, so the fixture is deliberately ordinary.
+  const someWork = [chore('a', 90, 'm1'), chore('b', 45, 'm2')]
+
+  it('AC 1: stands on the surface and states what is counted and what is not', () => {
+    setup({ chores: someWork })
+    expect(note()).toHaveTextContent(/counts time spent doing/i)
+    expect(note()).toHaveTextContent(/noticing, planning and remembering/i)
+    expect(note()).toHaveTextContent(/does not count/i)
+  })
+
+  it('AC 2: attributes the uncounted work to nobody — no name, no figure, no rank', () => {
+    // The denial asserted over the WHOLE note, in the vocabulary a rewrite
+    // that modelled the noticing dimension would have to introduce: a member's
+    // name, a number of any kind, or a comparison word. A test that only
+    // checked the sentence above would stay green while a second sentence
+    // quietly scored somebody (cairn: a-copy-test-defends-the-sentence).
+    setup({ chores: someWork })
+    const text = note().textContent
+    for (const member of members) {
+      expect(text).not.toContain(member.display_name)
+    }
+    expect(text).not.toMatch(/\d/)
+    expect(text).not.toMatch(/%/)
+    expect(text).not.toMatch(/\b(most|more|less|behind|ahead|rank|score|top|bottom)\b/i)
+  })
+
+  it('AC 4: promises nothing about a future feature', () => {
+    // Deciding later to model the noticing dimension must not make this copy
+    // retroactively a lie — so no future tense and no roadmap vocabulary.
+    // `planned`/`plans` are banned; `planning` is the copy's own word for the
+    // uncounted work and is deliberately not.
+    setup({ chores: someWork })
+    expect(note().textContent).not.toMatch(
+      /\b(yet|soon|coming|will|until|one day|someday|eventually|future|roadmap|for now|planned|plans)\b/i,
+    )
+  })
+
+  it('AC 3: the dismiss control hands the dismissal to the app', () => {
+    const onDismiss = vi.fn()
+    setup({ chores: someWork, onDismissFairnessNote: onDismiss })
+    fireEvent.click(screen.getByRole('button', { name: /noted/i }))
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3: dismissed, it stops standing and is reachable on demand', () => {
+    setup({ chores: someWork, fairnessNoteDismissed: true })
+    expect(screen.queryByTestId('fairness-note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /noted/i })).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: /what the split counts/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+    expect(note()).toHaveTextContent(/does not count/i)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId('fairness-note')).not.toBeInTheDocument()
   })
 })

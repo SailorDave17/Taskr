@@ -13,6 +13,7 @@
 // whole thesis rests on.
 
 import { getSupabase } from './supabase.js'
+import { normalizeDueDate } from './dueDates.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -49,7 +50,26 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, repeat_kind, repeat_weekdays, generated_from, actual_minutes'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes, source'
+
+/**
+ * How a chore came to exist — `chores_source_known` in `0023`, story #211.
+ *
+ * Provenance, never privilege: nothing keys off this value, and a wrong one
+ * costs an answer rather than an access decision. It exists so the extraction
+ * bet (epic #217) can be judged on data — `docs/refresh-charter.md` makes trust
+ * in extracted numbers a kill condition, and a kill condition nothing measures
+ * is a sentence rather than a test.
+ *
+ * NOT to be confused with `assigned_source`, which is on the same row and
+ * records how the ASSIGNMENT was decided ('manual' | 'auto' | null). The two
+ * vocabularies deliberately share no word, so a value read from the wrong column
+ * is a wrong answer rather than a plausible one.
+ */
+export const CHORE_SOURCES = Object.freeze(['manual', 'extraction'])
+
+/** What a chore's origin is when nobody says otherwise. */
+export const DEFAULT_CHORE_SOURCE = 'manual'
 
 /** The bounds of `chores_expected_minutes_range`, named so the UI can say them. */
 export const MIN_EXPECTED_MINUTES = 1
@@ -147,31 +167,16 @@ export function normalizeActualMinutes(value) {
 /**
  * A due date as the `date` column wants it: `YYYY-MM-DD`, no time, no zone.
  *
- * Deliberately string-in, string-out, and deliberately NOT via `new Date()`.
- * Parsing '2026-08-10' into a Date and formatting it back returns the previous
- * day for anyone west of UTC, because the parse is UTC-midnight and the format
- * is local — a chore due Monday would be stored as Sunday for half the world.
- * The column is a calendar date and this keeps it one all the way down.
+ * Lived here until #202, which moved it to dueDates.js — a leaf module — so
+ * the extraction grader can import it without inheriting this file's
+ * supabase.js import (extraction.test.js walls the grader off from anything
+ * that could reach the network). Re-exported rather than duplicated, because a
+ * second implementation of the same validation is the drift the move avoids.
+ * Every existing caller and its one-argument, ISO-only behaviour are
+ * unchanged; the widened phrase-plus-reference form is #202's and is
+ * documented at the definition.
  */
-export function normalizeDueDate(value) {
-  const text = String(value ?? '').trim()
-  if (!text) throw new Error('When is this chore due?')
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error('A due date needs to look like 2026-08-10.')
-
-  const [year, month, day] = text.split('-').map(Number)
-  if (month < 1 || month > 12) throw new Error('That is not a real month.')
-  // Round-trip through UTC to reject 31 February and friends, which the regex
-  // above is happy with. UTC on both sides, so no zone can shift the answer.
-  const asUtc = new Date(Date.UTC(year, month - 1, day))
-  if (
-    asUtc.getUTCFullYear() !== year ||
-    asUtc.getUTCMonth() !== month - 1 ||
-    asUtc.getUTCDate() !== day
-  ) {
-    throw new Error('That is not a real date.')
-  }
-  return text
-}
+export { normalizeDueDate }
 
 /**
  * A schedule the columns will accept — #53 AC 6: structured, never free text.
@@ -250,7 +255,27 @@ export async function listChores(householdId) {
  * outside `current_household_ids()`, so this is defence in depth over a database
  * guard rather than the guard (#159 AC 5).
  */
-export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, householdId }) {
+export async function addChore({
+  title,
+  expectedMinutes,
+  dueOn,
+  repeatKind,
+  repeatWeekdays,
+  householdId,
+  // #211 — where the chore came from. Defaulted rather than required, so every
+  // existing call site keeps its current meaning without being edited: App.jsx
+  // spreads a form object that names no source, and a typed chore is exactly
+  // what 'manual' means. The extraction path (#213) is the one caller that will
+  // pass anything else.
+  //
+  // Validated by the check constraint in 0023 and NOT here, which is
+  // `setCapacity`'s shape for the same column and the same reason: this is
+  // provenance, so a bad value costs an answer rather than an access decision,
+  // and a second copy of the vocabulary in a client-side guard is a second copy
+  // to drift. `chores.pglite.test.js` holds CHORE_SOURCES equal to what the
+  // constraint admits, which is the binding that keeps the two honest.
+  source = DEFAULT_CHORE_SOURCE,
+}) {
   const cleanTitle = normalizeTitle(title)
   const minutes = normalizeExpectedMinutes(expectedMinutes)
   const due = normalizeDueDate(dueOn)
@@ -271,11 +296,51 @@ export async function addChore({ title, expectedMinutes, dueOn, repeatKind, repe
         due_on: due,
         repeat_kind: repeat.repeat_kind,
         repeat_weekdays: repeat.repeat_weekdays,
+        // Written explicitly rather than left to the column's DEFAULT. The two
+        // are identical for a typed chore, and stating it is what makes the
+        // insert path a thing a mutation can remove and a test can miss — the
+        // column default would silently supply 'manual' and every assertion
+        // would go on passing while the client had stopped saying anything.
+        source,
       })
       .select(CHORE_COLUMNS)
       .single(),
     'adding the chore',
   )
+}
+
+/**
+ * Add several chores in one confirmed pass — #220.
+ *
+ * A loop over `addChore`, and that it is NOTHING MORE is the story's central
+ * decision (filed 2026-08-26): no bulk insert, no second write route, no new
+ * grant. Every row lands exactly as a singly-added chore does, so nothing
+ * downstream — the allocator, the repeat pass, `liveSchema.js` — can tell the
+ * two apart, and there is no second refusal behaviour to keep in step.
+ *
+ * SEQUENTIAL, deliberately. `created_at` then orders the rows in entry order
+ * (listChores breaks due-date ties on it), and a per-row outcome can name which
+ * rows landed when one is refused mid-batch — #220 AC 5's whole requirement.
+ *
+ * NEVER THROWS for a refused row. A thrown error could only say "something
+ * failed" after some rows are already durable; the outcome array says which.
+ * One outcome per input row, in the same order, `{ ok: true, chore }` or
+ * `{ ok: false, message }` — the caller prunes the saved rows so a re-confirm
+ * cannot duplicate them.
+ */
+export async function addChores(rows, { householdId } = {}) {
+  const outcomes = []
+  for (const row of rows) {
+    try {
+      // householdId is spread LAST so a stray one inside a row cannot override
+      // the household the caller is showing — the same defence addChore itself
+      // makes for the snake_case spelling.
+      outcomes.push({ ok: true, chore: await addChore({ ...row, householdId }) })
+    } catch (err) {
+      outcomes.push({ ok: false, message: err.message })
+    }
+  }
+  return outcomes
 }
 
 /** Edit a chore's title, minutes or due date — AC 6. */

@@ -123,6 +123,65 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: null,
     source: '0012 — deliberately never granted (NEGATIVE CONTROL)',
   }),
+  // `0022`, 2026-08-28. The four columns a PostgREST upsert needs privileges on
+  // that nothing about the app's behaviour would suggest: it names EVERY payload
+  // column in its `DO UPDATE SET` list — the conflict target included — so each
+  // needs UPDATE because it is a SET target and SELECT because `EXCLUDED."col"`
+  // reads it. Without them the split surface and every capacity edit were
+  // refused `permission denied` on the live project.
+  //
+  // These rows are here because `check:live` is BLIND to `0022` in both
+  // directions — it reads tables, columns, RPCs and functions, and `0022` adds
+  // grants and a trigger — so this probe is the only instrument that can say
+  // whether the migration reached the project. They are RED until it is pasted,
+  // which is the deliberate red this table's own docblock describes.
+  Object.freeze({
+    table: 'member_split_seen',
+    column: 'member_id',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0020’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'household_id',
+    privileges: 'arw',
+    source: '0022 — `rw` is 0022’s; `a` is 0005’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'member_id',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0005’s',
+  }),
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'period_start',
+    privileges: 'arw',
+    source: '0022 — `w` is 0022’s; `ar` is 0005’s',
+  }),
+  // `0023`, 2026-08-28 (#211). Chore provenance, and this row exists for HALF a
+  // reason rather than the whole one — which is worth stating, because every
+  // other row above is here because `check:live` is blind to its migration and
+  // this one is not.
+  //
+  // `check:live` reads `chores` with `CHORE_COLUMNS`, so the SELECT half of this
+  // grant is exactly what it caught: a *measured* 27 of 28 before the apply,
+  // `chores` answering `42703 column chores.source does not exist`, and 28 of 28
+  // after. Nothing there can see the INSERT half, because that check only reads —
+  // so `a` is the letter this row is really for, and `r` rides along because a
+  // privilege string is how this table expresses itself.
+  //
+  // `w` is ABSENT on purpose and the absence is the interesting assertion: an
+  // origin is a fact about an event that already happened, so `0023` grants
+  // INSERT and never UPDATE. A future migration that widened it would move this
+  // row to `arw` and be caught here — which is a thing no client-side probe can
+  // do, since a client that never tries the write cannot report being allowed it.
+  Object.freeze({
+    table: 'chores',
+    column: 'source',
+    privileges: 'ar',
+    source: '0023 (#211) — `a` is the half check:live cannot see; `w` withheld',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -352,10 +411,27 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
-  Object.freeze({ table: 'chores', authenticated: 'dDxtm' }),
-  Object.freeze({ table: 'households', authenticated: 'ardDxtm' }),
+  // The three below moved with `0019` (#227), and it has been APPLIED —
+  // 2026-08-27, under #235, by `npm run migrate:live`. This probe now agrees
+  // with the live project on every row, so a moved row here is a real finding
+  // rather than the entry doing its job.
+  //
+  // *Measured 2026-08-27, before the paste*: chores `dDxtm`, households
+  // `ardDxtm`, members `dDxtm`. *Measured 2026-08-27, after it*: chores `d`,
+  // households no table-level grant, members `d` — the values below, read back
+  // from the catalog. The pre-paste readings are kept rather than deleted,
+  // because a measurement with no successor reads as one nobody took.
+  Object.freeze({ table: 'chores', authenticated: 'd' }),
+  Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
-  Object.freeze({ table: 'members', authenticated: 'dDxtm' }),
+  // #50, arriving with `0020`, which revokes wholesale and grants by column —
+  // so the expected table-level reading is an absence, like `households` above.
+  // *Measured 2026-08-28*, after `0020` was applied in #50's own session:
+  // no table-level grant, agreeing — the revoke visible in the catalog, which
+  // is the one instrument that can see it (check:live reads the same either
+  // way once the columns are granted).
+  Object.freeze({ table: 'member_split_seen', authenticated: null }),
+  Object.freeze({ table: 'members', authenticated: 'd' }),
 ])
 
 /**
@@ -593,13 +669,22 @@ async function main(env) {
     refuse(
       `anon reaches ${strays.length + fns.unexpected.length} thing(s) in public, and ` +
         `${controlsMoved.length} control row(s) moved.\n\n` +
-        'Before `0017` is pasted this is the EXPECTED reading, and the two strays are\n' +
-        '`households` and `members` — that red is the entry doing its job, exactly as\n' +
-        '`LIVE_SCHEMA` carries a table whose migration has not been pasted yet.\n\n' +
-        'After the paste it is a real finding: either a privilege arrived from\n' +
-        'somewhere, or a revoke hit `authenticated` instead of `anon`. A moved CONTROL\n' +
-        'row is the second of those and is the more serious — it means the paste took\n' +
-        'a privilege the app needs.',
+        'READ WHICH HALF MOVED before reading this as a fault — the two mean\n' +
+        'opposite things and only one of them is bad news.\n\n' +
+        'STRAYS are `anon` reaching something. Before `0017` was pasted that was the\n' +
+        'expected reading, with `households` and `members` the two entries; it has\n' +
+        'been pasted, so a stray now is a real finding.\n\n' +
+        'MOVED CONTROL ROWS are `authenticated` sitting somewhere other than the\n' +
+        'recorded value. Before `0019` (#227) was pasted, EXACTLY THREE were\n' +
+        'expected — `households` reading `ardDxtm` against no table-level grant,\n' +
+        'and `chores` and `members` reading `dDxtm` against `d`. IT HAS BEEN\n' +
+        'PASTED (2026-08-27, #235), so a moved row now is a REAL FINDING and not\n' +
+        'the entry doing its job. No excused moved row is left.\n\n' +
+        'What a moved row means now: a revoke hit `authenticated` when it was\n' +
+        'aimed at `anon`, or took a privilege the app needs. `households` losing\n' +
+        'its column SELECTs is the one that breaks the app for every signed-in\n' +
+        'member at once — see `0019` section 1, where the re-grant sits below the\n' +
+        'revoke for exactly that reason.',
     )
   }
 

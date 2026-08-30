@@ -120,14 +120,55 @@ is exactly the kind of claim that is satisfied by inspection and false in practi
 
 ## Branch protection — AC 5, and the honest answer
 
-> **The premise below expired and the conclusion has not been re-taken.** *Measured 2026-08-30*:
-> `gh repo view SailorDave17/Taskr --json visibility` now answers **PUBLIC**, and branch protection is
-> free on a public repository — so the 403 recorded here, and the "purchasing decision" it justified,
-> no longer describe this repo. Protection is now *available and unconfigured*, which is a different
-> statement from *unavailable*. Deliberately left unconfigured rather than switched on inside a CI
-> repair: enabling it changes who can push to `develop` and would start refusing the owner's own
-> direct pushes, which is a policy decision and not a side effect. Everything below is kept as the
-> record of why it was not done at the time.
+> **The premise below expired, and the first correction to it was WRONG.** Everything after this
+> block is kept as the 2026-08-04 record; read this first.
+>
+> *Measured 2026-08-30*: `gh repo view --json visibility` answers **PUBLIC**, so the 403 and the
+> "purchasing decision" it justified no longer describe this repo. That much stood. The same edit then
+> asserted protection was *"available and unconfigured"* — **false when it was written.** A ruleset was
+> already active, and the check that would have shown it was not run: `visibility` was read and the
+> rulesets API was not, in an annotation to a paragraph whose own last line names rulesets as a
+> separate thing. Re-measured the same day:
+>
+> ```
+> $ gh api repos/SailorDave17/Taskr/branches/develop/protection
+> {"message": "Branch not protected", "status": "404"}
+>
+> $ gh api repos/SailorDave17/Taskr/rules/branches/develop
+> [{"type": "deletion", ...}, {"type": "non_fast_forward", ...}]
+> ```
+>
+> **Both answers are true, and only one of them describes the repository.** Classic branch protection
+> is absent, which is what the 404 says; a *ruleset* is active, and the legacy endpoint cannot see it.
+> `Branch not protected` is therefore a correct sentence and a misleading reading — **ask
+> `rules/branches/<name>`, never `branches/<name>/protection`, before concluding a branch is open.**
+>
+> **What is actually enforced, as of 2026-08-30.** Ruleset **`Branches not to delete`** (id 21859879),
+> enforcement `active`, **no bypass actors**, targeting `~DEFAULT_BRANCH`, `main`, `develop` and
+> `release`. It carries exactly two rules:
+>
+> | Rule | Effect |
+> |---|---|
+> | `deletion` | those branches cannot be deleted, by anyone |
+> | `non_fast_forward` | they cannot be force-pushed, by anyone |
+>
+> So **destruction is now prevented and a failing merge is not.** There is no `pull_request` rule, so
+> a direct push to `develop` still lands, and no `required_status_checks` rule, so a red run does not
+> block a merge. **For pass/fail the gate remains advisory**, exactly as the section below says — the
+> sentence is still true, for a narrower reason than when it was written.
+>
+> **Ratified 2026-08-30, not yet applied — tracked as #289:** require a pull request, and require the
+> **`Lint, test, build`** check (app `github-actions`), on `develop`, `release` and `main`. That makes
+> the gate enforcing rather than advisory, and it stops direct pushes to `develop` — accepted as the
+> cost.
+>
+> **The ordering is load-bearing and must not be reversed.** A required check must name a context that
+> actually *fires* on the branch it guards. Until #243's trigger fix is merged, a pull request into
+> `release` or `main` produces no `Lint, test, build` run at all, so requiring it first would leave
+> promotion pull requests waiting forever on a status nobody can produce — the same defect this file's
+> *What triggers a run* section documents, arriving from the enforcement side. **Merge the trigger fix,
+> confirm a real run on each target branch, then add the rules.** #289 carries that ordering as its
+> first criterion and names #243 as its dependency.
 
 **Branch protection is not configured, and it is not configurable on this repository.** *Measured
 2026-08-04:*

@@ -18,49 +18,14 @@
 
 import { gradeExtraction, oracleExtractorFor, zeroExtractor, INPUT_KINDS } from '../src/lib/extraction.js'
 import { CORPUS } from '../src/lib/extraction.corpus.js'
-
-const pct = (n, d) => (d === 0 ? '—' : `${((n / d) * 100).toFixed(1)}%`)
-
-function shape(summary) {
-  return [
-    `total ${String(summary.total).padStart(3)}`,
-    `answerable ${String(summary.answerable).padStart(3)}`,
-    `ambiguous ${String(summary.ambiguous).padStart(3)}`,
-  ].join('   ')
-}
+// The rendering is SHARED with scripts/extraction-run.mjs (#203 AC 4): a
+// score's spelling lives in exactly one file, so the transcript runner cannot
+// print the same figures a different way. The #202 due-date-axis commentary
+// moved there with the code it explains.
+import { pct, scoreLines, shapeLine } from './extraction-report-format.mjs'
 
 function score(label, summary) {
-  console.log(`  ${label.padEnd(10)}`)
-  console.log(
-    `    within tolerance      ${String(summary.withinTolerance).padStart(3)} of ${String(
-      summary.answerable,
-    ).padStart(3)}   (${pct(summary.withinTolerance, summary.answerable)})`,
-  )
-  console.log(
-    `    absolute error        ${String(summary.totalAbsoluteErrorMinutes).padStart(3)} minutes total, worst ${summary.worstAbsoluteErrorMinutes} on one entity`,
-  )
-  console.log(
-    `    attribution           ${summary.unattributed} unattributed, ${summary.misattributed} misattributed`,
-  )
-  console.log(
-    `    refusals              ${summary.refusals.total} (${summary.refusals.onAmbiguous} correct, ${summary.refusals.onAnswerable} on answerable)`,
-  )
-  console.log(`    overconfident         ${summary.overconfident} of ${summary.ambiguous} ambiguous`)
-  console.log(`    unparseable           ${summary.malformed}`)
-  // #202 — the due-date axis, its own figure with its own floor and ceiling,
-  // never folded into the within-tolerance count above: that scale is the one
-  // the owner's accuracy threshold is named against. Applies to chore
-  // descriptions only, so the capacity row reads a dash rather than a vacuous
-  // zero-of-zero.
-  if (summary.dueApplicable > 0) {
-    console.log(
-      `    due dates exact       ${String(summary.dueExact).padStart(3)} of ${String(
-        summary.dueApplicable,
-      ).padStart(3)}   (${pct(summary.dueExact, summary.dueApplicable)}), ${summary.dueInvented} invented`,
-    )
-  } else {
-    console.log('    due dates exact       —   (no due-date expectations in this kind)')
-  }
+  for (const line of scoreLines(label, summary)) console.log(line)
 }
 
 const floor = await gradeExtraction(zeroExtractor, CORPUS)
@@ -69,8 +34,8 @@ const ceiling = await gradeExtraction(oracleExtractorFor(CORPUS), CORPUS)
 console.log('Extraction corpus — #42')
 console.log('='.repeat(78))
 console.log('Corpus shape')
-for (const kind of INPUT_KINDS) console.log(`  ${kind.padEnd(10)} ${shape(ceiling.byKind[kind])}`)
-console.log(`  ${'all'.padEnd(10)} ${shape(ceiling.overall)}`)
+for (const kind of INPUT_KINDS) console.log(`  ${kind.padEnd(10)} ${shapeLine(ceiling.byKind[kind])}`)
+console.log(`  ${'all'.padEnd(10)} ${shapeLine(ceiling.overall)}`)
 
 console.log('')
 console.log('FLOOR — the negative control: an extractor that answers with nothing (AC 4)')

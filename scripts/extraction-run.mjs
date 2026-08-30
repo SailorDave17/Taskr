@@ -45,7 +45,7 @@ import {
   DEFAULT_CONFIGS,
   createExtractor,
 } from '../src/lib/extractionAdapter.js'
-import { pct, scoreLines, shapeLine } from './extraction-report-format.mjs'
+import { killConditionSection, pct, scoreLines, shapeLine } from './extraction-report-format.mjs'
 
 /** Refusals print their message and nothing else; see check-deployed.mjs. */
 class Refusal extends Error {}
@@ -196,6 +196,23 @@ export function runReportLines(results) {
         )} ms over ${latenciesMs.length} calls`,
       )
     }
+    // #204 — the same figures, read against the kill conditions.
+    //
+    // The provider-call p95 above is handed in as ONE COMPONENT of the latency
+    // axis, never as the axis itself: this run times THIS MACHINE to the
+    // provider, and the kill number is specified on the DEPLOYED path, which
+    // also carries the phone's transport and the function's cold start (#205).
+    // So the latency row correctly reads "not measured" until both halves
+    // exist — the alternative being a real measurement of the wrong thing,
+    // which is worse than none because it looks like an answer.
+    lines.push('')
+    lines.push(`  KILL CONDITIONS (#204) — ${config.label}`)
+    lines.push(
+      ...killConditionSection({
+        graded,
+        latency: latenciesMs?.length ? { providerCallP95Ms: percentile(latenciesMs, 95) } : undefined,
+      }),
+    )
   }
   const scale = results
     .map(

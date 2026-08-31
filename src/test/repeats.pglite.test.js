@@ -36,6 +36,13 @@ const MONDAY_BEFORE = '2026-08-17'
 // 15:00 EDT on Monday the 24th — mid-afternoon, nowhere near a date boundary
 // in any zone a fixture uses.
 const MONDAY_AFTERNOON = '2026-08-24 19:00:00+00'
+// The #54 fixtures need days AROUND that Monday: the Friday before it, the
+// Sunday afternoon before it, and the Tuesday and Thursday after it — all at
+// the same mid-afternoon instant, for the same date-boundary reason.
+const FRIDAY_BEFORE = '2026-08-21'
+const SUNDAY_AFTERNOON = '2026-08-23 19:00:00+00'
+const TUESDAY_AFTERNOON = '2026-08-25 19:00:00+00'
+const THURSDAY_AFTERNOON = '2026-08-27 19:00:00+00'
 
 // A pglite test builds a real Postgres in WebAssembly, so vitest's 5000ms
 // default testTimeout is a number nobody chose for this suite - it is what you
@@ -633,20 +640,40 @@ describe('a chore that repeats, run against a real Postgres', () => {
       }
     })
 
-    it('a client cannot UPDATE the repeat columns — editing a repeat is #54', async () => {
+    it('a client may UPDATE the repeat pair (0024) and still cannot touch the bookkeeping columns', async () => {
+      // This test asserted the whole UPDATE was refused until #54 landed the
+      // grant — the rule changed, so the test was REWRITTEN rather than
+      // deleted: what survives is the boundary, which is now inside the row.
+      // The pair is editable; the pass's and trigger's own columns are not.
       const chore = await addChore(deviceA, householdA.id, {
         title: 'Trash',
         due: MONDAY,
         kind: 'weekly',
         weekdays: '{1}',
       })
-      const result = await attempt(() =>
+      const edited = await attempt(() =>
         asDevice(db, deviceA, () =>
-          db.query(`update public.chores set repeat_kind = 'none' where id = $1`, [chore.id]),
+          db.query(
+            `update public.chores set repeat_kind = 'none', repeat_weekdays = null where id = $1`,
+            [chore.id],
+          ),
         ),
       )
-      expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/permission denied/)
+      expect(edited.ok).toBe(true)
+
+      for (const [column, value] of [
+        ['repeat_since', `'${MONDAY}'`],
+        ['repeat_caught_up_through', `'${MONDAY}'`],
+        ['generated_from', 'null'],
+      ]) {
+        const result = await attempt(() =>
+          asDevice(db, deviceA, () =>
+            db.query(`update public.chores set ${column} = ${value} where id = $1`, [chore.id]),
+          ),
+        )
+        expect(result.ok, `${column} must stay out of the client's update grant`).toBe(false)
+        expect(result.error).toMatch(/permission denied/)
+      }
     })
 
     it('an occurrence cannot itself repeat, by the named constraint', async () => {
@@ -767,6 +794,243 @@ describe('a chore that repeats, run against a real Postgres', () => {
   })
 
   // -------------------------------------------------------------------------
+  // #54 — editing a repeat changes only what has not been dated yet
+  // -------------------------------------------------------------------------
+
+  describe('#54 — editing a repeat', () => {
+    /**
+     * The client's own edit paths, mirrored as PostgREST issues them: the
+     * estimate accept sends `expected_minutes` alone, and a schedule edit or
+     * switch-off sends the PAIR — `normalizeRepeat` always produces both
+     * columns, because `chores_repeat_weekdays_shape` ties them.
+     */
+    const setMinutesAsClient = (uid, choreId, minutes) =>
+      asDevice(db, uid, () =>
+        db.query(`update public.chores set expected_minutes = $2 where id = $1`, [choreId, minutes]),
+      )
+    const setRepeatAsClient = (uid, choreId, kind, weekdays = null) =>
+      asDevice(db, uid, () =>
+        db.query(
+          `update public.chores set repeat_kind = $2, repeat_weekdays = $3::smallint[] where id = $1`,
+          [choreId, kind, weekdays],
+        ),
+      )
+
+    /** A daily 10-minute repeat running since Friday, caught up through Sunday. */
+    const dailySinceFriday = async () => {
+      const anchor = await addChore(deviceA, householdA.id, {
+        title: 'Dishes',
+        minutes: 10,
+        due: FRIDAY_BEFORE,
+        kind: 'daily',
+      })
+      await backdate(anchor.id, { since: FRIDAY_BEFORE })
+      const pass = await runAt(deviceA, SUNDAY_AFTERNOON)
+      // Two occurrences exist when the edits below happen: Saturday (past) and
+      // Sunday (the fixture's present). Monday's does not exist yet — it is
+      // the future occurrence the pass creates AFTER the edit.
+      expect(pass.created_count).toBe(2)
+      return anchor
+    }
+
+    describe('AC 1 — an estimate edit reaches only what is not yet dated', () => {
+      it('past and present occurrences keep their minutes; the future one carries the new value', async () => {
+        const anchor = await dailySinceFriday()
+
+        await setMinutesAsClient(deviceA, anchor.id, 25)
+
+        const after = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(after.created_count).toBe(1)
+
+        const rows = await occurrenceRows(anchor.id)
+        expect(rows.map((r) => [r.due_on, r.expected_minutes])).toEqual([
+          ['2026-08-22', 10], // past — created before the edit
+          ['2026-08-23', 10], // present — the date the edit happened
+          ['2026-08-24', 25], // future — created after it, from the anchor's new value
+        ])
+      })
+    })
+
+    describe('AC 2 — a schedule edit', () => {
+      it('leaves created occurrences alone; the next one is computed from the new schedule', async () => {
+        const anchor = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(await occurrenceDates(anchor.id)).toEqual([MONDAY])
+
+        // Monday → Thursday. The Monday occurrence already on the list is not
+        // this edit's to move.
+        await setRepeatAsClient(deviceA, anchor.id, 'weekly', '{4}')
+
+        const pass = await runAt(deviceA, THURSDAY_AFTERNOON)
+        expect(pass.created_count).toBe(1)
+        const rows = await occurrenceRows(anchor.id)
+        expect(rows.map((r) => r.due_on)).toEqual([MONDAY, '2026-08-27'])
+        expect(rows[0].expected_minutes).toBe(10)
+      })
+
+      it('the kind itself can change, and the watermark keeps the new schedule from back-filling', async () => {
+        const anchor = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+
+        // Weekly-on-Monday → daily. Tuesday's pass creates Tuesday and nothing
+        // behind the watermark — a daily schedule read from scratch would owe
+        // every day since the 17th, and the watermark is what says those days
+        // were already decided under the old schedule.
+        await setRepeatAsClient(deviceA, anchor.id, 'daily', null)
+
+        const pass = await runAt(deviceA, TUESDAY_AFTERNOON)
+        expect(pass.created_count).toBe(1)
+        expect(pass.skipped_count).toBe(0)
+        expect(await occurrenceDates(anchor.id)).toEqual([MONDAY, '2026-08-25'])
+      })
+    })
+
+    describe('AC 3 — switching a repeat off', () => {
+      it('creates nothing further and keeps every dated occurrence', async () => {
+        const anchor = await dailySinceFriday()
+
+        await setRepeatAsClient(deviceA, anchor.id, 'none', null)
+        // The 0012 trigger nulled repeat_since — the constraint requires it,
+        // and the trigger rather than the client is its author.
+        expect(await repeatSinceOf(anchor.id)).toBeNull()
+
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(0)
+        expect(pass.skipped_count).toBe(0)
+        // Switching off a repeat is not a way to delete this week's chores.
+        expect(await occurrenceDates(anchor.id)).toEqual(['2026-08-22', '2026-08-23'])
+      })
+
+      it('re-enabling later cannot back-fill the off window — repeat_since is re-stamped, not restored', async () => {
+        const anchor = await dailySinceFriday()
+        await setRepeatAsClient(deviceA, anchor.id, 'none', null)
+
+        // Back on. The trigger stamps repeat_since with the DATABASE's real
+        // today — a held instant cannot reach a trigger — so assert it was
+        // stamped at all, then backdate it to Wednesday to bring the fixture
+        // back onto held time.
+        await setRepeatAsClient(deviceA, anchor.id, 'daily', null)
+        expect(await repeatSinceOf(anchor.id)).not.toBeNull()
+        await backdate(anchor.id, { since: '2026-08-26' })
+
+        const pass = await runAt(deviceA, THURSDAY_AFTERNOON)
+        expect(pass.created_count).toBe(1)
+        expect(pass.skipped_count).toBe(0)
+        // Thursday arrives; Monday through Wednesday — the off window — never
+        // materialises, because nothing may be dated at or before repeat_since.
+        expect(await occurrenceDates(anchor.id)).toEqual([
+          '2026-08-22',
+          '2026-08-23',
+          '2026-08-27',
+        ])
+      })
+    })
+
+    describe('AC 5 — committed load does not move underneath somebody', () => {
+      /**
+       * Saturday's occurrence assigned (outstanding — exactly the row the
+       * allocator counts against capacity), Sunday's completed (history).
+       * Every arm below is a client-path change to the ANCHOR.
+       */
+      const committedFixture = async () => {
+        const anchor = await dailySinceFriday()
+        const [saturday, sunday] = await occurrenceRows(anchor.id)
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.assign_chore($1, $2)', [saturday.id, memberTwoA]),
+        )
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.complete_chore($1)', [sunday.id]),
+        )
+        return { anchor, saturday, sunday }
+      }
+
+      const committed = async (id) => {
+        const { rows } = await db.query(
+          `select expected_minutes, assigned_member_id from public.chores where id = $1`,
+          [id],
+        )
+        return rows[0]
+      }
+
+      it('neither an estimate edit, a schedule edit nor a switch-off moves an assigned occurrence', async () => {
+        const { anchor, saturday } = await committedFixture()
+
+        await setMinutesAsClient(deviceA, anchor.id, 25)
+        expect(await committed(saturday.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+
+        await setRepeatAsClient(deviceA, anchor.id, 'weekly', '{1}')
+        expect(await committed(saturday.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+
+        await setRepeatAsClient(deviceA, anchor.id, 'none', null)
+        expect(await committed(saturday.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+      })
+
+      it('AC 4 — deleting the repeat outright applies the recorded choice: occurrences stay, history intact', async () => {
+        const { anchor, saturday, sunday } = await committedFixture()
+
+        await asDevice(db, deviceA, () =>
+          db.query('delete from public.chores where id = $1', [anchor.id]),
+        )
+
+        // Never silently removing: both rows survive, orphaned rather than
+        // destroyed — the assigned work is still somebody's, the completed
+        // work is still history. Never silently keeping: this test and the
+        // remove-confirm's own sentence are where the choice is said.
+        const { rows } = await db.query(
+          `select id, expected_minutes, assigned_member_id,
+                  completed_at is not null as done, generated_from
+           from public.chores where id = any($1::uuid[]) order by due_on`,
+          [[saturday.id, sunday.id]],
+        )
+        expect(rows).toHaveLength(2)
+        expect(rows[0]).toMatchObject({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+          generated_from: null,
+        })
+        expect(rows[1].done).toBe(true)
+        expect(rows[1].generated_from).toBeNull()
+
+        // And the schedule really is over.
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(0)
+      })
+    })
+
+    describe('what the grant cannot be used for', () => {
+      it('an occurrence cannot be promoted into a repeat through the new grant', async () => {
+        const anchor = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+        const [made] = await occurrenceRows(anchor.id)
+
+        const result = await attempt(() =>
+          setRepeatAsClient(deviceA, made.id, 'daily', null),
+        )
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/chores_occurrence_does_not_repeat/)
+      })
+
+      it('half a schedule is refused by the shape constraint for a caller that skips normalizeRepeat', async () => {
+        const anchor = await trashSinceLastMonday()
+        const result = await attempt(() =>
+          setRepeatAsClient(deviceA, anchor.id, 'weekly', null),
+        )
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/chores_repeat_weekdays_shape/)
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Re-runnability — a re-paste is the normal path
   // -------------------------------------------------------------------------
 
@@ -778,6 +1042,25 @@ describe('a chore that repeats, run against a real Postgres', () => {
         `select count(*)::int as n from pg_constraint where conname = 'chores_repeat_kind_known'`,
       )
       expect(rows[0].n).toBe(1)
+    })
+
+    it('re-pasting 0024 is a no-op — a grant is idempotent, and the UPDATE set is exactly what it says', async () => {
+      const through = await databaseThrough('0024_edit_or_stop_a_repeat.sql')
+      await through.exec(migrationSql('0024_edit_or_stop_a_repeat.sql'))
+      const { rows } = await through.query(
+        `select column_name from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'chores'
+            and grantee = 'authenticated' and privilege_type = 'UPDATE'
+          order by column_name`,
+      )
+      expect(rows.map((r) => r.column_name)).toEqual([
+        'actual_minutes',
+        'due_on',
+        'expected_minutes',
+        'repeat_kind',
+        'repeat_weekdays',
+        'title',
+      ])
     })
   })
 })

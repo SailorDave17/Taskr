@@ -439,11 +439,13 @@ describe('chores, run against a real Postgres', () => {
       // READABLE; 0012 is the first to widen the INSERT set, because a repeat
       // is DECLARED where the chore is created, and 0015 the first to widen the
       // UPDATE set since 0003 — an actual is adjustable after the fact, and
-      // actuals.pglite proves it stays out of INSERT. The convention holds:
-      // additive by column, and no later story revokes a shipped grant.
-      // `repeat_since`, the watermark and `generated_from` are absent from
-      // insert and update — the trigger and the catch-up pass are their only
-      // authors, and repeats.pglite.test.js proves the refusals.
+      // actuals.pglite proves it stays out of INSERT. 0024 (#54) widens UPDATE
+      // second, with the repeat pair — editing or stopping a repeat is an edit
+      // to the chore that holds it. The convention holds: additive by column,
+      // and no later story revokes a shipped grant. `repeat_since`, the
+      // watermark and `generated_from` are absent from insert and update — the
+      // trigger and the catch-up pass are their only authors, and
+      // repeats.pglite.test.js proves the refusals.
       //
       // `source` (0023) is the second column after `repeat_kind` to join INSERT
       // and stay out of UPDATE, and the reason is the same one stated the other
@@ -479,6 +481,8 @@ describe('chores, run against a real Postgres', () => {
         'actual_minutes',
         'due_on',
         'expected_minutes',
+        'repeat_kind',
+        'repeat_weekdays',
         'title',
       ])
     })

@@ -12,6 +12,18 @@
   ACCOUNT can still sign in. That is the first time this denominator has moved on something a
   migration cannot change, and nothing became excusable: the two rows are green whenever the
   account works.
+  **`0024` on 2026-08-31 (#54, editing or stopping a repeat)**, applied with `npm run migrate:live`
+  (md5 `7f1795a1f7ed2c0dd5612a0793bd0383` read back identical, 4757 characters, 1 statement) in the
+  story's own session. It never entered the excused-red set and could not have: `check:live` is
+  structurally blind to it in BOTH directions — one UPDATE grant, a privilege that check only ever
+  exercises by reading — *measured at 28 of 28 immediately after the apply, denominator unmoved*.
+  What testifies instead is `npm run probe:live-grants`, which gained two expectation rows in the
+  same change (`chores.repeat_kind` and `chores.repeat_weekdays`, both `arw`): *measured 2026-08-31
+  at **13 of 13 agreeing**, negative control included* — `chores.repeat_since` still carries **no
+  column-level grant**, which is the row that proves `0024` widened exactly the pair and nothing
+  else. The apply came BEFORE the `release` promotion, `0020`'s safe order; the client additionally
+  sends the repeat pair only when a schedule actually changed, so a pre-`0024` client and a
+  post-`0024` project can coexist in either order for every edit that is not a schedule edit.
   **`0023` on 2026-08-28 (#211)**, applied with `npm run migrate:live` (md5
   `3f1df4ec58d79025b12f7f612ff759e4` read back identical, 8982 characters, 5 statements) in the
   story's own session. This is the first migration here whose before-reading AND after-reading were

@@ -911,6 +911,114 @@ describe('#53 — the repeat is set where the chore is created', () => {
   })
 })
 
+describe('#54 — the repeat is edited where the chore is edited', () => {
+  const repeatAnchor = { ...chores[0], repeat_kind: 'weekly', repeat_weekdays: [1, 4] }
+  const occurrence = {
+    ...chores[1],
+    repeat_kind: 'none',
+    repeat_weekdays: null,
+    generated_from: 'c1',
+  }
+  const openAnchorEditor = () =>
+    clickAndSettle(screen.getByRole('button', { name: /edit placeholder chore/i }))
+  const saveEdit = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+  it('seeds the editor with the schedule the row actually has', async () => {
+    setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    expect(screen.getByLabelText(/how often placeholder chore repeats/i)).toHaveValue('weekly')
+    expect(screen.getByLabelText(/repeat placeholder chore on mon/i)).toBeChecked()
+    expect(screen.getByLabelText(/repeat placeholder chore on thu/i)).toBeChecked()
+    expect(screen.getByLabelText(/repeat placeholder chore on tue/i)).not.toBeChecked()
+  })
+
+  it('switching off sends the pair — kind none, days emptied', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/how often placeholder chore repeats/i), {
+      target: { value: 'none' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+    })
+  })
+
+  it('an untouched schedule travels in NO save — an ordinary edit needs no repeat privilege', async () => {
+    // Not an optimisation: the pair is only sent when it changed, so a
+    // title-only edit works against a project where 0024 is not yet applied —
+    // the client and the migration deploy on different clocks.
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/name for placeholder chore/i), {
+      target: { value: 'Placeholder Renamed Chore' },
+    })
+    await saveEdit()
+
+    // Exact-match on purpose: repeatKind present at all would fail this.
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Renamed Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+    })
+  })
+
+  it('a generated occurrence offers no schedule controls, and its save carries none', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor, occurrence] })
+    await clickAndSettle(screen.getByRole('button', { name: /edit placeholder other chore/i }))
+
+    expect(
+      screen.queryByLabelText(/how often placeholder other chore repeats/i),
+    ).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/name for placeholder other chore/i), {
+      target: { value: 'Placeholder Renamed Occurrence' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c2', {
+      title: 'Placeholder Renamed Occurrence',
+      expectedMinutes: '90',
+      dueOn: '2026-08-11',
+    })
+  })
+
+  it('weekly with every day unchecked is refused with a sentence, and sends nothing', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.click(screen.getByLabelText(/repeat placeholder chore on mon/i))
+    fireEvent.click(screen.getByLabelText(/repeat placeholder chore on thu/i))
+    await saveEdit()
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least one weekday/i)
+  })
+
+  it('AC 4 — removing a repeat says the recorded choice out loud: occurrences stay', async () => {
+    setup({ chores: [repeatAnchor, chores[1]] })
+
+    await clickAndSettle(screen.getByRole('button', { name: /remove placeholder chore$/i }))
+    expect(screen.getByText(/ends the repeat/i)).toHaveTextContent(
+      'Chores it already put on the list stay there.',
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /keep/i }))
+
+    // A plain chore's confirmation says no such thing — there is no schedule
+    // to end and nothing generated to speak for.
+    await clickAndSettle(screen.getByRole('button', { name: /remove placeholder other chore$/i }))
+    expect(screen.queryByText(/ends the repeat/i)).not.toBeInTheDocument()
+  })
+})
+
 describe('#12 — expected-vs-actual capture and feedback', () => {
   // An anchor due back this week with three finished occurrences behind it.
   // Literal values: expected 20, actuals averaging exactly 25 — the 25%

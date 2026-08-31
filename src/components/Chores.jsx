@@ -66,15 +66,80 @@ function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays })
     normalizeTitle(title)
     normalizeExpectedMinutes(expectedMinutes)
     normalizeDueDate(dueOn)
-    // #53 — the add form's repeat is validated by the same function the data
+    // #53/#54 — both forms' repeat is validated by the same function the data
     // layer calls, for the reason above: the rules the constraint actually
-    // enforces live in one place. The edit form passes no repeat fields and
-    // gets 'none' back, which is the no-op it means — editing a repeat is #54.
+    // enforces live in one place. An occurrence row's editor passes no repeat
+    // fields and gets 'none' back, which is the no-op it means.
     normalizeRepeat({ repeatKind, repeatWeekdays })
     return null
   } catch (err) {
     return err.message
   }
+}
+
+/**
+ * The schedule controls — a kind, then weekdays for weekly. ONE component for
+ * the add form (#53) and the edit form (#54), because two copies of the
+ * weekday checkboxes would be two vocabularies for one column pair.
+ *
+ * Structured on the way in — #53 AC 6: free text has no field to arrive
+ * through, and monthly is absent because it is #103, not because it was
+ * forgotten.
+ */
+function RepeatControl({ kind, days, onKindChange, onDaysChange, context }) {
+  return (
+    <>
+      <label className="field">
+        <span className="field__label">Repeats</span>
+        <select
+          className="field__input"
+          value={kind}
+          aria-label={context ? `How often ${context} repeats` : 'How often this chore repeats'}
+          onChange={(e) => {
+            const next = e.target.value
+            onKindChange(next)
+            // Days belong to weekly alone; leaving a stale selection behind
+            // would silently rearm if the person flips back.
+            if (next !== 'weekly') onDaysChange([])
+          }}
+        >
+          <option value="none">Does not repeat</option>
+          <option value="daily">Every day</option>
+          <option value="weekly">Weekly, on&hellip;</option>
+        </select>
+      </label>
+      {kind === 'weekly' ? (
+        <fieldset className="field chore-weekdays">
+          <legend className="field__label">Which days</legend>
+          <div className="chore-weekdays__row">
+            {WEEKDAYS.map(({ isoDow, label }) => (
+              <label key={isoDow} className="chore-weekdays__day">
+                <input
+                  type="checkbox"
+                  checked={days.includes(isoDow)}
+                  aria-label={context ? `Repeat ${context} on ${label}` : `Repeat on ${label}`}
+                  onChange={(e) =>
+                    onDaysChange(
+                      e.target.checked ? [...days, isoDow] : days.filter((d) => d !== isoDow),
+                    )
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+    </>
+  )
+}
+
+RepeatControl.propTypes = {
+  kind: PropTypes.string.isRequired,
+  days: PropTypes.array.isRequired,
+  onKindChange: PropTypes.func.isRequired,
+  onDaysChange: PropTypes.func.isRequired,
+  context: PropTypes.string,
 }
 
 /**
@@ -378,8 +443,16 @@ function ChoreRow({
   const [title, setTitle] = useState(chore.title)
   const [minutes, setMinutes] = useState(String(chore.expected_minutes))
   const [dueOn, setDueOn] = useState(chore.due_on)
+  const [editKind, setEditKind] = useState(chore.repeat_kind ?? 'none')
+  const [editDays, setEditDays] = useState(chore.repeat_weekdays ?? [])
   const [complaint, setComplaint] = useState(null)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
+
+  // A generated occurrence is ordinary work (#53 AC 7) and cannot itself
+  // repeat — `chores_occurrence_does_not_repeat` refuses it whatever the form
+  // sends — so its editor shows no schedule controls and its save carries no
+  // repeat fields at all.
+  const isOccurrence = chore.generated_from != null
 
   /**
    * Seed the editor from the row as it is NOW, every time it opens.
@@ -396,6 +469,8 @@ function ChoreRow({
     setTitle(chore.title)
     setMinutes(String(chore.expected_minutes))
     setDueOn(chore.due_on)
+    setEditKind(chore.repeat_kind ?? 'none')
+    setEditDays(chore.repeat_weekdays ?? [])
     setComplaint(null)
     setEditing(true)
   }
@@ -404,8 +479,31 @@ function ChoreRow({
     setTitle(chore.title)
     setMinutes(String(chore.expected_minutes))
     setDueOn(chore.due_on)
+    setEditKind(chore.repeat_kind ?? 'none')
+    setEditDays(chore.repeat_weekdays ?? [])
     setComplaint(null)
     setEditing(false)
+  }
+
+  /**
+   * Did the person actually change the schedule? — #54.
+   *
+   * The repeat pair travels in the save ONLY when it did. Not an optimisation:
+   * an estimate-only or title-only edit then needs no UPDATE privilege on the
+   * repeat columns, so every pre-#54 edit keeps working against a project
+   * where `0024` is not yet applied — the client and the migration deploy on
+   * different clocks, and this is the line that keeps an ordinary edit out of
+   * the gap between them.
+   */
+  function repeatChanged() {
+    const storedKind = chore.repeat_kind ?? 'none'
+    const storedDays = [...(chore.repeat_weekdays ?? [])].sort((a, b) => a - b)
+    const chosenDays = [...new Set(editDays)].sort((a, b) => a - b)
+    return (
+      editKind !== storedKind ||
+      chosenDays.length !== storedDays.length ||
+      chosenDays.some((d, i) => d !== storedDays[i])
+    )
   }
 
   if (editing) {
@@ -416,16 +514,24 @@ function ChoreRow({
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            const problem = validate({ title, expectedMinutes: minutes, dueOn })
+            const withRepeat = !isOccurrence && repeatChanged()
+            const problem = validate({
+              title,
+              expectedMinutes: minutes,
+              dueOn,
+              ...(withRepeat ? { repeatKind: editKind, repeatWeekdays: editDays } : {}),
+            })
             if (problem) {
               setComplaint(problem)
               return
             }
             setComplaint(null)
-            onSave(chore.id, { title, expectedMinutes: minutes, dueOn }).then(
-              () => setEditing(false),
-              () => {},
-            )
+            onSave(chore.id, {
+              title,
+              expectedMinutes: minutes,
+              dueOn,
+              ...(withRepeat ? { repeatKind: editKind, repeatWeekdays: editDays } : {}),
+            }).then(() => setEditing(false), () => {})
           }}
         >
           <label className="field">
@@ -460,6 +566,19 @@ function ChoreRow({
               aria-label={`Due date for ${chore.title}`}
             />
           </label>
+          {/* #54 — the schedule is edited where the chore is edited. Changing
+              it touches nothing already dated: occurrences copy their minutes
+              at creation, so only what the pass creates from now on follows
+              the new schedule, and switching off deletes nothing. */}
+          {!isOccurrence ? (
+            <RepeatControl
+              kind={editKind}
+              days={editDays}
+              onKindChange={setEditKind}
+              onDaysChange={setEditDays}
+              context={chore.title}
+            />
+          ) : null}
           {complaint ? (
             <p className="error" role="alert">
               {complaint}
@@ -616,6 +735,16 @@ function ChoreRow({
             >
               Keep
             </button>
+            {/* #54 AC 4 — the recorded choice, said where it is applied rather
+                than only in a migration comment: deleting a repeat ends the
+                schedule and KEEPS what it already created (0012's FK orphans
+                the occurrences). Silent keeping reads later as a bug; this
+                sentence is what makes it a decision. */}
+            {describeRepeat(chore) ? (
+              <p className="card__note" role="status">
+                This ends the repeat. Chores it already put on the list stay there.
+              </p>
+            ) : null}
           </>
         ) : (
           <button
@@ -946,50 +1075,14 @@ export default function Chores({
             onChange={(e) => setDueOn(e.target.value)}
           />
         </label>
-        <label className="field">
-          <span className="field__label">Repeats</span>
-          {/* Structured on the way in — AC 6: a kind, then weekdays for
-              weekly. Free text has no field to arrive through, and monthly is
-              absent because it is #103, not because it was forgotten. */}
-          <select
-            className="field__input"
-            value={repeatKind}
-            aria-label="How often this chore repeats"
-            onChange={(e) => {
-              const kind = e.target.value
-              setRepeatKind(kind)
-              // Days belong to weekly alone; leaving a stale selection behind
-              // would silently rearm if the person flips back.
-              if (kind !== 'weekly') setRepeatDays([])
-            }}
-          >
-            <option value="none">Does not repeat</option>
-            <option value="daily">Every day</option>
-            <option value="weekly">Weekly, on&hellip;</option>
-          </select>
-        </label>
-        {repeatKind === 'weekly' ? (
-          <fieldset className="field chore-weekdays">
-            <legend className="field__label">Which days</legend>
-            <div className="chore-weekdays__row">
-              {WEEKDAYS.map(({ isoDow, label }) => (
-                <label key={isoDow} className="chore-weekdays__day">
-                  <input
-                    type="checkbox"
-                    checked={repeatDays.includes(isoDow)}
-                    aria-label={`Repeat on ${label}`}
-                    onChange={(e) =>
-                      setRepeatDays((days) =>
-                        e.target.checked ? [...days, isoDow] : days.filter((d) => d !== isoDow),
-                      )
-                    }
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        ) : null}
+        {/* #53's controls, now the shared component #54's edit form also
+            renders — one copy of the schedule vocabulary. */}
+        <RepeatControl
+          kind={repeatKind}
+          days={repeatDays}
+          onKindChange={setRepeatKind}
+          onDaysChange={setRepeatDays}
+        />
         {complaint ? (
           <p className="error" role="alert">
             {complaint}

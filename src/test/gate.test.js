@@ -1009,6 +1009,10 @@ describe('#19 — no real household name reaches version control', () => {
     // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
     'Placeholder Repeat': 'a chore title',
     'Placeholder Done Chore': 'a chore title',
+    // #54 — the edit-form fixtures rename a chore and an occurrence, so the
+    // renamed titles are literals the assertions match by accessible name.
+    'Placeholder Renamed Chore': 'a chore title',
+    'Placeholder Renamed Occurrence': 'a chore title',
     // #49 — reassignment.pglite.test.js needs up to three distinguishable
     // chores per scenario. Declared rather than lower-cased, same instinct as
     // the #37 chores above: the vocabulary exists to put every name-shaped

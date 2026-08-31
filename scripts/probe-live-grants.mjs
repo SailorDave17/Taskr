@@ -182,6 +182,27 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'ar',
     source: '0023 (#211) — `a` is the half check:live cannot see; `w` withheld',
   }),
+  // `0024` (#54): editing or stopping a repeat. `check:live` is blind to this
+  // migration in BOTH directions — it is one grant, of a privilege that check
+  // only ever exercises by reading — so these two rows are the instrument that
+  // says whether it reached the project, exactly as the `0022` rows are for
+  // that file. `ar` is `0012`'s (declared at creation, readable since); `w` is
+  // `0024`'s whole content. They are RED until it is applied, which is the
+  // deliberate red this table's own docblock describes. The negative control
+  // above is untouched on purpose: `repeat_since` stays granted to nobody, and
+  // a `0024` that accidentally widened it would flip that row, not these.
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_kind',
+    privileges: 'arw',
+    source: '0024 (#54) — `w` is 0024’s; `ar` is 0012’s',
+  }),
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_weekdays',
+    privileges: 'arw',
+    source: '0024 (#54) — `w` is 0024’s; `ar` is 0012’s',
+  }),
 ])
 
 /** The role every expectation above is about. */

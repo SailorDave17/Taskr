@@ -7,6 +7,8 @@ import {
   functionsToDeploy,
   parseEnvFile,
   projectRefFrom,
+  redactForRefusal,
+  REFUSAL_VALUE_LIMIT,
   resolveSupabaseUrl,
 } from './deploy-function.mjs'
 
@@ -143,5 +145,111 @@ describe('which functions an invocation deploys', () => {
     // sends somebody to look at the filesystem instead of at what they typed.
     expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/No such Edge Function/)
     expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/calendar-connect/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #285 — a refusal must never read `.env.local` back to you.
+//
+// During #52 a `projectRefFrom` refusal printed the WHOLE file, access token
+// and test password included, because the "value" it was handed was the entire
+// file rather than one variable. The refusal was right to name what it saw; the
+// defect is that it saw more than the one value it was asked about.
+// ---------------------------------------------------------------------------
+
+// Obvious fakes, and deliberately SHORT: every one of them has to fit inside
+// `REFUSAL_VALUE_LIMIT` of the start of the fixture, or a mutation that removes
+// the one-line rule would truncate the secret away and the test would pass for
+// a reason that has nothing to do with the guard.
+const LEAKED_TOKEN = 'sbp_LEAKED_TOKEN'
+const LEAKED_PASSWORD = 'LEAKED_PASSWORD'
+const LEAKED_ANON = 'sb_publishable_LEAKED'
+
+const URL_LINE = 'VITE_SUPABASE_URL=nope'
+const TOKEN_LINE = `SUPABASE_ACCESS_TOKEN=${LEAKED_TOKEN}`
+const PASSWORD_LINE = `TASKR_TEST_PASSWORD=${LEAKED_PASSWORD}`
+const ANON_LINE = `VITE_SUPABASE_ANON_KEY=${LEAKED_ANON}`
+const EVERY_SECRET = [LEAKED_TOKEN, LEAKED_PASSWORD, LEAKED_ANON]
+
+const refusalFor = (input) => {
+  try {
+    projectRefFrom(input)
+  } catch (error) {
+    return error.message
+  }
+  return ''
+}
+
+describe('a refusal quotes the one value it was asked about, and no more', () => {
+  it.each([
+    ['the URL is on line one', [URL_LINE, TOKEN_LINE, PASSWORD_LINE, ANON_LINE]],
+    // The order neither the one-line rule NOR the length cap saves you from:
+    // the secret is the first thing in the file, so both quote it happily. Only
+    // the assignment rule refuses it, which is why that rule exists.
+    ['a SECRET is on line one', [TOKEN_LINE, PASSWORD_LINE, URL_LINE, ANON_LINE]],
+  ])('handed the whole of .env.local, refuses without quoting a secret — %s', (_case, lines) => {
+    const message = refusalFor(lines.join('\n') + '\n')
+    expect(message).not.toBe('')
+    for (const secret of EVERY_SECRET) {
+      expect(message, `refusal quoted ${secret}`).not.toContain(secret)
+    }
+  })
+
+  it('POSITIVE CONTROL: a short offending value is still quoted in full', () => {
+    // Without this, every assertion above is satisfied by a sanitiser that
+    // returns the empty string — which would refuse the deploy just as loudly
+    // and tell nobody what was wrong with what they set.
+    expect(redactForRefusal('https://example.com')).toBe('https://example.com')
+    expect(refusalFor('https://example.com')).toContain('https://example.com')
+  })
+
+  it('quotes the first line only, and says it truncated', () => {
+    const quoted = redactForRefusal('https://bad\nSUPABASE_ACCESS_TOKEN=sbp_LEAKED_TOKEN')
+    expect(quoted).toContain('https://bad')
+    expect(quoted).not.toContain(LEAKED_TOKEN)
+    // The marker matters: a silently shortened value reads as the whole value,
+    // and somebody would go looking for a typo in a string they cannot see.
+    expect(quoted).toContain('[truncated]')
+  })
+
+  it('elides an assignment VALUE and keeps its NAME', () => {
+    // Keeping the name is the diagnostic half: a caller that handed us a file
+    // needs to be told it handed us a file.
+    const quoted = redactForRefusal(TOKEN_LINE)
+    expect(quoted).toContain('SUPABASE_ACCESS_TOKEN')
+    expect(quoted).toContain('<redacted>')
+    expect(quoted).not.toContain(LEAKED_TOKEN)
+  })
+
+  it('caps one enormous line', () => {
+    const quoted = redactForRefusal('https://' + 'a'.repeat(400))
+    expect(quoted.length).toBeLessThan(REFUSAL_VALUE_LIMIT + 20)
+    expect(quoted).toContain('[truncated]')
+  })
+})
+
+describe('.env.local parses to one-line values, whatever wrote it', () => {
+  // #285 AC 2. The issue named CRLF handling as the obvious suspect for the
+  // "value" that spanned the whole file. MEASURED 2026-08-31: it is innocent —
+  // LF and CRLF both parse to identical one-line values, and a CR-only file
+  // parses to nothing at all rather than to one giant value. The whole-file
+  // value reached the refusal from a CALLER, not from this parser. These cases
+  // stay as the regression test that keeps that true.
+  it.each([
+    ['LF', '\n'],
+    ['CRLF', '\r\n'],
+  ])('%s: every value is exactly one line', (_case, eol) => {
+    const parsed = parseEnvFile([URL_LINE, TOKEN_LINE, PASSWORD_LINE, ANON_LINE].join(eol) + eol)
+
+    expect(Object.keys(parsed)).toEqual([
+      'VITE_SUPABASE_URL',
+      'SUPABASE_ACCESS_TOKEN',
+      'TASKR_TEST_PASSWORD',
+      'VITE_SUPABASE_ANON_KEY',
+    ])
+    for (const [key, value] of Object.entries(parsed)) {
+      expect(value, `${key} spans more than one line`).not.toMatch(/[\r\n]/)
+    }
+    expect(parsed.VITE_SUPABASE_URL).toBe('nope')
   })
 })

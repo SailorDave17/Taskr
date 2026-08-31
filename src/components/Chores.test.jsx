@@ -61,6 +61,7 @@ function setup(overrides = {}) {
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
   render(
@@ -69,6 +70,8 @@ function setup(overrides = {}) {
       members={members}
       capacities={capacities}
       exclusions={[]}
+      repeatExceptions={[]}
+      todayIso="2026-08-24"
       {...handlers}
       {...overrides}
     />,
@@ -91,9 +94,17 @@ function setupRerenderable() {
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, exclusions: [], ...handlers }
+  const props = {
+    members,
+    capacities,
+    exclusions: [],
+    repeatExceptions: [],
+    todayIso: '2026-08-24',
+    ...handlers,
+  }
   const view = render(<Chores chores={chores} {...props} />)
   return {
     handlers,
@@ -582,8 +593,9 @@ function setupExclusionRerender(initialChores, initialExclusions) {
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, ...handlers }
+  const props = { members, capacities, repeatExceptions: [], todayIso: '2026-08-24', ...handlers }
   const view = render(
     <Chores chores={initialChores} exclusions={initialExclusions} {...props} />,
   )
@@ -1363,5 +1375,114 @@ describe('batch entry — #220, several chores in one pass', () => {
       repeatKind: 'none',
       repeatWeekdays: [],
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #105 — skipping one occurrence of a repeat
+//
+// Everything here is about the SCREEN: what is offered, what is said, and which
+// handler fires. The rules — the exception stored, the uncompleted instance
+// removed and a completed one kept, the pass honouring the stored date — live
+// in Postgres and are exercised by src/test/repeats.pglite.test.js, exactly as
+// the #37 block above splits its story.
+// ---------------------------------------------------------------------------
+
+describe('skipping one occurrence — #105', () => {
+  // A weekly-on-Monday anchor with one completed instance (history) and one
+  // outstanding one (today's). todayIso is the setup default, 2026-08-24 — a
+  // Monday — so the upcoming offers are the following Mondays.
+  const anchor = {
+    id: 'r1',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'weekly',
+    repeat_weekdays: [1],
+  }
+  const doneInstance = {
+    id: 'r2',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-17',
+    generated_from: 'r1',
+    completed_at: '2026-08-17T20:00:00Z',
+    completed_by_member_id: 'm1',
+  }
+  const openInstance = {
+    id: 'r3',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-24',
+    generated_from: 'r1',
+    completed_at: null,
+    completed_by_member_id: null,
+  }
+  const repeatFixture = [anchor, doneInstance, openInstance]
+
+  const skipSelect = () =>
+    screen.getByLabelText(/skip one date placeholder repeat repeats on/i)
+
+  it('offers the upcoming schedule dates from the anchor, and choosing one calls onSkip', () => {
+    const { onSkip } = setup({ chores: repeatFixture })
+    const options = within(skipSelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    // Today's generated instance, then the next Mondays inside the horizon.
+    expect(options).toEqual(['2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'])
+
+    fireEvent.change(skipSelect(), { target: { value: '2026-08-31' } })
+    expect(onSkip).toHaveBeenCalledTimes(1)
+    expect(onSkip).toHaveBeenCalledWith('r1', '2026-08-31')
+  })
+
+  it("a generated outstanding date is offered as already on the list; a completed one is history and is not", () => {
+    setup({ chores: repeatFixture })
+    const select = within(skipSelect())
+    expect(select.getByRole('option', { name: /2026-08-24 — already on the list/i })).toBeInTheDocument()
+    // 2026-08-17 was completed: skipping it would read as a way to un-do work.
+    expect(select.queryByRole('option', { name: /2026-08-17/ })).toBeNull()
+  })
+
+  it('a date already skipped is not offered again, and is announced', () => {
+    setup({
+      chores: repeatFixture,
+      repeatExceptions: [{ id: 'e1', chore_id: 'r1', excluded_on: '2026-08-31' }],
+    })
+    expect(within(skipSelect()).queryByRole('option', { name: '2026-08-31' })).toBeNull()
+    expect(screen.getByText(/won't repeat on 2026-08-31/i)).toBeInTheDocument()
+  })
+
+  it('a spent skip — today or older — is neither offered nor restated', () => {
+    setup({
+      chores: repeatFixture,
+      repeatExceptions: [{ id: 'e1', chore_id: 'r1', excluded_on: '2026-08-24' }],
+    })
+    // The instance's date is skipped, so it is not offered again; its effect
+    // (the row leaving the list on the next refresh) is not a future fact to
+    // announce.
+    expect(within(skipSelect()).queryByRole('option', { name: /2026-08-24/ })).toBeNull()
+    expect(screen.queryByText(/won't repeat on/i)).toBeNull()
+  })
+
+  it('no skip control on a one-off, and none on a generated occurrence row', () => {
+    setup({ chores: repeatFixture })
+    // The default fixtures c1/c2 are one-offs; r3 is a generated occurrence.
+    // Exactly one control exists on this screen and it is the anchor's.
+    expect(screen.getAllByLabelText(/skip one date/i)).toHaveLength(1)
+    expect(screen.queryByTestId('skip-c1')).toBeNull()
+    expect(screen.queryByTestId('skip-r3')).toBeNull()
+    expect(screen.getByTestId('skip-r1')).toBeInTheDocument()
+  })
+
+  it('with no todayIso the control renders nothing rather than guessing a calendar', () => {
+    setup({ chores: repeatFixture, todayIso: null })
+    expect(screen.queryByLabelText(/skip one date/i)).toBeNull()
   })
 })

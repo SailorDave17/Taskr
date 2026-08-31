@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeDueDate } from './dueDates.js'
+import { localTodayIn, normalizeDueDate, upcomingOccurrenceDates } from './dueDates.js'
 
 // #202 — the widened normalizeDueDate: a stated date plus an explicit
 // reference date, string in and string out.
@@ -106,6 +106,86 @@ describe('AC 2 — the four stated forms, resolved against an explicit reference
     expect(() => normalizeDueDate(new Date(), WEDNESDAY)).toThrow(/Date object/i)
     expect(() => normalizeDueDate('tomorrow', new Date())).toThrow(/Date object/i)
     expect(typeof normalizeDueDate('tomorrow', WEDNESDAY)).toBe('string')
+  })
+})
+
+describe('#105 — the skip picker arithmetic', () => {
+  // 2026-08-24 is a Monday, the same anchor repeats.pglite.test.js derives its
+  // dates from — so an expectation wrong by a day fails against a named date.
+  const MONDAY = '2026-08-24'
+
+  describe('upcomingOccurrenceDates — the mirror of repeat_occurrence_dates', () => {
+    // The binding that keeps this copy honest against the SQL original lives
+    // in repeats.pglite.test.js, where both run over the same fixtures. These
+    // pin the arithmetic itself on hand-computed calendars.
+
+    it('daily fills every date in (after, after + horizon]', () => {
+      expect(upcomingOccurrenceDates('daily', null, MONDAY, 3)).toEqual([
+        '2026-08-25',
+        '2026-08-26',
+        '2026-08-27',
+      ])
+    })
+
+    it('the interval is open at the start — the from date itself is never offered', () => {
+      // A weekly-on-Monday schedule asked from a Monday: that Monday is the
+      // caller's own row (or today), not an upcoming occurrence.
+      expect(upcomingOccurrenceDates('weekly', [1], MONDAY, 14)).toEqual([
+        '2026-08-31',
+        '2026-09-07',
+      ])
+    })
+
+    it('a weekly set lands on exactly its ISO weekdays, in date order', () => {
+      // Monday=1 and Thursday=4 from a Monday: Thursday arrives first.
+      expect(upcomingOccurrenceDates('weekly', [1, 4], MONDAY, 7)).toEqual([
+        '2026-08-27',
+        '2026-08-31',
+      ])
+    })
+
+    it('crosses a month boundary as calendar arithmetic, not millisecond arithmetic', () => {
+      expect(upcomingOccurrenceDates('daily', null, '2026-08-30', 3)).toEqual([
+        '2026-08-31',
+        '2026-09-01',
+        '2026-09-02',
+      ])
+    })
+
+    it("offers nothing for 'none' or a kind this copy has not learned", () => {
+      // The empty list is the honest answer: offering nothing is visible,
+      // guessing dates for a vocabulary the mirror does not know is not.
+      expect(upcomingOccurrenceDates('none', null, MONDAY, 28)).toEqual([])
+      expect(upcomingOccurrenceDates('monthly', null, MONDAY, 28)).toEqual([])
+    })
+
+    it('refuses a from-date that is not a date', () => {
+      expect(() => upcomingOccurrenceDates('daily', null, 'someday', 7)).toThrow(/reference date/i)
+    })
+  })
+
+  describe("localTodayIn — the household's calendar, not the phone's", () => {
+    // 03:30 UTC on Monday 2026-08-24 — the exact instant the pglite AC 5
+    // fixture uses, where the two calendars below disagree.
+    const LATE_SUNDAY_EASTERN_MS = Date.UTC(2026, 7, 24, 3, 30)
+
+    it('the same instant is Sunday in New York and Monday in UTC', () => {
+      expect(localTodayIn('America/New_York', LATE_SUNDAY_EASTERN_MS)).toBe('2026-08-23')
+      expect(localTodayIn('UTC', LATE_SUNDAY_EASTERN_MS)).toBe(MONDAY)
+    })
+
+    it('never reads the ambient zone — the suite pin proves it cannot have', () => {
+      // TZ is pinned to Pacific/Marquesas (UTC-9:30) for the whole suite, so
+      // an implementation using local getters would answer 2026-08-23 for UTC
+      // too. The assertion above already refuses that; this one makes the
+      // control explicit rather than implied.
+      expect(process.env.TZ).toBe('Pacific/Marquesas')
+    })
+
+    it('refuses a missing zone rather than guessing one', () => {
+      expect(() => localTodayIn('')).toThrow(/zone/i)
+      expect(() => localTodayIn(null)).toThrow(/zone/i)
+    })
   })
 })
 

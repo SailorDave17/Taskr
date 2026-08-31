@@ -111,6 +111,7 @@ export const MIGRATIONS = [
   '0022_an_upsert_writes_every_column_it_names.sql',
   '0023_chore_provenance.sql',
   '0024_edit_or_stop_a_repeat.sql',
+  '0025_skip_a_single_occurrence.sql',
 ]
 
 export function migrationSql(name) {

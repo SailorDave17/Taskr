@@ -12,6 +12,24 @@
   ACCOUNT can still sign in. That is the first time this denominator has moved on something a
   migration cannot change, and nothing became excusable: the two rows are green whenever the
   account works.
+  **`0025` on 2026-08-31 (#105, skipping a single occurrence)**, applied with `npm run migrate:live`
+  (md5 `503e51d11da186853141bb9da38c093d` read back identical, 17592 characters, 12 statements) in
+  the story's own session. `check:live` is NOT blind to this one — the same change gave it a table
+  entry (`chore_repeat_exceptions`) and an RPC probe (`skip_repeat_occurrence`), and BOTH sides were
+  measured: **28 of 30 before the apply**, the two new entries the two reds (`PGRST205` and
+  `PGRST202`), and **30 of 30 immediately after**, clearing on exactly that action. The one half the
+  RPC probe cannot see is the EXECUTE privilege: `skip_date` is a `date`, so the nil-UUID
+  placeholder fails its cast (`22P02`) before the privilege check — `apply_assignments`' documented
+  limit, tracked as #268 — and the privilege is proven against a real Postgres by
+  `repeats.pglite.test.js` instead (an `anon` arm included, so the by-name revoke is exercised, not
+  assumed). `npm run probe:live-grants` gained a table-ACL control row in the same change —
+  `chore_repeat_exceptions` expects NO table-level grant for `authenticated`, which is the
+  single-writer model made visible in the catalog, since the client holds column-level select and
+  nothing else and `skip_repeat_occurrence` (definer) is the only writer: *measured 2026-08-31 at
+  **13 of 13 agreeing**, negative control included*. The apply came BEFORE the merge and the
+  `release` promotion, `0020`'s safe order, and the two directions coexist: a pre-`0025` client
+  never calls the new function, and the replaced catch-up pass behaves identically while the
+  exception table is empty.
   **`0024` on 2026-08-31 (#54, editing or stopping a repeat)**, applied with `npm run migrate:live`
   (md5 `7f1795a1f7ed2c0dd5612a0793bd0383` read back identical, 4757 characters, 1 statement) in the
   story's own session. It never entered the excused-red set and could not have: `check:live` is
@@ -195,8 +213,11 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-28 at 28 of 28*, after `0023` was applied in
-  #211's own session, and at the same figure before it for #250's two seeded-account rows.**
+- **The excused-red set is EMPTY. *Measured 2026-08-31 at 30 of 30*, after `0025` was applied in
+  #105's own session — the denominator moved from 28 when that story added a table entry and an RPC
+  probe, and both of its reds cleared on the apply (*measured 28 of 30 before, 30 of 30 after*).**
+  Before that: *measured 2026-08-28 at 28 of 28*, after `0023` was applied in
+  #211's own session, and at the same figure before it for #250's two seeded-account rows.
   `0023` (`chores.source`, #211) is the second migration running to be applied inside the story that
   needed it, so like `0021` it never entered this set — but unlike `0021` both readings were taken:
   *27 of 28 before, `chores` answering `42703` on `chores.source`; 28 of 28 after*. That before-reading

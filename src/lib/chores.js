@@ -76,15 +76,31 @@ export const MIN_EXPECTED_MINUTES = 1
 export const MAX_EXPECTED_MINUTES = 1440
 
 /**
- * The catch-up bound, in days — #53 AC 4. Owner decision 2026-08-24, recorded
- * in docs/refresh-charter.md's decision log.
+ * The catch-up bounds — #53 AC 4, made KIND-DEPENDENT by #103.
  *
- * THE AUTHORITY IS THE MIGRATION: `catch_up_repeats_at` in `0012` carries the
- * same number, and that copy is the one that decides what exists. This copy
- * only words the notice, and repeats.pglite.test.js holds the two equal so
- * they cannot drift apart silently.
+ * Seven days for daily and weekly (owner decision 2026-08-24), one month for
+ * monthly (owner decision 2026-08-31, taken on a review escalation): the same
+ * seven days would have dropped a monthly chore's whole occurrence in silence,
+ * which for a rent chore is the feature's headline case failing.
+ *
+ * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0026` carries both
+ * numbers and its copy is the one that decides what exists; these are the
+ * client-side record, and repeats.pglite.test.js holds them equal so they
+ * cannot drift apart silently.
+ *
+ * NEITHER IS RENDERED, and that is a change worth stating rather than leaving
+ * to be noticed. Until #103 the notice sentence below named the seven days,
+ * which was honest while one number governed every kind. The pass returns ONE
+ * skipped count across every schedule it walked, so a sentence naming one
+ * window would now be wrong whenever a household has both a daily and a
+ * monthly repeat — and it is the monthly case, the one likeliest to be
+ * skipped, that the old wording would have described incorrectly. So the
+ * sentence names no window, and these constants survive as the record the
+ * charter's decision log points at, kept true by a test rather than by a
+ * reader.
  */
 export const CATCH_UP_BOUND_DAYS = 7
+export const CATCH_UP_BOUND_MONTHS = 1
 
 /**
  * The estimate-update thresholds — #12 AC 4. Owner-ratified tunable defaults,
@@ -524,21 +540,45 @@ export function formatSkippedNotice(skipped) {
   if (n <= 0) return null
   const what = n === 1 ? '1 repeat occurrence' : `${n} repeat occurrences`
   return (
-    `${what} more than ${CATCH_UP_BOUND_DAYS} days old ` +
+    `${what} older than the catch-up window ` +
     `${n === 1 ? 'was' : 'were'} skipped rather than piled onto this week.`
   )
 }
 
 /**
- * How far ahead the skip picker offers dates, in days — #105.
+ * How far ahead the skip picker looks, and how many dates it offers — #105,
+ * REWORKED by #103's review.
  *
  * Presentation only: the exception table takes any date, and the pass honours
- * whatever is stored. Four weeks covers "we're away next week" with the whole
- * gap visible in one list, and caps a daily repeat's offer at 28 options —
- * a native select handles that on a phone where a longer list would not earn
- * its scroll.
+ * whatever is stored.
+ *
+ * WHY THIS IS NO LONGER A DAY COUNT. It was `SKIP_OFFER_HORIZON_DAYS = 28`,
+ * argued from "four weeks covers 'we're away next week'" and from capping a
+ * daily repeat at 28 options. Both halves are about DAILY, and 28 days is
+ * shorter than a monthly period — so the moment #103 added monthly, the
+ * control offered nothing at all for days at a time, and `SkipControl`
+ * returns null when it has nothing to offer, so the whole affordance
+ * disappeared from the row with no explanation and came back with no user
+ * action. *Measured during review*: for a monthly-on-the-15th chore the offer
+ * list is empty on 2026-08-16 and 08-17, and for a NEWLY CREATED anchor first
+ * due 2026-09-15 it is empty from 2026-08-01 right through 2026-09-16 —
+ * roughly six weeks in which #105's stated purpose is unreachable on the
+ * first use of a monthly schedule.
+ *
+ * A day count cannot fit all three kinds: any window wide enough for monthly
+ * offers a daily repeat a hundred-odd options. What fits every kind is a
+ * COUNT OF OCCURRENCES — the next N dates this schedule produces, whatever
+ * its period — with a scan ceiling so the loop is bounded for a schedule that
+ * produces nothing (a monthly anchor needs ~366 days to yield twelve).
+ *
+ * Twelve is the select's constraint rather than the calendar's: it is a
+ * comfortable list on a phone, and it means daily now offers twelve days
+ * where it offered twenty-eight. That narrowing is deliberate and is the
+ * trade — "we're away next week" fits inside twelve days, and the kinds that
+ * gain are the two the old number was never chosen for.
  */
-export const SKIP_OFFER_HORIZON_DAYS = 28
+export const SKIP_OFFER_MAX_DATES = 12
+export const SKIP_OFFER_SCAN_DAYS = 400
 
 // The columns a client may read, matching the select grant in 0025 exactly.
 // `household_id` stays absent and a wildcard select still fails loudly here —

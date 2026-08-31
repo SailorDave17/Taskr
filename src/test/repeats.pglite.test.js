@@ -29,6 +29,7 @@ import {
 } from './support/pgliteSupabase.js'
 import {
   CATCH_UP_BOUND_DAYS,
+  CATCH_UP_BOUND_MONTHS,
   outstandingMinutes,
   toAllocatorChores,
   upcomingOccurrenceDates,
@@ -459,17 +460,27 @@ describe('a chore that repeats, run against a real Postgres', () => {
       expect(second.skipped_count).toBe(0)
     })
 
-    it('the bound is ONE constant: the migration and the UI copy agree', async () => {
-      // The value lives in catch_up_repeats_at; src/lib/chores.js carries the
-      // copy the notice sentence renders. Two copies of one number is exactly
-      // the drift ci-shaped checks exist for, so the suite holds them equal.
-      const source = migrationSql('0012_repeating_chores.sql')
-      const declared = source.match(/catch_up_bound_days constant integer := (\d+);/)
-      // Positive control first: if the regex stops matching, that is a finding,
-      // not a pass — an absent match must never read as agreement.
-      expect(declared).not.toBeNull()
-      expect(Number(declared[1])).toBe(CATCH_UP_BOUND_DAYS)
+    it('the bounds are ONE pair of constants: the migration and the client copies agree', async () => {
+      // RE-POINTED FROM 0012 TO 0026 by #103, and the reason is the guard's own
+      // subject moving rather than a tidy-up: `0026` replaces
+      // `catch_up_repeats_at`, so 0012's declaration is now historical text in
+      // a body that no longer runs. A test reading it would go on passing while
+      // asserting against a number the database does not use — which is the
+      // shape where a guard stays where the hazard was.
+      //
+      // Both bounds are asserted, because #103 made the bound kind-dependent:
+      // seven days for daily/weekly, one month for monthly.
+      const source = migrationSql('0026_repeat_monthly.sql')
+      const days = source.match(/catch_up_bound_days constant integer := (\d+);/)
+      const months = source.match(/catch_up_bound_months constant integer := (\d+);/)
+      // Positive control first: if either regex stops matching, that is a
+      // finding, not a pass — an absent match must never read as agreement.
+      expect(days).not.toBeNull()
+      expect(months).not.toBeNull()
+      expect(Number(days[1])).toBe(CATCH_UP_BOUND_DAYS)
+      expect(Number(months[1])).toBe(CATCH_UP_BOUND_MONTHS)
       expect(CATCH_UP_BOUND_DAYS).toBe(7)
+      expect(CATCH_UP_BOUND_MONTHS).toBe(1)
     })
   })
 
@@ -1501,7 +1512,17 @@ describe('a chore that repeats, run against a real Postgres', () => {
         expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28'])
       })
 
-      it('day 29 lands on February 29 in a leap year — the clamp reads the actual month', async () => {
+      // RENAMED after #103's review, and the rename is the finding: this test
+      // was called "the clamp reads the actual month" and carries no unique
+      // discriminating power for the clamp. Its whole reachable window is
+      // (2028-01-29, 2028-02-29], and every month in it has a last day >= 29,
+      // so `least(29, last_day)` is a no-op on every date the function is
+      // asked about — mutate the clamp down to a bare `monthday` and this stays
+      // green. It is kept rather than replaced because it is the only pglite
+      // assertion that a February 29 occurrence is created at all; what changed
+      // is that its name now claims only what it proves, and the arm below
+      // carries the claim the old name made.
+      it('a day-29 monthly fires on February 29 when the month has one', async () => {
         const parent = await addChore(deviceA, householdA.id, {
           title: 'Rent',
           due: '2028-01-29',
@@ -1512,6 +1533,24 @@ describe('a chore that repeats, run against a real Postgres', () => {
         const pass = await runAt(deviceA, '2028-02-29 19:00:00+00')
         expect(pass.created_count).toBe(1)
         expect(await occurrenceDates(parent.id)).toEqual(['2028-02-29'])
+      })
+
+      it('day 29 clamps to February 28 in a NON-leap year — the arm that isolates the clamp', async () => {
+        // The discriminating twin of the test above, one day over the edge
+        // rather than three: 2027 is not a leap year, so `least(29, 28)` is the
+        // only thing that puts an occurrence in February at all. With the clamp
+        // mutated to a bare `monthday` this creates nothing, where its leap-year
+        // sibling goes on passing.
+        const parent = await addChore(deviceA, householdA.id, {
+          title: 'Rent',
+          due: '2027-01-29',
+          kind: 'monthly',
+          monthday: 29,
+        })
+        await backdate(parent.id, { since: '2027-01-29' })
+        const pass = await runAt(deviceA, '2027-02-28 19:00:00+00')
+        expect(pass.created_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28'])
       })
 
       it('day 31 lands on the 30th of a 30-day month', async () => {
@@ -1557,16 +1596,33 @@ describe('a chore that repeats, run against a real Postgres', () => {
     })
 
     describe('AC 4 — the catch-up bound and the double-fire proof, unchanged for monthly', () => {
-      it('a fire date older than the bound is skipped and said, not piled on', async () => {
-        // Nobody opens the app between January and mid-March: February's
-        // clamped occurrence (the 28th) is beyond the seven-day window at
-        // March 15, so it is counted rather than created, and no monthly date
-        // falls inside the window.
+      it("a month-old occurrence IS caught up — monthly's bound is one interval, not seven days", async () => {
+        // THE ESCALATION'S OWN SCENARIO, and this test asserted the opposite
+        // until 2026-08-31. Nobody opens the app between January and mid-March.
+        // Under the flat seven-day bound February's clamped occurrence (the
+        // 28th) was 15 days old, so the pass counted it skipped and created
+        // NOTHING — a rent chore vanishing for a month, in silence, with the
+        // household reading a notice worded for a week. The owner made the
+        // bound kind-dependent at #103's commit gate; one month is the window
+        // for monthly, so the occurrence is created.
         const parent = await rentOnThe31st()
         const pass = await runAt(deviceA, '2027-03-15 19:00:00+00')
-        expect(pass.created_count).toBe(0)
+        expect(pass.created_count).toBe(1)
+        expect(pass.skipped_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28'])
+      })
+
+      it('an occurrence older than a WHOLE month is still skipped and said', async () => {
+        // The bound did not go away, it changed units — so the far side of it
+        // still behaves as #53 AC 4 requires. Nobody opens the app from January
+        // to mid-April: March's occurrence is inside the one-month window and
+        // is created, February's is outside it and is counted rather than
+        // piled on.
+        const parent = await rentOnThe31st()
+        const pass = await runAt(deviceA, '2027-04-15 19:00:00+00')
+        expect(pass.created_count).toBe(1)
         expect(pass.skipped_count).toBe(1)
-        expect(await occurrenceDates(parent.id)).toEqual([])
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-03-31'])
       })
 
       it('a simulated double-fire creates nothing — the INDEX holds, exactly as #53 proved', async () => {
@@ -1677,6 +1733,16 @@ describe('a chore that repeats, run against a real Postgres', () => {
         })
 
         // And the schedule really is off: nothing further generates.
+        //
+        // This assertion was VACUOUS until #103's review and the bound change
+        // that followed it. Under the old flat seven-day bound the counter-
+        // factual — delete the switch-off above, leaving a monthly-on-the-15th
+        // schedule — produced created_count 0 as well, because 2027-03-15 sat
+        // outside a window opening 2027-03-25: the catch-up bound was doing the
+        // work the switch-off was being credited for. With the monthly bound at
+        // one month the window opens 2027-03-01, so the counterfactual creates
+        // 2027-03-15 and this line discriminates. Proven by mutation, not by
+        // this paragraph.
         const pass = await runAt(deviceA, '2027-03-31 19:00:00+00')
         expect(pass.created_count).toBe(0)
       })

@@ -5,7 +5,8 @@ import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
   MONTHDAYS,
-  SKIP_OFFER_HORIZON_DAYS,
+  SKIP_OFFER_MAX_DATES,
+  SKIP_OFFER_SCAN_DAYS,
   WEEKDAYS,
   ordinalOf,
   actualsSummary,
@@ -324,8 +325,8 @@ ExclusionControl.propTypes = {
  * WHAT IS OFFERED, and why it is a list rather than a date box: the dates of
  * outstanding instances the pass has already generated (skipping one removes
  * it — the ratified retroactivity rule, which is how "we're away next week"
- * still works after catch-up ran), then the schedule's upcoming dates inside
- * SKIP_OFFER_HORIZON_DAYS. A free date box would accept a date the schedule
+ * still works after catch-up ran), then the schedule's next dates, up to
+ * SKIP_OFFER_MAX_DATES of them. A free date box would accept a date the schedule
  * never visits and "succeed" — an inert row wearing a confirmation — where a
  * list can only offer dates that mean something. Dates already skipped are not
  * offered again.
@@ -348,16 +349,24 @@ function SkipControl({ chore, chores, repeatExceptions, todayIso, busy, onSkip }
   // schedule produces nothing at or before the anchor's own due date, so
   // offering from the later of (today, due date) offers only dates that exist.
   const from = todayIso >= chore.due_on ? todayIso : chore.due_on
+  // #103's review: scan far enough that a MONTHLY schedule yields dates at all,
+  // then cap the list at what a phone select can carry. A day-count horizon
+  // shorter than the period offered nothing for days at a time, and — for an
+  // anchor first due more than a horizon away — for weeks.
   const upcoming = upcomingOccurrenceDates(
     chore.repeat_kind,
     chore.repeat_weekdays,
     chore.repeat_monthday,
     from,
-    SKIP_OFFER_HORIZON_DAYS,
+    SKIP_OFFER_SCAN_DAYS,
   )
+  // Sliced AFTER merging and sorting, so an already-generated date can never be
+  // pushed out of the list by future ones: those rows are real work sitting on
+  // somebody's list today, and they sort earliest.
   const offered = [...new Set([...generated, ...upcoming])]
     .filter((date) => !skipped.has(date))
     .sort()
+    .slice(0, SKIP_OFFER_MAX_DATES)
   // Feedback that a stored skip is real: without this line, skipping an
   // upcoming date changes nothing visible but the offer list. Spent dates
   // (today and older) are not restated — their effect is the row's absence.

@@ -16,8 +16,15 @@
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
   **`0026` on 2026-08-31 (#103, monthly repeats)**, applied with `npm run migrate:live` (md5
-  `70e3ba954d79883965f0fbe8728af1dd` read back identical, 13276 characters, 12 statements) in the
-  story's own session. `check:live` sees exactly HALF of it: `repeat_monthday` joins
+  `3897797d46d358a2c86d79fa85bea600` read back identical, 16949 characters, 12 statements) in the
+  story's own session. **Applied TWICE that day, and the second is the one recorded above**: the
+  first apply carried md5 `70e3ba954d79883965f0fbe8728af1dd` (13276 characters), and the story's
+  review then changed the file — the catch-up bound became kind-dependent, on an owner decision at
+  the commit gate. `0026` is idempotent by construction and had reached no project but this one, so
+  the amended file was re-applied rather than chased with a `0027` whose only content would have
+  been one replaced function. Both numbers are kept because a recorded md5 whose file has moved is
+  worse than none: a reader checking the live project against this page needs to know which paste
+  it is looking at. `check:live` sees exactly HALF of it: `repeat_monthday` joins
   `CHORE_COLUMNS`, and both sides were measured — **29 of 30 before the apply**, the one red
   `chores` answering `42703 column chores.repeat_monthday does not exist`, and **30 of 30
   immediately after**, clearing on exactly that action. What it cannot see — the INSERT and UPDATE
@@ -26,11 +33,25 @@
   row (*measured 2026-08-31 at **14 of 14 agreeing**, the `chores.repeat_since` negative control
   still carrying no column-level grant*), and the constraint plus clamp behaviour are proven against
   a real Postgres by `repeats.pglite.test.js`. The apply came BEFORE the merge and the `release`
-  promotion, `0020`'s safe order, and the two directions coexist: a pre-`0026` client names no
-  monthday anywhere (the column defaults null, the widened constraint admits every old shape, and
-  the replaced pass behaves identically for daily and weekly), while a post-`0026` client against a
-  pre-`0026` project would fail loudly on the read — which is the window `check:live` exists to
-  keep visible and which the in-session apply closed within the hour.
+  promotion, `0020`'s safe order. The two directions coexist **for reads and for creates** — a
+  pre-`0026` client names no monthday anywhere, the column defaults null, the widened constraint
+  admits every old shape, and the replaced pass behaves identically for daily and weekly — while a
+  post-`0026` client against a pre-`0026` project fails loudly on the read, which is the window
+  `check:live` exists to keep visible and which the in-session apply closed within the hour.
+  **One edit path is the exception, and this sentence claimed otherwise until it was measured**
+  (#103's review, corrected the same day): a pre-`0026` client editing a MONTHLY chore's schedule
+  sends the kind/weekdays pair without `repeat_monthday`, leaving the old value standing, so
+  `chores_repeat_monthday_shape` refuses. *Measured against a real Postgres*: switch-off,
+  monthly→weekly and monthly→daily all refused, **3 of 3**, with the post-`0026` spelling of the
+  identical edit succeeding as the control — so it is the missing column, not the row, the role or
+  a policy. Bounded on both sides by the same run: a **title-only** edit on a monthly chore
+  succeeds, so the blast radius is schedule edits alone, and every **non-monthly** row is
+  unaffected, which is every row that exists today. It fails closed and the old build's edit form
+  swallows the rejection silently, and reaching it at all needs a monthly chore created by a
+  post-`0026` client and then edited from a device on a stale build — Taskr #260's service-worker
+  case. Recorded rather than repaired: the repair would be a trigger nulling `repeat_monthday`
+  whenever the kind is not monthly, mirroring what `0012` already does for `repeat_since` on the
+  same trigger, and it is not #103's to take unasked.
   **`0025` on 2026-08-31 (#105, skipping a single occurrence)**, applied with `npm run migrate:live`
   (md5 `503e51d11da186853141bb9da38c093d` read back identical, 17592 characters, 12 statements) in
   the story's own session. `check:live` is NOT blind to this one — the same change gave it a table

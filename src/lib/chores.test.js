@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CATCH_UP_BOUND_DAYS,
+  CATCH_UP_BOUND_MONTHS,
   CHORE_COLUMNS,
   CHORE_SOURCES,
   DEFAULT_CHORE_SOURCE,
@@ -418,20 +419,33 @@ describe('#53 AC 4 — the skipped-occurrences sentence', () => {
     expect(formatSkippedNotice(-1)).toBeNull()
   })
 
-  it('names the count and the bound, in days a person can check', () => {
+  it('names the count, and no longer a window it cannot know', () => {
+    // REWRITTEN by #103, and the reason is a real change rather than wording.
+    // The sentence used to name the seven days, which was honest while ONE
+    // number bounded every kind. #103 made the bound kind-dependent, and the
+    // pass returns a single skipped count across every schedule it walked — so
+    // a household with both a daily and a monthly repeat would read a window
+    // that is wrong for at least one of them, and the monthly case is both the
+    // likelier to be skipped and the one the old wording described worst.
     expect(formatSkippedNotice(1)).toBe(
-      `1 repeat occurrence more than ${CATCH_UP_BOUND_DAYS} days old was skipped rather than piled onto this week.`,
+      '1 repeat occurrence older than the catch-up window was skipped rather than piled onto this week.',
     )
     expect(formatSkippedNotice(3)).toBe(
-      `3 repeat occurrences more than ${CATCH_UP_BOUND_DAYS} days old were skipped rather than piled onto this week.`,
+      '3 repeat occurrences older than the catch-up window were skipped rather than piled onto this week.',
     )
+    // The number is gone from the copy, so it cannot silently disagree with the
+    // migration: asserted here so a well-meaning edit putting it back has to
+    // argue with a test rather than with a comment.
+    expect(formatSkippedNotice(3)).not.toMatch(/\d+ days/)
   })
 
-  it('the bound the sentence names is the owner-decided seven days', () => {
-    // The migration's copy is the authority; repeats.pglite.test.js holds the
-    // two equal. This pins the JS copy to the DECISION, so a drive-by edit
-    // here reddens something even with the pglite suite filtered out.
+  it('the bounds the migration enforces are the owner-decided seven days and one month', () => {
+    // The migration's copy is the authority; repeats.pglite.test.js holds
+    // these equal to it. This pins the JS copies to the DECISIONS, so a
+    // drive-by edit here reddens something even with the pglite suite filtered
+    // out — which matters more now that neither number is rendered anywhere.
     expect(CATCH_UP_BOUND_DAYS).toBe(7)
+    expect(CATCH_UP_BOUND_MONTHS).toBe(1)
   })
 })
 

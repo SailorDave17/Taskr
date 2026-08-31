@@ -1539,8 +1539,25 @@ describe('skipping one occurrence — #105', () => {
       .getAllByRole('option')
       .map((o) => o.value)
       .filter(Boolean)
-    // Today's generated instance, then the next Mondays inside the horizon.
-    expect(options).toEqual(['2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'])
+    // Today's generated instance, then the next Mondays — twelve entries, the
+    // select's cap. This was five under the old 28-day horizon; #103's review
+    // replaced a day count with a count of occurrences, which is what lets a
+    // monthly schedule offer anything at all. Spelled literally rather than
+    // derived from SKIP_OFFER_MAX_DATES, so changing the cap reddens this.
+    expect(options).toEqual([
+      '2026-08-24',
+      '2026-08-31',
+      '2026-09-07',
+      '2026-09-14',
+      '2026-09-21',
+      '2026-09-28',
+      '2026-10-05',
+      '2026-10-12',
+      '2026-10-19',
+      '2026-10-26',
+      '2026-11-02',
+      '2026-11-09',
+    ])
 
     fireEvent.change(skipSelect(), { target: { value: '2026-08-31' } })
     expect(onSkip).toHaveBeenCalledTimes(1)
@@ -1589,5 +1606,101 @@ describe('skipping one occurrence — #105', () => {
   it('with no todayIso the control renders nothing rather than guessing a calendar', () => {
     setup({ chores: repeatFixture, todayIso: null })
     expect(screen.queryByLabelText(/skip one date/i)).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // #103's review — the monthly skip picker, which had NO test of any kind.
+  //
+  // The gap was not that the monthly path was unreached: it was rendered by an
+  // edit-form test and simply never asserted, so feeding the monthday slot the
+  // wrong-but-well-typed `repeat_weekdays` returned an empty list and the whole
+  // suite stayed green. These assert what the control offers, which is the only
+  // thing that could have caught either that or the horizon defect below.
+  // -------------------------------------------------------------------------
+
+  const monthlyAnchor = {
+    id: 'm1',
+    household_id: 'h1',
+    title: 'Placeholder Monthly',
+    expected_minutes: 10,
+    due_on: '2026-08-15',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'monthly',
+    repeat_weekdays: null,
+    repeat_monthday: 15,
+  }
+  const monthlySelect = () =>
+    screen.getByLabelText(/skip one date placeholder monthly repeats on/i)
+
+  it('a monthly anchor offers its next dates, one per month', () => {
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-24' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).toEqual([
+      '2026-09-15',
+      '2026-10-15',
+      '2026-11-15',
+      '2026-12-15',
+      '2027-01-15',
+      '2027-02-15',
+      '2027-03-15',
+      '2027-04-15',
+      '2027-05-15',
+      '2027-06-15',
+      '2027-07-15',
+      '2027-08-15',
+    ])
+  })
+
+  it('REGRESSION: the control does not vanish the day after a monthly occurrence', () => {
+    // The defect four of six review lenses found. Under the 28-day horizon,
+    // upcomingOccurrenceDates('monthly', null, 15, '2026-08-16', 28) returned
+    // [] — measured — so with no outstanding generated instance the control
+    // returned null and the whole affordance disappeared from the row with no
+    // explanation, coming back two days later with no user action.
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-16' })
+    expect(screen.getByTestId('skip-m1')).toBeInTheDocument()
+    expect(
+      within(monthlySelect()).getByRole('option', { name: '2026-09-15' }),
+    ).toBeInTheDocument()
+  })
+
+  it('REGRESSION: a monthly anchor first due beyond the horizon can still be skipped', () => {
+    // The larger half, which no lens claimed and the refuter measured: for an
+    // anchor whose first due date is more than a horizon away, `from` is that
+    // future due date and a 28-day window still fell short of the NEXT
+    // occurrence — empty from 2026-08-01 through 2026-09-16, so roughly six
+    // weeks in which a member who set up a monthly chore could not skip
+    // anything. The anchor's own due date is deliberately not offered: that row
+    // IS the first occurrence, and removing it would remove the schedule.
+    setup({ chores: [{ ...monthlyAnchor, due_on: '2026-09-15' }], todayIso: '2026-08-01' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).not.toHaveLength(0)
+    expect(options[0]).toBe('2026-10-15')
+    expect(options).not.toContain('2026-09-15')
+  })
+
+  it('a monthly day-31 anchor offers the clamped date a short month really produces', () => {
+    // The clamp reaching the picker, not just the pass: February 2027 has no
+    // 31st, and what the household is offered has to be the date the schedule
+    // will actually create, or skipping it stores an exception for a day
+    // nothing fires on.
+    setup({
+      chores: [{ ...monthlyAnchor, due_on: '2027-01-31', repeat_monthday: 31 }],
+      todayIso: '2027-02-01',
+    })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options[0]).toBe('2027-02-28')
+    expect(options[1]).toBe('2027-03-31')
+    expect(options[2]).toBe('2027-04-30')
   })
 })

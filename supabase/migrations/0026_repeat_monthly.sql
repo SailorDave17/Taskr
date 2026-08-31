@@ -40,6 +40,33 @@
 -- holds the two equal.
 --
 -- ===========================================================================
+-- The catch-up bound is KIND-DEPENDENT from here on
+-- ===========================================================================
+--
+-- Owner decision, 2026-08-31, at this story's commit gate, taken on a review
+-- escalation. `catch_up_bound_days = 7` was ratified on 2026-08-24 when the
+-- only kinds were daily and weekly, and for those it costs at most a week of
+-- chores. Put a MONTHLY schedule under the same number and it silently drops
+-- the whole month: a household that does not open the app within seven days
+-- of the fire date loses that occurrence entirely, which for a rent chore is
+-- the feature's headline case failing in silence.
+--
+-- So the bound is now expressed per kind: seven days for daily and weekly,
+-- exactly as before, and ONE INTERVAL for monthly — a missed monthly
+-- occurrence is caught up if it fired within the last month, and skipped if
+-- an entire further month has passed. The rejected alternatives are recorded
+-- because a bound is the kind of number that gets "simplified" later: keeping
+-- 7 universally was cheapest and accepts the silent drop, and exempting
+-- monthly from the bound altogether would let a chore dated weeks ago appear
+-- as new work, which is the pile-on the bound exists to prevent.
+--
+-- This is `a-ceiling-that-holds-is-not-a-fit-2026-08-13` caught before it
+-- shipped rather than after: a constant whose justification named one subject
+-- while the constant came to govern several. The daily/weekly arm is
+-- unchanged, so nothing that was decided in August is being re-decided here —
+-- what is added is the arm that number was never asked about.
+--
+-- ===========================================================================
 -- What the trigger already does for monthly, for free
 -- ===========================================================================
 --
@@ -62,14 +89,34 @@
 -- (the schedule) and `create or replace` (the pass); the privilege statements
 -- are idempotent.
 --
--- The hazard: re-pasting `0012` or `0025` on top of a project that has this
--- file reverts the pass to a monthly-blind body (and `0012` recreates the
--- four-parameter schedule function, harmlessly — nothing calls it once this
--- file's pass is back). The repair is re-pasting THIS file, and the
--- whole-list-in-order re-run stays safe, which is what
--- `migrations.pglite.test.js` proves. Re-pasting `0012` does NOT narrow the
--- kind constraint back: its guard is `if not exists`, and the constraint
--- exists.
+-- THE HAZARD, and the two halves are NOT equally bad — the difference is the
+-- whole point of writing it down. Both `0012` and `0025` carry their own
+-- `catch_up_repeats_at`, so re-pasting either one on top of this file
+-- replaces the pass. What happens next differs:
+--
+--   * Re-pasting `0012` degrades to a MONTHLY-BLIND pass. `0012` recreates
+--     the four-parameter `repeat_occurrence_dates` in the same file, so its
+--     body resolves and daily and weekly keep generating; monthly chores
+--     quietly stop. Bad, and survivable.
+--
+--   * Re-pasting `0025` BREAKS EVERY KIND. Its body calls the four-parameter
+--     signature that section 2 below DROPS, and `0025` does not recreate it —
+--     so from that paste on, `catch_up_repeats()` raises for daily, weekly
+--     and monthly alike, and `src/lib/chores.js` surfaces a hard error on app
+--     open. The paste itself SUCCEEDS SILENTLY, because `create or replace
+--     function` parse-checks a plpgsql body without resolving its callees;
+--     nothing is wrong at apply time and everything is wrong at call time.
+--     *Measured on PGlite (#103's review): CREATE succeeds, invocation
+--     answers `function … does not exist`.*
+--
+-- The repair for both is re-pasting THIS file. The whole-list-in-order re-run
+-- stays safe, which is what `migrations.pglite.test.js` proves — and note
+-- what that suite does NOT cover: `databaseThrough('0025…')` builds a schema
+-- through `0025` only, so no test ever places `0025` on top of `0026`. The
+-- protection here is this paragraph, not a check.
+--
+-- Re-pasting `0012` does NOT narrow the kind constraint back: its guard is
+-- `if not exists`, and the constraint exists.
 
 -- ---------------------------------------------------------------------------
 -- 1. The column and the constraints
@@ -169,7 +216,13 @@ security definer
 set search_path = ''
 as $$
 declare
+  -- Daily and weekly: the 2026-08-24 owner decision, unchanged.
   catch_up_bound_days constant integer := 7;
+  -- Monthly: one interval — owner decision 2026-08-31, reasoned in the header.
+  -- A separate constant rather than a day count, because "one month" is not a
+  -- fixed number of days and expressing it as one would reintroduce the clamp
+  -- problem in the bound.
+  catch_up_bound_months constant integer := 1;
 
   caller uuid := (select auth.uid());
   parent record;
@@ -205,7 +258,15 @@ begin
       coalesce(parent.repeat_caught_up_through, parent.repeat_since)
     );
 
-    bound_floor := today_local - catch_up_bound_days + 1;
+    -- The oldest date this pass may CREATE, per kind. `+ 1` in both arms so
+    -- the window is inclusive of its own floor: seven days means today and
+    -- the six before it, one month means today and everything back to the
+    -- same day-of-month last month.
+    bound_floor := case
+      when parent.repeat_kind = 'monthly'
+        then (today_local - make_interval(months => catch_up_bound_months))::date + 1
+      else today_local - catch_up_bound_days + 1
+    end;
 
     with made as (
       insert into public.chores

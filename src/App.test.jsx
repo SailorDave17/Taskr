@@ -1881,7 +1881,7 @@ describe('#53 — the boot-time catch-up pass', () => {
     // real), so the sentence asserted is the sentence a person reads.
     const notice = await screen.findByRole('status')
     expect(notice).toHaveTextContent(
-      '3 repeat occurrences more than 7 days old were skipped rather than piled onto this week.',
+      '3 repeat occurrences older than the catch-up window were skipped rather than piled onto this week.',
     )
     // Told, not alarmed: nothing failed, so the error surface stays empty.
     expect(screen.queryAllByRole('alert')).toEqual([])

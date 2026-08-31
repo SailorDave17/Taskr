@@ -406,6 +406,46 @@ describe('updateChore', () => {
       /saving the change: permission denied/i,
     )
   })
+
+  // #54 — the repeat pair through the edit path. `normalizeRepeat` produces
+  // BOTH columns whenever a repeat field is present, because the shape
+  // constraint ties them: a patch carrying half a schedule cannot be sent.
+
+  it('a schedule edit sends the pair, sorted and deduplicated', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { repeatKind: 'weekly', repeatWeekdays: [4, 1, 1] })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ repeat_kind: 'weekly', repeat_weekdays: [1, 4] })
+  })
+
+  it('switching off sends none AND nulls the weekdays in the same patch', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { repeatKind: 'none' })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({ repeat_kind: 'none', repeat_weekdays: null })
+  })
+
+  it('refuses weekly without days before any request', async () => {
+    await expect(updateChore('c1', { repeatKind: 'weekly', repeatWeekdays: [] })).rejects.toThrow(
+      /at least one weekday/i,
+    )
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('refuses a weekdays-only patch — half a schedule would silently switch the repeat off', async () => {
+    await expect(updateChore('c1', { repeatWeekdays: [1] })).rejects.toThrow(/pass repeatKind/i)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('a patch naming no repeat field sends no repeat columns', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { title: 'Dishes' })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(Object.keys(update.patch)).toEqual(['title'])
+  })
 })
 
 describe('recordActualMinutes — #12', () => {

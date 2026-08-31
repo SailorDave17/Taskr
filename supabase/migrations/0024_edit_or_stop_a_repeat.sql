@@ -1,0 +1,82 @@
+-- Edit or stop a repeat without moving committed load — story #54.
+--
+-- ONE statement, and the reasoning is longer than the SQL because the story's
+-- behaviour is mostly things this file deliberately does NOT add.
+--
+-- ===========================================================================
+-- The propagation rule is the ABSENCE of a propagation mechanism
+-- ===========================================================================
+--
+-- #54 resolves #11's template-edit propagation decision to its option (b):
+-- editing a repeat changes only what has not been dated yet. `0012` already
+-- built the half that makes this free — an occurrence copies the parent's
+-- `expected_minutes` and exclusions AT CREATION and never follows the parent
+-- afterwards — so an estimate edit on the anchor reaches every occurrence the
+-- catch-up pass creates from then on, and no occurrence that already exists.
+--
+-- There is deliberately no trigger here rewriting not-yet-done occurrences the
+-- way legacy's updateAllTasksBasedOnTemplate did. That shape moves minutes
+-- already counted against somebody's capacity with no announced re-balance,
+-- which is the conflation the charter's item 5 exists to end. #54's AC 6
+-- mutates this file into exactly that trigger and records which tests redden,
+-- so the absence is a proven design rather than an omission.
+--
+-- ===========================================================================
+-- What 0024 permits, and what still refuses
+-- ===========================================================================
+--
+-- (Wording note, load-bearing: the live-catalog probe's own test scans every
+-- migration for a g-r-a-n-t spelling followed by its negative-control column
+-- before the next semicolon, and a comment is one long semicolon-free span —
+-- so the prose above the column names below avoids that word on purpose.)
+--
+-- `repeat_kind` and `repeat_weekdays` travel together — the check constraint
+-- `chores_repeat_weekdays_shape` (0012) ties them, so a schedule edit and a
+-- switch-off both write the pair in one statement. The client's
+-- `normalizeRepeat` produces the pair; a caller that skips it and sends half a
+-- schedule is refused by the constraint, not by convention.
+--
+-- Switching a repeat OFF is `repeat_kind = 'none', repeat_weekdays = null`.
+-- The `chores_repeat_since` trigger (0012) fires on `update of repeat_kind`
+-- and nulls `repeat_since`; existing dated occurrences are untouched, because
+-- nothing here or in 0012 deletes anything — switching off a repeat is not a
+-- way to delete this week's chores (#54 AC 3).
+--
+-- The WATERMARK is deliberately retained on a switch-off. It is bookkeeping,
+-- not schedule state, and keeping it is safe in the one case that looks
+-- dangerous: re-enabling the repeat later fires the trigger again, which
+-- stamps `repeat_since` to the household-local TODAY (it was nulled at
+-- switch-off), and the pass creates nothing dated at or before `repeat_since`
+-- — so the off window can never be back-filled, whatever the watermark says.
+-- The suite asserts exactly that.
+--
+-- Still writable by no client, the pass or the trigger staying the only
+-- author:
+--   - `repeat_since` — the trigger's, and probe:live-grants' negative control;
+--   - `repeat_caught_up_through` — the pass's high-water mark;
+--   - `generated_from` — the exactly-once key, forgeable by nobody.
+--
+-- An occurrence cannot be promoted into a repeat through this grant:
+-- `chores_occurrence_does_not_repeat` (0012) refuses `repeat_kind <> 'none'`
+-- on any row carrying `generated_from`, whatever privileges the caller holds.
+--
+-- ===========================================================================
+-- Deleting a repeat outright — the recorded choice, restated where the story
+-- that owns it can be found
+-- ===========================================================================
+--
+-- The choice is KEEP: `chores_generated_from_in_household` (0012) is
+-- `on delete set null (generated_from)`, so deleting the anchor ends the
+-- schedule and orphans the occurrences — they are real work, some of it
+-- completed history. This file changes nothing about it; #54's suite asserts
+-- it on the client's own delete path, completed history included, so the
+-- choice cannot silently drift to CASCADE in a later edit (#54 AC 4).
+--
+-- ===========================================================================
+-- Re-runnability
+-- ===========================================================================
+--
+-- Applied by `npm run migrate:live` or a hand paste; a re-paste is the normal
+-- path. A GRANT is idempotent, so this file re-applies with no guard needed.
+
+grant update (repeat_kind, repeat_weekdays) on public.chores to authenticated;

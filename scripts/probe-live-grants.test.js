@@ -313,7 +313,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names, plus 0022 and 0023', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022, 0023 and 0024', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -335,6 +335,11 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // to updatable would move the row and be reported, where no client-side
       // probe can report being allowed a write it never attempts.
       'chores.source=ar',
+      // 0024, story #54. One grant — the repeat pair becomes editable — and
+      // `check:live` is blind to it in both directions, so these rows are the
+      // only instrument that can say whether it reached the project.
+      'chores.repeat_kind=arw',
+      'chores.repeat_weekdays=arw',
     ])
   })
 })

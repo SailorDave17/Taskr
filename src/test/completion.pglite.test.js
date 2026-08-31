@@ -158,14 +158,21 @@ describe('completing a chore, run against a real Postgres', () => {
             and grantee = 'authenticated' and privilege_type = 'UPDATE'
           order by column_name`,
       )
-      // 0003's set plus 0015's `actual_minutes` (#12) — the set is the
-      // schema's, not this story's. What #35 claims is that the two completion
-      // columns are NOT in it, asserted by name so the point survives the next
-      // migration widening the list again.
+      // 0003's set plus 0015's `actual_minutes` (#12) and 0024's repeat pair
+      // (#54) — the set is the schema's, not this story's. What #35 claims is
+      // that the two completion columns are NOT in it, asserted by name so the
+      // point survives the next migration widening the list again.
       const writable = rows.map((r) => r.column_name)
       expect(writable).not.toContain('completed_at')
       expect(writable).not.toContain('completed_by_member_id')
-      expect(writable).toEqual(['actual_minutes', 'due_on', 'expected_minutes', 'title'])
+      expect(writable).toEqual([
+        'actual_minutes',
+        'due_on',
+        'expected_minutes',
+        'repeat_kind',
+        'repeat_weekdays',
+        'title',
+      ])
     })
 
     it('but both are readable, because the list has to render them', async () => {

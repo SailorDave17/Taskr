@@ -343,12 +343,37 @@ export async function addChores(rows, { householdId } = {}) {
   return outcomes
 }
 
-/** Edit a chore's title, minutes or due date — AC 6. */
-export async function updateChore(id, { title, expectedMinutes, dueOn }) {
+/**
+ * Edit a chore's title, minutes, due date — #34 AC 6 — or its repeat — #54.
+ *
+ * The repeat fields are a PAIR, never a half: `chores_repeat_weekdays_shape`
+ * ties `repeat_kind` to `repeat_weekdays`, so a patch naming either names
+ * both, through the same `normalizeRepeat` the add path calls. A weekdays-only
+ * patch is refused here with a sentence rather than sent — `normalizeRepeat`
+ * would read the missing kind as 'none' and silently switch the repeat off,
+ * which is not what a caller editing the days meant.
+ *
+ * Propagation is #54's ratified option (b) BY CONSTRUCTION, and this function
+ * is where the claim is easiest to mis-fix later, so it is stated here: an
+ * occurrence copies its minutes at creation (0012), so an estimate edit on the
+ * anchor reaches only occurrences created AFTER it, and never rewrites work
+ * already on somebody's list. There is deliberately no second statement here
+ * updating occurrence rows — #54 AC 6 mutates that shape in and records which
+ * tests redden.
+ */
+export async function updateChore(id, { title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
   const patch = {}
   if (title !== undefined) patch.title = normalizeTitle(title)
   if (expectedMinutes !== undefined) patch.expected_minutes = normalizeExpectedMinutes(expectedMinutes)
   if (dueOn !== undefined) patch.due_on = normalizeDueDate(dueOn)
+  if (repeatKind === undefined && repeatWeekdays !== undefined) {
+    throw new Error('A schedule edit names how often — pass repeatKind with repeatWeekdays.')
+  }
+  if (repeatKind !== undefined) {
+    const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
+    patch.repeat_kind = repeat.repeat_kind
+    patch.repeat_weekdays = repeat.repeat_weekdays
+  }
 
   // An empty patch would issue `update chores set` — a syntax error from
   // Postgres reported as "saving the change: ...", which reads like the row was

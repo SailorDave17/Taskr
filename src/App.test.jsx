@@ -742,6 +742,7 @@ describe('chores — the write path and the re-read', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
       householdId: household.id,
     })
     await waitFor(() =>

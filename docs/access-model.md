@@ -7,11 +7,30 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0023` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-28 at 28 of 28*, after #250 added two rows that ask whether the SEEDED TEST
-  ACCOUNT can still sign in. That is the first time this denominator has moved on something a
-  migration cannot change, and nothing became excusable: the two rows are green whenever the
-  account works.
+- Status: **`0001`–`0026` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-08-31 at 30 of 30*, after `0026` was applied in its own story's session (below).
+  *(This range read `0001`–`0023` until 2026-08-31 while the entries below already recorded `0024`
+  and `0025` applied — the headline is a second copy of what its own detail says, and it is the copy
+  a reader acts on, so it is now bumped in the same edit that adds an entry.)* The denominator
+  history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
+  sign in — the first time it moved on something a migration cannot change, and nothing became
+  excusable: those rows are green whenever the account works.
+  **`0026` on 2026-08-31 (#103, monthly repeats)**, applied with `npm run migrate:live` (md5
+  `70e3ba954d79883965f0fbe8728af1dd` read back identical, 13276 characters, 12 statements) in the
+  story's own session. `check:live` sees exactly HALF of it: `repeat_monthday` joins
+  `CHORE_COLUMNS`, and both sides were measured — **29 of 30 before the apply**, the one red
+  `chores` answering `42703 column chores.repeat_monthday does not exist`, and **30 of 30
+  immediately after**, clearing on exactly that action. What it cannot see — the INSERT and UPDATE
+  halves of the new column's privileges, the widened kind constraint, and the replaced schedule
+  function — is covered two ways: `npm run probe:live-grants` gained a `chores.repeat_monthday=arw`
+  row (*measured 2026-08-31 at **14 of 14 agreeing**, the `chores.repeat_since` negative control
+  still carrying no column-level grant*), and the constraint plus clamp behaviour are proven against
+  a real Postgres by `repeats.pglite.test.js`. The apply came BEFORE the merge and the `release`
+  promotion, `0020`'s safe order, and the two directions coexist: a pre-`0026` client names no
+  monthday anywhere (the column defaults null, the widened constraint admits every old shape, and
+  the replaced pass behaves identically for daily and weekly), while a post-`0026` client against a
+  pre-`0026` project would fail loudly on the read — which is the window `check:live` exists to
+  keep visible and which the in-session apply closed within the hour.
   **`0025` on 2026-08-31 (#105, skipping a single occurrence)**, applied with `npm run migrate:live`
   (md5 `503e51d11da186853141bb9da38c093d` read back identical, 17592 characters, 12 statements) in
   the story's own session. `check:live` is NOT blind to this one — the same change gave it a table
@@ -213,9 +232,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-31 at 30 of 30*, after `0025` was applied in
-  #105's own session — the denominator moved from 28 when that story added a table entry and an RPC
-  probe, and both of its reds cleared on the apply (*measured 28 of 30 before, 30 of 30 after*).**
+- **The excused-red set is EMPTY. *Measured 2026-08-31 at 30 of 30*, after `0026` was applied in
+  #103's own session (denominator unmoved — that story widens the existing `chores` column list, and
+  its one pre-apply red, `42703` on `chores.repeat_monthday`, cleared on exactly the apply: *29 of
+  30 before, 30 of 30 after*).** Earlier the same day, at the same figure after `0025` was applied
+  in #105's own session — the denominator moved from 28 when that story added a table entry and an
+  RPC probe, and both of its reds cleared on the apply (*measured 28 of 30 before, 30 of 30 after*).
   Before that: *measured 2026-08-28 at 28 of 28*, after `0023` was applied in
   #211's own session, and at the same figure before it for #250's two seeded-account rows.
   `0023` (`chores.source`, #211) is the second migration running to be applied inside the story that

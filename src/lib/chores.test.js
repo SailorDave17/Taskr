@@ -22,6 +22,7 @@ import {
   normalizeExpectedMinutes,
   normalizeRepeat,
   normalizeTitle,
+  ordinalOf,
 } from './chores.js'
 
 // #34 — the validators the form and the data layer share.
@@ -154,9 +155,9 @@ describe('the readable column list', () => {
     // returning a narrower row, so this list is load-bearing rather than tidy.
     // 0004 added the two completion columns as readable, 0006 added
     // assigned_member_id, 0012 the three repeat columns a screen renders,
-    // 0015 the actual (#12), 0018 assigned_source (#49) and 0023 source
-    // (#211); if this list and the grant ever disagree, every read fails with a
-    // permission error.
+    // 0015 the actual (#12), 0018 assigned_source (#49), 0023 source (#211)
+    // and 0026 repeat_monthday (#103); if this list and the grant ever
+    // disagree, every read fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
       'actual_minutes',
       'assigned_member_id',
@@ -170,6 +171,7 @@ describe('the readable column list', () => {
       'household_id',
       'id',
       'repeat_kind',
+      'repeat_monthday',
       'repeat_weekdays',
       'source',
       'title',
@@ -258,22 +260,41 @@ describe('outstanding — #35 AC 5', () => {
 // order, a person holding nothing still appearing, and nothing that ranks.
 
 describe('#53 — a schedule the columns will accept', () => {
-  it('accepts the three kinds, defaulting an unstated one to none', () => {
-    expect(normalizeRepeat({})).toEqual({ repeat_kind: 'none', repeat_weekdays: null })
-    expect(normalizeRepeat(undefined)).toEqual({ repeat_kind: 'none', repeat_weekdays: null })
+  it('accepts the four kinds, defaulting an unstated one to none', () => {
+    expect(normalizeRepeat({})).toEqual({
+      repeat_kind: 'none',
+      repeat_weekdays: null,
+      repeat_monthday: null,
+    })
+    expect(normalizeRepeat(undefined)).toEqual({
+      repeat_kind: 'none',
+      repeat_weekdays: null,
+      repeat_monthday: null,
+    })
     expect(normalizeRepeat({ repeatKind: 'daily' })).toEqual({
       repeat_kind: 'daily',
       repeat_weekdays: null,
+      repeat_monthday: null,
     })
     expect(normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [3] })).toEqual({
       repeat_kind: 'weekly',
       repeat_weekdays: [3],
+      repeat_monthday: null,
+    })
+    // #103 — monthly joined the structured kinds. The form's select hands a
+    // string; the column wants a number.
+    expect(normalizeRepeat({ repeatKind: 'monthly', repeatMonthday: '12' })).toEqual({
+      repeat_kind: 'monthly',
+      repeat_weekdays: null,
+      repeat_monthday: 12,
     })
   })
 
   it('refuses anything outside the structured kinds — AC 6, worded for a person', () => {
-    for (const repeatKind of ['monthly', 'every other thursday', 'WEEKLY', 42]) {
-      expect(() => normalizeRepeat({ repeatKind })).toThrow(/daily or weekly/i)
+    // 'monthly' left this list with #103; 'fortnightly' stands where it stood,
+    // so the refusal of an unlearned kind stays exercised.
+    for (const repeatKind of ['fortnightly', 'every other thursday', 'WEEKLY', 42]) {
+      expect(() => normalizeRepeat({ repeatKind })).toThrow(/daily, weekly or monthly/i)
     }
   })
 
@@ -288,6 +309,34 @@ describe('#53 — a schedule the columns will accept', () => {
     expect(() => normalizeRepeat({ repeatKind: 'none', repeatWeekdays: [1] })).toThrow(
       /only make sense on a weekly repeat/i,
     )
+    expect(() => normalizeRepeat({ repeatKind: 'monthly', repeatMonthday: 5, repeatWeekdays: [1] })).toThrow(
+      /only make sense on a weekly repeat/i,
+    )
+  })
+
+  it('requires a day of the month for monthly, and refuses one elsewhere — #103', () => {
+    expect(() => normalizeRepeat({ repeatKind: 'monthly' })).toThrow(/needs a day of the month/i)
+    expect(() => normalizeRepeat({ repeatKind: 'monthly', repeatMonthday: '' })).toThrow(
+      /needs a day of the month/i,
+    )
+    for (const repeatKind of ['none', 'daily']) {
+      expect(() => normalizeRepeat({ repeatKind, repeatMonthday: 5 })).toThrow(
+        /only makes sense on a monthly repeat/i,
+      )
+    }
+    expect(() =>
+      normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [1], repeatMonthday: 5 }),
+    ).toThrow(/only makes sense on a monthly repeat/i)
+  })
+
+  it('holds the monthday to 1..31 — the bound chores_repeat_monthday_shape enforces again', () => {
+    for (const repeatMonthday of [0, 32, 1.5, 'the 3rd', NaN]) {
+      expect(() => normalizeRepeat({ repeatKind: 'monthly', repeatMonthday })).toThrow(
+        /1 through 31/,
+      )
+    }
+    expect(normalizeRepeat({ repeatKind: 'monthly', repeatMonthday: 31 }).repeat_monthday).toBe(31)
+    expect(normalizeRepeat({ repeatKind: 'monthly', repeatMonthday: 1 }).repeat_monthday).toBe(1)
   })
 
   it('holds weekdays to ISO 1..7', () => {
@@ -302,6 +351,7 @@ describe('#53 — a schedule the columns will accept', () => {
     expect(normalizeRepeat({ repeatKind: 'weekly', repeatWeekdays: [5, 1, 5, 3] })).toEqual({
       repeat_kind: 'weekly',
       repeat_weekdays: [1, 3, 5],
+      repeat_monthday: null,
     })
   })
 })
@@ -323,6 +373,41 @@ describe("#53 — the row's account of its schedule", () => {
     expect(describeRepeat({ repeat_kind: 'weekly', repeat_weekdays: [7] })).toBe(
       'repeats weekly on Sun',
     )
+  })
+
+  it('names the day of the month for monthly, saying the clamp where it can fire — #103', () => {
+    expect(describeRepeat({ repeat_kind: 'monthly', repeat_monthday: 12 })).toBe(
+      'repeats monthly on the 12th',
+    )
+    expect(describeRepeat({ repeat_kind: 'monthly', repeat_monthday: 1 })).toBe(
+      'repeats monthly on the 1st',
+    )
+    // 29–31 do not exist in every month, and a bare "on the 31st" reads as
+    // skipping February — which is the rejected behaviour, so the row says
+    // the rule the pass actually applies.
+    expect(describeRepeat({ repeat_kind: 'monthly', repeat_monthday: 31 })).toBe(
+      'repeats monthly on the 31st (last day of shorter months)',
+    )
+    expect(describeRepeat({ repeat_kind: 'monthly', repeat_monthday: 29 })).toBe(
+      'repeats monthly on the 29th (last day of shorter months)',
+    )
+    // A row read before 0026 is pasted carries no monthday; the screen must
+    // not invent one, same rule as the schedule-less rows above.
+    expect(describeRepeat({ repeat_kind: 'monthly' })).toBe('repeats monthly')
+  })
+
+  it('ordinalOf speaks English ordinals, the teens included', () => {
+    expect(ordinalOf(1)).toBe('1st')
+    expect(ordinalOf(2)).toBe('2nd')
+    expect(ordinalOf(3)).toBe('3rd')
+    expect(ordinalOf(4)).toBe('4th')
+    expect(ordinalOf(11)).toBe('11th')
+    expect(ordinalOf(12)).toBe('12th')
+    expect(ordinalOf(13)).toBe('13th')
+    expect(ordinalOf(21)).toBe('21st')
+    expect(ordinalOf(22)).toBe('22nd')
+    expect(ordinalOf(23)).toBe('23rd')
+    expect(ordinalOf(31)).toBe('31st')
   })
 })
 

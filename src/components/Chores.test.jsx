@@ -171,9 +171,11 @@ describe('AC 2 — the form refuses with a sentence, before any request is sent'
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
-      // #53 — the untouched form declares no repeat, explicitly.
+      // #53 — the untouched form declares no repeat, explicitly. #103 made
+      // the declared schedule a triple.
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -840,9 +842,9 @@ describe('#53 — the repeat is set where the chore is created', () => {
     const options = within(kindSelect())
       .getAllByRole('option')
       .map((o) => o.value)
-    // Monthly is #103, exceptions are #105 — named follow-ups. Their absence
-    // here is the decision, so it is asserted rather than implied.
-    expect(options).toEqual(['none', 'daily', 'weekly'])
+    // Monthly joined with #103 — a KIND in the select, so the AC 6 contract
+    // holds: there is still no field a phrase could arrive through.
+    expect(options).toEqual(['none', 'daily', 'weekly', 'monthly'])
   })
 
   it('reveals the weekday picker only for weekly', () => {
@@ -852,6 +854,22 @@ describe('#53 — the repeat is set where the chore is created', () => {
     expect(screen.getByLabelText(/repeat on mon/i)).toBeInTheDocument()
     chooseKind('daily')
     expect(screen.queryByLabelText(/repeat on mon/i)).not.toBeInTheDocument()
+  })
+
+  it('reveals the day-of-month picker only for monthly — #103', () => {
+    setup()
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
+    chooseKind('monthly')
+    expect(screen.getByLabelText(/which day of the month/i)).toBeInTheDocument()
+    // The clamp is said where the risky days are picked: a person choosing the
+    // 31st is exactly the person who needs to know February still fires.
+    const dayOptions = within(screen.getByLabelText(/which day of the month/i))
+      .getAllByRole('option')
+      .map((o) => o.textContent)
+    expect(dayOptions).toContain('31st (or last day of the month)')
+    expect(dayOptions).toContain('12th')
+    chooseKind('daily')
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
   })
 
   it('submits a weekly repeat with the chosen days', async () => {
@@ -868,6 +886,56 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'weekly',
       repeatWeekdays: [1, 4],
+      repeatMonthday: '',
+    })
+  })
+
+  it('submits a monthly repeat with the chosen day of the month — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '31' },
+    })
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('refuses monthly with no day chosen, with a sentence, and sends nothing — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    await submitAdd()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/needs a day of the month/i)
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale monthday when the kind leaves monthly, so it cannot silently re-arm — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '15' },
+    })
+    chooseKind('none')
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -895,6 +963,7 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -945,7 +1014,7 @@ describe('#54 — the repeat is edited where the chore is edited', () => {
     expect(screen.getByLabelText(/repeat placeholder chore on tue/i)).not.toBeChecked()
   })
 
-  it('switching off sends the pair — kind none, days emptied', async () => {
+  it('switching off sends the whole schedule — kind none, days emptied, no monthday', async () => {
     const { onSave } = setup({ chores: [repeatAnchor] })
     await openAnchorEditor()
 
@@ -960,7 +1029,42 @@ describe('#54 — the repeat is edited where the chore is edited', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
+  })
+
+  it('a weekly anchor can become monthly, seeded and sent as a whole schedule — #103', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/how often placeholder chore repeats/i), {
+      target: { value: 'monthly' },
+    })
+    fireEvent.change(screen.getByLabelText(/which day of the month placeholder chore repeats on/i), {
+      target: { value: '31' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('a monthly anchor seeds its editor with the day it actually has — #103', async () => {
+    setup({
+      chores: [{ ...chores[0], repeat_kind: 'monthly', repeat_weekdays: null, repeat_monthday: 12 }],
+    })
+    await openAnchorEditor()
+
+    expect(screen.getByLabelText(/how often placeholder chore repeats/i)).toHaveValue('monthly')
+    expect(
+      screen.getByLabelText(/which day of the month placeholder chore repeats on/i),
+    ).toHaveValue('12')
   })
 
   it('an untouched schedule travels in NO save — an ordinary edit needs no repeat privilege', async () => {
@@ -1374,6 +1478,7 @@ describe('batch entry — #220, several chores in one pass', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 })

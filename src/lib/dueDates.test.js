@@ -120,7 +120,7 @@ describe('#105 — the skip picker arithmetic', () => {
     // pin the arithmetic itself on hand-computed calendars.
 
     it('daily fills every date in (after, after + horizon]', () => {
-      expect(upcomingOccurrenceDates('daily', null, MONDAY, 3)).toEqual([
+      expect(upcomingOccurrenceDates('daily', null, null, MONDAY, 3)).toEqual([
         '2026-08-25',
         '2026-08-26',
         '2026-08-27',
@@ -130,7 +130,7 @@ describe('#105 — the skip picker arithmetic', () => {
     it('the interval is open at the start — the from date itself is never offered', () => {
       // A weekly-on-Monday schedule asked from a Monday: that Monday is the
       // caller's own row (or today), not an upcoming occurrence.
-      expect(upcomingOccurrenceDates('weekly', [1], MONDAY, 14)).toEqual([
+      expect(upcomingOccurrenceDates('weekly', [1], null, MONDAY, 14)).toEqual([
         '2026-08-31',
         '2026-09-07',
       ])
@@ -138,29 +138,67 @@ describe('#105 — the skip picker arithmetic', () => {
 
     it('a weekly set lands on exactly its ISO weekdays, in date order', () => {
       // Monday=1 and Thursday=4 from a Monday: Thursday arrives first.
-      expect(upcomingOccurrenceDates('weekly', [1, 4], MONDAY, 7)).toEqual([
+      expect(upcomingOccurrenceDates('weekly', [1, 4], null, MONDAY, 7)).toEqual([
         '2026-08-27',
         '2026-08-31',
       ])
     })
 
     it('crosses a month boundary as calendar arithmetic, not millisecond arithmetic', () => {
-      expect(upcomingOccurrenceDates('daily', null, '2026-08-30', 3)).toEqual([
+      expect(upcomingOccurrenceDates('daily', null, null, '2026-08-30', 3)).toEqual([
         '2026-08-31',
         '2026-09-01',
         '2026-09-02',
       ])
     })
 
+    it('monthly lands on exactly its day of the month — #103', () => {
+      // Day 15 asked from 2026-08-24 over ~2 months: Sep 15 and Oct 15, no
+      // clamp involved because both months have a 15th.
+      expect(upcomingOccurrenceDates('monthly', null, 15, MONDAY, 60)).toEqual([
+        '2026-09-15',
+        '2026-10-15',
+      ])
+    })
+
+    it("monthly day 31 clamps to a short month's last day — the ratified rule, not skip-the-month", () => {
+      // From 2027-01-15 across ~4 months: January 31 (a 31-day month, no
+      // clamp), February 28 (2027 is not a leap year — the CLAMP), March 31,
+      // April 30 (a 30-day month — the clamp again). RFC 5545's
+      // skip-the-month would omit February and April entirely; the owner
+      // rejected that at the groom gate, and this pins the boundary against
+      // it: mutate Math.min away and February vanishes here by name.
+      expect(upcomingOccurrenceDates('monthly', null, 31, '2027-01-15', 110)).toEqual([
+        '2027-01-31',
+        '2027-02-28',
+        '2027-03-31',
+        '2027-04-30',
+      ])
+    })
+
+    it('monthly day 29 lands on February 29 in a leap year and the 28th otherwise', () => {
+      // 2028 is a leap year; 2027 is not. One schedule, both Februaries.
+      expect(upcomingOccurrenceDates('monthly', null, 29, '2027-02-01', 30)).toEqual(['2027-02-28'])
+      expect(upcomingOccurrenceDates('monthly', null, 29, '2028-02-01', 30)).toEqual(['2028-02-29'])
+    })
+
     it("offers nothing for 'none' or a kind this copy has not learned", () => {
       // The empty list is the honest answer: offering nothing is visible,
       // guessing dates for a vocabulary the mirror does not know is not.
-      expect(upcomingOccurrenceDates('none', null, MONDAY, 28)).toEqual([])
-      expect(upcomingOccurrenceDates('monthly', null, MONDAY, 28)).toEqual([])
+      // 'fortnightly' stands where 'monthly' used to — #103 taught the mirror
+      // monthly, so the unknown-kind case needs a kind that is still unknown.
+      expect(upcomingOccurrenceDates('none', null, null, MONDAY, 28)).toEqual([])
+      expect(upcomingOccurrenceDates('fortnightly', null, null, MONDAY, 28)).toEqual([])
+      // Monthly with no monthday offers nothing rather than guessing a day —
+      // a row in that state cannot exist under chores_repeat_monthday_shape,
+      // but a mirror that invented a day for it would hide exactly that bug.
+      expect(upcomingOccurrenceDates('monthly', null, null, MONDAY, 60)).toEqual([])
     })
 
     it('refuses a from-date that is not a date', () => {
-      expect(() => upcomingOccurrenceDates('daily', null, 'someday', 7)).toThrow(/reference date/i)
+      expect(() => upcomingOccurrenceDates('daily', null, null, 'someday', 7)).toThrow(
+        /reference date/i,
+      )
     })
   })
 

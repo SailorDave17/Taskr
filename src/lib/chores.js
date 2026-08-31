@@ -50,7 +50,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes, source'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, repeat_monthday, generated_from, actual_minutes, source'
 
 /**
  * How a chore came to exist — `chores_source_known` in `0023`, story #211.
@@ -103,7 +103,24 @@ export const MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE = 3
 export const ESTIMATE_DEVIATION_THRESHOLD = 0.25
 
 /** The schedule kinds `chores_repeat_kind_known` accepts, in the UI's order. */
-export const REPEAT_KINDS = ['none', 'daily', 'weekly']
+export const REPEAT_KINDS = ['none', 'daily', 'weekly', 'monthly']
+
+/**
+ * The days a monthly repeat can be pinned to — #103. 1..31 because 31 is a
+ * real choice: `0026`'s clamp makes it fire on every month's last day when the
+ * month is shorter, which is the owner-ratified rule (skip-the-month was
+ * rejected at the groom gate).
+ */
+export const MONTHDAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+
+/** "1" → "1st", "22" → "22nd" — how a screen says a day of the month. */
+export function ordinalOf(day) {
+  const n = Number(day)
+  const tens = n % 100
+  if (tens >= 11 && tens <= 13) return `${n}th`
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'
+  return `${n}${suffix}`
+}
 
 /** ISO weekdays as the schema stores them (1 = Monday … 7 = Sunday). */
 export const WEEKDAYS = [
@@ -189,27 +206,49 @@ export { localTodayIn, upcomingOccurrenceDates } from './dueDates.js'
 /**
  * A schedule the columns will accept — #53 AC 6: structured, never free text.
  *
- * Takes the form's shape (`repeatKind` + `repeatWeekdays`) and returns the two
- * COLUMN values, so a caller cannot send half a schedule: weekly without days
- * is refused here with a sentence, and the check constraint
- * `chores_repeat_weekdays_shape` refuses it again at the database for any
- * caller that skips this function.
+ * Takes the form's shape (`repeatKind` + `repeatWeekdays` + `repeatMonthday`,
+ * #103) and returns the three COLUMN values, so a caller cannot send part of
+ * a schedule: weekly without days, or monthly without a day of the month, is
+ * refused here with a sentence, and the check constraints
+ * `chores_repeat_weekdays_shape` and `chores_repeat_monthday_shape` refuse it
+ * again at the database for any caller that skips this function.
  *
  * Weekdays come back sorted and deduplicated. The constraint tolerates a
  * duplicate (it is harmless to the schedule arithmetic), but a stored
  * `{5,1,5}` would render back as a different-looking set than was saved.
  */
-export function normalizeRepeat({ repeatKind, repeatWeekdays } = {}) {
+export function normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday } = {}) {
   const kind = repeatKind === undefined || repeatKind === null ? 'none' : String(repeatKind)
   if (!REPEAT_KINDS.includes(kind)) {
-    throw new Error('A repeat is daily or weekly — anything fancier is not a schedule yet.')
+    throw new Error('A repeat is daily, weekly or monthly — anything fancier is not a schedule yet.')
+  }
+
+  const hasMonthday =
+    repeatMonthday !== undefined && repeatMonthday !== null && String(repeatMonthday).trim() !== ''
+
+  if (kind !== 'monthly' && hasMonthday) {
+    throw new Error('A day of the month only makes sense on a monthly repeat.')
+  }
+
+  if (kind === 'monthly') {
+    if (Array.isArray(repeatWeekdays) && repeatWeekdays.length > 0) {
+      throw new Error('Weekdays only make sense on a weekly repeat.')
+    }
+    if (!hasMonthday) {
+      throw new Error('A monthly repeat needs a day of the month.')
+    }
+    const day = Number(repeatMonthday)
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      throw new Error('A day of the month is 1 through 31.')
+    }
+    return { repeat_kind: 'monthly', repeat_weekdays: null, repeat_monthday: day }
   }
 
   if (kind !== 'weekly') {
     if (Array.isArray(repeatWeekdays) && repeatWeekdays.length > 0) {
       throw new Error('Weekdays only make sense on a weekly repeat.')
     }
-    return { repeat_kind: kind, repeat_weekdays: null }
+    return { repeat_kind: kind, repeat_weekdays: null, repeat_monthday: null }
   }
 
   const days = Array.isArray(repeatWeekdays) ? repeatWeekdays.map(Number) : []
@@ -219,7 +258,11 @@ export function normalizeRepeat({ repeatKind, repeatWeekdays } = {}) {
   if (days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
     throw new Error('A weekday is 1 (Monday) through 7 (Sunday).')
   }
-  return { repeat_kind: 'weekly', repeat_weekdays: [...new Set(days)].sort((a, b) => a - b) }
+  return {
+    repeat_kind: 'weekly',
+    repeat_weekdays: [...new Set(days)].sort((a, b) => a - b),
+    repeat_monthday: null,
+  }
 }
 
 /** A chore title the column will accept. */
@@ -269,6 +312,7 @@ export async function addChore({
   dueOn,
   repeatKind,
   repeatWeekdays,
+  repeatMonthday,
   householdId,
   // #211 — where the chore came from. Defaulted rather than required, so every
   // existing call site keeps its current meaning without being edited: App.jsx
@@ -290,7 +334,7 @@ export async function addChore({
   // #53 — the repeat is set where the chore is created, as a property of the
   // chore. There is no templates screen to route through, and callers that say
   // nothing get 'none', which is the column's own default.
-  const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
+  const repeat = normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday })
 
   if (!householdId) throw new Error('Which household? Adding a chore must name one.')
 
@@ -304,6 +348,7 @@ export async function addChore({
         due_on: due,
         repeat_kind: repeat.repeat_kind,
         repeat_weekdays: repeat.repeat_weekdays,
+        repeat_monthday: repeat.repeat_monthday,
         // Written explicitly rather than left to the column's DEFAULT. The two
         // are identical for a typed chore, and stating it is what makes the
         // insert path a thing a mutation can remove and a test can miss — the
@@ -354,12 +399,14 @@ export async function addChores(rows, { householdId } = {}) {
 /**
  * Edit a chore's title, minutes, due date — #34 AC 6 — or its repeat — #54.
  *
- * The repeat fields are a PAIR, never a half: `chores_repeat_weekdays_shape`
- * ties `repeat_kind` to `repeat_weekdays`, so a patch naming either names
- * both, through the same `normalizeRepeat` the add path calls. A weekdays-only
- * patch is refused here with a sentence rather than sent — `normalizeRepeat`
- * would read the missing kind as 'none' and silently switch the repeat off,
- * which is not what a caller editing the days meant.
+ * The repeat fields travel TOGETHER, never partially: the shape constraints
+ * (`chores_repeat_weekdays_shape`, `chores_repeat_monthday_shape`) tie
+ * `repeat_kind` to `repeat_weekdays` and `repeat_monthday`, so a patch naming
+ * any of them names all three, through the same `normalizeRepeat` the add
+ * path calls. A weekdays-only or monthday-only patch is refused here with a
+ * sentence rather than sent — `normalizeRepeat` would read the missing kind
+ * as 'none' and silently switch the repeat off, which is not what a caller
+ * editing the schedule meant.
  *
  * Propagation is #54's ratified option (b) BY CONSTRUCTION, and this function
  * is where the claim is easiest to mis-fix later, so it is stated here: an
@@ -369,18 +416,22 @@ export async function addChores(rows, { householdId } = {}) {
  * updating occurrence rows — #54 AC 6 mutates that shape in and records which
  * tests redden.
  */
-export async function updateChore(id, { title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
+export async function updateChore(
+  id,
+  { title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, repeatMonthday },
+) {
   const patch = {}
   if (title !== undefined) patch.title = normalizeTitle(title)
   if (expectedMinutes !== undefined) patch.expected_minutes = normalizeExpectedMinutes(expectedMinutes)
   if (dueOn !== undefined) patch.due_on = normalizeDueDate(dueOn)
-  if (repeatKind === undefined && repeatWeekdays !== undefined) {
-    throw new Error('A schedule edit names how often — pass repeatKind with repeatWeekdays.')
+  if (repeatKind === undefined && (repeatWeekdays !== undefined || repeatMonthday !== undefined)) {
+    throw new Error('A schedule edit names how often — pass repeatKind with the schedule fields.')
   }
   if (repeatKind !== undefined) {
-    const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
+    const repeat = normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday })
     patch.repeat_kind = repeat.repeat_kind
     patch.repeat_weekdays = repeat.repeat_weekdays
+    patch.repeat_monthday = repeat.repeat_monthday
   }
 
   // An empty patch would issue `update chores set` — a syntax error from
@@ -550,6 +601,16 @@ export async function skipRepeatOccurrence(choreId, skipDate) {
 export function describeRepeat(chore) {
   if (!chore || chore.repeat_kind === 'none' || !chore.repeat_kind) return null
   if (chore.repeat_kind === 'daily') return 'repeats daily'
+  if (chore.repeat_kind === 'monthly') {
+    // #103. Days 29–31 do not exist in every month, and the clamp is a fact a
+    // person planning rent day needs on screen — a bare "on the 31st" reads as
+    // skipping February, which is exactly the rejected behaviour.
+    const day = Number(chore.repeat_monthday)
+    if (!Number.isInteger(day)) return 'repeats monthly'
+    return day >= 29
+      ? `repeats monthly on the ${ordinalOf(day)} (last day of shorter months)`
+      : `repeats monthly on the ${ordinalOf(day)}`
+  }
   const names = (chore.repeat_weekdays ?? [])
     .map((d) => WEEKDAYS.find((w) => w.isoDow === Number(d))?.label)
     .filter(Boolean)

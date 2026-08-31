@@ -83,14 +83,18 @@ describe('a chore that repeats, run against a real Postgres', () => {
    * only granted columns: `repeat_since` is deliberately unreadable by a
    * client (RETURNING needs select privilege), which is itself asserted below.
    */
-  const addChore = (uid, household, { title, minutes = 10, due, kind = 'none', weekdays = null }) =>
+  const addChore = (
+    uid,
+    household,
+    { title, minutes = 10, due, kind = 'none', weekdays = null, monthday = null },
+  ) =>
     asDevice(db, uid, async () => {
       const { rows } = await db.query(
         `insert into public.chores
-           (household_id, title, expected_minutes, due_on, repeat_kind, repeat_weekdays)
-         values ($1, $2, $3, $4, $5, $6::smallint[])
+           (household_id, title, expected_minutes, due_on, repeat_kind, repeat_weekdays, repeat_monthday)
+         values ($1, $2, $3, $4, $5, $6::smallint[], $7::smallint)
          returning id, repeat_kind`,
-        [household, title, minutes, due, kind, weekdays],
+        [household, title, minutes, due, kind, weekdays, monthday],
       )
       return rows[0]
     })
@@ -200,12 +204,48 @@ describe('a chore that repeats, run against a real Postgres', () => {
       expect(result.error).toMatch(/chores_repeat_kind_known/)
     })
 
-    it('monthly is refused — #103 is a named follow-up, not a silent inclusion', async () => {
-      const result = await attempt(() =>
-        addChore(deviceA, householdA.id, { title: 'Rent', due: MONDAY, kind: 'monthly' }),
+    it('monthly is structured too — a day-of-month choice, never free text (#103 AC 2)', async () => {
+      // This test refused the KIND until #103 landed it — the rule changed, so
+      // the test was REWRITTEN rather than deleted: what survives is #53 AC 6's
+      // contract, which monthly now has to honour. The kind is admitted; a
+      // monthly schedule missing its day, carrying a day on the wrong kind, or
+      // carrying a day no month has, is refused by the named constraint.
+      const accepted = await addChore(deviceA, householdA.id, {
+        title: 'Rent',
+        due: MONDAY,
+        kind: 'monthly',
+        monthday: 31,
+      })
+      expect(accepted.repeat_kind).toBe('monthly')
+
+      const cases = [
+        { kind: 'monthly', monthday: null }, // monthly with no day: never fires
+        { kind: 'monthly', monthday: 0 }, // no zeroth day
+        { kind: 'monthly', monthday: 32 }, // no 32nd day of any month
+        { kind: 'daily', monthday: 12 }, // a day on a kind that ignores it
+        { kind: 'none', monthday: 12 },
+      ]
+      for (const { kind, monthday } of cases) {
+        const result = await attempt(() =>
+          addChore(deviceA, householdA.id, { title: 'Shaped', due: MONDAY, kind, monthday }),
+        )
+        expect(result.ok, `${kind} with monthday ${monthday} should be refused`).toBe(false)
+        expect(result.error).toMatch(/chores_repeat_monthday_shape/)
+      }
+
+      // And weekdays still travel with weekly alone — a monthly repeat
+      // carrying a weekday set is refused by the OTHER shape constraint.
+      const crossed = await attempt(() =>
+        addChore(deviceA, householdA.id, {
+          title: 'Shaped',
+          due: MONDAY,
+          kind: 'monthly',
+          weekdays: '{1}',
+          monthday: 12,
+        }),
       )
-      expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/chores_repeat_kind_known/)
+      expect(crossed.ok).toBe(false)
+      expect(crossed.error).toMatch(/chores_repeat_weekdays_shape/)
     })
 
     it('weekdays travel with weekly and only with weekly, and the set must be real', async () => {
@@ -1373,23 +1413,303 @@ describe('a chore that repeats, run against a real Postgres', () => {
         // The SQL is the authority on what the pass creates; the JS copy only
         // decides what the picker offers. This is the binding that keeps the
         // two from drifting apart silently — same interval convention, same
-        // ISO weekdays, exercised on a weekly set AND a daily run.
+        // ISO weekdays, same monthly clamp (#103), exercised on a weekly set,
+        // a daily run, and a monthly schedule ACROSS the clamp: day 31 over a
+        // window containing February, where the two implementations disagree
+        // the moment either one drops the short-month rule.
         const until = '2026-09-21' // MONDAY + 28 days
         const { rows: weekly } = await db.query(
           `select to_char(d, 'YYYY-MM-DD') as d
-           from public.repeat_occurrence_dates('weekly', '{1,4}'::smallint[], $1, $2) as s(d)`,
+           from public.repeat_occurrence_dates('weekly', '{1,4}'::smallint[], null, $1, $2) as s(d)`,
           [MONDAY, until],
         )
-        expect(upcomingOccurrenceDates('weekly', [1, 4], MONDAY, 28)).toEqual(
+        expect(upcomingOccurrenceDates('weekly', [1, 4], null, MONDAY, 28)).toEqual(
           weekly.map((r) => r.d),
         )
 
         const { rows: daily } = await db.query(
           `select to_char(d, 'YYYY-MM-DD') as d
-           from public.repeat_occurrence_dates('daily', null, $1, $2) as s(d)`,
+           from public.repeat_occurrence_dates('daily', null, null, $1, $2) as s(d)`,
           [MONDAY, until],
         )
-        expect(upcomingOccurrenceDates('daily', null, MONDAY, 28)).toEqual(daily.map((r) => r.d))
+        expect(upcomingOccurrenceDates('daily', null, null, MONDAY, 28)).toEqual(
+          daily.map((r) => r.d),
+        )
+
+        const { rows: monthly } = await db.query(
+          `select to_char(d, 'YYYY-MM-DD') as d
+           from public.repeat_occurrence_dates('monthly', null::smallint[], 31::smallint, $1, $2) as s(d)`,
+          ['2027-01-15', '2027-05-05'],
+        )
+        expect(monthly.map((r) => r.d)).toEqual([
+          '2027-01-31',
+          '2027-02-28',
+          '2027-03-31',
+          '2027-04-30',
+        ])
+        expect(upcomingOccurrenceDates('monthly', null, 31, '2027-01-15', 110)).toEqual(
+          monthly.map((r) => r.d),
+        )
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // #103 — a chore that repeats monthly on a chosen day of the month
+  // -------------------------------------------------------------------------
+
+  describe('#103 — a monthly repeat', () => {
+    /**
+     * The client's schedule edit for a monthly repeat, as PostgREST issues it:
+     * `normalizeRepeat` always produces all three columns, because the shape
+     * constraints tie them.
+     */
+    const setScheduleAsClient = (uid, choreId, kind, weekdays = null, monthday = null) =>
+      asDevice(db, uid, () =>
+        db.query(
+          `update public.chores
+             set repeat_kind = $2, repeat_weekdays = $3::smallint[], repeat_monthday = $4::smallint
+           where id = $1`,
+          [choreId, kind, weekdays, monthday],
+        ),
+      )
+
+    /** A day-31 monthly rent chore anchored on 2027-01-31, through the client path. */
+    const rentOnThe31st = async (due = '2027-01-31') => {
+      const chore = await addChore(deviceA, householdA.id, {
+        title: 'Rent',
+        minutes: 10,
+        due,
+        kind: 'monthly',
+        monthday: 31,
+      })
+      await backdate(chore.id, { since: due })
+      return chore
+    }
+
+    describe('AC 1 — the clamp: a short month fires on its last day, never skips', () => {
+      it('day 31 lands on February 28 in a non-leap year', async () => {
+        // (Jan 31, Feb 28] contains exactly one matching date under the
+        // ratified rule — min(31, 28) = 28 — and NONE under the rejected
+        // skip-the-month alternative, which is what makes this fixture the
+        // discriminating one: the mutation to `monthday` alone reddens it by
+        // name.
+        const parent = await rentOnThe31st()
+        const pass = await runAt(deviceA, '2027-02-28 19:00:00+00')
+        expect(pass.created_count).toBe(1)
+        expect(pass.skipped_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28'])
+      })
+
+      it('day 29 lands on February 29 in a leap year — the clamp reads the actual month', async () => {
+        const parent = await addChore(deviceA, householdA.id, {
+          title: 'Rent',
+          due: '2028-01-29',
+          kind: 'monthly',
+          monthday: 29,
+        })
+        await backdate(parent.id, { since: '2028-01-29' })
+        const pass = await runAt(deviceA, '2028-02-29 19:00:00+00')
+        expect(pass.created_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual(['2028-02-29'])
+      })
+
+      it('day 31 lands on the 30th of a 30-day month', async () => {
+        const parent = await rentOnThe31st('2027-03-31')
+        const pass = await runAt(deviceA, '2027-04-30 19:00:00+00')
+        expect(pass.created_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-04-30'])
+      })
+
+      it('after a clamped February the schedule fires on the true 31st again — the clamp does not stick', async () => {
+        const parent = await rentOnThe31st()
+        await runAt(deviceA, '2027-02-28 19:00:00+00')
+        const march = await runAt(deviceA, '2027-03-31 19:00:00+00')
+        expect(march.created_count).toBe(1)
+        expect(march.skipped_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28', '2027-03-31'])
+      })
+    })
+
+    describe('AC 3 — a month boundary across a DST change lands on the household-local date', () => {
+      // US DST ends 02:00 on Sunday 2026-11-01 — the month boundary IS the
+      // DST day. 23:30 Saturday the 31st in America/New_York (EDT, UTC-4) is
+      // already 03:30Z on November 1st; the occurrence must wait for the
+      // household's own midnight, and 07:00Z is 02:00 EST — Sunday the 1st by
+      // any reading of the repeated hour.
+      it('at 23:30 Oct 31 household time, November has not arrived — after local midnight it has', async () => {
+        const parent = await addChore(deviceA, householdA.id, {
+          title: 'Rent',
+          due: '2026-10-01',
+          kind: 'monthly',
+          monthday: 1,
+        })
+        await backdate(parent.id, { since: '2026-10-01' })
+
+        const lateSaturday = await runAt(deviceA, '2026-11-01 03:30:00+00')
+        expect(lateSaturday.created_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual([])
+
+        const sunday = await runAt(deviceA, '2026-11-01 07:00:00+00')
+        expect(sunday.created_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual(['2026-11-01'])
+      })
+    })
+
+    describe('AC 4 — the catch-up bound and the double-fire proof, unchanged for monthly', () => {
+      it('a fire date older than the bound is skipped and said, not piled on', async () => {
+        // Nobody opens the app between January and mid-March: February's
+        // clamped occurrence (the 28th) is beyond the seven-day window at
+        // March 15, so it is counted rather than created, and no monthly date
+        // falls inside the window.
+        const parent = await rentOnThe31st()
+        const pass = await runAt(deviceA, '2027-03-15 19:00:00+00')
+        expect(pass.created_count).toBe(0)
+        expect(pass.skipped_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual([])
+      })
+
+      it('a simulated double-fire creates nothing — the INDEX holds, exactly as #53 proved', async () => {
+        const parent = await rentOnThe31st()
+        await runAt(deviceA, '2027-02-28 19:00:00+00')
+        await db.query('update public.chores set repeat_caught_up_through = null where id = $1', [
+          parent.id,
+        ])
+        const rerun = await runAt(deviceA, '2027-02-28 19:00:00+00')
+        expect(rerun.created_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28'])
+      })
+
+      it('the index itself refuses a duplicate monthly occurrence, by name', async () => {
+        const parent = await rentOnThe31st()
+        await runAt(deviceA, '2027-02-28 19:00:00+00')
+        const dup = await attempt(() =>
+          db.query(
+            `insert into public.chores (household_id, title, expected_minutes, due_on, generated_from)
+             values ($1, 'Rent', 10, '2027-02-28', $2)`,
+            [householdA.id, parent.id],
+          ),
+        )
+        expect(dup.ok).toBe(false)
+        expect(dup.error).toMatch(/chores_one_occurrence_per_date/)
+      })
+
+      it("#105's exception mechanism reaches a monthly date with no special case", async () => {
+        const parent = await rentOnThe31st()
+        await asDevice(db, deviceA, () =>
+          db.query('select public.skip_repeat_occurrence($1, $2::date)', [
+            parent.id,
+            '2027-02-28',
+          ]),
+        )
+        const pass = await runAt(deviceA, '2027-02-28 19:00:00+00')
+        expect(pass.created_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual([])
+      })
+    })
+
+    describe("AC 5 — a monthly occurrence's minutes are in the committed derivation", () => {
+      it('the generated instance is ordinary work: assignable, and its minutes count', async () => {
+        const parent = await rentOnThe31st()
+        await runAt(deviceA, '2027-02-28 19:00:00+00')
+        const [made] = await occurrenceRows(parent.id)
+        expect(made.expected_minutes).toBe(10)
+
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.assign_chore($1, $2)', [made.id, memberTwoA]),
+        )
+
+        // The derivations the app actually renders — the same instruments the
+        // #105 AC 1 test reads: the household's outstanding total and the
+        // member's open load through allocation.assess.
+        const { rows } = await db.query(
+          `select id, expected_minutes, actual_minutes, assigned_member_id, completed_at
+           from public.chores where household_id = $1`,
+          [householdA.id],
+        )
+        const members = [{ id: memberTwoA, capacityMinutes: 300 }]
+        expect(outstandingMinutes(rows)).toBeGreaterThanOrEqual(10)
+        expect(assess({ members, chores: toAllocatorChores(rows) }).load[0].openMinutes).toBe(10)
+      })
+    })
+
+    describe('AC 6 — #54 holds for monthly: committed load does not move', () => {
+      /** February's occurrence generated and assigned — committed work. */
+      const committedMonthlyFixture = async () => {
+        const parent = await rentOnThe31st()
+        await runAt(deviceA, '2027-02-28 19:00:00+00')
+        const [february] = await occurrenceRows(parent.id)
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.assign_chore($1, $2)', [february.id, memberTwoA]),
+        )
+        return { parent, february }
+      }
+
+      const committed = async (id) => {
+        const { rows } = await db.query(
+          `select expected_minutes, assigned_member_id from public.chores where id = $1`,
+          [id],
+        )
+        return rows[0]
+      }
+
+      it('neither an estimate edit, a monthday edit nor a switch-off moves the assigned occurrence', async () => {
+        const { parent, february } = await committedMonthlyFixture()
+
+        await asDevice(db, deviceA, () =>
+          db.query(`update public.chores set expected_minutes = 25 where id = $1`, [parent.id]),
+        )
+        expect(await committed(february.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+
+        await setScheduleAsClient(deviceA, parent.id, 'monthly', null, 15)
+        expect(await committed(february.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+
+        await setScheduleAsClient(deviceA, parent.id, 'none', null, null)
+        expect(await committed(february.id)).toEqual({
+          expected_minutes: 10,
+          assigned_member_id: memberTwoA,
+        })
+
+        // And the schedule really is off: nothing further generates.
+        const pass = await runAt(deviceA, '2027-03-31 19:00:00+00')
+        expect(pass.created_count).toBe(0)
+      })
+
+      it('a monthday edit reaches only what the pass creates AFTER it', async () => {
+        const { parent } = await committedMonthlyFixture()
+
+        // 31st → 15th. February's clamped occurrence already on the list is
+        // not this edit's to move; March generates on the new day.
+        await setScheduleAsClient(deviceA, parent.id, 'monthly', null, 15)
+
+        const pass = await runAt(deviceA, '2027-03-15 19:00:00+00')
+        expect(pass.created_count).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual(['2027-02-28', '2027-03-15'])
+      })
+
+      it('the client may edit the monthday, and still cannot touch the bookkeeping columns', async () => {
+        // 0026 widens the editable schedule set the way 0024 did for the pair;
+        // the boundary inside the row is unchanged, and the #54 test above
+        // already re-proves it — this pins the monthly spelling of the edit.
+        const parent = await rentOnThe31st()
+        const edited = await attempt(() => setScheduleAsClient(deviceA, parent.id, 'monthly', null, 12))
+        expect(edited.ok).toBe(true)
+
+        const forged = await attempt(() =>
+          asDevice(db, deviceA, () =>
+            db.query(`update public.chores set repeat_caught_up_through = '2027-02-01' where id = $1`, [
+              parent.id,
+            ]),
+          ),
+        )
+        expect(forged.ok).toBe(false)
+        expect(forged.error).toMatch(/permission denied/)
       })
     })
   })
@@ -1419,6 +1739,9 @@ describe('a chore that repeats, run against a real Postgres', () => {
     })
 
     it('re-pasting 0024 is a no-op — a grant is idempotent, and the UPDATE set is exactly what it says', async () => {
+      // Through 0024, deliberately: this asserts what THAT file's paste leaves
+      // behind, so 0026's later widening does not belong in this list — the
+      // full-schema set is asserted in the 0026 test below.
       const through = await databaseThrough('0024_edit_or_stop_a_repeat.sql')
       await through.exec(migrationSql('0024_edit_or_stop_a_repeat.sql'))
       const { rows } = await through.query(
@@ -1432,6 +1755,49 @@ describe('a chore that repeats, run against a real Postgres', () => {
         'due_on',
         'expected_minutes',
         'repeat_kind',
+        'repeat_weekdays',
+        'title',
+      ])
+    })
+
+    it('re-pasting 0026 is a no-op: one constraint set, one schedule function, the exact UPDATE set — #103', async () => {
+      const through = await databaseThrough('0026_repeat_monthly.sql')
+      await through.exec(migrationSql('0026_repeat_monthly.sql'))
+
+      // The drop-and-recreate leaves exactly one of each constraint standing,
+      // and the widened kind list really is the widened one.
+      const { rows: constraints } = await through.query(
+        `select conname, count(*)::int as n from pg_constraint
+          where conname in ('chores_repeat_kind_known', 'chores_repeat_monthday_shape')
+          group by conname order by conname`,
+      )
+      expect(constraints).toEqual([
+        { conname: 'chores_repeat_kind_known', n: 1 },
+        { conname: 'chores_repeat_monthday_shape', n: 1 },
+      ])
+
+      // The four-parameter schedule function is GONE and the five-parameter one
+      // stands alone — a `create or replace` with a changed signature adds an
+      // overload rather than replacing, which is exactly what the drop in 0026
+      // exists to prevent, so the count is the assertion.
+      const { rows: fns } = await through.query(
+        `select count(*)::int as n, min(pronargs)::int as args from pg_proc
+          where proname = 'repeat_occurrence_dates'`,
+      )
+      expect(fns).toEqual([{ n: 1, args: 5 }])
+
+      const { rows: updatable } = await through.query(
+        `select column_name from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'chores'
+            and grantee = 'authenticated' and privilege_type = 'UPDATE'
+          order by column_name`,
+      )
+      expect(updatable.map((r) => r.column_name)).toEqual([
+        'actual_minutes',
+        'due_on',
+        'expected_minutes',
+        'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'title',
       ])

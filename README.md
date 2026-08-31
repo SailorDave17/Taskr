@@ -337,6 +337,10 @@ client two acts in an order somebody chooses.
   descriptions the AI bet's accuracy is scored against, what the grader measures and what it
   deliberately does not, and the floor and ceiling the two control extractors reach. **Read
   before touching the extraction corpus or grader.**
+- [`extraction-run.md`](docs/extraction-run.md) — the AI bet graded against a live model at two
+  configurations (#206, measured 2026-08-31): accuracy, due dates, per-kind latency and cost per
+  household per year, each placed between the corpus's recorded floor and ceiling, with the kill
+  conditions read against every figure. **Read before arguing the bet is settled either way.**
 - [`capacity-model.md`](docs/capacity-model.md) — baseline versus this week’s override, why the week
   begins on Monday, and the access rules on `member_capacity`. **Read before touching capacity or
   the week boundary.**

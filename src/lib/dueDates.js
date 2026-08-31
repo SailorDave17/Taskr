@@ -71,6 +71,14 @@ function isoDowOf(iso) {
   return sundayFirst === 0 ? 7 : sundayFirst
 }
 
+/** The last day of `iso`'s own month — `Date.UTC(y, m, 0)` is day 0 of the
+ * NEXT month, which is this month's last day. Same UTC space as everything
+ * else here, so no zone can move the answer. */
+function lastDayOfMonthOf(iso) {
+  const [year, month] = iso.split('-').map(Number)
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
 /**
  * The local calendar date named by a reference string.
  *
@@ -132,23 +140,38 @@ export function localTodayIn(timeZone, epochMs = Date.now()) {
  * The dates a repeat schedule produces in (afterIso, afterIso + horizonDays] —
  * the skip picker's offer list, #105.
  *
- * The JavaScript mirror of `repeat_occurrence_dates` (0012): same open/closed
- * interval, same ISO-weekday convention. The SQL is the authority on what the
- * pass CREATES; this only decides what a screen OFFERS to skip, so drift
- * between the two costs a wrong offer list, never a wrong row — and the skip
- * function stores whatever date it is asked for either way.
+ * The JavaScript mirror of `repeat_occurrence_dates` (0012, widened by 0026):
+ * same open/closed interval, same ISO-weekday convention, same parameter
+ * order, and — #103 — the same monthly clamp. The SQL is the authority on
+ * what the pass CREATES; this only decides what a screen OFFERS to skip, so
+ * drift between the two costs a wrong offer list, never a wrong row — and the
+ * skip function stores whatever date it is asked for either way.
+ *
+ * The monthly branch carries the owner-ratified short-month rule: a date
+ * matches when its day-of-month equals min(monthday, its own month's last
+ * day), so a day-31 schedule fires on Feb 28 / Feb 29 / Apr 30 rather than
+ * skipping the month. Skip-the-month (RFC 5545 behaviour) was rejected at the
+ * groom gate — a monthly bill chore not appearing in February is not what a
+ * household wants.
  *
  * Unknown kinds ('none', or a vocabulary this copy has not learned) produce
  * the empty list rather than a guess: offering nothing is visible, offering
  * wrong dates is not.
  */
-export function upcomingOccurrenceDates(kind, weekdays, afterIso, horizonDays) {
+export function upcomingOccurrenceDates(kind, weekdays, monthday, afterIso, horizonDays) {
   const from = referenceDateOf(afterIso)
   const days = Array.isArray(weekdays) ? weekdays.map(Number) : []
+  const chosenDay = Number(monthday)
   const out = []
   for (let offset = 1; offset <= horizonDays; offset += 1) {
     const candidate = addDays(from, offset)
-    if (kind === 'daily' || (kind === 'weekly' && days.includes(isoDowOf(candidate)))) {
+    if (
+      kind === 'daily' ||
+      (kind === 'weekly' && days.includes(isoDowOf(candidate))) ||
+      (kind === 'monthly' &&
+        Number.isInteger(chosenDay) &&
+        Number(candidate.slice(8, 10)) === Math.min(chosenDay, lastDayOfMonthOf(candidate)))
+    ) {
       out.push(candidate)
     }
   }

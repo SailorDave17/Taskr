@@ -1008,6 +1008,7 @@ describe('#19 — no real household name reaches version control', () => {
     'Placeholder Fourth Chore': 'a chore title',
     // #12 — the actuals fixtures: a repeat anchor and a finished one-off.
     'Placeholder Repeat': 'a chore title',
+    'Placeholder Monthly': 'a chore title — the monthly anchor in #103’s skip-picker tests',
     'Placeholder Done Chore': 'a chore title',
     // #54 — the edit-form fixtures rename a chore and an occurrence, so the
     // renamed titles are literals the assertions match by accessible name.
@@ -1052,7 +1053,7 @@ describe('#19 — no real household name reaches version control', () => {
     // fixtures anonymous.
     Trash: 'the chore title in the issue’s own weekly scenario',
     Vague: 'a chore whose free-text repeat is refused by chores_repeat_kind_known',
-    Rent: 'a chore whose `monthly` repeat is refused — #103 is the named follow-up',
+    Rent: 'the monthly chore in the #103 fixtures — the day-of-the-month scenario is a rent day',
     Shaped: 'a chore title in the repeat_weekdays shape cases',
     Once: 'a chore with no repeat, whose repeat_since stays null',
     Forged: 'a chore title in the fixture proving generated_from is not client-writable',

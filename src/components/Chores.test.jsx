@@ -171,9 +171,11 @@ describe('AC 2 — the form refuses with a sentence, before any request is sent'
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
-      // #53 — the untouched form declares no repeat, explicitly.
+      // #53 — the untouched form declares no repeat, explicitly. #103 made
+      // the declared schedule a triple.
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -840,9 +842,9 @@ describe('#53 — the repeat is set where the chore is created', () => {
     const options = within(kindSelect())
       .getAllByRole('option')
       .map((o) => o.value)
-    // Monthly is #103, exceptions are #105 — named follow-ups. Their absence
-    // here is the decision, so it is asserted rather than implied.
-    expect(options).toEqual(['none', 'daily', 'weekly'])
+    // Monthly joined with #103 — a KIND in the select, so the AC 6 contract
+    // holds: there is still no field a phrase could arrive through.
+    expect(options).toEqual(['none', 'daily', 'weekly', 'monthly'])
   })
 
   it('reveals the weekday picker only for weekly', () => {
@@ -852,6 +854,22 @@ describe('#53 — the repeat is set where the chore is created', () => {
     expect(screen.getByLabelText(/repeat on mon/i)).toBeInTheDocument()
     chooseKind('daily')
     expect(screen.queryByLabelText(/repeat on mon/i)).not.toBeInTheDocument()
+  })
+
+  it('reveals the day-of-month picker only for monthly — #103', () => {
+    setup()
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
+    chooseKind('monthly')
+    expect(screen.getByLabelText(/which day of the month/i)).toBeInTheDocument()
+    // The clamp is said where the risky days are picked: a person choosing the
+    // 31st is exactly the person who needs to know February still fires.
+    const dayOptions = within(screen.getByLabelText(/which day of the month/i))
+      .getAllByRole('option')
+      .map((o) => o.textContent)
+    expect(dayOptions).toContain('31st (or last day of the month)')
+    expect(dayOptions).toContain('12th')
+    chooseKind('daily')
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
   })
 
   it('submits a weekly repeat with the chosen days', async () => {
@@ -868,6 +886,56 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'weekly',
       repeatWeekdays: [1, 4],
+      repeatMonthday: '',
+    })
+  })
+
+  it('submits a monthly repeat with the chosen day of the month — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '31' },
+    })
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('refuses monthly with no day chosen, with a sentence, and sends nothing — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    await submitAdd()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/needs a day of the month/i)
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale monthday when the kind leaves monthly, so it cannot silently re-arm — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '15' },
+    })
+    chooseKind('none')
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -895,6 +963,7 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -945,7 +1014,7 @@ describe('#54 — the repeat is edited where the chore is edited', () => {
     expect(screen.getByLabelText(/repeat placeholder chore on tue/i)).not.toBeChecked()
   })
 
-  it('switching off sends the pair — kind none, days emptied', async () => {
+  it('switching off sends the whole schedule — kind none, days emptied, no monthday', async () => {
     const { onSave } = setup({ chores: [repeatAnchor] })
     await openAnchorEditor()
 
@@ -960,7 +1029,42 @@ describe('#54 — the repeat is edited where the chore is edited', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
+  })
+
+  it('a weekly anchor can become monthly, seeded and sent as a whole schedule — #103', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/how often placeholder chore repeats/i), {
+      target: { value: 'monthly' },
+    })
+    fireEvent.change(screen.getByLabelText(/which day of the month placeholder chore repeats on/i), {
+      target: { value: '31' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('a monthly anchor seeds its editor with the day it actually has — #103', async () => {
+    setup({
+      chores: [{ ...chores[0], repeat_kind: 'monthly', repeat_weekdays: null, repeat_monthday: 12 }],
+    })
+    await openAnchorEditor()
+
+    expect(screen.getByLabelText(/how often placeholder chore repeats/i)).toHaveValue('monthly')
+    expect(
+      screen.getByLabelText(/which day of the month placeholder chore repeats on/i),
+    ).toHaveValue('12')
   })
 
   it('an untouched schedule travels in NO save — an ordinary edit needs no repeat privilege', async () => {
@@ -1374,6 +1478,7 @@ describe('batch entry — #220, several chores in one pass', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 })
@@ -1434,8 +1539,25 @@ describe('skipping one occurrence — #105', () => {
       .getAllByRole('option')
       .map((o) => o.value)
       .filter(Boolean)
-    // Today's generated instance, then the next Mondays inside the horizon.
-    expect(options).toEqual(['2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'])
+    // Today's generated instance, then the next Mondays — twelve entries, the
+    // select's cap. This was five under the old 28-day horizon; #103's review
+    // replaced a day count with a count of occurrences, which is what lets a
+    // monthly schedule offer anything at all. Spelled literally rather than
+    // derived from SKIP_OFFER_MAX_DATES, so changing the cap reddens this.
+    expect(options).toEqual([
+      '2026-08-24',
+      '2026-08-31',
+      '2026-09-07',
+      '2026-09-14',
+      '2026-09-21',
+      '2026-09-28',
+      '2026-10-05',
+      '2026-10-12',
+      '2026-10-19',
+      '2026-10-26',
+      '2026-11-02',
+      '2026-11-09',
+    ])
 
     fireEvent.change(skipSelect(), { target: { value: '2026-08-31' } })
     expect(onSkip).toHaveBeenCalledTimes(1)
@@ -1484,5 +1606,101 @@ describe('skipping one occurrence — #105', () => {
   it('with no todayIso the control renders nothing rather than guessing a calendar', () => {
     setup({ chores: repeatFixture, todayIso: null })
     expect(screen.queryByLabelText(/skip one date/i)).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // #103's review — the monthly skip picker, which had NO test of any kind.
+  //
+  // The gap was not that the monthly path was unreached: it was rendered by an
+  // edit-form test and simply never asserted, so feeding the monthday slot the
+  // wrong-but-well-typed `repeat_weekdays` returned an empty list and the whole
+  // suite stayed green. These assert what the control offers, which is the only
+  // thing that could have caught either that or the horizon defect below.
+  // -------------------------------------------------------------------------
+
+  const monthlyAnchor = {
+    id: 'm1',
+    household_id: 'h1',
+    title: 'Placeholder Monthly',
+    expected_minutes: 10,
+    due_on: '2026-08-15',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'monthly',
+    repeat_weekdays: null,
+    repeat_monthday: 15,
+  }
+  const monthlySelect = () =>
+    screen.getByLabelText(/skip one date placeholder monthly repeats on/i)
+
+  it('a monthly anchor offers its next dates, one per month', () => {
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-24' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).toEqual([
+      '2026-09-15',
+      '2026-10-15',
+      '2026-11-15',
+      '2026-12-15',
+      '2027-01-15',
+      '2027-02-15',
+      '2027-03-15',
+      '2027-04-15',
+      '2027-05-15',
+      '2027-06-15',
+      '2027-07-15',
+      '2027-08-15',
+    ])
+  })
+
+  it('REGRESSION: the control does not vanish the day after a monthly occurrence', () => {
+    // The defect four of six review lenses found. Under the 28-day horizon,
+    // upcomingOccurrenceDates('monthly', null, 15, '2026-08-16', 28) returned
+    // [] — measured — so with no outstanding generated instance the control
+    // returned null and the whole affordance disappeared from the row with no
+    // explanation, coming back two days later with no user action.
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-16' })
+    expect(screen.getByTestId('skip-m1')).toBeInTheDocument()
+    expect(
+      within(monthlySelect()).getByRole('option', { name: '2026-09-15' }),
+    ).toBeInTheDocument()
+  })
+
+  it('REGRESSION: a monthly anchor first due beyond the horizon can still be skipped', () => {
+    // The larger half, which no lens claimed and the refuter measured: for an
+    // anchor whose first due date is more than a horizon away, `from` is that
+    // future due date and a 28-day window still fell short of the NEXT
+    // occurrence — empty from 2026-08-01 through 2026-09-16, so roughly six
+    // weeks in which a member who set up a monthly chore could not skip
+    // anything. The anchor's own due date is deliberately not offered: that row
+    // IS the first occurrence, and removing it would remove the schedule.
+    setup({ chores: [{ ...monthlyAnchor, due_on: '2026-09-15' }], todayIso: '2026-08-01' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).not.toHaveLength(0)
+    expect(options[0]).toBe('2026-10-15')
+    expect(options).not.toContain('2026-09-15')
+  })
+
+  it('a monthly day-31 anchor offers the clamped date a short month really produces', () => {
+    // The clamp reaching the picker, not just the pass: February 2027 has no
+    // 31st, and what the household is offered has to be the date the schedule
+    // will actually create, or skipping it stores an exception for a day
+    // nothing fires on.
+    setup({
+      chores: [{ ...monthlyAnchor, due_on: '2027-01-31', repeat_monthday: 31 }],
+      todayIso: '2027-02-01',
+    })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options[0]).toBe('2027-02-28')
+    expect(options[1]).toBe('2027-03-31')
+    expect(options[2]).toBe('2027-04-30')
   })
 })

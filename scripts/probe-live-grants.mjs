@@ -203,6 +203,19 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'arw',
     source: '0024 (#54) — `w` is 0024’s; `ar` is 0012’s',
   }),
+  // `0026` (#103): the monthly day of the month, sitting in all three sets
+  // exactly as the pair above does — declared at creation, shown by the form,
+  // editable where the chore is edited. `check:live` CAN see the select half
+  // (`repeat_monthday` joins CHORE_COLUMNS, so the read answers `42703` until
+  // the apply), so this row's own letters are `a` and `w` — the halves only a
+  // catalog read can testify to. The negative control above is untouched on
+  // purpose, exactly as 0024 left it.
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_monthday',
+    privileges: 'arw',
+    source: '0026 (#103) — `aw` is what check:live cannot see; `r` it can',
+  }),
 ])
 
 /** The role every expectation above is about. */

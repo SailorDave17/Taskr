@@ -314,7 +314,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names, plus 0022, 0023 and 0024', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022 through 0026', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -341,6 +341,10 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // only instrument that can say whether it reached the project.
       'chores.repeat_kind=arw',
       'chores.repeat_weekdays=arw',
+      // 0026, story #103. The monthly day joins all three sets as the pair
+      // did; `check:live` sees only the select half (42703 until the apply),
+      // so the INSERT and UPDATE halves are this probe's alone.
+      'chores.repeat_monthday=arw',
     ])
   })
 })

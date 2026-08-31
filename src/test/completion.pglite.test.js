@@ -158,8 +158,9 @@ describe('completing a chore, run against a real Postgres', () => {
             and grantee = 'authenticated' and privilege_type = 'UPDATE'
           order by column_name`,
       )
-      // 0003's set plus 0015's `actual_minutes` (#12) and 0024's repeat pair
-      // (#54) — the set is the schema's, not this story's. What #35 claims is
+      // 0003's set plus 0015's `actual_minutes` (#12), 0024's repeat pair
+      // (#54) and 0026's monthly day (#103) — the set is the schema's, not
+      // this story's. What #35 claims is
       // that the two completion columns are NOT in it, asserted by name so the
       // point survives the next migration widening the list again.
       const writable = rows.map((r) => r.column_name)
@@ -170,6 +171,7 @@ describe('completing a chore, run against a real Postgres', () => {
         'due_on',
         'expected_minutes',
         'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'title',
       ])
@@ -188,11 +190,11 @@ describe('completing a chore, run against a real Postgres', () => {
       // completion columns being present, which is asserted by name below so the
       // point survives the next migration widening the list again.
       //
-      // It has now survived four of them, `source` (0023, #211) being the
-      // latest. Worth knowing before the fifth: this whole-set assertion is the
-      // SECOND copy of the readable set — chores.pglite.test.js AC 5 holds the
-      // other — so a migration that widens the grant reddens two tests in two
-      // files, and both are the same finding rather than two.
+      // It has now survived five of them, `repeat_monthday` (0026, #103) being
+      // the latest. Worth knowing before the sixth: this whole-set assertion is
+      // the SECOND copy of the readable set — chores.pglite.test.js AC 5 holds
+      // the other — so a migration that widens the grant reddens two tests in
+      // two files, and both are the same finding rather than two.
       const readable = rows.map((r) => r.column_name)
       expect(readable).toContain('completed_at')
       expect(readable).toContain('completed_by_member_id')
@@ -209,6 +211,7 @@ describe('completing a chore, run against a real Postgres', () => {
         'household_id',
         'id',
         'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'source',
         'title',

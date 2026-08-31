@@ -4,8 +4,11 @@ import ChoreDraftList from './ChoreDraftList.jsx'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
-  SKIP_OFFER_HORIZON_DAYS,
+  MONTHDAYS,
+  SKIP_OFFER_MAX_DATES,
+  SKIP_OFFER_SCAN_DAYS,
   WEEKDAYS,
+  ordinalOf,
   actualsSummary,
   describeRepeat,
   estimateSuggestion,
@@ -63,16 +66,16 @@ import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
  * sentence" testable: a boolean would let the UI invent its own wording, and
  * then the sentence a person reads would be untested.
  */
-function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays }) {
+function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, repeatMonthday }) {
   try {
     normalizeTitle(title)
     normalizeExpectedMinutes(expectedMinutes)
     normalizeDueDate(dueOn)
-    // #53/#54 — both forms' repeat is validated by the same function the data
-    // layer calls, for the reason above: the rules the constraint actually
-    // enforces live in one place. An occurrence row's editor passes no repeat
-    // fields and gets 'none' back, which is the no-op it means.
-    normalizeRepeat({ repeatKind, repeatWeekdays })
+    // #53/#54/#103 — both forms' repeat is validated by the same function the
+    // data layer calls, for the reason above: the rules the constraints
+    // actually enforce live in one place. An occurrence row's editor passes no
+    // repeat fields and gets 'none' back, which is the no-op it means.
+    normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday })
     return null
   } catch (err) {
     return err.message
@@ -80,15 +83,17 @@ function validate({ title, expectedMinutes, dueOn, repeatKind, repeatWeekdays })
 }
 
 /**
- * The schedule controls — a kind, then weekdays for weekly. ONE component for
- * the add form (#53) and the edit form (#54), because two copies of the
- * weekday checkboxes would be two vocabularies for one column pair.
+ * The schedule controls — a kind, then weekdays for weekly or a day of the
+ * month for monthly (#103). ONE component for the add form (#53) and the edit
+ * form (#54), because two copies of the schedule controls would be two
+ * vocabularies for one column set.
  *
- * Structured on the way in — #53 AC 6: free text has no field to arrive
- * through, and monthly is absent because it is #103, not because it was
- * forgotten.
+ * Structured on the way in — #53 AC 6, honoured by #103: a day-of-month
+ * CHOICE, never free text — there is no field a phrase could arrive through.
+ * Days 29–31 say the clamp beside the number, because a person picking the
+ * 31st is exactly the person who needs to know February still fires.
  */
-function RepeatControl({ kind, days, onKindChange, onDaysChange, context }) {
+function RepeatControl({ kind, days, monthday, onKindChange, onDaysChange, onMonthdayChange, context }) {
   return (
     <>
       <label className="field">
@@ -100,16 +105,39 @@ function RepeatControl({ kind, days, onKindChange, onDaysChange, context }) {
           onChange={(e) => {
             const next = e.target.value
             onKindChange(next)
-            // Days belong to weekly alone; leaving a stale selection behind
-            // would silently rearm if the person flips back.
+            // Days belong to weekly alone, the monthday to monthly alone;
+            // leaving a stale selection behind would silently rearm if the
+            // person flips back.
             if (next !== 'weekly') onDaysChange([])
+            if (next !== 'monthly') onMonthdayChange('')
           }}
         >
           <option value="none">Does not repeat</option>
           <option value="daily">Every day</option>
           <option value="weekly">Weekly, on&hellip;</option>
+          <option value="monthly">Monthly, on the&hellip;</option>
         </select>
       </label>
+      {kind === 'monthly' ? (
+        <label className="field">
+          <span className="field__label">Which day of the month</span>
+          <select
+            className="field__input"
+            value={monthday}
+            aria-label={
+              context ? `Which day of the month ${context} repeats on` : 'Which day of the month'
+            }
+            onChange={(e) => onMonthdayChange(e.target.value)}
+          >
+            <option value="">Pick a day&hellip;</option>
+            {MONTHDAYS.map((day) => (
+              <option key={day} value={String(day)}>
+                {day >= 29 ? `${ordinalOf(day)} (or last day of the month)` : ordinalOf(day)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {kind === 'weekly' ? (
         <fieldset className="field chore-weekdays">
           <legend className="field__label">Which days</legend>
@@ -139,8 +167,10 @@ function RepeatControl({ kind, days, onKindChange, onDaysChange, context }) {
 RepeatControl.propTypes = {
   kind: PropTypes.string.isRequired,
   days: PropTypes.array.isRequired,
+  monthday: PropTypes.string.isRequired,
   onKindChange: PropTypes.func.isRequired,
   onDaysChange: PropTypes.func.isRequired,
+  onMonthdayChange: PropTypes.func.isRequired,
   context: PropTypes.string,
 }
 
@@ -295,8 +325,8 @@ ExclusionControl.propTypes = {
  * WHAT IS OFFERED, and why it is a list rather than a date box: the dates of
  * outstanding instances the pass has already generated (skipping one removes
  * it — the ratified retroactivity rule, which is how "we're away next week"
- * still works after catch-up ran), then the schedule's upcoming dates inside
- * SKIP_OFFER_HORIZON_DAYS. A free date box would accept a date the schedule
+ * still works after catch-up ran), then the schedule's next dates, up to
+ * SKIP_OFFER_MAX_DATES of them. A free date box would accept a date the schedule
  * never visits and "succeed" — an inert row wearing a confirmation — where a
  * list can only offer dates that mean something. Dates already skipped are not
  * offered again.
@@ -319,15 +349,24 @@ function SkipControl({ chore, chores, repeatExceptions, todayIso, busy, onSkip }
   // schedule produces nothing at or before the anchor's own due date, so
   // offering from the later of (today, due date) offers only dates that exist.
   const from = todayIso >= chore.due_on ? todayIso : chore.due_on
+  // #103's review: scan far enough that a MONTHLY schedule yields dates at all,
+  // then cap the list at what a phone select can carry. A day-count horizon
+  // shorter than the period offered nothing for days at a time, and — for an
+  // anchor first due more than a horizon away — for weeks.
   const upcoming = upcomingOccurrenceDates(
     chore.repeat_kind,
     chore.repeat_weekdays,
+    chore.repeat_monthday,
     from,
-    SKIP_OFFER_HORIZON_DAYS,
+    SKIP_OFFER_SCAN_DAYS,
   )
+  // Sliced AFTER merging and sorting, so an already-generated date can never be
+  // pushed out of the list by future ones: those rows are real work sitting on
+  // somebody's list today, and they sort earliest.
   const offered = [...new Set([...generated, ...upcoming])]
     .filter((date) => !skipped.has(date))
     .sort()
+    .slice(0, SKIP_OFFER_MAX_DATES)
   // Feedback that a stored skip is real: without this line, skipping an
   // upcoming date changes nothing visible but the offer list. Spent dates
   // (today and older) are not restated — their effect is the row's absence.
@@ -547,6 +586,9 @@ function ChoreRow({
   const [dueOn, setDueOn] = useState(chore.due_on)
   const [editKind, setEditKind] = useState(chore.repeat_kind ?? 'none')
   const [editDays, setEditDays] = useState(chore.repeat_weekdays ?? [])
+  const [editMonthday, setEditMonthday] = useState(
+    chore.repeat_monthday != null ? String(chore.repeat_monthday) : '',
+  )
   const [complaint, setComplaint] = useState(null)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
@@ -573,6 +615,7 @@ function ChoreRow({
     setDueOn(chore.due_on)
     setEditKind(chore.repeat_kind ?? 'none')
     setEditDays(chore.repeat_weekdays ?? [])
+    setEditMonthday(chore.repeat_monthday != null ? String(chore.repeat_monthday) : '')
     setComplaint(null)
     setEditing(true)
   }
@@ -583,6 +626,7 @@ function ChoreRow({
     setDueOn(chore.due_on)
     setEditKind(chore.repeat_kind ?? 'none')
     setEditDays(chore.repeat_weekdays ?? [])
+    setEditMonthday(chore.repeat_monthday != null ? String(chore.repeat_monthday) : '')
     setComplaint(null)
     setEditing(false)
   }
@@ -601,10 +645,12 @@ function ChoreRow({
     const storedKind = chore.repeat_kind ?? 'none'
     const storedDays = [...(chore.repeat_weekdays ?? [])].sort((a, b) => a - b)
     const chosenDays = [...new Set(editDays)].sort((a, b) => a - b)
+    const storedMonthday = chore.repeat_monthday != null ? String(chore.repeat_monthday) : ''
     return (
       editKind !== storedKind ||
       chosenDays.length !== storedDays.length ||
-      chosenDays.some((d, i) => d !== storedDays[i])
+      chosenDays.some((d, i) => d !== storedDays[i]) ||
+      editMonthday !== storedMonthday
     )
   }
 
@@ -617,11 +663,14 @@ function ChoreRow({
           onSubmit={(e) => {
             e.preventDefault()
             const withRepeat = !isOccurrence && repeatChanged()
+            const repeatFields = withRepeat
+              ? { repeatKind: editKind, repeatWeekdays: editDays, repeatMonthday: editMonthday }
+              : {}
             const problem = validate({
               title,
               expectedMinutes: minutes,
               dueOn,
-              ...(withRepeat ? { repeatKind: editKind, repeatWeekdays: editDays } : {}),
+              ...repeatFields,
             })
             if (problem) {
               setComplaint(problem)
@@ -632,7 +681,7 @@ function ChoreRow({
               title,
               expectedMinutes: minutes,
               dueOn,
-              ...(withRepeat ? { repeatKind: editKind, repeatWeekdays: editDays } : {}),
+              ...repeatFields,
             }).then(() => setEditing(false), () => {})
           }}
         >
@@ -676,8 +725,10 @@ function ChoreRow({
             <RepeatControl
               kind={editKind}
               days={editDays}
+              monthday={editMonthday}
               onKindChange={setEditKind}
               onDaysChange={setEditDays}
+              onMonthdayChange={setEditMonthday}
               context={chore.title}
             />
           ) : null}
@@ -927,6 +978,7 @@ export default function Chores({
   // evening of data entry, which is the universal killer the field scan names.
   const [repeatKind, setRepeatKind] = useState('none')
   const [repeatDays, setRepeatDays] = useState([])
+  const [repeatMonthday, setRepeatMonthday] = useState('')
   const [complaint, setComplaint] = useState(null)
 
   // #220 — enter several chores in one pass. The single form above stays the
@@ -1150,6 +1202,7 @@ export default function Chores({
             dueOn,
             repeatKind,
             repeatWeekdays: repeatDays,
+            repeatMonthday,
           })
           if (problem) {
             // AC 2: the refusal happens here, before onAdd is ever called, so a
@@ -1158,13 +1211,21 @@ export default function Chores({
             return
           }
           setComplaint(null)
-          onAdd({ title, expectedMinutes: minutes, dueOn, repeatKind, repeatWeekdays: repeatDays }).then(
+          onAdd({
+            title,
+            expectedMinutes: minutes,
+            dueOn,
+            repeatKind,
+            repeatWeekdays: repeatDays,
+            repeatMonthday,
+          }).then(
             () => {
               setTitle('')
               setMinutes('')
               setDueOn('')
               setRepeatKind('none')
               setRepeatDays([])
+              setRepeatMonthday('')
             },
             () => {},
           )
@@ -1207,8 +1268,10 @@ export default function Chores({
         <RepeatControl
           kind={repeatKind}
           days={repeatDays}
+          monthday={repeatMonthday}
           onKindChange={setRepeatKind}
           onDaysChange={setRepeatDays}
+          onMonthdayChange={setRepeatMonthday}
         />
         {complaint ? (
           <p className="error" role="alert">

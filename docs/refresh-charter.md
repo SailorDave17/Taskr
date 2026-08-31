@@ -421,6 +421,39 @@ recorded in the decision log". This is that record.
   widening of a three-day story for a message whose whole content is "less work appeared than you
   might have expected".
 
+**AMENDED 2026-08-31 by the decision below — the seven days above now govern daily and weekly
+only.** Nothing in this entry was wrong when written; its subject grew. Two of its clauses have
+expired and are corrected there rather than edited away here: the authority is now `0026`, not
+`0012`, and the UI sentence no longer names the number at all.
+
+## Decision taken 2026-08-31 — the catch-up bound is KIND-DEPENDENT
+
+Owner decision at the commit gate of #103, taken on an escalation raised by that story's review
+fan-out. The bound above was ratified on 2026-08-24 when the only schedule kinds were daily and
+weekly; #103 added monthly and would have put it under the same seven days without anyone deciding
+that it should be.
+
+- **Seven days for daily and weekly — unchanged — and ONE MONTH for monthly.** The authority is the
+  pair of constants in `catch_up_repeats_at`, now in
+  `supabase/migrations/0026_repeat_monthly.sql`; `src/lib/chores.js` carries both, and
+  `repeats.pglite.test.js` holds all four copies equal.
+- **Why**: seven days costs a daily or weekly schedule at most a week of chores, which is the
+  reasoning above and still holds. For a monthly schedule the same number silently drops the
+  **entire occurrence** — a household that does not open the app within a week of rent day loses
+  rent day, with no row, no notice they can act on, and a skipped-count sentence that was worded for
+  a week. One interval means a missed monthly occurrence is caught up if it fired within the last
+  month and skipped if a further month has passed, so the bound keeps its purpose and changes its
+  units.
+- **Rejected**: keeping seven universally (cheapest, no code, and accepts the silent drop — refused
+  because the feature's headline case is a bill chore); and exempting monthly from the bound
+  entirely (simplest to reason about, at the cost of a chore dated weeks ago appearing as new work,
+  which is the walk-in pile the original decision exists to prevent).
+- **What it cost elsewhere**: the notice sentence stopped naming a window. The pass returns one
+  skipped count across every schedule it walked, so any single number in that sentence is wrong for
+  a household running both a daily and a monthly repeat — and it is the monthly case, the one
+  likeliest to be skipped, that the old wording described worst. Both constants remain exported and
+  unrendered, as the client-side record this log points at.
+
 ## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
 
 Owner decision at the pickup of #47, whose criterion 11 required "the navigation approach chosen is

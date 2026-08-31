@@ -112,6 +112,7 @@ export const MIGRATIONS = [
   '0023_chore_provenance.sql',
   '0024_edit_or_stop_a_repeat.sql',
   '0025_skip_a_single_occurrence.sql',
+  '0026_repeat_monthly.sql',
 ]
 
 export function migrationSql(name) {

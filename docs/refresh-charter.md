@@ -279,14 +279,46 @@ satisfies "fairness is seen" without a number having to be read.
    "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
    is in minutes, because that is the unit the fairness claim is made in.
 
-### Open caveat, carried rather than closed
+### Caveat closed 2026-08-31 — the mismatch did not reproduce
 
 The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
 no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
-prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
-**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
-it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
-looked at on a phone before it is called done.**
+prototype's own CSS was not implicated and the leading suspect was the viewer it was delivered in.
+**Mechanism never established.** It did not block that gate (judged in the browser, owner's call) and
+it was not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.** That story is #47, the load surface, and #48 is the
+look.
+
+**It did not reproduce.** *Measured 2026-08-31* against the shipped load surface on
+<https://taskr.madcowhq.com>, one household, both sides confirmed on `build 28a757e` — read off the
+running page, not off the deploy — with the same two members and the same chores:
+
+| | phone | desktop browser |
+|---|---|---|
+| client | Samsung SM-S918U, Android 16, Chrome 151 | Chrome, 360 px viewport |
+| viewport | 384 CSS px, DPR 2.8125 | 360 CSS px, DPR 1 |
+| off-level statement | identical | identical |
+| per-member figures | identical | identical |
+| bar fill, declared and measured | 54% and 12% | 54% and 12% |
+| horizontal scroll | none | none |
+| elements past either edge | 0 | 0 |
+
+Every semantic field matched. The only differences were pixel widths, and they are accounted for
+exactly by viewport width plus the **15 px scrollbar gutter** a desktop browser reserves and mobile
+Chrome overlays: a control at a matched nominal 384 px gave a 287 px bar against the phone's 302.58,
+a difference of 15.58. Fill *ratios* were identical across all three measurements, which is the
+claim the surface actually makes.
+
+What is closed is the caveat as the charter framed it — *does the shipped surface render differently
+on a phone*. The original prototype's mechanism was never established and now cannot be, because the
+prototype is gone; that is recorded as unresolved rather than answered.
+
+**What this check nearly got wrong.** The desktop browser first reported `build cab59d9` while the
+phone reported `28a757e` — the same URL in the same minute, serving builds three days apart, because
+a stale workbox service worker in the automation browser's persistent profile was answering from its
+precache. Had the build not been read off the running page first, two different builds would have
+been compared and any difference between them attributed to this caveat. The first read of any
+on-device verification is *is this the build I think it is*, and it is answered from the running page.
 
 ## Consequences for the backlog
 

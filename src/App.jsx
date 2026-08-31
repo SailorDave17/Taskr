@@ -25,8 +25,11 @@ import {
   completeChore,
   formatSkippedNotice,
   listChores,
+  listRepeatExceptions,
+  localTodayIn,
   recordActualMinutes,
   removeChore,
+  skipRepeatOccurrence,
   unassignChore,
   uncompleteChore,
   updateChore,
@@ -106,6 +109,10 @@ export default function App() {
   // over the rows where it needs them, so there is one representation and no
   // second copy to fall out of step with the first.
   const [exclusions, setExclusions] = useState([])
+  // #105 — which dates the household's repeats will NOT generate. Server state
+  // like the exclusions above, and the same one-representation rule: the chore
+  // screen folds over the rows to decide what to offer and what to say.
+  const [repeatExceptions, setRepeatExceptions] = useState([])
   // #95 — who in this household has connected a Google Calendar. Server state
   // like everything else here, read through the same refresh. The rows carry no
   // credential: the refresh token is in `calendar_tokens`, which this client is
@@ -183,6 +190,14 @@ export default function App() {
     // another phone recorded is on this screen after the next mutation for the
     // same reason the roster is: there is no cache to be stale.
     setExclusions(found ? await listExclusions(memberIds) : [])
+    // #105 — the skipped dates, read on every refresh like the exclusions
+    // above. Scoped by the ANCHOR ids out of the chores just read, because only
+    // an anchor can carry an exception and `household_id` is deliberately not
+    // in this table's select grant (0025's reasoning).
+    const anchorIds = choreRows
+      .filter((c) => c.repeat_kind && c.repeat_kind !== 'none')
+      .map((c) => c.id)
+    setRepeatExceptions(found && anchorIds.length ? await listRepeatExceptions(anchorIds) : [])
     // #95 AC 5 — "Calendar connected" is derived from a SERVER read on every
     // refresh, exactly like the roster. A locally remembered flag would show
     // connected on the phone that pressed the button and nothing on the phone
@@ -589,6 +604,14 @@ export default function App() {
     (choreId, memberId) => mutate(() => allowMember(choreId, memberId)),
     [mutate],
   )
+  // #105 — skip one occurrence of a repeat. An RPC for access rather than the
+  // clock: the exception table has no client write privilege at all, and the
+  // ratified retroactivity rule (uncompleted instance goes, completed stays)
+  // is applied inside the function where no caller can take half of it.
+  const handleSkipOccurrence = useCallback(
+    (choreId, date) => mutate(() => skipRepeatOccurrence(choreId, date)),
+    [mutate],
+  )
   // #46 — set or clear THIS period's capacity. Both take the period from state
   // rather than recomputing it, so the write lands in the same week the screen
   // is showing even if midnight passes mid-session.
@@ -810,6 +833,8 @@ export default function App() {
           chores={chores}
           members={members}
           exclusions={exclusions}
+          repeatExceptions={repeatExceptions}
+          todayIso={household ? localTodayIn(household.timezone) : null}
           busy={busy}
           error={error}
           onAdd={handleAddChore}
@@ -822,6 +847,7 @@ export default function App() {
           onUnassign={handleUnassignChore}
           onExclude={handleExcludeMember}
           onAllow={handleAllowMember}
+          onSkip={handleSkipOccurrence}
           onRecordActual={handleRecordActual}
         />
       ) : null}

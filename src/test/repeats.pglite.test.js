@@ -27,7 +27,13 @@ import {
   migrationSql,
   newDevice,
 } from './support/pgliteSupabase.js'
-import { CATCH_UP_BOUND_DAYS } from '../lib/chores.js'
+import {
+  CATCH_UP_BOUND_DAYS,
+  outstandingMinutes,
+  toAllocatorChores,
+  upcomingOccurrenceDates,
+} from '../lib/chores.js'
+import { assess } from '../lib/allocation.js'
 
 // 2026-08-24 is a Monday; every date below is derived from that anchor, and
 // getting one wrong fails loudly because the assertions name exact dates.
@@ -1031,6 +1037,364 @@ describe('a chore that repeats, run against a real Postgres', () => {
   })
 
   // -------------------------------------------------------------------------
+  // #105 — skipping a single occurrence
+  // -------------------------------------------------------------------------
+
+  describe('#105 — skipping a single occurrence', () => {
+    /**
+     * The skip through the CLIENT path: `skip_repeat_occurrence` is granted to
+     * `authenticated`, so unlike `catch_up_repeats_at` it runs under the role
+     * with the caller identity coming from auth.uid() — exactly what PostgREST
+     * does with the app's `.rpc()` call.
+     */
+    const skipAsClient = (uid, choreId, date) =>
+      asDevice(db, uid, async () => {
+        const { rows } = await db.query(
+          'select public.skip_repeat_occurrence($1, $2::date) as removed',
+          [choreId, date],
+        )
+        return rows[0].removed
+      })
+
+    /** The exception dates the CLIENT can read back — the granted columns. */
+    const skippedDatesAsClient = (uid, choreId) =>
+      asDevice(db, uid, async () => {
+        const { rows } = await db.query(
+          `select to_char(excluded_on, 'YYYY-MM-DD') as excluded_on
+           from public.chore_repeat_exceptions where chore_id = $1 order by excluded_on`,
+          [choreId],
+        )
+        return rows.map((r) => r.excluded_on)
+      })
+
+    /** The household's chores in the client's column shapes, as the owner. */
+    const weekRows = async (householdId) => {
+      const { rows } = await db.query(
+        `select id, expected_minutes, actual_minutes, assigned_member_id, completed_at
+         from public.chores where household_id = $1`,
+        [householdId],
+      )
+      return rows
+    }
+
+    const versionOf = async (householdId) => {
+      const { rows } = await db.query(
+        'select assignments_version from public.households where id = $1',
+        [householdId],
+      )
+      return Number(rows[0].assignments_version)
+    }
+
+    describe('AC 2 — an upcoming occurrence is skipped', () => {
+      it('stores the exception structurally, and that household-local date generates no instance', async () => {
+        const parent = await trashSinceLastMonday()
+
+        const removed = await skipAsClient(deviceA, parent.id, MONDAY)
+        expect(removed).toBe(0)
+        expect(await skippedDatesAsClient(deviceA, parent.id)).toEqual([MONDAY])
+
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(0)
+        expect(await occurrenceDates(parent.id)).toEqual([])
+      })
+
+      it('an exception for a FUTURE date leaves the assignments version alone — nothing allocatable moved', async () => {
+        const parent = await trashSinceLastMonday()
+        const before = await versionOf(householdA.id)
+        await skipAsClient(deviceA, parent.id, '2026-08-31')
+        expect(await versionOf(householdA.id)).toBe(before)
+      })
+    })
+
+    describe('AC 3 — catch-up runs past a stored exception', () => {
+      it('the date stays empty, the neighbours generate, and the double-fire proof still holds', async () => {
+        // The #53 AC 3 fixture: a daily repeat switched on the 21st owes the
+        // 22nd, 23rd and 24th. Sunday the 23rd is skipped before any of them
+        // exist.
+        const chore = await addChore(deviceA, householdA.id, {
+          title: 'Dishes',
+          due: '2026-08-10',
+          kind: 'daily',
+        })
+        await backdate(chore.id, { since: '2026-08-21' })
+        await skipAsClient(deviceA, chore.id, '2026-08-23')
+
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(2)
+        expect(await occurrenceDates(chore.id)).toEqual(['2026-08-22', '2026-08-24'])
+
+        // Run again, then simulate the double-fire exactly as the #53 proof
+        // does — watermark wiped, pass re-run. The skipped date must not
+        // resurrect under either, and the unique index still owns exactly-once
+        // for the dates that DO exist.
+        const rerun = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(rerun.created_count).toBe(0)
+        await db.query('update public.chores set repeat_caught_up_through = null where id = $1', [
+          chore.id,
+        ])
+        const doubleFire = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(doubleFire.created_count).toBe(0)
+        expect(await occurrenceDates(chore.id)).toEqual(['2026-08-22', '2026-08-24'])
+      })
+
+      it('a deliberately skipped date is not announced as a missed occurrence', async () => {
+        // The #53 AC 4 fixture: five weeks of silence owes 28 skipped
+        // announcements. One of the beyond-bound dates was skipped on purpose,
+        // so the household is told about 27 — their own choice is not a gap.
+        const chore = await addChore(deviceA, householdA.id, {
+          title: 'Dishes',
+          due: '2026-07-20',
+          kind: 'daily',
+        })
+        await backdate(chore.id, { since: '2026-07-20' })
+        await skipAsClient(deviceA, chore.id, '2026-08-10')
+
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(7)
+        expect(pass.skipped_count).toBe(27)
+      })
+    })
+
+    describe('AC 1 — the ratified retroactivity rule, both sides of its boundary', () => {
+      it('an uncompleted generated instance is removed, and its minutes leave the week', async () => {
+        const parent = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+        const [made] = await occurrenceRows(parent.id)
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.assign_chore($1, $2)', [made.id, memberTwoA]),
+        )
+
+        // The committed-minutes derivations the app actually renders: the
+        // week total (outstandingMinutes) and the member's open load
+        // (allocation.assess over toAllocatorChores). Both must move.
+        const before = await weekRows(householdA.id)
+        const members = [{ id: memberTwoA, capacityMinutes: 300 }]
+        const beforeTotal = outstandingMinutes(before)
+        const beforeOpen = assess({ members, chores: toAllocatorChores(before) }).load[0].openMinutes
+        expect(beforeOpen).toBe(10)
+        const versionBefore = await versionOf(householdA.id)
+
+        const removed = await skipAsClient(deviceA, parent.id, MONDAY)
+        expect(removed).toBe(1)
+        expect(await occurrenceDates(parent.id)).toEqual([])
+
+        const after = await weekRows(householdA.id)
+        expect(outstandingMinutes(after)).toBe(beforeTotal - 10)
+        expect(assess({ members, chores: toAllocatorChores(after) }).load[0].openMinutes).toBe(0)
+        // The removal is an allocator-input change, and the chores delete
+        // trigger from 0018 says so — no trigger on the exception table needed.
+        expect(await versionOf(householdA.id)).toBeGreaterThan(versionBefore)
+      })
+
+      it('a completed instance stays as history — the skip removes nothing and the week is unmoved', async () => {
+        const parent = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+        const [made] = await occurrenceRows(parent.id)
+        await asDevice(db, deviceA, () =>
+          db.query('select * from public.complete_chore($1)', [made.id]),
+        )
+
+        const beforeTotal = outstandingMinutes(await weekRows(householdA.id))
+        const removed = await skipAsClient(deviceA, parent.id, MONDAY)
+        expect(removed).toBe(0)
+
+        const { rows } = await db.query(
+          'select completed_at is not null as done from public.chores where id = $1',
+          [made.id],
+        )
+        expect(rows).toHaveLength(1)
+        expect(rows[0].done).toBe(true)
+        expect(outstandingMinutes(await weekRows(householdA.id))).toBe(beforeTotal)
+        // The exception is still stored: the date is done AND skipped, which
+        // costs nothing and keeps the fact a member stated.
+        expect(await skippedDatesAsClient(deviceA, parent.id)).toEqual([MONDAY])
+      })
+    })
+
+    describe('AC 5 — one date, not a stop', () => {
+      it('after the skipped date passes, the next occurrence generates normally', async () => {
+        const anchor = await addChore(deviceA, householdA.id, {
+          title: 'Dishes',
+          due: FRIDAY_BEFORE,
+          kind: 'daily',
+        })
+        await backdate(anchor.id, { since: FRIDAY_BEFORE })
+        await skipAsClient(deviceA, anchor.id, '2026-08-23')
+
+        const sunday = await runAt(deviceA, SUNDAY_AFTERNOON)
+        expect(sunday.created_count).toBe(1)
+        expect(await occurrenceDates(anchor.id)).toEqual(['2026-08-22'])
+
+        const monday = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(monday.created_count).toBe(1)
+        expect(await occurrenceDates(anchor.id)).toEqual(['2026-08-22', '2026-08-24'])
+      })
+
+      it("#54's stop path is untouched: switching off after a skip still deletes nothing", async () => {
+        const anchor = await addChore(deviceA, householdA.id, {
+          title: 'Dishes',
+          due: FRIDAY_BEFORE,
+          kind: 'daily',
+        })
+        await backdate(anchor.id, { since: FRIDAY_BEFORE })
+        await runAt(deviceA, SUNDAY_AFTERNOON)
+        await skipAsClient(deviceA, anchor.id, '2026-08-24')
+
+        await asDevice(db, deviceA, () =>
+          db.query(
+            `update public.chores set repeat_kind = 'none', repeat_weekdays = null where id = $1`,
+            [anchor.id],
+          ),
+        )
+        const pass = await runAt(deviceA, MONDAY_AFTERNOON)
+        expect(pass.created_count).toBe(0)
+        expect(await occurrenceDates(anchor.id)).toEqual(['2026-08-22', '2026-08-23'])
+      })
+    })
+
+    describe('what may be skipped, and by whom', () => {
+      it('skipping the same date twice is the same fact — both calls succeed, one row stands', async () => {
+        const parent = await trashSinceLastMonday()
+        await skipAsClient(deviceA, parent.id, MONDAY)
+        await skipAsClient(deviceA, parent.id, MONDAY)
+        expect(await skippedDatesAsClient(deviceA, parent.id)).toEqual([MONDAY])
+      })
+
+      it('the constraint itself refuses a duplicate row, by name', async () => {
+        const parent = await trashSinceLastMonday()
+        await skipAsClient(deviceA, parent.id, MONDAY)
+        const dup = await attempt(() =>
+          db.query(
+            `insert into public.chore_repeat_exceptions (household_id, chore_id, excluded_on)
+             values ($1, $2, $3)`,
+            [householdA.id, parent.id, MONDAY],
+          ),
+        )
+        expect(dup.ok).toBe(false)
+        expect(dup.error).toMatch(/chore_repeat_exceptions_one_per_date/)
+      })
+
+      it('the skip is refused unauthenticated', async () => {
+        const parent = await trashSinceLastMonday()
+        const result = await attempt(() => skipAsClient(null, parent.id, MONDAY))
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/not authenticated/)
+      })
+
+      it("a member cannot skip another household's chore", async () => {
+        const parent = await trashSinceLastMonday()
+        const result = await attempt(() => skipAsClient(deviceB, parent.id, MONDAY))
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/No such chore in this household/)
+      })
+
+      it('a chore that does not repeat is refused with a sentence', async () => {
+        const plain = await addChore(deviceA, householdA.id, { title: 'Once', due: MONDAY })
+        const result = await attempt(() => skipAsClient(deviceA, plain.id, MONDAY))
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/does not repeat/)
+      })
+
+      it('a generated occurrence is refused too — its dates are skipped from the anchor', async () => {
+        const parent = await trashSinceLastMonday()
+        await runAt(deviceA, MONDAY_AFTERNOON)
+        const [made] = await occurrenceRows(parent.id)
+        const result = await attempt(() => skipAsClient(deviceA, made.id, MONDAY))
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/does not repeat/)
+      })
+    })
+
+    describe('grants and scope — the single-writer model', () => {
+      it('the client holds no write privilege of any kind on the exception table', async () => {
+        const parent = await trashSinceLastMonday()
+        const writes = [
+          [
+            'insert',
+            `insert into public.chore_repeat_exceptions (household_id, chore_id, excluded_on)
+             values ('${householdA.id}', '${parent.id}', '${MONDAY}')`,
+          ],
+          ['update', `update public.chore_repeat_exceptions set excluded_on = '${MONDAY}'`],
+          ['delete', 'delete from public.chore_repeat_exceptions'],
+        ]
+        for (const [verb, sql] of writes) {
+          const result = await attempt(() => asDevice(db, deviceA, () => db.query(sql)))
+          expect(result.ok, `${verb} must be refused for the client role`).toBe(false)
+          expect(result.error).toMatch(/permission denied/)
+        }
+      })
+
+      it('the client reads exactly the granted columns — household_id is not one', async () => {
+        const parent = await trashSinceLastMonday()
+        await skipAsClient(deviceA, parent.id, MONDAY)
+
+        const granted = await attempt(() =>
+          asDevice(db, deviceA, () =>
+            db.query(
+              'select id, chore_id, excluded_on, created_at from public.chore_repeat_exceptions',
+            ),
+          ),
+        )
+        expect(granted.ok).toBe(true)
+
+        const withheld = await attempt(() =>
+          asDevice(db, deviceA, () =>
+            db.query('select household_id from public.chore_repeat_exceptions'),
+          ),
+        )
+        expect(withheld.ok).toBe(false)
+        expect(withheld.error).toMatch(/permission denied/)
+      })
+
+      it("row-level security keeps one household's skips off another household's screen", async () => {
+        const parent = await trashSinceLastMonday()
+        await skipAsClient(deviceA, parent.id, MONDAY)
+        expect(await skippedDatesAsClient(deviceA, parent.id)).toEqual([MONDAY])
+        expect(await skippedDatesAsClient(deviceB, parent.id)).toEqual([])
+      })
+
+      it('anon may not execute the skip — the by-name revoke is load-bearing', async () => {
+        const parent = await trashSinceLastMonday()
+        await db.exec('set role anon')
+        try {
+          const result = await attempt(() =>
+            db.query('select public.skip_repeat_occurrence($1, $2::date)', [parent.id, MONDAY]),
+          )
+          expect(result.ok).toBe(false)
+          expect(result.error).toMatch(/permission denied/)
+        } finally {
+          await db.exec('reset role')
+        }
+      })
+    })
+
+    describe('the offer-list mirror', () => {
+      it('upcomingOccurrenceDates agrees with the SQL schedule function it mirrors', async () => {
+        // The SQL is the authority on what the pass creates; the JS copy only
+        // decides what the picker offers. This is the binding that keeps the
+        // two from drifting apart silently — same interval convention, same
+        // ISO weekdays, exercised on a weekly set AND a daily run.
+        const until = '2026-09-21' // MONDAY + 28 days
+        const { rows: weekly } = await db.query(
+          `select to_char(d, 'YYYY-MM-DD') as d
+           from public.repeat_occurrence_dates('weekly', '{1,4}'::smallint[], $1, $2) as s(d)`,
+          [MONDAY, until],
+        )
+        expect(upcomingOccurrenceDates('weekly', [1, 4], MONDAY, 28)).toEqual(
+          weekly.map((r) => r.d),
+        )
+
+        const { rows: daily } = await db.query(
+          `select to_char(d, 'YYYY-MM-DD') as d
+           from public.repeat_occurrence_dates('daily', null, $1, $2) as s(d)`,
+          [MONDAY, until],
+        )
+        expect(upcomingOccurrenceDates('daily', null, MONDAY, 28)).toEqual(daily.map((r) => r.d))
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Re-runnability — a re-paste is the normal path
   // -------------------------------------------------------------------------
 
@@ -1040,6 +1404,16 @@ describe('a chore that repeats, run against a real Postgres', () => {
       await through.exec(migrationSql('0012_repeating_chores.sql'))
       const { rows } = await through.query(
         `select count(*)::int as n from pg_constraint where conname = 'chores_repeat_kind_known'`,
+      )
+      expect(rows[0].n).toBe(1)
+    })
+
+    it('re-pasting 0025 onto a database that already has it is a no-op', async () => {
+      const through = await databaseThrough('0025_skip_a_single_occurrence.sql')
+      await through.exec(migrationSql('0025_skip_a_single_occurrence.sql'))
+      const { rows } = await through.query(
+        `select count(*)::int as n from pg_constraint
+          where conname = 'chore_repeat_exceptions_one_per_date'`,
       )
       expect(rows[0].n).toBe(1)
     })

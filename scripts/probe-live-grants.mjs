@@ -442,6 +442,14 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // households no table-level grant, members `d` — the values below, read back
   // from the catalog. The pre-paste readings are kept rather than deleted,
   // because a measurement with no successor reads as one nobody took.
+  // #105, arriving with `0025`, which revokes wholesale and grants select by
+  // column — so the expected table-level reading is an absence, like
+  // `member_split_seen` below. The client holds NO write privilege of any kind
+  // here: `skip_repeat_occurrence` (definer) is the single writer, so a
+  // table-level letter appearing for `authenticated` would mean a later
+  // migration widened the write model, which is exactly what this control
+  // exists to report.
+  Object.freeze({ table: 'chore_repeat_exceptions', authenticated: null }),
   Object.freeze({ table: 'chores', authenticated: 'd' }),
   Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),

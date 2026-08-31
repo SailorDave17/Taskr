@@ -179,6 +179,14 @@ export function normalizeActualMinutes(value) {
 export { normalizeDueDate }
 
 /**
+ * The skip picker's date arithmetic — #105, re-exported from dueDates.js for
+ * normalizeDueDate's reason: one implementation, living in the leaf module, so
+ * the schedule mirror and the due-date rules cannot drift apart by having two
+ * homes.
+ */
+export { localTodayIn, upcomingOccurrenceDates } from './dueDates.js'
+
+/**
  * A schedule the columns will accept — #53 AC 6: structured, never free text.
  *
  * Takes the form's shape (`repeatKind` + `repeatWeekdays`) and returns the two
@@ -467,6 +475,70 @@ export function formatSkippedNotice(skipped) {
   return (
     `${what} more than ${CATCH_UP_BOUND_DAYS} days old ` +
     `${n === 1 ? 'was' : 'were'} skipped rather than piled onto this week.`
+  )
+}
+
+/**
+ * How far ahead the skip picker offers dates, in days — #105.
+ *
+ * Presentation only: the exception table takes any date, and the pass honours
+ * whatever is stored. Four weeks covers "we're away next week" with the whole
+ * gap visible in one list, and caps a daily repeat's offer at 28 options —
+ * a native select handles that on a phone where a longer list would not earn
+ * its scroll.
+ */
+export const SKIP_OFFER_HORIZON_DAYS = 28
+
+// The columns a client may read, matching the select grant in 0025 exactly.
+// `household_id` stays absent and a wildcard select still fails loudly here —
+// 0010's reasoning, restated in 0025.
+export const REPEAT_EXCEPTION_COLUMNS = 'id, chore_id, excluded_on, created_at'
+
+/**
+ * Every exception date this household's repeating chores carry — #105.
+ *
+ * Scoped by ANCHOR ids rather than a household id, because `household_id` is
+ * deliberately not in the select grant (0025) — the same shape as
+ * `listExclusions`, which scopes by the member set for the same reason. Only
+ * anchors can carry exceptions, so the caller passes the anchor ids it is
+ * showing and the list stays as small as the household's schedules.
+ */
+export async function listRepeatExceptions(anchorIds) {
+  if (!Array.isArray(anchorIds)) {
+    throw new Error('Which repeats? An exception read must name their anchor chores.')
+  }
+  if (anchorIds.length === 0) return []
+  return (
+    unwrap(
+      await getSupabase()
+        .from('chore_repeat_exceptions')
+        .select(REPEAT_EXCEPTION_COLUMNS)
+        .in('chore_id', anchorIds),
+      'loading the skipped dates',
+    ) ?? []
+  )
+}
+
+/**
+ * Skip one occurrence of a repeating chore — #105.
+ *
+ * Through an RPC for the house's ACCESS reason in its strongest form: the
+ * client holds no write privilege on the exception table at all, so this is
+ * not the preferred path but the only one. The function stores the exception
+ * AND removes that date's uncompleted generated instance in one transaction —
+ * the ratified retroactivity rule (uncompleted goes, completed stays as
+ * history) lives in `0025` where no client can apply half of it.
+ *
+ * Returns the number of instance rows removed (0 for an upcoming date, 1 when
+ * catch-up had already generated the occurrence). Callers refresh afterwards
+ * like every other mutation, so the value is informational.
+ */
+export async function skipRepeatOccurrence(choreId, skipDate) {
+  if (!choreId) throw new Error('Which repeating chore is being skipped?')
+  const date = normalizeDueDate(skipDate)
+  return unwrap(
+    await getSupabase().rpc('skip_repeat_occurrence', { chore_id: choreId, skip_date: date }),
+    'skipping that date',
   )
 }
 

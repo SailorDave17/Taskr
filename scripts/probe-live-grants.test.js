@@ -141,6 +141,7 @@ describe('what it asks for — AC 3', () => {
       'chore_exclusions',
       'calendar_connections',
       'member_split_seen',
+      'chore_repeat_exceptions',
     ])
   })
 

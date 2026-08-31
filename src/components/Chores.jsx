@@ -4,6 +4,7 @@ import ChoreDraftList from './ChoreDraftList.jsx'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
+  SKIP_OFFER_HORIZON_DAYS,
   WEEKDAYS,
   actualsSummary,
   describeRepeat,
@@ -16,6 +17,7 @@ import {
   normalizeRepeat,
   normalizeTitle,
   outstandingMinutes,
+  upcomingOccurrenceDates,
 } from '../lib/chores.js'
 import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
 
@@ -283,6 +285,103 @@ ExclusionControl.propTypes = {
 }
 
 /**
+ * Skip one occurrence of a repeat — #105.
+ *
+ * ExclusionControl's shape on purpose: a select CONTROLLED AT THE EMPTY VALUE,
+ * an action rather than a state, on the anchor row where the schedule already
+ * lives. The state it changes is read back from the server on the next
+ * refresh, like everything else here.
+ *
+ * WHAT IS OFFERED, and why it is a list rather than a date box: the dates of
+ * outstanding instances the pass has already generated (skipping one removes
+ * it — the ratified retroactivity rule, which is how "we're away next week"
+ * still works after catch-up ran), then the schedule's upcoming dates inside
+ * SKIP_OFFER_HORIZON_DAYS. A free date box would accept a date the schedule
+ * never visits and "succeed" — an inert row wearing a confirmation — where a
+ * list can only offer dates that mean something. Dates already skipped are not
+ * offered again.
+ *
+ * A COMPLETED occurrence's date is not offered: completed work is history, the
+ * skip function would remove nothing, and offering it would read as a way to
+ * un-do work. The anchor's own due date is not offered either — the anchor row
+ * IS that occurrence, and removing it would be removing the schedule.
+ */
+function SkipControl({ chore, chores, repeatExceptions, todayIso, busy, onSkip }) {
+  if (!todayIso) return null
+
+  const skipped = new Set(
+    repeatExceptions.filter((x) => x.chore_id === chore.id).map((x) => x.excluded_on),
+  )
+  const generated = new Set(
+    chores.filter((c) => c.generated_from === chore.id && isOutstanding(c)).map((c) => c.due_on),
+  )
+  // ISO strings order lexicographically, so max() is a string comparison. The
+  // schedule produces nothing at or before the anchor's own due date, so
+  // offering from the later of (today, due date) offers only dates that exist.
+  const from = todayIso >= chore.due_on ? todayIso : chore.due_on
+  const upcoming = upcomingOccurrenceDates(
+    chore.repeat_kind,
+    chore.repeat_weekdays,
+    from,
+    SKIP_OFFER_HORIZON_DAYS,
+  )
+  const offered = [...new Set([...generated, ...upcoming])]
+    .filter((date) => !skipped.has(date))
+    .sort()
+  // Feedback that a stored skip is real: without this line, skipping an
+  // upcoming date changes nothing visible but the offer list. Spent dates
+  // (today and older) are not restated — their effect is the row's absence.
+  const upcomingSkipped = [...skipped].filter((date) => date > todayIso).sort()
+
+  if (offered.length === 0 && upcomingSkipped.length === 0) return null
+
+  return (
+    <div className="chore__skip" data-testid={`skip-${chore.id}`}>
+      {offered.length > 0 ? (
+        <label className="chore__skip-add">
+          <span className="field__label">Skip a date</span>
+          <select
+            className="field__input"
+            value=""
+            disabled={busy}
+            aria-label={`Skip one date ${chore.title} repeats on`}
+            onChange={(e) => {
+              const chosen = e.target.value
+              if (!chosen) return
+              // Two-arm, for the reason every control here gives: onSkip routes
+              // through App's mutate(), which RETHROWS after recording the
+              // message.
+              onSkip(chore.id, chosen).then(() => {}, () => {})
+            }}
+          >
+            <option value="">This date, once&hellip;</option>
+            {offered.map((date) => (
+              <option key={date} value={date}>
+                {generated.has(date) ? `${date} — already on the list` : date}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {upcomingSkipped.length > 0 ? (
+        <p className="chore__skip-note" role="status">
+          Won&apos;t repeat on {upcomingSkipped.join(', ')}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+SkipControl.propTypes = {
+  chore: PropTypes.object.isRequired,
+  chores: PropTypes.array.isRequired,
+  repeatExceptions: PropTypes.array.isRequired,
+  todayIso: PropTypes.string,
+  busy: PropTypes.bool,
+  onSkip: PropTypes.func.isRequired,
+}
+
+/**
  * The chore is held by somebody marked as unable to do it — #37 ACs 6 and 7.
  *
  * ONE surface for two criteria, and that is a finding rather than a shortcut.
@@ -428,6 +527,8 @@ function ChoreRow({
   chores,
   members,
   exclusions,
+  repeatExceptions,
+  todayIso,
   busy,
   onSave,
   onRemove,
@@ -437,6 +538,7 @@ function ChoreRow({
   onUnassign,
   onExclude,
   onAllow,
+  onSkip,
   onRecordActual,
 }) {
   const [editing, setEditing] = useState(false)
@@ -672,6 +774,19 @@ function ChoreRow({
           onExclude={onExclude}
           onAllow={onAllow}
         />
+        {/* #105 — on the anchor, beside the schedule it edits. A generated
+            occurrence gets nothing here: its date is skipped from its anchor,
+            and the row's own Remove already exists for plain deletion. */}
+        {describeRepeat(chore) ? (
+          <SkipControl
+            chore={chore}
+            chores={chores}
+            repeatExceptions={repeatExceptions}
+            todayIso={todayIso}
+            busy={busy}
+            onSkip={onSkip}
+          />
+        ) : null}
       </div>
 
       <div className="row row--end row--actions">
@@ -767,6 +882,8 @@ ChoreRow.propTypes = {
   chores: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
   exclusions: PropTypes.array.isRequired,
+  repeatExceptions: PropTypes.array.isRequired,
+  todayIso: PropTypes.string,
   busy: PropTypes.bool,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
@@ -776,6 +893,7 @@ ChoreRow.propTypes = {
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,
   onAllow: PropTypes.func.isRequired,
+  onSkip: PropTypes.func.isRequired,
   onRecordActual: PropTypes.func.isRequired,
 }
 
@@ -783,6 +901,8 @@ export default function Chores({
   chores,
   members,
   exclusions,
+  repeatExceptions,
+  todayIso,
   busy,
   error,
   onAdd,
@@ -795,6 +915,7 @@ export default function Chores({
   onUnassign,
   onExclude,
   onAllow,
+  onSkip,
   onRecordActual,
 }) {
   const [title, setTitle] = useState('')
@@ -945,6 +1066,8 @@ export default function Chores({
                 chores={chores}
                 members={members}
                 exclusions={exclusions}
+                repeatExceptions={repeatExceptions}
+                todayIso={todayIso}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
@@ -954,6 +1077,7 @@ export default function Chores({
                 onUnassign={onUnassign}
                 onExclude={onExclude}
                 onAllow={onAllow}
+                onSkip={onSkip}
                 onRecordActual={onRecordActual}
               />
             ))}
@@ -996,6 +1120,8 @@ export default function Chores({
                 chores={chores}
                 members={members}
                 exclusions={exclusions}
+                repeatExceptions={repeatExceptions}
+                todayIso={todayIso}
                 busy={busy}
                 onSave={onSave}
                 onRemove={onRemove}
@@ -1005,6 +1131,7 @@ export default function Chores({
                 onUnassign={onUnassign}
                 onExclude={onExclude}
                 onAllow={onAllow}
+                onSkip={onSkip}
                 onRecordActual={onRecordActual}
               />
             ))}
@@ -1160,6 +1287,8 @@ Chores.propTypes = {
   chores: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
   exclusions: PropTypes.array.isRequired,
+  repeatExceptions: PropTypes.array.isRequired,
+  todayIso: PropTypes.string,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
@@ -1172,5 +1301,6 @@ Chores.propTypes = {
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,
   onAllow: PropTypes.func.isRequired,
+  onSkip: PropTypes.func.isRequired,
   onRecordActual: PropTypes.func.isRequired,
 }

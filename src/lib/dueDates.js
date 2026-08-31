@@ -104,6 +104,58 @@ function nextOccurrenceOf(refIso, month, day) {
 }
 
 /**
+ * Today, on the household's own calendar — `YYYY-MM-DD` — #105.
+ *
+ * `en-CA` with an explicit `timeZone` for capacity.js's reason (its private
+ * `localDateIn` is the same eight lines): every LOCAL getter on Date reads the
+ * ambient zone, so "today" computed with them changes depending on which phone
+ * asked, while the household's calendar does not. The SQL authority on which
+ * date a pass runs for is `catch_up_repeats_at`; this copy only decides what a
+ * screen offers, which is why a phone with a wrong CLOCK mis-offers dates but
+ * can never move an occurrence between days.
+ *
+ * `epochMs` is a NUMBER, defaulted to the real clock, so tests can hold time
+ * without a Date object crossing this module's boundary — the module's whole
+ * defence is that none ever does.
+ */
+export function localTodayIn(timeZone, epochMs = Date.now()) {
+  if (!timeZone) throw new Error("Today is a fact about a household's zone — name one.")
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(epochMs)
+}
+
+/**
+ * The dates a repeat schedule produces in (afterIso, afterIso + horizonDays] —
+ * the skip picker's offer list, #105.
+ *
+ * The JavaScript mirror of `repeat_occurrence_dates` (0012): same open/closed
+ * interval, same ISO-weekday convention. The SQL is the authority on what the
+ * pass CREATES; this only decides what a screen OFFERS to skip, so drift
+ * between the two costs a wrong offer list, never a wrong row — and the skip
+ * function stores whatever date it is asked for either way.
+ *
+ * Unknown kinds ('none', or a vocabulary this copy has not learned) produce
+ * the empty list rather than a guess: offering nothing is visible, offering
+ * wrong dates is not.
+ */
+export function upcomingOccurrenceDates(kind, weekdays, afterIso, horizonDays) {
+  const from = referenceDateOf(afterIso)
+  const days = Array.isArray(weekdays) ? weekdays.map(Number) : []
+  const out = []
+  for (let offset = 1; offset <= horizonDays; offset += 1) {
+    const candidate = addDays(from, offset)
+    if (kind === 'daily' || (kind === 'weekly' && days.includes(isoDowOf(candidate)))) {
+      out.push(candidate)
+    }
+  }
+  return out
+}
+
+/**
  * A due date as the `date` column wants it: `YYYY-MM-DD`, no time, no zone.
  *
  * TWO CALLING SHAPES, one function:

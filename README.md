@@ -100,9 +100,12 @@ about the project, so nothing became excusable and the count moved for the first
 migration cannot change. #211 then inverted it once more inside a single session: adding
 `chores.source` to what the client reads took it to a *measured* **27 of 28**, `chores` answering
 `42703` on the new column, and `npm run migrate:live` applying `0023` took it straight back —
-*measured* **28 of 28**, both readings taken rather than one reasoned from the other.
-**Where it stands: the excused-red set is EMPTY, *measured* at 28 of 28 on
-2026-08-28, so ANY red, on any subject, is real.**
+*measured* **28 of 28**, both readings taken rather than one reasoned from the other. #105 then
+repeated that both-sides discipline: adding the exception table and the skip RPC to what the check
+asks took it to a *measured* **28 of 30**, and `npm run migrate:live` applying `0025` took it
+straight back — *measured* **30 of 30** the same hour, both reds clearing on exactly that action.
+**Where it stands: the excused-red set is EMPTY, *measured* at 30 of 30 on
+2026-08-31, so ANY red, on any subject, is real.**
 
 [`docs/access-model.md`](docs/access-model.md) carries the excused-red table — empty, `0023`'s row
 never having stood at all because #211 applied it in its own session, as #59 did for `0021` and #50

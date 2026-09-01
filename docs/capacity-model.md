@@ -105,10 +105,17 @@ which is 0002's hole reopened.
 narrowing the read surface there is a separate change with its own caller migration and does not ride
 in on this one. A test asserts that `select('*')` still works.
 
-## What is not done here
+## Both halves of this shipped on 2026-08-09
 
-- **Applying 0005 to the live project** is #45 — an owner-only paste into the Supabase SQL editor.
-  Everything above is proven against real Postgres via PGlite, which means *consistent with Postgres,
-  given the Supabase-shaped stub*. It does **not** mean Supabase will accept it.
-- **A screen to set it** is #46. `Roster.jsx` still renders the baseline, which is what it means to
-  show; it starts showing this week's number in #46, through `effectiveCapacity`.
+- **`0005` is applied to the live project** (#45, closed 2026-08-09). The migration status and the
+  excused-red set are carried in [`docs/access-model.md`](access-model.md) — read them there rather
+  than trusting a figure copied onto this page, because a live-project status claim's falsifying
+  event is an action outside this repo and a third copy is what goes stale.
+- **The screen exists** (#46, closed 2026-08-09). [`src/components/Roster.jsx`](../src/components/Roster.jsx)
+  renders this week's number through `effectiveCapacity`. The sentence this section used to carry —
+  "`Roster.jsx` still renders the baseline" — was true only before #46 and had been false for three
+  weeks.
+
+The heading matters as much as the bullets. It read *What is not done here* while every claim under
+it was false, and a reader opens a not-done section precisely to learn what is outstanding — so a
+stale one is worse than a stale sentence elsewhere.

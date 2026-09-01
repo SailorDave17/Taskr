@@ -267,7 +267,7 @@ whole rebuild rather than 2020 dead code.
 |---|---|
 | **`develop`** | **The integration branch, and the repository default.** Branch from here; merge back here. |
 | `release` | **What Vercel builds production from.** Entered only by a pull request from `develop` that the owner merges, after the migrations that branch assumes are applied. Never a working branch. |
-| `main` | The **cutover target**, tagged `legacy-final`. Not a working branch — but *measured* 2026-08-27, it also took a "Release to main" catch-up merge (#230) and sits behind `release`'s current tip; check `git log origin/main..origin/release` before assuming it is current. |
+| `main` | The **backup branch**: a known-good working version to fall back to if `release` breaks and cannot be fixed in place (owner directive, 2026-09-01). Also the original **cutover target**, tagged `legacy-final`. Never a working branch and never a base — entered only by a pull request **from `release`** that the owner merges, so the backup is by construction a state production actually ran. The "Release to main" catch-up merges (#230, *measured* 2026-08-27) are that backup being taken, not drift. It is allowed to sit behind `release` and *measured 2026-09-01* it does, by 22 commits, so run `git log origin/main..origin/release` before treating it as a current fallback. |
 
 Confirm the default with `gh repo view --json defaultBranchRef` rather than trusting any document,
 including this one — it has been wrong here before (2026-08-05).

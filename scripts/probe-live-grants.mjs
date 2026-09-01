@@ -433,7 +433,7 @@ export function publicProaclQuery() {
  * confirmed when BOTH halves hold: anon lost everything, and authenticated lost
  * nothing.
  *
- * All seven tables, not the two `0017` names. A revoke aimed at one table cannot
+ * All nine tables, not the two `0017` names. A revoke aimed at one table cannot
  * splash onto another, but this list costs nothing to widen and a control that
  * only watches the tables you changed cannot report a surprise.
  *

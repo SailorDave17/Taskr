@@ -2,7 +2,7 @@ import { corsHeaders } from '@supabase/supabase-js/cors'
 import { SPLIT_SEEN_COLUMNS } from './announce.js'
 import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
-import { CHORE_COLUMNS } from './chores.js'
+import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 
@@ -71,6 +71,14 @@ export const LIVE_SCHEMA = Object.freeze([
   // job in #50's own session — 25 of 26 with this entry the one red, then
   // 26 of 26 after `npm run migrate:live` applied `0020` the same hour.
   Object.freeze({ table: 'member_split_seen', columns: SPLIT_SEEN_COLUMNS }),
+  // #105, arriving with `0025` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file: applying a migration is a step recorded nowhere else, and an entry
+  // withheld until after it would leave the window it covers uncovered. Note
+  // which of `0025`'s writers is NOT probed: the client holds select only, and
+  // that is the whole write model — `skip_repeat_occurrence` is the one writer,
+  // and it is probed as an RPC below.
+  Object.freeze({ table: 'chore_repeat_exceptions', columns: REPEAT_EXCEPTION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -135,6 +143,14 @@ export const LIVE_RPCS = Object.freeze([
     fn: 'apply_assignments',
     args: Object.freeze(['household_id', 'expected_version', 'placements', 'verdict']),
   }),
+  // #105, arriving with `0025` — red on purpose until that file is applied.
+  // `skip_date` is a `date`, so the nil-UUID placeholder fails its CAST
+  // (`22P02`, Postgres answering) before the privilege check could run — the
+  // same shape as `apply_assignments` above, and the same limit: this probe
+  // proves the function resolves with these argument names and says nothing
+  // about the execute privilege (#268 tracks that class). The pglite suite is
+  // what proves the privilege against a real Postgres.
+  Object.freeze({ fn: 'skip_repeat_occurrence', args: Object.freeze(['chore_id', 'skip_date']) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

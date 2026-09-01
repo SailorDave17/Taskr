@@ -92,6 +92,17 @@ export function secretKeyKind(key) {
   if (value.startsWith('1//')) return 'google-refresh-token'
   if (value.startsWith('ya29.')) return 'google-access-token'
 
+  // #203 — the Anthropic API key arrives with the extraction adapter, and this
+  // entry lands in the SAME story that first gives the key a reason to exist
+  // (#56 AC 5 pulled forward: the guard should exist before the key does).
+  // Prefix-based like the Google entries and for the same reason: Anthropic
+  // keys are prefixed on purpose so a scanner can recognise one without
+  // knowing whose it is. There is no publishable sibling — NO Anthropic
+  // credential belongs in a client bundle, ever; the key lives with whatever
+  // supplies the adapter's transport (the local runner's environment today,
+  // the Edge Function's secrets at #209).
+  if (value.startsWith('sk-ant-')) return 'anthropic-api-key'
+
   return null
 }
 
@@ -123,6 +134,12 @@ const REMEDY = Object.freeze({
   'google-access-token':
     'That is a Google OAuth access token. Short-lived, but it must not be built into a ' +
     'bundle; the Edge Function obtains one per call and keeps it in memory.',
+  'anthropic-api-key':
+    'That is an Anthropic API key (sk-ant-…). It has no publishable sibling: no Anthropic ' +
+    'credential belongs in a client bundle, under any variable name. It belongs in the ' +
+    'environment of whatever supplies the extraction transport — ANTHROPIC_API_KEY for the ' +
+    'local runner, an Edge Function secret at deploy. If it has already been built, rotate ' +
+    'it at console.anthropic.com → API Keys.',
 })
 
 /**

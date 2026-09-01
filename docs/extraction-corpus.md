@@ -2,10 +2,12 @@
 
 - Story: #42 — score plain-language capacity extraction against a fixed corpus
 - Story: #202 — score a proposed chore's due date as its own axis
+- Story: #204 — report each graded run against the named kill conditions
 - Command: `npm run extraction:corpus`
 - Corpus: [`src/lib/extraction.corpus.js`](../src/lib/extraction.corpus.js)
 - Grader: [`src/lib/extraction.js`](../src/lib/extraction.js)
 - Date rules: [`src/lib/dueDates.js`](../src/lib/dueDates.js)
+- Kill conditions: [`src/lib/extractionThresholds.js`](../src/lib/extractionThresholds.js)
 
 Every figure on this page is **re-derivable**. Run the command; a test in
 `src/lib/extraction.test.js` fails when this document and the command disagree, so the numbers here
@@ -155,6 +157,78 @@ than at noon.
 **Entity matching is unchanged by this story**: case and surrounding whitespace only, no stemming,
 no synonyms, no fuzzy distance. The date axis reads the entities the minutes axis matched, so its
 strictness is inherited rather than re-decided.
+
+## The kill conditions — #204
+
+The scale above says what a run *scored*. This says what a score has to *clear*, and the report
+prints the two beside each other so the verdict is a comparison rather than a judgement made from a
+table of raw figures.
+
+The owner named the five kill numbers on **2026-08-26, before any measurement** — which is the
+property that makes them a threshold rather than a rationalisation of whatever the first run
+happened to produce. They are recorded on epic #217 and defined in exactly one place in the tree,
+[`src/lib/extractionThresholds.js`](../src/lib/extractionThresholds.js); every figure in this table
+is re-derived from that module by a test, so it cannot fall behind the numbers the commands use.
+
+| Axis | capacity | chores | all | A failure |
+|---|---|---|---|---|
+| within tolerance | >= 18 of 25 | >= 18 of 25 | >= 35 of 50 | kills the bet |
+| ambiguous refused | >= 4 of 5 | >= 4 of 5 | >= 7 of 10 | kills the bet |
+| overconfident | <= 1 of 5 | <= 1 of 5 | <= 2 of 10 | kills the bet |
+| due dates exact | — | >= 18 of 25 | >= 18 of 25 | narrows the bet |
+| p95, deployed path | — | — | <= 3000 ms | kills the bet |
+| cost per household per year | — | — | <= $5.00 | kills the bet |
+| correction rate | — | — | <= 30% | kills the bet |
+
+### Two verdicts, not one
+
+The verdict is taken **per input kind** as well as overall. Capacity 25 of 25 alongside chores 10 of
+25 sums to 35 of 50, which **clears** the accuracy kill number on a run whose chore half is broken —
+so a combined verdict cannot express proceed-on-capacity / stop-on-chores, which the owner named as
+the most likely non-trivial outcome.
+
+The owner's numbers are counts against the combined corpus, so the per-kind ones are derived by one
+stated rule rather than invented per axis: **the same rate, applied to each half, rounded toward
+strictness** (owner, 2026-08-30). 35 of 50 is 70%, and 70% of 25 is 17.5, so 18 of 25; 7 of 10 is
+70%, and 70% of 5 is 3.5, so 4 of 5; 2 of 10 is 20%, and 20% of 5 is 1, so 1 of 5. The halving is
+clean because the corpus is exactly symmetric — 25 answerable and 5 ambiguous of each kind — and a
+test asserts that symmetry, so a corpus that stopped being symmetric reddens rather than silently
+repricing a decided bet.
+
+Due dates carry one number at two scopes because capacity contributes **no** applicable item to the
+overall denominator: the overall date figure *is* the chore figure. That, too, is asserted rather
+than assumed.
+
+### An axis with no figure is not an axis that passed
+
+Three of the seven have no figure yet, and the report prints **not measured** against each, with the
+reason:
+
+| Axis | What the report says it is waiting for |
+|---|---|
+| p95, deployed path | needs transport and cold start (#205) and the provider call (#206) |
+| cost per household per year | needs token usage from a live run (#206) |
+| correction rate | needs the capture flow in production |
+
+This is the half of the story worth the most. An axis with no figure that prints **pass** is exactly
+what a report looks like when nothing ran, and this report's whole authority is that a fail is real.
+So *not measured* is a first-class outcome rather than a blank cell, a scope that clears every
+measured axis is still reported as **incomplete**, and an axis is omitted from the report only where
+it genuinely does not apply — a week has no due date, so capacity has no date row.
+
+The latency axis is the sharp case: its kill number is specified **on the deployed path**, which is
+the phone's transport and the function's cold start *plus* the provider call. `npm run
+extraction:run` times this machine to the provider, which is one leg. Feeding that in alone would be
+a real measurement of the wrong thing — worse than none, because it looks like an answer — so the
+axis takes both components or reports neither, and names the one it is missing.
+
+### The comparison mechanism is controlled in both directions
+
+`npm run extraction:corpus` prints the kill conditions against **both controls**. Neither is a
+candidate extractor and neither verdict is a verdict on the bet: the floor must **fail** every axis
+that has a figure and the ceiling must **clear** every one, so every CI run exercises both outcomes
+rather than only the one that happens to be true today. A comparator that could only print `PASS`
+would look identical to a working one until the day it mattered.
 
 ## What the grader deliberately does not do
 

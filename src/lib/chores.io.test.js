@@ -165,8 +165,11 @@ describe('addChore', () => {
       due_on: '2026-08-10',
       // #53 — a caller that says nothing about repeating writes 'none'
       // explicitly, so the row's schedule is stated rather than inherited.
+      // #103 widened the schedule shape to a triple; a no-schedule row states
+      // all three.
       repeat_kind: 'none',
       repeat_weekdays: null,
+      repeat_monthday: null,
       // #211 — and a caller that says nothing about where the chore came from
       // writes 'manual' explicitly, for the same reason. The column's DEFAULT
       // would supply the identical value, which is exactly why this is asserted
@@ -405,6 +408,79 @@ describe('updateChore', () => {
     await expect(updateChore('c1', { title: 'Dishes' })).rejects.toThrow(
       /saving the change: permission denied/i,
     )
+  })
+
+  // #54 — the repeat fields through the edit path, a triple since #103.
+  // `normalizeRepeat` produces ALL THREE columns whenever a repeat field is
+  // present, because the shape constraints tie them: a patch carrying part of
+  // a schedule cannot be sent.
+
+  it('a schedule edit sends the whole schedule, sorted and deduplicated', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { repeatKind: 'weekly', repeatWeekdays: [4, 1, 1] })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({
+      repeat_kind: 'weekly',
+      repeat_weekdays: [1, 4],
+      repeat_monthday: null,
+    })
+  })
+
+  it('a monthly edit sends the day of the month and nulls the weekdays — #103', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { repeatKind: 'monthly', repeatMonthday: '31' })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({
+      repeat_kind: 'monthly',
+      repeat_weekdays: null,
+      repeat_monthday: 31,
+    })
+  })
+
+  it('switching off sends none AND nulls the schedule fields in the same patch', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { repeatKind: 'none' })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(update.patch).toEqual({
+      repeat_kind: 'none',
+      repeat_weekdays: null,
+      repeat_monthday: null,
+    })
+  })
+
+  it('refuses weekly without days before any request', async () => {
+    await expect(updateChore('c1', { repeatKind: 'weekly', repeatWeekdays: [] })).rejects.toThrow(
+      /at least one weekday/i,
+    )
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('refuses monthly without a day before any request — #103', async () => {
+    await expect(updateChore('c1', { repeatKind: 'monthly' })).rejects.toThrow(
+      /needs a day of the month/i,
+    )
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('refuses a weekdays-only patch — half a schedule would silently switch the repeat off', async () => {
+    await expect(updateChore('c1', { repeatWeekdays: [1] })).rejects.toThrow(/pass repeatKind/i)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('refuses a monthday-only patch for the same reason — #103', async () => {
+    await expect(updateChore('c1', { repeatMonthday: 5 })).rejects.toThrow(/pass repeatKind/i)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('a patch naming no repeat field sends no repeat columns', async () => {
+    results.chores = { data: ROW, error: null }
+    await updateChore('c1', { title: 'Dishes' })
+
+    const update = opsOn('chores').find((c) => c.op === 'update')
+    expect(Object.keys(update.patch)).toEqual(['title'])
   })
 })
 

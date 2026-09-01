@@ -279,14 +279,46 @@ satisfies "fairness is seen" without a number having to be read.
    "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
    is in minutes, because that is the unit the fairness claim is made in.
 
-### Open caveat, carried rather than closed
+### Caveat closed 2026-08-31 — the mismatch did not reproduce
 
 The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
 no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
-prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
-**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
-it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
-looked at on a phone before it is called done.**
+prototype's own CSS was not implicated and the leading suspect was the viewer it was delivered in.
+**Mechanism never established.** It did not block that gate (judged in the browser, owner's call) and
+it was not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.** That story is #47, the load surface, and #48 is the
+look.
+
+**It did not reproduce.** *Measured 2026-08-31* against the shipped load surface on
+<https://taskr.madcowhq.com>, one household, both sides confirmed on `build 28a757e` — read off the
+running page, not off the deploy — with the same two members and the same chores:
+
+| | phone | desktop browser |
+|---|---|---|
+| client | Samsung SM-S918U, Android 16, Chrome 151 | Chrome, 360 px viewport |
+| viewport | 384 CSS px, DPR 2.8125 | 360 CSS px, DPR 1 |
+| off-level statement | identical | identical |
+| per-member figures | identical | identical |
+| bar fill, declared and measured | 54% and 12% | 54% and 12% |
+| horizontal scroll | none | none |
+| elements past either edge | 0 | 0 |
+
+Every semantic field matched. The only differences were pixel widths, and they are accounted for
+exactly by viewport width plus the **15 px scrollbar gutter** a desktop browser reserves and mobile
+Chrome overlays: a control at a matched nominal 384 px gave a 287 px bar against the phone's 302.58,
+a difference of 15.58. Fill *ratios* were identical across all three measurements, which is the
+claim the surface actually makes.
+
+What is closed is the caveat as the charter framed it — *does the shipped surface render differently
+on a phone*. The original prototype's mechanism was never established and now cannot be, because the
+prototype is gone; that is recorded as unresolved rather than answered.
+
+**What this check nearly got wrong.** The desktop browser first reported `build cab59d9` while the
+phone reported `28a757e` — the same URL in the same minute, serving builds three days apart, because
+a stale workbox service worker in the automation browser's persistent profile was answering from its
+precache. Had the build not been read off the running page first, two different builds would have
+been compared and any difference between them attributed to this caveat. The first read of any
+on-device verification is *is this the build I think it is*, and it is answered from the running page.
 
 ## Consequences for the backlog
 
@@ -388,6 +420,39 @@ recorded in the decision log". This is that record.
   household-wide, but it costs a notifications table, RLS, grants and a dismiss flow, a substantial
   widening of a three-day story for a message whose whole content is "less work appeared than you
   might have expected".
+
+**AMENDED 2026-08-31 by the decision below — the seven days above now govern daily and weekly
+only.** Nothing in this entry was wrong when written; its subject grew. Two of its clauses have
+expired and are corrected there rather than edited away here: the authority is now `0026`, not
+`0012`, and the UI sentence no longer names the number at all.
+
+## Decision taken 2026-08-31 — the catch-up bound is KIND-DEPENDENT
+
+Owner decision at the commit gate of #103, taken on an escalation raised by that story's review
+fan-out. The bound above was ratified on 2026-08-24 when the only schedule kinds were daily and
+weekly; #103 added monthly and would have put it under the same seven days without anyone deciding
+that it should be.
+
+- **Seven days for daily and weekly — unchanged — and ONE MONTH for monthly.** The authority is the
+  pair of constants in `catch_up_repeats_at`, now in
+  `supabase/migrations/0026_repeat_monthly.sql`; `src/lib/chores.js` carries both, and
+  `repeats.pglite.test.js` holds all four copies equal.
+- **Why**: seven days costs a daily or weekly schedule at most a week of chores, which is the
+  reasoning above and still holds. For a monthly schedule the same number silently drops the
+  **entire occurrence** — a household that does not open the app within a week of rent day loses
+  rent day, with no row, no notice they can act on, and a skipped-count sentence that was worded for
+  a week. One interval means a missed monthly occurrence is caught up if it fired within the last
+  month and skipped if a further month has passed, so the bound keeps its purpose and changes its
+  units.
+- **Rejected**: keeping seven universally (cheapest, no code, and accepts the silent drop — refused
+  because the feature's headline case is a bill chore); and exempting monthly from the bound
+  entirely (simplest to reason about, at the cost of a chore dated weeks ago appearing as new work,
+  which is the walk-in pile the original decision exists to prevent).
+- **What it cost elsewhere**: the notice sentence stopped naming a window. The pass returns one
+  skipped count across every schedule it walked, so any single number in that sentence is wrong for
+  a household running both a daily and a monthly repeat — and it is the monthly case, the one
+  likeliest to be skipped, that the old wording described worst. Both constants remain exported and
+  unrendered, as the client-side record this log points at.
 
 ## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
 

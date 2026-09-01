@@ -215,6 +215,17 @@ const CLIENT_OPERATIONS = [
     site: 'announce.js dismissFairnessNote()',
     sql: 'update public.member_split_seen set fairness_note_dismissed = true where false',
   },
+  // #105 — the ONLY client operation on the exception table is the read. The
+  // writes go through `skip_repeat_occurrence` (definer, granted to
+  // `authenticated`), so there is deliberately no insert/update/delete row
+  // here; repeats.pglite.test.js asserts all three are REFUSED for the client
+  // role, which is this list's mirror image for a single-writer table.
+  {
+    table: 'chore_repeat_exceptions',
+    op: 'select',
+    site: 'chores.js listRepeatExceptions()',
+    sql: 'select id, chore_id, excluded_on, created_at from public.chore_repeat_exceptions limit 0',
+  },
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {

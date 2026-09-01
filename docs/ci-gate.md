@@ -86,7 +86,89 @@ Tests  1 failed | 6 passed (7)
 `success`, none skipped. A build tool's own summary is not evidence that the thing you care about
 actually executed; the failure mode there is a *pass*, so nothing draws attention to it.
 
+## What triggers a run — corrected 2026-08-30 (#243)
+
+| Event | Branches |
+|---|---|
+| `push` | `develop`, `release`, `main`, `feature/**` |
+| `pull_request` | `develop`, `release`, `main` |
+
+**These are exact names, and the reason is a defect that shipped.** When the integration branch moved
+`rebuild/v1` -> `develop` on 2026-08-27, the trigger lists were updated by renaming `rebuild` to
+`develop` and keeping the `/**`. That glob was only ever correct because the old branch had a slash
+in it: `rebuild/**` matches `rebuild/v1`, while `develop/**` requires a literal `develop/` prefix and
+matches neither the branch `develop` nor a pull request into it.
+
+*Measured 2026-08-30, before the fix:*
+
+- **Zero** CI runs on branch `develop`, ever.
+- The most recent `pull_request`-event run was 2026-08-28T01:42Z, from the `rebuild/**` era. Every
+  run after it is a `feature/**` push.
+- PR #283 (`develop` -> `release`, the merge that deploys production) and PR #282
+  (`release` -> `main`) both merged carrying **only Vercel checks — no `Lint, test, build` at all.**
+
+**It looked fine, and that is the part worth remembering.** `gh pr checks` reports the checks
+attached to a pull request's head SHA whatever event produced them, so the `feature/**` push run
+shows up on the pull request and reads as a pass. What it is *not* is a run of the merge result: a
+push run tests the head commit in isolation, so a branch that is stale against `develop` can report
+green while the merge it is about to become would fail.
+
+`src/test/gate.test.js` now asserts this table against the branch model in `README.md`, including a
+control that fires on the exact broken list. Nothing in the suite read this file before, which is why
+`npm test` was green throughout — and #243's own AC 3 had named the risk in advance: *a trigger list
+is exactly the kind of claim that is satisfied by inspection and false in practice.*
+
 ## Branch protection — AC 5, and the honest answer
+
+> **The premise below expired, and the first correction to it was WRONG.** Everything after this
+> block is kept as the 2026-08-04 record; read this first.
+>
+> *Measured 2026-08-30*: `gh repo view --json visibility` answers **PUBLIC**, so the 403 and the
+> "purchasing decision" it justified no longer describe this repo. That much stood. The same edit then
+> asserted protection was *"available and unconfigured"* — **false when it was written.** A ruleset was
+> already active, and the check that would have shown it was not run: `visibility` was read and the
+> rulesets API was not, in an annotation to a paragraph whose own last line names rulesets as a
+> separate thing. Re-measured the same day:
+>
+> ```
+> $ gh api repos/SailorDave17/Taskr/branches/develop/protection
+> {"message": "Branch not protected", "status": "404"}
+>
+> $ gh api repos/SailorDave17/Taskr/rules/branches/develop
+> [{"type": "deletion", ...}, {"type": "non_fast_forward", ...}]
+> ```
+>
+> **Both answers are true, and only one of them describes the repository.** Classic branch protection
+> is absent, which is what the 404 says; a *ruleset* is active, and the legacy endpoint cannot see it.
+> `Branch not protected` is therefore a correct sentence and a misleading reading — **ask
+> `rules/branches/<name>`, never `branches/<name>/protection`, before concluding a branch is open.**
+>
+> **What is actually enforced, as of 2026-08-30.** Ruleset **`Branches not to delete`** (id 21859879),
+> enforcement `active`, **no bypass actors**, targeting `~DEFAULT_BRANCH`, `main`, `develop` and
+> `release`. It carries exactly two rules:
+>
+> | Rule | Effect |
+> |---|---|
+> | `deletion` | those branches cannot be deleted, by anyone |
+> | `non_fast_forward` | they cannot be force-pushed, by anyone |
+>
+> So **destruction is now prevented and a failing merge is not.** There is no `pull_request` rule, so
+> a direct push to `develop` still lands, and no `required_status_checks` rule, so a red run does not
+> block a merge. **For pass/fail the gate remains advisory**, exactly as the section below says — the
+> sentence is still true, for a narrower reason than when it was written.
+>
+> **Ratified 2026-08-30, not yet applied — tracked as #289:** require a pull request, and require the
+> **`Lint, test, build`** check (app `github-actions`), on `develop`, `release` and `main`. That makes
+> the gate enforcing rather than advisory, and it stops direct pushes to `develop` — accepted as the
+> cost.
+>
+> **The ordering is load-bearing and must not be reversed.** A required check must name a context that
+> actually *fires* on the branch it guards. Until #243's trigger fix is merged, a pull request into
+> `release` or `main` produces no `Lint, test, build` run at all, so requiring it first would leave
+> promotion pull requests waiting forever on a status nobody can produce — the same defect this file's
+> *What triggers a run* section documents, arriving from the enforcement side. **Merge the trigger fix,
+> confirm a real run on each target branch, then add the rules.** #289 carries that ordering as its
+> first criterion and names #243 as its dependency.
 
 **Branch protection is not configured, and it is not configurable on this repository.** *Measured
 2026-08-04:*

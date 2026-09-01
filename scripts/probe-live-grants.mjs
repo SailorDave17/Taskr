@@ -182,6 +182,40 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'ar',
     source: '0023 (#211) — `a` is the half check:live cannot see; `w` withheld',
   }),
+  // `0024` (#54): editing or stopping a repeat. `check:live` is blind to this
+  // migration in BOTH directions — it is one grant, of a privilege that check
+  // only ever exercises by reading — so these two rows are the instrument that
+  // says whether it reached the project, exactly as the `0022` rows are for
+  // that file. `ar` is `0012`'s (declared at creation, readable since); `w` is
+  // `0024`'s whole content. They are RED until it is applied, which is the
+  // deliberate red this table's own docblock describes. The negative control
+  // above is untouched on purpose: `repeat_since` stays granted to nobody, and
+  // a `0024` that accidentally widened it would flip that row, not these.
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_kind',
+    privileges: 'arw',
+    source: '0024 (#54) — `w` is 0024’s; `ar` is 0012’s',
+  }),
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_weekdays',
+    privileges: 'arw',
+    source: '0024 (#54) — `w` is 0024’s; `ar` is 0012’s',
+  }),
+  // `0026` (#103): the monthly day of the month, sitting in all three sets
+  // exactly as the pair above does — declared at creation, shown by the form,
+  // editable where the chore is edited. `check:live` CAN see the select half
+  // (`repeat_monthday` joins CHORE_COLUMNS, so the read answers `42703` until
+  // the apply), so this row's own letters are `a` and `w` — the halves only a
+  // catalog read can testify to. The negative control above is untouched on
+  // purpose, exactly as 0024 left it.
+  Object.freeze({
+    table: 'chores',
+    column: 'repeat_monthday',
+    privileges: 'arw',
+    source: '0026 (#103) — `aw` is what check:live cannot see; `r` it can',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -421,6 +455,14 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // households no table-level grant, members `d` — the values below, read back
   // from the catalog. The pre-paste readings are kept rather than deleted,
   // because a measurement with no successor reads as one nobody took.
+  // #105, arriving with `0025`, which revokes wholesale and grants select by
+  // column — so the expected table-level reading is an absence, like
+  // `member_split_seen` below. The client holds NO write privilege of any kind
+  // here: `skip_repeat_occurrence` (definer) is the single writer, so a
+  // table-level letter appearing for `authenticated` would mean a later
+  // migration widened the write model, which is exactly what this control
+  // exists to report.
+  Object.freeze({ table: 'chore_repeat_exceptions', authenticated: null }),
   Object.freeze({ table: 'chores', authenticated: 'd' }),
   Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),

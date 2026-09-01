@@ -423,21 +423,13 @@ describe('who cannot do a chore, run against a real Postgres', () => {
   // -------------------------------------------------------------------------
 
   describe('AC 8 — a device may write an exclusion for its own household and no other', () => {
-    it('POSITIVE CONTROL: the permitted write succeeds, so the refusals below are not a dead grant', async () => {
-      const allowed = await attempt(() =>
-        asDevice(db, deviceA, () =>
-          db.query(
-            `insert into public.chore_exclusions (household_id, chore_id, member_id)
-             values ($1, $2, $3)`,
-            [householdA.id, dishes, memberTwo],
-          ),
-        ),
-      )
-      expect(allowed.ok, 'the grant set must not be simply empty').toBe(true)
-      expect(await exclusionCount()).toBe(1)
-    })
-
-    it('refuses a row naming another household outright', async () => {
+    it('refuses a row naming another household, while its OWN household still writes', async () => {
+      // The permitted write and the refusal are in ONE test because the AC says
+      // so, and the reason is worth stating: as two tests they can drift apart —
+      // the refusal keeps passing while the permitted write is deleted, renamed
+      // or quietly narrowed, and "refused" then means "this device can write
+      // nothing at all" rather than "this device cannot write THERE". #36 AC 2
+      // pairs them the same way against the column grant.
       const refused = await attempt(() =>
         asDevice(db, deviceA, () =>
           db.query(
@@ -450,6 +442,21 @@ describe('who cannot do a chore, run against a real Postgres', () => {
       expect(refused.ok).toBe(false)
       expect(refused.error).toMatch(/row-level security policy/i)
       expect(await exclusionCount()).toBe(0)
+
+      // POSITIVE CONTROL, same device, same statement shape, its own household.
+      // Without it the refusal above is equally consistent with the insert grant
+      // being absent altogether.
+      const allowed = await attempt(() =>
+        asDevice(db, deviceA, () =>
+          db.query(
+            `insert into public.chore_exclusions (household_id, chore_id, member_id)
+             values ($1, $2, $3)`,
+            [householdA.id, dishes, memberTwo],
+          ),
+        ),
+      )
+      expect(allowed.ok, 'the grant set must not be simply empty').toBe(true)
+      expect(await exclusionCount()).toBe(1)
     })
 
     it('and cannot smuggle another household\'s chore in under its own household_id', async () => {

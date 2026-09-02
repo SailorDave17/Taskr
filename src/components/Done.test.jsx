@@ -70,6 +70,8 @@ function setup(overrides = {}) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
@@ -255,5 +257,89 @@ describe('#12 — expected-vs-actual capture, on the Done surface', () => {
     const row = screen.getByText('Placeholder Done Chore').closest('li')
     await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
     expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #305 — a chore nobody did sits in its week's group, labelled "not done", in
+// the same quiet tone as a completion, with one control: the way back. And
+// #35 AC 9 binds it exactly as it binds the completions — no per-person miss
+// count anywhere.
+// ---------------------------------------------------------------------------
+
+describe('#305 — a chore nobody did, on the Done surface', () => {
+  const missedChore = {
+    id: 'c8',
+    household_id: 'h1',
+    title: 'Placeholder Missed Chore',
+    expected_minutes: 40,
+    due_on: '2026-08-20',
+    completed_at: null,
+    completed_by_member_id: null,
+    assigned_member_id: 'm1',
+    // The week of Aug 24, which is where twoWeeks' newest completion sits.
+    missed_at: '2026-08-26T09:00:00Z',
+  }
+  const withMissed = [...twoWeeks, missedChore]
+  const missedRow = () => screen.getByText('Placeholder Missed Chore').closest('li')
+
+  it('AC 6: appears in its week’s group, labelled not done, not struck through, with no "took"', () => {
+    setup({ chores: withMissed })
+    const group = screen.getByRole('region', { name: 'Aug 24 – Aug 30, 2026' })
+    const row = within(group).getByText('Placeholder Missed Chore').closest('li')
+    expect(within(row).getByText('not done')).toBeInTheDocument()
+    expect(row).toHaveClass('chore--missed')
+    expect(row).not.toHaveTextContent(/took/i)
+    expect(within(row).queryByLabelText(/actually took/)).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /mark .* done/i })).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /not done after all/i })).not.toBeInTheDocument()
+    // The closed count includes it — it is that week's record.
+    expect(group).toHaveTextContent(/2 chores/)
+
+    // And a completed row in the same group carries neither the label nor the
+    // modifier: the two states are told apart on the row, not by the group.
+    const doneRow = within(group).getByText('Placeholder Other Chore').closest('li')
+    expect(within(doneRow).queryByText('not done')).not.toBeInTheDocument()
+    expect(doneRow).not.toHaveClass('chore--missed')
+  })
+
+  it('AC 6: "Put it back" calls the unmiss handler, and nothing else', async () => {
+    const { onUnmiss, onUncomplete, onComplete, onRemove } = setup({ chores: withMissed })
+    const back = within(missedRow()).getByRole('button', {
+      name: /put placeholder missed chore back on the list — it was marked not done/i,
+    })
+    expect(back).toHaveTextContent(/put it back/i)
+    await clickAndSettle(back)
+    expect(onUnmiss).toHaveBeenCalledWith('c8')
+    expect(onUncomplete).not.toHaveBeenCalled()
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onRemove).not.toHaveBeenCalled()
+  })
+
+  it('a household whose only settled work is a miss still has a surface, under that week', () => {
+    setup({ chores: [chores[0], missedChore] })
+    expect(surface()).not.toHaveTextContent(/nothing finished yet/i)
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Aug 24 – Aug 30, 2026')
+  })
+
+  it('#35 AC 9, extended: no streak, rank, score, per-person total or per-person MISS count, and nothing styled as an alert', () => {
+    setup({ chores: withMissed })
+    expect(surface()).not.toHaveTextContent(/streak|rank|score|points|leaderboard|best|winner/i)
+    expect(surface()).not.toHaveTextContent(/m1/)
+    // A per-person miss count would render a number beside the word — "1
+    // missed", "misses: 2", "2 not done". The only "not done" on this surface
+    // is the row label, and nothing counts it. No trailing word boundary on
+    // purpose: textContent joins adjacent nodes with NO whitespace, so a count
+    // followed by the next heading reads "1 missedAug 24" — measured while
+    // proving this test, where the boundary form scored 0 red against a
+    // predicted 1 on exactly the mutation this assertion exists to catch.
+    const text = surface().textContent
+    expect(text).not.toMatch(/\b\d+\s+(missed|misses|not done)/i)
+    expect(text).not.toMatch(/(missed|misses|not done)\s*[:×x]\s*\d+/i)
+    // The label itself is quiet: red is for work, never for people.
+    const label = within(missedRow()).getByText('not done')
+    expect(label.className).not.toMatch(/error|danger|warning|alert/)
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(surface().querySelector('.error')).toBeNull()
   })
 })

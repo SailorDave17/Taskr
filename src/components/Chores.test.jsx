@@ -79,6 +79,8 @@ function setup(overrides = {}) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
@@ -117,6 +119,8 @@ function setupRerenderable() {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
@@ -620,6 +624,8 @@ function setupExclusionRerender(initialChores, initialExclusions) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
@@ -1700,5 +1706,53 @@ describe('skipping one occurrence — #105', () => {
     expect(options[0]).toBe('2027-02-28')
     expect(options[1]).toBe('2027-03-31')
     expect(options[2]).toBe('2027-04-30')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #305 — the third exit. An outstanding row offers "Didn't happen" beside
+// Done; a chore marked missed leaves this tab entirely and is NOT counted as
+// done. What it looks like on the Done surface is Done.test.jsx.
+// ---------------------------------------------------------------------------
+
+describe('#305 — a chore that did not get done, on the Chores tab', () => {
+  const outstandingRow = () => screen.getByText('Placeholder Chore').closest('li')
+  const missedChore = {
+    id: 'c8',
+    household_id: 'h1',
+    title: 'Placeholder Missed Chore',
+    expected_minutes: 40,
+    due_on: '2026-08-20',
+    completed_at: null,
+    completed_by_member_id: null,
+    // The current week in setup() is Aug 24 — so if this were counted as
+    // "done this week" the line below would read 1 rather than 0.
+    missed_at: '2026-08-25T09:00:00Z',
+  }
+
+  it('AC 6: an outstanding row offers "Didn’t happen" beside Done, and it calls the miss handler alone', async () => {
+    const { onMiss, onComplete, onRemove } = setup()
+    const row = outstandingRow()
+    expect(within(row).getByRole('button', { name: /mark placeholder chore done/i })).toBeInTheDocument()
+    const control = within(row).getByRole('button', { name: /say placeholder chore did not happen/i })
+    expect(control).toHaveTextContent(/didn.t happen/i)
+
+    await clickAndSettle(control)
+    expect(onMiss).toHaveBeenCalledWith('c1')
+    // No confirmation step, and no other handler: it is not a removal.
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onRemove).not.toHaveBeenCalled()
+  })
+
+  it('AC 6: a missed chore has left the outstanding list, its total and the done count', () => {
+    setup({ chores: [...chores, missedChore] })
+    expect(screen.queryByText('Placeholder Missed Chore')).not.toBeInTheDocument()
+    // 20 + 90, never 150: the miss is not still-to-do.
+    const total = screen.getByTestId('outstanding-total')
+    expect(total).toHaveTextContent(/2 still to do · 110 min/i)
+    expect(total).not.toHaveTextContent('150')
+    // And it is not "done" either: the line to the Done tab shows (something
+    // has left the list) and counts zero.
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
   })
 })

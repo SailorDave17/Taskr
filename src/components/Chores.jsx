@@ -13,6 +13,8 @@ import {
   describeRepeat,
   estimateSuggestion,
   formatMinutes,
+  isCompleted,
+  isMissed,
   isOutstanding,
   normalizeActualMinutes,
   normalizeDueDate,
@@ -577,6 +579,8 @@ export function ChoreRow({
   onRemove,
   onComplete,
   onUncomplete,
+  onMiss,
+  onUnmiss,
   onAssign,
   onUnassign,
   onExclude,
@@ -755,7 +759,9 @@ export function ChoreRow({
   }
 
   return (
-    <li className="chore">
+    // #305 — a missed row carries a modifier so the Done surface can dim it
+    // without striking it through: a strike says finished, and this was not.
+    <li className={isMissed(chore) ? 'chore chore--missed' : 'chore'}>
       <div className="chore__identity">
         <span className="chore__title">{chore.title}</span>
         <span className="chore__cost">
@@ -777,10 +783,18 @@ export function ChoreRow({
               expected to cost. Null on rows completed before the column
               existed; every completion since stores a value (seeded or
               entered), so this renders on all new done work. */}
-          {!isOutstanding(chore) && chore.actual_minutes != null ? (
+          {isCompleted(chore) && chore.actual_minutes != null ? (
             <>
               <span aria-hidden="true"> · </span>
               <span className="chore__took">took {chore.actual_minutes} min</span>
+            </>
+          ) : null}
+          {/* #305 — a chore nobody did says so, in the same quiet tone as
+              "took". Work, not a person: no name, no count, no red. */}
+          {isMissed(chore) ? (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span className="chore__missed">not done</span>
             </>
           ) : null}
         </span>
@@ -846,14 +860,43 @@ export function ChoreRow({
 
       <div className="row row--end row--actions">
         {isOutstanding(chore) ? (
+          <>
+            <button
+              className="button"
+              type="button"
+              onClick={() => onComplete(chore.id).then(() => {}, () => {})}
+              disabled={busy}
+              aria-label={`Mark ${chore.title} done`}
+            >
+              Done
+            </button>
+            {/* #305 — the third exit, beside Done and no confirmation: it is
+                reversed by "Put it back" on the missed row, and it destroys
+                nothing. Quiet rather than primary, because Done is the thing a
+                row is for. The accessible name avoids the word "done" on
+                purpose — "Mark X not done" would match every query for the
+                Done control. */}
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => onMiss(chore.id).then(() => {}, () => {})}
+              disabled={busy}
+              aria-label={`Say ${chore.title} did not happen`}
+            >
+              Didn&rsquo;t happen
+            </button>
+          </>
+        ) : isMissed(chore) ? (
+          // #305 — a missed row offers the way back and nothing else: no
+          // "Took", because nothing was done and there is no time to record.
           <button
-            className="button"
+            className="button button--quiet"
             type="button"
-            onClick={() => onComplete(chore.id).then(() => {}, () => {})}
+            onClick={() => onUnmiss(chore.id).then(() => {}, () => {})}
             disabled={busy}
-            aria-label={`Mark ${chore.title} done`}
+            aria-label={`Put ${chore.title} back on the list — it was marked not done`}
           >
-            Done
+            Put it back
           </button>
         ) : (
           <>
@@ -944,6 +987,8 @@ ChoreRow.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,
   onUncomplete: PropTypes.func.isRequired,
+  onMiss: PropTypes.func.isRequired,
+  onUnmiss: PropTypes.func.isRequired,
   onAssign: PropTypes.func.isRequired,
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,
@@ -969,6 +1014,8 @@ export default function Chores({
   onRemove,
   onComplete,
   onUncomplete,
+  onMiss,
+  onUnmiss,
   onAssign,
   onUnassign,
   onExclude,
@@ -1137,6 +1184,8 @@ export default function Chores({
                 onRemove={onRemove}
                 onComplete={onComplete}
                 onUncomplete={onUncomplete}
+                onMiss={onMiss}
+                onUnmiss={onUnmiss}
                 onAssign={onAssign}
                 onUnassign={onUnassign}
                 onExclude={onExclude}
@@ -1364,6 +1413,8 @@ Chores.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,
   onUncomplete: PropTypes.func.isRequired,
+  onMiss: PropTypes.func.isRequired,
+  onUnmiss: PropTypes.func.isRequired,
   onAssign: PropTypes.func.isRequired,
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,

@@ -130,6 +130,12 @@ export const LIVE_RPCS = Object.freeze([
   // by Postgres with `25006`, and both classify as PRESENT.
   Object.freeze({ fn: 'catch_up_repeats', args: Object.freeze([]) }),
   Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
+  // #305, arriving with `0027` — red on purpose until that file is applied,
+  // the same deliberate window every migration-borne entry here has had. Both
+  // write, so the read-only GET answers `25006` once the function resolves,
+  // which classifies as PRESENT exactly as `complete_chore` above does.
+  Object.freeze({ fn: 'miss_chore', args: Object.freeze(['chore_id']) }),
+  Object.freeze({ fn: 'unmiss_chore', args: Object.freeze(['chore_id']) }),
   Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied

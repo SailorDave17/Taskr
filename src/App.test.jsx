@@ -47,6 +47,9 @@ const choresApi = {
   // reason: pure, own tests, and a stub could disagree with the boundary the
   // suggestion sits on.
   recordActualMinutes: vi.fn(),
+  // #305 — the third state's writer and its undo, stubbed like completion.
+  missChore: vi.fn(),
+  unmissChore: vi.fn(),
 }
 
 // #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
@@ -822,6 +825,42 @@ describe('chores — the write path and the re-read', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /remove placeholder chore\?/i })))
 
     expect(choresApi.removeChore).toHaveBeenCalledWith('c1')
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('#305: "Didn’t happen" goes through missChore with the chore on screen, then re-reads', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /say placeholder chore did not happen/i })),
+    )
+
+    expect(choresApi.missChore).toHaveBeenCalledWith('c1')
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Written before it is re-read, as every other write here is.
+    expect(choresApi.missChore.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#305: "Put it back" on the Done tab goes through unmissChore, then re-reads', async () => {
+    choresApi.listChores.mockResolvedValue([{ ...chore, missed_at: '2026-08-25T09:00:00Z' }])
+    await renderApp('Done')
+    const back = await screen.findByRole('button', {
+      name: /put placeholder chore back on the list — it was marked not done/i,
+    })
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(back))
+
+    expect(choresApi.unmissChore).toHaveBeenCalledWith('c1')
+    expect(choresApi.missChore).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
     )

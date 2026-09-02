@@ -25,6 +25,7 @@ import {
   completeChore,
   formatSkippedNotice,
   listChores,
+  missChore,
   listRepeatExceptions,
   localTodayIn,
   recordActualMinutes,
@@ -32,6 +33,7 @@ import {
   skipRepeatOccurrence,
   unassignChore,
   uncompleteChore,
+  unmissChore,
   updateChore,
 } from './lib/chores.js'
 import {
@@ -566,6 +568,10 @@ export default function App() {
   // work between weeks.
   const handleCompleteChore = useCallback((id) => mutate(() => completeChore(id)), [mutate])
   const handleUncompleteChore = useCallback((id) => mutate(() => uncompleteChore(id)), [mutate])
+  // #305 — "didn't happen" goes through an RPC for the same clock reason:
+  // `missed_at` decides which week the Done surface files the row under.
+  const handleMissChore = useCallback((id) => mutate(() => missChore(id)), [mutate])
+  const handleUnmissChore = useCallback((id) => mutate(() => unmissChore(id)), [mutate])
   // #12 — adjusting an actual is a plain column-granted update, unlike the two
   // above; completion already seeded the honest default, this says otherwise.
   const handleRecordActual = useCallback(
@@ -850,6 +856,8 @@ export default function App() {
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}
           onUncomplete={handleUncompleteChore}
+          onMiss={handleMissChore}
+          onUnmiss={handleUnmissChore}
           onAssign={handleAssignChore}
           onUnassign={handleUnassignChore}
           onExclude={handleExcludeMember}
@@ -881,6 +889,8 @@ export default function App() {
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}
           onUncomplete={handleUncompleteChore}
+          onMiss={handleMissChore}
+          onUnmiss={handleUnmissChore}
           onAssign={handleAssignChore}
           onUnassign={handleUnassignChore}
           onExclude={handleExcludeMember}

@@ -83,10 +83,11 @@ export const MAX_EXPECTED_MINUTES = 1440
  * seven days would have dropped a monthly chore's whole occurrence in silence,
  * which for a rent chore is the feature's headline case failing.
  *
- * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0026` carries both
- * numbers and its copy is the one that decides what exists; these are the
- * client-side record, and repeats.pglite.test.js holds them equal so they
- * cannot drift apart silently.
+ * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0028` (the body
+ * that runs — `0026` declared the same two values and #306 replaced the pass
+ * again) carries both numbers and its copy is the one that decides what
+ * exists; these are the client-side record, and repeats.pglite.test.js holds
+ * them equal so they cannot drift apart silently.
  *
  * NEITHER IS RENDERED, and that is a change worth stating rather than leaving
  * to be noticed. Until #103 the notice sentence below named the seven days,
@@ -538,6 +539,15 @@ export async function recordActualMinutes(id, actualMinutes) {
  * Exactly-once under a double-fire is the DATABASE's unique index, not
  * anything here — two devices calling this in the same second is the designed
  * case, not a race to defend against in JavaScript.
+ *
+ * Since #306 (`0028`) the pass also WRITES `missed_at`: when it creates a new
+ * occurrence for an anchor, every older outstanding member of that anchor's
+ * family is marked missed with the pass's clock, so at most one occurrence
+ * of a repeat is on the list at a time. Nothing here changes for that — the
+ * return shape is the same two counts by decision (the household is not
+ * told; docs/refresh-charter.md, 2026-09-02) — but a caller reading
+ * `missed_at` after this resolves may see rows that were outstanding a
+ * moment ago, which is the point.
  */
 export async function catchUpRepeats() {
   const rows = unwrap(await getSupabase().rpc('catch_up_repeats'), 'catching up repeats')

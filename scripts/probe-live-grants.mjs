@@ -217,9 +217,12 @@ export const MEASURED_GRANTS = Object.freeze([
     source: '0026 (#103) — `aw` is what check:live cannot see; `r` it can',
   }),
   // `0027` (#305): the missed stamp. `r` only, and the ABSENCE of `a` and `w`
-  // is this row's whole content — `missed_at` moves only through `miss_chore`
-  // and `unmiss_chore`, for 0004's clock reason, so a client role holds no
-  // write on it. `check:live` sees the select half (`missed_at` joins
+  // is this row's whole content — `missed_at` moves only through definer
+  // functions (`miss_chore` and `unmiss_chore`, and since `0028` (#306) the
+  // catch-up pass `catch_up_repeats_at`, which is granted to no client role),
+  // for 0004's clock reason, so a client role holds no write on it. *(This
+  // named the two 0027 functions as the only writers until 2026-09-02; the
+  // privilege claim was and is unchanged.)* `check:live` sees the select half (`missed_at` joins
   // CHORE_COLUMNS, so the read answers `42703` until the apply) and cannot
   // see the withholding; a future migration that widened this column to
   // writable would move the row to `arw` and be reported here, where no

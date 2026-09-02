@@ -397,6 +397,14 @@ describe('a chore nobody did, run against a real Postgres', () => {
       })
       // Backdate `repeat_since` as the owner so the pass has a past to walk.
       await db.query(`update public.chores set repeat_since = '2026-08-10' where id = $1`, [anchorId])
+      // Monday's own occurrence (the anchor row — 0012 makes its due_on the
+      // first occurrence) was DONE. Since #306 the pass supersedes an
+      // outstanding anchor the moment Tuesday's occurrence generates, which
+      // would stamp the parent for a reason unrelated to this test's claim.
+      // Completed work is untouched by that rule (#306 AC 4), so completing it
+      // keeps the anchor a row a miss on an occurrence could only reach by
+      // writing to its parent — which is exactly what is asserted below.
+      await call(organizer, 'complete_chore', anchorId)
     })
 
     it("marking Tuesday's occurrence missed leaves Wednesday's to generate, and the anchor untouched", async () => {

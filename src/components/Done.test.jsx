@@ -343,3 +343,57 @@ describe('#305 — a chore nobody did, on the Done surface', () => {
     expect(surface().querySelector('.error')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// #307 — a chore claimed by whoever completed it, on the Done surface.
+//
+// The migration (0029) writes `assigned_member_id` when an unassigned chore is
+// completed, so a done row now routinely CARRIES a holder where before it
+// usually did not. What AC 7 asks is that it shows that holder the way any
+// assigned chore does — the same `AssigneeSelect` this row already renders —
+// and that #35 AC 9 still binds: naming who holds a chore is not a per-person
+// total, and nothing here may become one.
+// ---------------------------------------------------------------------------
+
+describe('#307 — the holder a completion wrote, on the Done surface', () => {
+  /** #302's finished chore, claimed by its completer the way 0029 writes it. */
+  const claimed = {
+    ...chores[1],
+    completed_at: '2026-08-25T10:00:00Z',
+    completed_by_member_id: 'm1',
+    assigned_member_id: 'm1',
+    assigned_source: 'completed',
+  }
+
+  it('shows the holder in the same control every other row uses', () => {
+    setup({ chores: [chores[0], claimed] })
+    const doneRow = screen.getByText('Placeholder Other Chore').closest('li')
+    const who = within(doneRow).getByRole('combobox', { name: /who is doing/i })
+    // The person's NAME, through the roster — never the id, which #35 AC 9
+    // forbids surfacing and which would be meaningless to a reader anyway.
+    expect(who).toHaveValue('m1')
+    expect(within(who).getByRole('option', { selected: true })).toHaveTextContent('Placeholder One')
+  })
+
+  it('SYNTHETIC CONTROL: a done row with no holder still reads "Nobody yet"', () => {
+    // The pre-0029 shape, and the state a completed-then-uncompleted-then-
+    // recompleted row passes through. Without this, the assertion above passes
+    // on a control that displays the first option whatever the row says.
+    setup({ chores: [chores[0], { ...claimed, assigned_member_id: null, assigned_source: null }] })
+    const doneRow = screen.getByText('Placeholder Other Chore').closest('li')
+    const who = within(doneRow).getByRole('combobox', { name: /who is doing/i })
+    expect(who).toHaveValue('')
+    expect(within(who).getByRole('option', { selected: true })).toHaveTextContent('Nobody yet')
+  })
+
+  it('#35 AC 9 still holds: a claimed done row adds no total, streak or rank', () => {
+    // The check the AC names by number. Naming the holder is a fact about one
+    // chore; a count of chores per person is a scoreboard, and this surface may
+    // not grow one by accident.
+    setup({ chores: [chores[0], claimed, { ...doneOneOff, assigned_member_id: 'm1' }] })
+    expect(surface()).not.toHaveTextContent(/streak|rank|score|points|leaderboard|best|winner/i)
+    expect(surface()).not.toHaveTextContent(/m1/)
+    // Two chores held by one person, and no figure anywhere saying "2".
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+})

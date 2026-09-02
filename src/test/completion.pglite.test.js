@@ -406,11 +406,21 @@ describe('completing a chore, run against a real Postgres', () => {
   // AC 7 — the noticing signal: unassigned completion is allowed and attributed
   // -------------------------------------------------------------------------
 
+  // PARTLY SUPERSEDED by #307 (0029), 2026-09-01: option (a)'s "surface
+  // nothing" half is reversed — completing an unassigned chore now also sets
+  // `assigned_member_id` to the completer, with `assigned_source = 'completed'`.
+  // Everything asserted BELOW is untouched by that and still true: the
+  // completion is accepted, and `completed_by_member_id` records the member
+  // rather than the auth id. The new behaviour is proved in
+  // completion-assignment.pglite.test.js, and the charter's 2026-09-01 decision
+  // records why the 2026-08-08 objection stopped applying. These tests are left
+  // as #35's evidence rather than rewritten into #307's.
   describe('AC 7 — completing a chore nobody was assigned', () => {
     it('is ACCEPTED, and records who did it', async () => {
       // Owner decision, 2026-08-08, option (a): allow it, attribute it, surface
       // nothing. Refusing would make the app argue with someone who has just
-      // done the dishes.
+      // done the dishes. (The "surface nothing" half was reversed by #307 —
+      // see the block comment above.)
       const done = await asDevice(db, deviceA, async () => {
         const { rows } = await db.query(`select ${READABLE} from public.complete_chore($1)`, [
           choreId,

@@ -115,6 +115,7 @@ export const MIGRATIONS = [
   '0026_repeat_monthly.sql',
   '0027_missed_chores.sql',
   '0028_a_superseded_occurrence_is_missed.sql',
+  '0029_completion_assigns_the_completer.sql',
 ]
 
 export function migrationSql(name) {

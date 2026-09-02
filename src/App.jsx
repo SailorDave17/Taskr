@@ -59,6 +59,7 @@ import {
 } from './lib/calendar.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
+import Done from './components/Done.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 import Split from './components/Split.jsx'
@@ -80,17 +81,20 @@ import Split from './components/Split.jsx'
 // deliberately, and no state in which somebody is signed in as nobody.
 
 /**
- * The three surfaces, in the order they are offered — #47 criterion 11.
+ * The four surfaces, in the order they are offered — #47 criterion 11, plus
+ * #302's Done.
  *
  * The split is FIRST and is the default view, per the charter's grooming
  * decision of 2026-08-06. `Who` rather than `Roster` because that is the
  * question a person is asking; the heading behind it still reads "Who is in the
- * household".
+ * household". `Done` is LAST: it is history, and the chore tab's own "N done
+ * this week" line is the way most people will reach it.
  */
 const SURFACES = [
   { key: 'split', label: 'Split' },
   { key: 'chores', label: 'Chores' },
   { key: 'who', label: 'Who' },
+  { key: 'done', label: 'Done' },
 ]
 
 export default function App() {
@@ -765,7 +769,8 @@ export default function App() {
         />
       ) : null}
 
-      {/* #47 criterion 11 — the three surfaces, and the only way between them.
+      {/* #47 criterion 11 — the surfaces, and the only way between them (four
+          since #302; the chore tab's done line is a second way to one of them).
           A `nav` with buttons rather than links, because there is nothing to
           link TO: one document, no router, and an anchor with no href is worse
           for assistive tech than a button that says what it does.
@@ -835,10 +840,43 @@ export default function App() {
           exclusions={exclusions}
           repeatExceptions={repeatExceptions}
           todayIso={household ? localTodayIn(household.timezone) : null}
+          timezone={household.timezone}
+          periodStart={periodStart}
           busy={busy}
           error={error}
           onAdd={handleAddChore}
           onAddMany={handleAddChores}
+          onSave={handleSaveChore}
+          onRemove={handleRemoveChore}
+          onComplete={handleCompleteChore}
+          onUncomplete={handleUncompleteChore}
+          onAssign={handleAssignChore}
+          onUnassign={handleUnassignChore}
+          onExclude={handleExcludeMember}
+          onAllow={handleAllowMember}
+          onSkip={handleSkipOccurrence}
+          onRecordActual={handleRecordActual}
+          // #302 AC 1 — the "N done this week" line is a second way onto the
+          // Done tab, and it arrives the same way the tab does: through goTo,
+          // so the re-read criterion 11 requires of every arrival holds here.
+          onShowDone={() => goTo('done')}
+        />
+      ) : null}
+
+      {/* #302 — completed work, by capacity week. Same rows, same handlers as
+          the chore list (a done row still offers "Not done after all" and
+          "Took"); it needs no add form and no complete handler of its own, but
+          ChoreRow takes the full set, so the full set is passed. */}
+      {status === 'joined' && household && view === 'done' ? (
+        <Done
+          chores={chores}
+          members={members}
+          exclusions={exclusions}
+          repeatExceptions={repeatExceptions}
+          todayIso={household ? localTodayIn(household.timezone) : null}
+          timezone={household.timezone}
+          busy={busy}
+          error={error}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

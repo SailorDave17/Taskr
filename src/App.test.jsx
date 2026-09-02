@@ -999,7 +999,7 @@ describe('moving between surfaces — #47 criterion 11', () => {
     expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
   })
 
-  it('marks the surface you are on, so the tabs are not three identical buttons', async () => {
+  it('marks the surface you are on, so the tabs are not four identical buttons', async () => {
     await renderApp()
     expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
@@ -1007,6 +1007,68 @@ describe('moving between surfaces — #47 criterion 11', () => {
     await tab('Who')
     expect(screen.getByRole('button', { name: 'Who' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Split' })).not.toHaveAttribute('aria-current')
+
+    // #302 AC 4 — the fourth tab is marked the same way.
+    await tab('Done')
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('#302 AC 4: arriving on Done re-reads everything, as every other tab does', async () => {
+    await renderApp()
+    const before = {
+      members: api.listMembers.mock.calls.length,
+      chores: choresApi.listChores.mock.calls.length,
+      capacity: capacityApi.listCapacity.mock.calls.length,
+    }
+
+    await tab('Done')
+
+    expect(screen.getByRole('region', { name: 'Done' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /the split/i })).not.toBeInTheDocument()
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(before.members)
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before.chores)
+    expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(before.capacity)
+  })
+
+  it('#302 AC 1: the chore tab’s "done this week" line leads to Done, re-reading on the way', async () => {
+    // One finished just now, so it falls in whatever capacity week App derives
+    // from the real clock, and one outstanding. The chore tab must show the
+    // outstanding one, count the finished one on its line, and not render it.
+    choresApi.listChores.mockResolvedValue([
+      {
+        id: 'c1',
+        household_id: 'h1',
+        title: 'Placeholder Chore',
+        expected_minutes: 20,
+        due_on: '2026-08-10',
+        completed_at: null,
+        completed_by_member_id: null,
+      },
+      {
+        id: 'c2',
+        household_id: 'h1',
+        title: 'Placeholder Other Chore',
+        expected_minutes: 30,
+        due_on: '2026-08-10',
+        completed_at: new Date().toISOString(),
+        completed_by_member_id: 'm1',
+      },
+    ])
+    await renderApp('Chores')
+    expect(screen.getByText('Placeholder Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Other Chore')).not.toBeInTheDocument()
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent(/done this week/)
+
+    const before = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByTestId('done-this-week')))
+
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('Placeholder Other Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Chore')).not.toBeInTheDocument()
+    // Through goTo, not a bare setView: the arrival re-read (criterion 11)
+    // holds for this route onto the surface as it does for the tab.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before)
   })
 
   it('offers no surfaces at all until there is a household to look at', async () => {
@@ -1946,7 +2008,10 @@ describe('#12 — adjusting how long a chore took', () => {
   })
 
   it('saves the adjusted value through the data layer, then re-reads from the server', async () => {
-    await renderApp('Chores')
+    // On the Done tab since #302 — a completed row no longer renders on the
+    // chore tab. The subject (the write, then the re-read) is unchanged; only
+    // the arrangement moved with the row.
+    await renderApp('Done')
     await screen.findByText('Placeholder Chore')
 
     const readsBefore = choresApi.listChores.mock.calls.length

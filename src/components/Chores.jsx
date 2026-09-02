@@ -22,6 +22,7 @@ import {
   outstandingMinutes,
   upcomingOccurrenceDates,
 } from '../lib/chores.js'
+import { countDoneInWeek } from '../lib/done.js'
 import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
 
 // The chore list — story #34.
@@ -561,7 +562,10 @@ ActualsFeedback.propTypes = {
   chores: PropTypes.array.isRequired,
 }
 
-function ChoreRow({
+// Exported since #302: the Done surface renders completed rows with this same
+// component, so "Not done after all" and "Took (minutes)" are one
+// implementation on two screens rather than two.
+export function ChoreRow({
   chore,
   chores,
   members,
@@ -954,9 +958,12 @@ export default function Chores({
   exclusions,
   repeatExceptions,
   todayIso,
+  timezone,
+  periodStart,
   busy,
   error,
   onAdd,
+  onShowDone,
   onAddMany,
   onSave,
   onRemove,
@@ -1093,6 +1100,11 @@ export default function Chores({
 
   const outstanding = chores.filter(isOutstanding)
   const done = chores.filter((c) => !isOutstanding(c))
+  // #302 AC 1 — the one number this tab still says about finished work. Both
+  // props arrive from App's refresh; between the household read and the period
+  // read there is a render where periodStart is still null, and a count of
+  // zero for that frame is the honest reading rather than a crash.
+  const doneThisWeek = timezone && periodStart ? countDoneInWeek(chores, timezone, periodStart) : 0
 
   return (
     <section className="card" aria-labelledby="chores-heading">
@@ -1154,41 +1166,28 @@ export default function Chores({
           answers to one question on two screens, which is the fault
           capacity.js's docstring calls invisible. */}
 
+      {/* #302 — completed work LEFT this tab. Until then every completed chore
+          ever rendered here under a heading reading "Done this week", which
+          nothing bounded to a week: it was false from the household's second
+          week on and grew by a screen a week once the daily repeats landed.
+          The rows still exist (#12 reads them, #105 keeps them); they now
+          live on the Done tab, grouped by capacity week. What stays here is
+          one line saying how many were finished THIS week, and it is the way
+          there. It renders whenever anything has ever been completed — with a
+          zero — because a household that finished things last week and
+          nothing yet this week should still be able to find them. */}
       {done.length > 0 ? (
-        <section className="chore-done" aria-labelledby="done-heading">
-          {/* Completed work stays VISIBLE in its own group rather than
-              vanishing, so the household can see the week's work was actually
-              done. Deliberately carries no streak, no rank, no score, no
-              per-person total, and no error or alert styling: red is for work,
-              never for people. A component test fails if any appears. */}
-          <h3 id="done-heading" className="card__subheading">
-            Done this week
-          </h3>
-          <ul className="chore-list chore-list--done">
-            {done.map((chore) => (
-              <ChoreRow
-                key={chore.id}
-                chore={chore}
-                chores={chores}
-                members={members}
-                exclusions={exclusions}
-                repeatExceptions={repeatExceptions}
-                todayIso={todayIso}
-                busy={busy}
-                onSave={onSave}
-                onRemove={onRemove}
-                onComplete={onComplete}
-                onUncomplete={onUncomplete}
-                onAssign={onAssign}
-                onUnassign={onUnassign}
-                onExclude={onExclude}
-                onAllow={onAllow}
-                onSkip={onSkip}
-                onRecordActual={onRecordActual}
-              />
-            ))}
-          </ul>
-        </section>
+        <p className="card__note chore-done-line">
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={onShowDone}
+            disabled={busy}
+            data-testid="done-this-week"
+          >
+            {doneThisWeek} done this week · see Done
+          </button>
+        </p>
       ) : null}
 
       <form
@@ -1352,10 +1351,15 @@ Chores.propTypes = {
   exclusions: PropTypes.array.isRequired,
   repeatExceptions: PropTypes.array.isRequired,
   todayIso: PropTypes.string,
+  // #302 — which capacity week is "this" one, and in whose zone. Optional only
+  // because App renders this surface one frame before its period read lands.
+  timezone: PropTypes.string,
+  periodStart: PropTypes.string,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
   onAddMany: PropTypes.func.isRequired,
+  onShowDone: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,

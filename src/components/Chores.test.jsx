@@ -34,6 +34,28 @@ const chores = [
 /** The same two chores with the second one finished — #35's mixed fixture. */
 const mixed = [chores[0], { ...chores[1], completed_at: '2026-08-08T10:00:00Z', completed_by_member_id: 'm1' }]
 
+/**
+ * #302 — one outstanding chore and two completed ones from TWO capacity weeks
+ * (New York): the second chore finished in the week of Aug 24, which is the
+ * week `setup` passes as current, and a third finished in the week of Aug 10.
+ * The chore tab must render neither completed row and count exactly one; the
+ * Done surface (Done.test.jsx, same fixture) must group them in two.
+ */
+const twoWeeks = [
+  chores[0],
+  { ...chores[1], completed_at: '2026-08-25T10:00:00Z', completed_by_member_id: 'm1' },
+  {
+    id: 'c7',
+    household_id: 'h1',
+    title: 'Placeholder Done Chore',
+    expected_minutes: 30,
+    due_on: '2026-08-12',
+    completed_at: '2026-08-12T10:00:00Z',
+    completed_by_member_id: 'm1',
+    actual_minutes: 45,
+  },
+]
+
 // #36 — the roster the assignee control and the load list are built from.
 // Two people with DIFFERENT capacities, because a fixture where everyone has the
 // same budget cannot tell "remaining" from "capacity minus committed".
@@ -63,6 +85,7 @@ function setup(overrides = {}) {
     onAllow: vi.fn().mockResolvedValue(undefined),
     onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
+    onShowDone: vi.fn(),
   }
   render(
     <Chores
@@ -72,6 +95,10 @@ function setup(overrides = {}) {
       exclusions={[]}
       repeatExceptions={[]}
       todayIso="2026-08-24"
+      // #302 — the current capacity week, as App derives it, and the zone the
+      // completions are read in. Aug 24 2026 is a Monday.
+      timezone="America/New_York"
+      periodStart="2026-08-24"
       {...handlers}
       {...overrides}
     />,
@@ -405,26 +432,18 @@ describe('while a write is in flight', () => {
 })
 
 // ---------------------------------------------------------------------------
-// #35 — completion. ACs 5, 8 and 9.
+// #35 — completion. AC 5 here; ACs 8 and 9 moved to Done.test.jsx with #302,
+// because the completed group moved to its own surface. The undo and the
+// "Took" control went with it (same fixtures, different render target).
 // ---------------------------------------------------------------------------
 
-describe('completion — #35', () => {
+describe('completion — #35, and what #302 took off this tab', () => {
   const outstandingRow = () => screen.getByText('Placeholder Chore').closest('li')
 
   it('offers Done on an outstanding chore and calls the handler', async () => {
     const { onComplete } = setup()
     await clickAndSettle(within(outstandingRow()).getByRole('button', { name: /mark placeholder chore done/i }))
     expect(onComplete).toHaveBeenCalledWith('c1')
-  })
-
-  it('offers the undo on a completed one instead', async () => {
-    const { onUncomplete, onComplete } = setup({ chores: mixed })
-    const doneRow = screen.getByText('Placeholder Other Chore').closest('li')
-    expect(within(doneRow).queryByRole('button', { name: /mark .* done/i })).not.toBeInTheDocument()
-
-    await clickAndSettle(within(doneRow).getByRole('button', { name: /put placeholder other chore back/i }))
-    expect(onUncomplete).toHaveBeenCalledWith('c2')
-    expect(onComplete).not.toHaveBeenCalled()
   })
 
   it('AC 5: the outstanding total counts only unfinished work', () => {
@@ -439,32 +458,42 @@ describe('completion — #35', () => {
     expect(total).toHaveTextContent(/1 still to do/i)
   })
 
-  it('AC 8: completed chores stay visible, in their own group', () => {
-    setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(within(done).getByText('Placeholder Other Chore')).toBeInTheDocument()
-    // And the outstanding one is NOT in that group.
-    expect(within(done).queryByText('Placeholder Chore')).not.toBeInTheDocument()
+  it('#302 AC 1 / AC 5: no completed chore renders here — finished work moved to the Done tab', () => {
+    setup({ chores: twoWeeks })
+    // Neither completed row, in either week, and none of a done row's controls.
+    expect(screen.queryByText('Placeholder Other Chore')).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Done Chore')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /back on the list/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/actually took/)).not.toBeInTheDocument()
+    // The outstanding list, its total and the forms are exactly as they were.
+    expect(within(outstandingRow()).getByRole('button', { name: /mark placeholder chore done/i })).toBeInTheDocument()
+    expect(screen.getByTestId('outstanding-total')).toHaveTextContent(/1 still to do · 20 min/i)
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
   })
 
-  it('AC 9: the completed group carries no streak, rank, score or per-person total', () => {
-    setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(done).not.toHaveTextContent(/streak|rank|score|points|leaderboard|best|winner/i)
-    // No per-person figure: the member id in the fixture must not surface.
-    expect(done).not.toHaveTextContent(/m1/)
+  it('#302 AC 1: one line counts THIS capacity week’s completions and leads to Done', async () => {
+    const { onShowDone } = setup({ chores: twoWeeks })
+    // Two completed rows; one finished in the current week (Aug 24), one in the
+    // week of Aug 10. A count over every completed row reads 2 and fails.
+    const line = screen.getByTestId('done-this-week')
+    expect(line).toHaveTextContent('1 done this week')
+    expect(line).not.toHaveTextContent('2 done')
+    expect(onShowDone).not.toHaveBeenCalled()
+    await clickAndSettle(line)
+    expect(onShowDone).toHaveBeenCalledTimes(1)
   })
 
-  it('AC 9: and nothing in it is styled as an error or an alert — red is for work, never people', () => {
+  it('#302: the line still shows, reading zero, when the only finished work is from an earlier week', () => {
+    // mixed's completion is 2026-08-08; the current week is Aug 24. The line is
+    // the way to the Done tab, so it must not vanish with the count.
     setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(within(done).queryByRole('alert')).not.toBeInTheDocument()
-    expect(done.querySelector('.error')).toBeNull()
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
   })
 
-  it('shows no completed group at all when nothing is done', () => {
+  it('shows no done line at all when nothing has ever been done', () => {
     setup()
-    expect(screen.queryByRole('region', { name: /done this week/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('done-this-week')).not.toBeInTheDocument()
   })
 })
 
@@ -1171,12 +1200,10 @@ describe('#12 — expected-vs-actual capture and feedback', () => {
     actual_minutes: 45,
   }
 
-  it('AC 2 — a completed chore says what it took beside what was expected', () => {
-    setup({ chores: [doneOneOff] })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    expect(row).toHaveTextContent('30 min')
-    expect(row).toHaveTextContent('took 45 min')
-  })
+  // AC 2's one-off half ("took 45 min" beside "30 min") and every AC 1 test on
+  // the "Took (minutes)" control moved to Done.test.jsx with #302: a completed
+  // row no longer renders on this tab. Their fixture (`doneOneOff`) is copied
+  // there unchanged, which is #302 AC 2's condition.
 
   it('AC 2 — the anchor shows expected versus average-actual, side by side', () => {
     setup({ chores: [anchor, occurrence('o1', 24), occurrence('o2', 32)] })
@@ -1192,44 +1219,15 @@ describe('#12 — expected-vs-actual capture and feedback', () => {
     expect(screen.getByTestId('feedback-r1')).not.toHaveTextContent(/actually/)
   })
 
-  it('AC 1 — the done row offers the stored actual, prefilled', () => {
-    setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    expect(input).toHaveValue(45)
-  })
-
-  it('AC 1 — a row completed before the column existed prefills with the estimate', () => {
-    setup({ chores: [{ ...doneOneOff, actual_minutes: null }] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    expect(input).toHaveValue(30)
-  })
-
-  it('AC 1 — saving an adjusted actual calls the handler with the normalized value', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '50' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 50)
-  })
-
-  it('AC 1 — a bad actual is refused with a sentence before any request', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '-5' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(screen.getByRole('alert')).toHaveTextContent(/negative/i)
-    expect(handlers.onRecordActual).not.toHaveBeenCalled()
-  })
-
-  it('AC 1 — zero is a legal actual: "it was already done" saves rather than argues', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '0' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 0)
+  it('#302: a completed one-off does not render here at all, so neither does its actual control', () => {
+    // Beside an OUTSTANDING row on purpose. With the done chore alone the
+    // outstanding list never renders, and the assertion passes through that
+    // wrapper whatever the list maps over — measured: rendering every chore in
+    // the list reddened 0 here until the anchor was added, and 1 after.
+    setup({ chores: [anchor, doneOneOff] })
+    expect(screen.getByText('Placeholder Repeat')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Done Chore')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/actually took/)).not.toBeInTheDocument()
   })
 
   it('an outstanding chore offers no actual control — there is nothing to have taken time yet', () => {

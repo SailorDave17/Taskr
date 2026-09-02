@@ -50,7 +50,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, repeat_monthday, generated_from, actual_minutes, source'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, missed_at, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, repeat_monthday, generated_from, actual_minutes, source'
 
 /**
  * How a chore came to exist — `chores_source_known` in `0023`, story #211.
@@ -83,10 +83,11 @@ export const MAX_EXPECTED_MINUTES = 1440
  * seven days would have dropped a monthly chore's whole occurrence in silence,
  * which for a rent chore is the feature's headline case failing.
  *
- * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0026` carries both
- * numbers and its copy is the one that decides what exists; these are the
- * client-side record, and repeats.pglite.test.js holds them equal so they
- * cannot drift apart silently.
+ * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0028` (the body
+ * that runs — `0026` declared the same two values and #306 replaced the pass
+ * again) carries both numbers and its copy is the one that decides what
+ * exists; these are the client-side record, and repeats.pglite.test.js holds
+ * them equal so they cannot drift apart silently.
  *
  * NEITHER IS RENDERED, and that is a change worth stating rather than leaving
  * to be noticed. Until #103 the notice sentence below named the seven days,
@@ -483,6 +484,26 @@ export async function uncompleteChore(id) {
 }
 
 /**
+ * Record that a chore did not get done — #305.
+ *
+ * Through an RPC for the same reason completion is (0027, quoting 0004): the
+ * CLOCK. `missed_at` decides which capacity week the Done surface files the
+ * row under, so the server stamps it and the client cannot. The column is in
+ * no update grant, so this is the only path there is.
+ */
+export async function missChore(id) {
+  return unwrap(await getSupabase().rpc('miss_chore', { chore_id: id }), 'marking it not done')
+}
+
+/** Undo a miss — the chore returns to the outstanding list. */
+export async function unmissChore(id) {
+  return unwrap(
+    await getSupabase().rpc('unmiss_chore', { chore_id: id }),
+    'putting it back on the list',
+  )
+}
+
+/**
  * Adjust how long a chore really took — #12 AC 1.
  *
  * A plain column-granted update, unlike completion, and the difference is
@@ -518,6 +539,15 @@ export async function recordActualMinutes(id, actualMinutes) {
  * Exactly-once under a double-fire is the DATABASE's unique index, not
  * anything here — two devices calling this in the same second is the designed
  * case, not a race to defend against in JavaScript.
+ *
+ * Since #306 (`0028`) the pass also WRITES `missed_at`: when it creates a new
+ * occurrence for an anchor, every older outstanding member of that anchor's
+ * family is marked missed with the pass's clock, so at most one occurrence
+ * of a repeat is on the list at a time. Nothing here changes for that — the
+ * return shape is the same two counts by decision (the household is not
+ * told; docs/refresh-charter.md, 2026-09-02) — but a caller reading
+ * `missed_at` after this resolves may see rows that were outstanding a
+ * moment ago, which is the point.
  */
 export async function catchUpRepeats() {
   const rows = unwrap(await getSupabase().rpc('catch_up_repeats'), 'catching up repeats')
@@ -680,9 +710,33 @@ export async function unassignChore(choreId) {
   )
 }
 
-/** Is this chore still to do? The whole definition of outstanding, in one place. */
+/** Was this chore recorded as not done? — #305. Null and absent both mean no. */
+export function isMissed(chore) {
+  return chore.missed_at !== null && chore.missed_at !== undefined
+}
+
+/**
+ * Was this chore finished? — keyed on `completed_at` alone.
+ *
+ * Until #305 this was `!isOutstanding`, and the two were one question. A
+ * missed chore is neither outstanding nor completed, so every reader that
+ * meant FINISHED — the actuals, the "took" line, the count on the Chores tab —
+ * asks this, and every reader that meant STILL TO DO asks `isOutstanding`.
+ * A row satisfies at most one of the three (0027's constraint forbids both
+ * stamps at once), which is what lets each reader ask only its own question.
+ */
+export function isCompleted(chore) {
+  return chore.completed_at !== null && chore.completed_at !== undefined
+}
+
+/**
+ * Is this chore still to do? The whole definition of outstanding, in one place.
+ *
+ * Both stamps null — #305 taught it the second column. A row that carries
+ * neither is on the list; a row that carries either has left it.
+ */
 export function isOutstanding(chore) {
-  return chore.completed_at === null || chore.completed_at === undefined
+  return !isCompleted(chore) && !isMissed(chore)
 }
 
 /**
@@ -707,10 +761,16 @@ export function outstandingMinutes(chores) {
  * not-template-only without a second rule. An occurrence row's family is also
  * itself alone — its history belongs to the anchor, and double-counting it
  * under both would weight the average by nothing real.
+ *
+ * COMPLETED, not "not outstanding" — #305. A missed occurrence has left the
+ * list and carries no actual, so counting it here would put its estimate into
+ * the average as though somebody had done the work in exactly the expected
+ * time, and would count toward the completion floor an estimate update waits
+ * for. It is ignored: the family's history is the work that happened.
  */
 export function completedInstances(chore, chores) {
   return chores.filter(
-    (c) => (c.id === chore.id || c.generated_from === chore.id) && !isOutstanding(c),
+    (c) => (c.id === chore.id || c.generated_from === chore.id) && isCompleted(c),
   )
 }
 
@@ -783,15 +843,25 @@ export function estimateSuggestion(chore, chores) {
  * back to the estimate for exactly those — the same fallback `actualsSummary`
  * uses, so the bar and the feedback line cannot disagree about what an old
  * completion cost.
+ *
+ * A MISSED chore is dropped here rather than passed through — #305. It
+ * contributes nothing: not open load (it is not going to happen) and not done
+ * minutes (nobody did it). Passing it as `done: true` would credit its holder
+ * with the estimate; passing it as `done: false` would count it as work still
+ * to do and the allocator would try to place it. Neither is the fact, so the
+ * allocator never sees the row — which is also why `announce.js`'s snapshot
+ * and the split surface's probe drop it for free, both being built from this.
  */
 export function toAllocatorChores(chores) {
-  return chores.map((chore) => ({
-    id: chore.id,
-    expectedMinutes: chore.expected_minutes || 0,
-    actualMinutes: chore.actual_minutes ?? null,
-    assignedMemberId: chore.assigned_member_id ?? null,
-    done: !isOutstanding(chore),
-  }))
+  return chores
+    .filter((chore) => !isMissed(chore))
+    .map((chore) => ({
+      id: chore.id,
+      expectedMinutes: chore.expected_minutes || 0,
+      actualMinutes: chore.actual_minutes ?? null,
+      assignedMemberId: chore.assigned_member_id ?? null,
+      done: !isOutstanding(chore),
+    }))
 }
 
 // `committedMinutes` and `commitmentByMember` lived here until #47.

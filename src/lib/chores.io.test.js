@@ -88,10 +88,12 @@ const {
   catchUpRepeats,
   completeChore,
   listChores,
+  missChore,
   recordActualMinutes,
   removeChore,
   unassignChore,
   uncompleteChore,
+  unmissChore,
   updateChore,
 } = await import('./chores.js')
 
@@ -584,6 +586,41 @@ describe('completion goes through the RPC, never an update — #35', () => {
   it('and the undo does too', async () => {
     results.uncomplete_chore = { data: null, error: { message: 'no such chore in your household' } }
     await expect(uncompleteChore('c1')).rejects.toThrow(/putting it back on the list: no such chore/i)
+  })
+})
+
+describe('a miss goes through the RPC, never an update — #305', () => {
+  const rpcs = () => calls.filter((c) => c.op === 'rpc')
+
+  it('missChore calls the function and sends NO timestamp', async () => {
+    results.miss_chore = { data: { ...ROW, missed_at: '2026-08-26T09:00:00Z' }, error: null }
+    await missChore('c1')
+
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'miss_chore', args: { chore_id: 'c1' } }])
+    // The clock is the server's, for the same reason completion's is: the
+    // stamp decides which week the Done surface files the row under.
+    expect(JSON.stringify(rpcs()[0].args)).not.toMatch(/missed_at|202\d-/)
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('unmissChore calls its own function', async () => {
+    results.unmiss_chore = { data: { ...ROW, missed_at: null }, error: null }
+    await unmissChore('c1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'unmiss_chore', args: { chore_id: 'c1' } }])
+    expect(opsOn('chores')).toHaveLength(0)
+  })
+
+  it('reports a refusal with what we were doing', async () => {
+    results.miss_chore = {
+      data: null,
+      error: { message: 'that chore is marked done — put it back on the list first' },
+    }
+    await expect(missChore('c1')).rejects.toThrow(/marking it not done: that chore is marked done/i)
+  })
+
+  it('and the undo does too', async () => {
+    results.unmiss_chore = { data: null, error: { message: 'no such chore in your household' } }
+    await expect(unmissChore('c1')).rejects.toThrow(/putting it back on the list: no such chore/i)
   })
 })
 

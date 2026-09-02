@@ -461,16 +461,17 @@ describe('a chore that repeats, run against a real Postgres', () => {
     })
 
     it('the bounds are ONE pair of constants: the migration and the client copies agree', async () => {
-      // RE-POINTED FROM 0012 TO 0026 by #103, and the reason is the guard's own
-      // subject moving rather than a tidy-up: `0026` replaces
-      // `catch_up_repeats_at`, so 0012's declaration is now historical text in
-      // a body that no longer runs. A test reading it would go on passing while
-      // asserting against a number the database does not use — which is the
-      // shape where a guard stays where the hazard was.
+      // RE-POINTED FROM 0012 TO 0026 by #103, AND FROM 0026 TO 0028 by #306,
+      // for the same reason each time — the guard's own subject moving rather
+      // than a tidy-up: each of those files replaces `catch_up_repeats_at`,
+      // so the earlier declaration is historical text in a body that no
+      // longer runs. A test reading it would go on passing while asserting
+      // against a number the database does not use — which is the shape where
+      // a guard stays where the hazard was.
       //
       // Both bounds are asserted, because #103 made the bound kind-dependent:
       // seven days for daily/weekly, one month for monthly.
-      const source = migrationSql('0026_repeat_monthly.sql')
+      const source = migrationSql('0028_a_superseded_occurrence_is_missed.sql')
       const days = source.match(/catch_up_bound_days constant integer := (\d+);/)
       const months = source.match(/catch_up_bound_months constant integer := (\d+);/)
       // Positive control first: if either regex stops matching, that is a

@@ -1,22 +1,24 @@
+import { assess } from './allocation.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  actualsSummary,
   CATCH_UP_BOUND_DAYS,
   CATCH_UP_BOUND_MONTHS,
   CHORE_COLUMNS,
   CHORE_SOURCES,
-  DEFAULT_CHORE_SOURCE,
-  ESTIMATE_DEVIATION_THRESHOLD,
-  MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE,
-  actualsSummary,
   completedInstances,
+  DEFAULT_CHORE_SOURCE,
   describeRepeat,
+  ESTIMATE_DEVIATION_THRESHOLD,
   estimateSuggestion,
   formatSkippedNotice,
+  isCompleted,
+  isMissed,
   isOutstanding,
-  outstandingMinutes,
   MAX_EXPECTED_MINUTES,
+  MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE,
   MIN_EXPECTED_MINUTES,
   normalizeActualMinutes,
   normalizeDueDate,
@@ -24,6 +26,8 @@ import {
   normalizeRepeat,
   normalizeTitle,
   ordinalOf,
+  outstandingMinutes,
+  toAllocatorChores,
 } from './chores.js'
 
 // #34 — the validators the form and the data layer share.
@@ -157,8 +161,8 @@ describe('the readable column list', () => {
     // 0004 added the two completion columns as readable, 0006 added
     // assigned_member_id, 0012 the three repeat columns a screen renders,
     // 0015 the actual (#12), 0018 assigned_source (#49), 0023 source (#211)
-    // and 0026 repeat_monthday (#103); if this list and the grant ever
-    // disagree, every read fails with a permission error.
+    // 0026 repeat_monthday (#103) and 0027 missed_at (#305); if this list and
+    // the grant ever disagree, every read fails with a permission error.
     expect(CHORE_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual([
       'actual_minutes',
       'assigned_member_id',
@@ -171,6 +175,7 @@ describe('the readable column list', () => {
       'generated_from',
       'household_id',
       'id',
+      'missed_at',
       'repeat_kind',
       'repeat_monthday',
       'repeat_weekdays',
@@ -634,5 +639,140 @@ describe('#12 AC 4 — the estimate-update boundary, at exactly 3 and exactly 25
       actual_minutes: 120,
     }
     expect(estimateSuggestion(one, [one])).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #305 — a chore nobody did. Neither outstanding nor completed, and it
+// contributes NOTHING: not load, not credit, not an actual. Each fixture below
+// is built so that the wrong reading — counting the miss as still-to-do, or as
+// done — produces a DIFFERENT number, so a reader that includes it fails.
+// ---------------------------------------------------------------------------
+
+describe('#305 — the three states are exclusive, and each predicate answers its own question', () => {
+  const out = { id: 'a', expected_minutes: 20, completed_at: null, missed_at: null }
+  const done = { id: 'd', expected_minutes: 30, completed_at: '2026-08-25T10:00:00Z', missed_at: null }
+  const missed = { id: 'm', expected_minutes: 60, completed_at: null, missed_at: '2026-08-26T09:00:00Z' }
+
+  it('outstanding: neither stamp', () => {
+    expect(isOutstanding(out)).toBe(true)
+    expect(isCompleted(out)).toBe(false)
+    expect(isMissed(out)).toBe(false)
+  })
+
+  it('completed: the completion stamp only', () => {
+    expect(isOutstanding(done)).toBe(false)
+    expect(isCompleted(done)).toBe(true)
+    expect(isMissed(done)).toBe(false)
+  })
+
+  it('missed: the miss stamp only — it has left the list and it is NOT done', () => {
+    expect(isOutstanding(missed)).toBe(false)
+    expect(isCompleted(missed)).toBe(false)
+    expect(isMissed(missed)).toBe(true)
+  })
+
+  it('a row read before 0027 shipped carries no missed_at and is simply not missed', () => {
+    expect(isMissed({ id: 'a', completed_at: null })).toBe(false)
+    expect(isOutstanding({ id: 'a', completed_at: null })).toBe(true)
+    expect(isMissed({ id: 'a', completed_at: null, missed_at: undefined })).toBe(false)
+  })
+})
+
+describe('#305 AC 4 — a missed chore counts toward neither the outstanding total nor the Split', () => {
+  const out = (id, minutes, holder = null) => ({
+    id, expected_minutes: minutes, assigned_member_id: holder, completed_at: null, missed_at: null,
+  })
+  const done = (id, minutes, holder = null) => ({
+    id, expected_minutes: minutes, assigned_member_id: holder,
+    completed_at: '2026-08-25T10:00:00Z', missed_at: null, actual_minutes: minutes,
+  })
+  const missed = (id, minutes, holder = null) => ({
+    id, expected_minutes: minutes, assigned_member_id: holder,
+    completed_at: null, missed_at: '2026-08-26T09:00:00Z', actual_minutes: null,
+  })
+
+  it('the outstanding total skips it — 20 with the miss ignored, 80 with it counted', () => {
+    const rows = [out('a', 20), missed('m', 60), done('d', 30)]
+    expect(outstandingMinutes(rows)).toBe(20)
+    expect(outstandingMinutes(rows)).not.toBe(80)
+  })
+
+  it('the allocator never sees it, so it is neither open load nor done credit on the Split', () => {
+    // Everything held by one person, so the wrong readings are visible in her
+    // own figures: open 80 if the miss counted as outstanding, done 90 if it
+    // counted as finished. The fact is open 20, done 30.
+    const rows = [out('a', 20, 'm1'), missed('m', 60, 'm1'), done('d', 30, 'm1')]
+    const normalized = toAllocatorChores(rows)
+    expect(normalized.map((c) => c.id)).toEqual(['a', 'd'])
+
+    const picture = assess({ members: [{ id: 'm1', capacityMinutes: 200 }], chores: normalized })
+    const mine = picture.load.find((entry) => entry.memberId === 'm1')
+    expect(mine.openMinutes).toBe(20)
+    expect(mine.doneMinutes).toBe(30)
+    expect(mine.assignedMinutes).toBe(50)
+    expect(mine.openMinutes).not.toBe(80)
+    expect(mine.doneMinutes).not.toBe(90)
+  })
+
+  it('POSITIVE CONTROL: the same rows with the miss turned into a completion DO move the done figure', () => {
+    // So the assertion above is about the miss being dropped, not about
+    // assess ignoring the third row for some other reason.
+    const rows = [out('a', 20, 'm1'), done('m', 60, 'm1'), done('d', 30, 'm1')]
+    const picture = assess({ members: [{ id: 'm1', capacityMinutes: 200 }], chores: toAllocatorChores(rows) })
+    expect(picture.load.find((entry) => entry.memberId === 'm1').doneMinutes).toBe(90)
+  })
+})
+
+describe('#305 AC 5 — the actuals ignore a missed occurrence', () => {
+  const anchor = {
+    id: 'r1',
+    expected_minutes: 20,
+    repeat_kind: 'weekly',
+    completed_at: '2026-08-10T10:00:00Z',
+    missed_at: null,
+    actual_minutes: 40,
+  }
+  const doneOccurrence = {
+    id: 'o1',
+    generated_from: 'r1',
+    expected_minutes: 20,
+    completed_at: '2026-08-17T10:00:00Z',
+    missed_at: null,
+    actual_minutes: 40,
+  }
+  const missedOccurrence = {
+    id: 'o2',
+    generated_from: 'r1',
+    expected_minutes: 20,
+    completed_at: null,
+    missed_at: '2026-08-24T09:00:00Z',
+    actual_minutes: null,
+  }
+  const all = [anchor, doneOccurrence, missedOccurrence]
+
+  it('is not a completed instance of its family', () => {
+    expect(completedInstances(anchor, all).map((c) => c.id).sort()).toEqual(['o1', 'r1'])
+  })
+
+  it('does not enter the average — which would otherwise pull 40 down to 33', () => {
+    // Counted, the null actual stands in as the estimate (minutesOf's fallback):
+    // (40 + 40 + 20) / 3. Ignored: (40 + 40) / 2.
+    expect(actualsSummary(anchor, all)).toEqual({ count: 2, averageMinutes: 40 })
+  })
+
+  it('does not count toward the completion floor, so no estimate update is offered on two real completions', () => {
+    // Two completions is below MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE. Counting
+    // the miss would make three, at an average deviating well past 25%, and
+    // the family would be offered 33 as a new estimate on work nobody did.
+    expect(estimateSuggestion(anchor, all)).toBeNull()
+  })
+
+  it('POSITIVE CONTROL: a third REAL completion is what earns the offer', () => {
+    const third = {
+      id: 'o3', generated_from: 'r1', expected_minutes: 20,
+      completed_at: '2026-08-24T10:00:00Z', missed_at: null, actual_minutes: 40,
+    }
+    expect(estimateSuggestion(anchor, [...all, third])).toBe(40)
   })
 })

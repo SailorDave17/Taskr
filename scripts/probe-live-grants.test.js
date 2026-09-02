@@ -314,7 +314,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names, plus 0022 through 0026', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022 through 0027', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -345,6 +345,11 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // did; `check:live` sees only the select half (42703 until the apply),
       // so the INSERT and UPDATE halves are this probe's alone.
       'chores.repeat_monthday=arw',
+      // 0027, story #305. `r` and nothing else: the missed stamp is set by
+      // `miss_chore` from the database clock and no client role may write it.
+      // `check:live` sees the select half (42703 until the apply); the ABSENCE
+      // of `a` and `w` is this probe's alone.
+      'chores.missed_at=r',
     ])
   })
 })

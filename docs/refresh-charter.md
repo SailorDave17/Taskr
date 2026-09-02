@@ -454,13 +454,19 @@ that it should be.
   likeliest to be skipped, that the old wording described worst. Both constants remain exported and
   unrendered, as the client-side record this log points at.
 
+**AMENDED 2026-09-02 by the decision below — the authority is now `0028`, not `0026`.** The values
+are unchanged; #306 replaced the pass again to add the supersede step, so `0026`'s declaration is
+historical text in a body that no longer runs, and `repeats.pglite.test.js` reads the constants out
+of `0028` for that reason.
+
 ## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
 
 Owner decision at the pickup of #47, whose criterion 11 required "the navigation approach chosen is
 recorded in the decision log". This is that record.
 
 - **Three surfaces — Split, Chores, Who — as a tab strip in `App.jsx`, with the current view held in
-  `useState`.** The split opens by default, which is not a new decision: the grooming section above
+  `useState`.** *(Four since 2026-09-01: #302 added Done — see that decision below.)* The split opens
+  by default, which is not a new decision: the grooming section above
   settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
   What #47 settled is the *mechanism*.
 - ~~**Why not a router.** `react-router` would be the largest dependency in the repo, added to move
@@ -638,6 +644,79 @@ RPC" — and #49 is that RPC. Two mechanism choices inside it:
   and clear. Rejected: overrides-only (a baseline edit would visibly change the bars and silently
   not move the split) and every-input-write (a re-balance on writes nobody experiences as a
   capacity change, beyond what #49 asserts).
+
+## Decision taken 2026-09-01 — completed work gets its own tab
+
+Owner decision at the pickup of #302, from the three options that issue tabled. The chore screen
+had rendered every completed chore ever under a heading reading "Done this week", which nothing
+bounded to a week — false from the household's second week and growing by a screen a week once the
+daily repeats (#53) landed.
+
+- **A fourth surface, Done, grouped by capacity week, newest first.** The Chores tab shows only
+  outstanding work plus one line — "N done this week" — that leads to Done. Groups use the week
+  `periodStartFor` derives in the household's zone, because the household already thinks in
+  capacity weeks (#46/#47); a second notion of a week here would be two answers to one question.
+  The 2026-08-25 tab decision above now reads four surfaces rather than three, and stands otherwise
+  — arrival on Done performs the same full re-read.
+- **Rejected: bound the group on the Chores tab to the current week with a "show earlier weeks"
+  disclosure.** Smallest change, but history keeps sharing a screen with the work and the disclosure
+  grows without bound behind one click.
+- **Rejected: archive or purge completed rows after N weeks.** Destroys the actuals #12 reads to
+  suggest estimates and the history #105 preserves on purpose. Only the screen changed; no row moves.
+- **What survives from #35 unchanged**: AC 8 (completed work stays visible somewhere) and AC 9 (no
+  streak, rank, score or per-person total, and nothing styled as an error or alert). The component
+  test moved to the new surface with the group it guards.
+- **The bar, set at the design-bar gate the same day — what must become true:** Done reads as a
+  **logbook** — dense rows, grouped by capacity week, the newest week open and the rest behind their
+  headings — the way Things 3's Logbook does, not the way a task list's hidden "completed" section
+  does. Judged on a running prototype of the real components at 360px, not on the issue text:
+  with eight weeks of daily repeats the first build rendered **27 screens**, because a done row is
+  the working row (375px tall, seven controls). Verdict *lands, but not at every size*. Half the
+  repair — only the newest week open — shipped inside #302; the other half, a compact done row
+  that keeps only "Not done after all" and "Took", is its own story, because it reopens #302 AC 2's
+  "exactly as it does today".
+
+## Decision taken 2026-09-02 — a superseded occurrence is marked missed, and the household is not told
+
+Owner decisions on #306: the rule on the issue itself (2026-09-02, from three options), and the
+notice question at pickup the same day (AC 7 asked for it to be decided rather than left implicit).
+
+- **The rule.** When the catch-up pass creates a new occurrence for a repeat anchor, every
+  outstanding member of that anchor's family with an older `due_on` is marked missed — #305's
+  state, written by `catch_up_repeats_at` in `0028` with the pass's own clock. It keys on the
+  anchor, not the kind, so a daily goes missed on the next app open, a weekly's window is its week
+  and a monthly's is its month; the anchor's own row is the first occurrence (0012) and is
+  superseded like any other. Completed work is history and is untouched (#105's rule); a row a
+  member put back stays on the list until the next occurrence really generates; a one-off has no
+  anchor and nothing supersedes it.
+- **Rejected**: marking missed at the end of the due day for every kind (a weekly done a day late
+  would read not-done first and Done-wins second, showing more misses than the household would feel
+  it earned); a per-kind grace window — daily 0, weekly 2, monthly 7 days (a third tunable plus copy
+  on the edit form, for a distinction the per-anchor rule already approximates); collapsing the
+  overdue copies into one row with a count (a tally on a person's chore is a shame mechanic); and
+  deleting the superseded rows (they are #105's history and the record #12's actuals may want).
+- **Cost, stated so it is not rediscovered as a defect**: an overdue weekly sits on the outstanding
+  list and in the Split for up to seven days, a monthly for up to a month, until its successor
+  generates. #305's manual "Didn't happen" is kept for exactly that gap, and for one-offs.
+- **Second cost, raised by #306's review fan-out and kept by the owner (2026-09-02)**: the anchor
+  row is the only row carrying a repeat's schedule controls (badge, Edit-schedule, #105's Skip, the
+  estimate offer), and once superseded it sits on the Done tab under the week it was superseded —
+  permanently, because a superseded row keeps its first stamp — so a repeat whose first day was not
+  ticked has those controls behind a collapsed old week. A completed anchor already lived on Done
+  under an old week before this decision; the rule extends that reach, it does not create it.
+  Rejected here: excluding the anchor from the rule (one permanent overdue row per repeat, counted
+  in the fairness figure — the stacking in miniature) and widening #306 to move the controls. The
+  repair is **#311**: a repeat's schedule controls reachable from its newest outstanding occurrence.
+- **The household is NOT told.** #53 AC 4's transient notice announces work that never appeared
+  because nobody opened the app for longer than the bound; a superseded occurrence has not vanished
+  — it is on the Done tab labelled *not done*, with "Put it back" beside it. A "N marked not done"
+  line would fire on most opens for any household with a daily repeat, a daily nag about work that
+  did not happen, which is the tone the design direction rules out; and it would need a third return
+  column from the pass, which a `create or replace` cannot add (a changed return type is a drop of
+  both catch-up functions and their privileges). So the pass's return shape is unchanged and
+  `skipped_count` still counts only what the bound skipped. Rejected: extending the notice with the
+  count; and saying it only when a skip is also announced (rare enough not to nag, but the same
+  function-drop cost and an inconsistently shown number).
 
 ## Open decisions (still owed)
 

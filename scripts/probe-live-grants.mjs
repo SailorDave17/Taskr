@@ -216,6 +216,26 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'arw',
     source: '0026 (#103) — `aw` is what check:live cannot see; `r` it can',
   }),
+  // `0027` (#305): the missed stamp. `r` only, and the ABSENCE of `a` and `w`
+  // is this row's whole content — `missed_at` moves only through definer
+  // functions (`miss_chore` and `unmiss_chore`, and since `0028` (#306) the
+  // catch-up pass `catch_up_repeats_at`, which is granted to no client role),
+  // for 0004's clock reason, so a client role holds no write on it. *(This
+  // named the two 0027 functions as the only writers until 2026-09-02; the
+  // privilege claim was and is unchanged.)* `check:live` sees the select half (`missed_at` joins
+  // CHORE_COLUMNS, so the read answers `42703` until the apply) and cannot
+  // see the withholding; a future migration that widened this column to
+  // writable would move the row to `arw` and be reported here, where no
+  // client-side probe can report being allowed a write it never attempts.
+  // #305 AC 8 words this as "granted to no client role", and the reading is
+  // the write half: the column has to be readable or the Done surface could
+  // not file the row under a week.
+  Object.freeze({
+    table: 'chores',
+    column: 'missed_at',
+    privileges: 'r',
+    source: '0027 (#305) — `r` only; `a` and `w` withheld, the whole point',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -433,7 +453,7 @@ export function publicProaclQuery() {
  * confirmed when BOTH halves hold: anon lost everything, and authenticated lost
  * nothing.
  *
- * All seven tables, not the two `0017` names. A revoke aimed at one table cannot
+ * All nine tables, not the two `0017` names. A revoke aimed at one table cannot
  * splash onto another, but this list costs nothing to widen and a control that
  * only watches the tables you changed cannot report a surprise.
  *

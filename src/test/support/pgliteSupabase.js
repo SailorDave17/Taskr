@@ -113,6 +113,8 @@ export const MIGRATIONS = [
   '0024_edit_or_stop_a_repeat.sql',
   '0025_skip_a_single_occurrence.sql',
   '0026_repeat_monthly.sql',
+  '0027_missed_chores.sql',
+  '0028_a_superseded_occurrence_is_missed.sql',
 ]
 
 export function migrationSql(name) {

@@ -726,3 +726,97 @@ describe('#59 — the note saying what the fairness number does not count', () =
     expect(screen.queryByTestId('fairness-note')).not.toBeInTheDocument()
   })
 })
+
+describe('#307 — work claimed by whoever completed it reaches the fairness figure', () => {
+  // The behaviour this story exists for, asserted on the surface where it
+  // shows. The DATABASE writes the holder now (0029): completing a chore
+  // nobody was assigned sets `assigned_member_id` to the completer with
+  // `assigned_source = 'completed'`. This surface changes not at all — it was
+  // always ready to count a done chore for its holder — so what these tests
+  // pin is that the row shape the migration produces lands where the charter
+  // says the household's argument ends.
+  //
+  // The fixture is chosen so the two rules DIFFER in a rendered figure, which
+  // is the same discipline criterion 9 states above: a fixture whose totals
+  // agree under both rules would pass whatever the database does.
+  //
+  // 90 minutes, done, by the person with 300 minutes of capacity.
+  //   Under the OLD rule (holder null): `assess` drops it entirely, m1 reads
+  //   "0 of 300 min" and the household total is 30.
+  //   Under THIS rule (holder m1): m1 reads "90 of 300 min", 90 min done.
+  const claimed = (extra = {}) => ({
+    id: 'c',
+    title: 'Placeholder Chore',
+    expected_minutes: 90,
+    assigned_member_id: 'm1',
+    assigned_source: 'completed',
+    completed_at: '2026-08-25T10:00:00Z',
+    ...extra,
+  })
+
+  it("counts the completed chore in the completer's own load", () => {
+    setup({ chores: [claimed(), chore('b', 30, 'm2')] })
+    expect(row('m1')).toHaveTextContent('90 of 300 min')
+    expect(row('m1')).toHaveTextContent('90 min done')
+  })
+
+  it('SYNTHETIC CONTROL: the identical chore with no holder reaches nobody', () => {
+    // The same row, one field different. This is the state the database wrote
+    // before 0029, and it is what makes the assertion above a measurement
+    // rather than a description: m1 reads zero, and the 90 minutes are in
+    // nobody's figure at all.
+    setup({ chores: [claimed({ assigned_member_id: null, assigned_source: null }), chore('b', 30, 'm2')] })
+    expect(row('m1')).toHaveTextContent('0 of 300 min')
+    expect(row('m1')).not.toHaveTextContent('90 min done')
+  })
+
+  it('counts it at its ACTUAL minutes where one was recorded', () => {
+    // #47 criterion 7 — done work contributes what it took, not what it was
+    // estimated at. The completion path seeds `actual_minutes` from the
+    // estimate (0015), and the done row carries an editable "Took (minutes)",
+    // so a claimed chore whose actual disagrees with its estimate must count
+    // the actual.
+    setup({ chores: [claimed({ actual_minutes: 150 }), chore('b', 30, 'm2')] })
+    expect(row('m1')).toHaveTextContent('150 of 300 min')
+    expect(row('m1')).toHaveTextContent('150 min done')
+  })
+
+  it('moves the levelness verdict, which is the figure the charter cares about', () => {
+    // The household-total assertion the AC asks for: a test asserting only the
+    // total must redden under this change. Two people at 300 and 60 minutes.
+    // m2 holds 30 minutes of open work — half their week. m1 has done 150
+    // minutes, half of theirs.
+    //   CLAIMED: 180 minutes counted over 360 of capacity, so each fair share
+    //   is half a person's week — 150 and 30, which is exactly what each holds.
+    //   The split is level.
+    //   UNCLAIMED: m1's 150 minutes reach nobody, so only 30 minutes are
+    //   counted at all. The fair shares drop to 25 and 5, m1 holds none of
+    //   theirs and m2 is 25 minutes past theirs — the household is off level
+    //   and the sentence names the wrong person, because the person who
+    //   actually did the most work is invisible.
+    setup({ chores: [claimed({ actual_minutes: 150 }), chore('b', 30, 'm2')] })
+    expect(verdict()).toHaveTextContent('The split is level.')
+  })
+
+  it('SYNTHETIC CONTROL: unclaimed, that same household is NOT level', () => {
+    setup({
+      chores: [
+        claimed({ actual_minutes: 150, assigned_member_id: null, assigned_source: null }),
+        chore('b', 30, 'm2'),
+      ],
+    })
+    expect(verdict()).not.toHaveTextContent('The split is level.')
+    expect(verdict()).toHaveTextContent('25 min off level')
+    // And it names m2, who did the LESS work of the two — the concrete cost of
+    // the old rule, on the screen the charter says the argument ends at.
+    expect(verdict()).toHaveTextContent('Placeholder Two')
+  })
+
+  it('does not put a claimed chore in the needs-attention area', () => {
+    // It has a holder now, so it is not orphan work — and it is done, so it is
+    // not work either. Both reasons point the same way, and the area must stay
+    // absent rather than gaining a permanent resident.
+    setup({ chores: [claimed(), chore('b', 30, 'm2')] })
+    expect(screen.queryByRole('region', { name: /needs attention/i })).toBeNull()
+  })
+})

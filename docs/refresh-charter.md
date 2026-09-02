@@ -718,6 +718,49 @@ notice question at pickup the same day (AC 7 asked for it to be decided rather t
   count; and saying it only when a skip is also announced (rare enough not to nag, but the same
   function-drop cost and an inconsistently shown number).
 
+## Decision taken 2026-09-01 — completing an unassigned chore assigns it to the completer
+
+**This REVERSES #35's answer to the noticing question, and the reversal is the point of the entry.**
+Owner instruction, 2026-09-01: *"when a chore is clicked as complete, assign it to the person that
+clicked complete so they get credit — unless it has already been assigned, then leave it."* Shipped
+as #307 (`0029`). The decision it reverses lived on #35 and never reached this document; it does
+now, so the record and its correction sit together.
+
+- **What #35 decided (2026-08-08) and why it was right then.** Given three options for a completion
+  of work nobody held — (a) allow it, attribute it, build no surface; (b) refuse the completion;
+  (c) auto-assign to the completer — the owner took **(a)**. (b) makes the app argue with somebody
+  who has just done the dishes. (c) was rejected for a concrete reason: a holder written by a
+  completion would later surface in stored re-assignment as *a re-balance that never happened*,
+  because `assigned_member_id` said WHO without saying HOW.
+- **What changed.** #49 (`0018`) shipped stored re-assignment with `assigned_source`, so the column
+  now records how an assignment was decided and a manual holder is already never moved by the
+  allocator. The 2026-08-08 objection had no mechanism; it has one now. This is not a change of mind
+  about the risk — it is the risk having acquired an answer.
+- **The cost of leaving it.** `completed_by_member_id` was read by NOTHING on the Split:
+  `toAllocatorChores` carries only `assignedMemberId`, and `assess` drops a done chore with no
+  holder from the arithmetic entirely. So a member who did an unassigned chore was credited in the
+  done group and **invisible in the fairness figure** — the one place this charter says the
+  household's argument ends. *Measured* on the shipped fixture: 150 minutes of finished work against
+  30 minutes of somebody else's open work reported the household 25 minutes off level and **named
+  the person who had done less**.
+- **The rule.** Unassigned at completion → the completer becomes the holder, with a **third**
+  `assigned_source` value, `completed`. Already assigned → holder and source untouched, whoever
+  completes it; `completed_by_member_id` still records who actually did the work. Un-completing a
+  `completed`-sourced row clears both columns and restores the pre-completion state exactly;
+  un-completing a manual or auto row leaves the assignment alone. A missed chore (#305) is never
+  assigned by this rule, because nothing was completed.
+- **Why a third value rather than `manual`.** `manual` is read: `apply_assignments` treats a manual
+  holder as pinned. More importantly, un-completion has to know which kind it is looking at — with
+  `manual`, *"Not done after all"* on a chore nobody was ever assigned would leave the completer
+  holding it as though a person had chosen them, pinned against the allocator on the strength of a
+  tap that has since been taken back.
+- **No backfill, deliberately.** Every row completed before `0029` was completed under the old rule
+  and those weeks' fairness figures were computed without them. Writing holders onto them now would
+  restate history the household has already looked at and agreed about. The rule applies from here.
+- **What survives from #35 unchanged**: AC 8 (completed work stays visible somewhere) and **AC 9**
+  (no streak, rank, score or per-person total). Naming who holds one chore is a fact about that
+  chore; a count per person is a scoreboard, and the Done surface's tests still refuse one.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

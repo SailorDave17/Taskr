@@ -7,15 +7,41 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0028` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s apply in its own story's session
-  (below), and at the same figure on 2026-09-01 after `0027` was applied in its.
+- Status: **`0001`–`0029` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-09-02 at 32 of 32*, on both sides of `0029`'s apply in its own story's session
+  (below), and at the same figure on both sides of `0028`'s earlier the same day, and on 2026-09-01
+  after `0027` was applied in its.
   *(This range read `0001`–`0023` until 2026-08-31 while the entries below already recorded `0024`
   and `0025` applied — the headline is a second copy of what its own detail says, and it is the copy
   a reader acts on, so it is now bumped in the same edit that adds an entry.)* The denominator
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0029` on 2026-09-02 (#307, completing an unassigned chore assigns it to the completer)**,
+  applied with `npm run migrate:live` in the story's own session, before the merge and the `release`
+  promotion — `0020`'s safe order — at md5 `4215ca88a9d3e70b3656b4beb6874454` (12456 characters,
+  5 statements), read back identical. One constraint dropped and re-added to admit a third
+  `assigned_source` value (`completed`), one `comment on column`, and two `create or replace`s with
+  UNCHANGED signatures (`complete_chore`, `uncomplete_chore`), so no overload and PostgREST's
+  argument-name resolution is untouched. **It issues no privilege statement at all**, which is the
+  claim most worth checking rather than believing: `create or replace` preserves a function's ACLs,
+  and if it did not, the client would silently lose the ability to complete anything.
+  It never entered the excused-red set and could not have — `check:live` probes tables, columns and
+  RPC name/argument sets, and this file adds no column and changes no signature, so it is
+  structurally blind to it in BOTH directions, the same shape as `0028` and for a different reason
+  (a body there, a constraint and two bodies here). *Measured at **32 of 32** immediately before AND
+  immediately after the apply, denominator unmoved*, and `npm run probe:live-grants` reads **15 of
+  15 with its negative control** on both sides, which is what makes the no-privilege-statement claim
+  a measurement. What testifies is a read-only catalog query over the Management API, taken on both
+  sides in the same session: **before**, `chores_assigned_source_known` admitted `'manual'` and
+  `'auto'` only, NEITHER function's body mentioned `assigned_source`, and the column carried no
+  comment; **after**, the constraint admits `'completed'` too, both bodies mention it, the comment is
+  present, and `complete_chore` still reads `chore_id uuid` and is still executable by
+  `authenticated` and not by `anon`. The client is unchanged by this story — `assigned_source` was
+  already in the column list it selects — so a pre-`0029` project simply credits nobody for an
+  unassigned completion and a post-`0029` project credits the completer, with nothing for a phone to
+  notice at the wire.
+
   **`0028` on 2026-09-02 (#306, a missed occurrence does not stack up)**, applied with
   `npm run migrate:live` in the story's own session, before the merge and the `release` promotion —
   `0020`'s safe order — **and applied TWICE, the second being the one that stands**: first at md5
@@ -1056,9 +1082,15 @@ the stated reason. What it did not name:
   measures: since `0025`, any file that carries its own body of a function a later file replaced
   reverts that function when re-pasted alone, with the paste reporting success — today `0012`,
   `0025` and `0026`, each carrying a `catch_up_repeats_at` that `0028` superseded (*measured under
-  #306, three arms in `superseded.pglite.test.js`*). `check:live` cannot see a function body, so the
-  reversion is silent to it too; the repair is re-pasting the newest file. *(This bullet read "every
-  other file here is" with no qualifier until 2026-09-02.)* Clearing `claimed_by`
+  #306, three arms in `superseded.pglite.test.js`*), and, since `0029`, **`0027` and `0007`**, which
+  carry the `complete_chore` and `uncomplete_chore` bodies `0029` superseded (*measured under #307,
+  two arms in `completion-assignment.pglite.test.js`, each with a before/after control in one run*).
+  Re-pasting `0027` alone takes the completion-assigns-the-completer rule away; re-pasting `0007`
+  takes it away too, because that file carries **both** functions — a prediction that only the undo
+  half would go was written into the test and **falsified by running it**, which is why the arm
+  exists. `check:live` cannot see a function body, so the reversion is silent to it too; the repair
+  is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
+  until 2026-09-02.)* Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
 - **AND NEITHER IS ANY PRE-`0007` FILE, RE-PASTED ON ITS OWN, ONTO TODAY'S SCHEMA** — which is a

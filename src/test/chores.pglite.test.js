@@ -442,7 +442,9 @@ describe('chores, run against a real Postgres', () => {
       // UPDATE set since 0003 — an actual is adjustable after the fact, and
       // actuals.pglite proves it stays out of INSERT. 0024 (#54) widens UPDATE
       // second, with the repeat pair, and 0026 puts repeat_monthday in all
-      // three sets exactly as the pair sits. The convention holds: additive by column,
+      // three sets exactly as the pair sits. 0027 (#305) adds `missed_at` to
+      // SELECT alone — the third stamp, after the two completion columns, that
+      // moves only through a function. The convention holds: additive by column,
       // and no later story revokes a shipped grant. `repeat_since`, the
       // watermark and `generated_from` are absent from insert and update — the
       // trigger and the catch-up pass are their only authors, and
@@ -464,6 +466,7 @@ describe('chores, run against a real Postgres', () => {
         'generated_from',
         'household_id',
         'id',
+        'missed_at',
         'repeat_kind',
         'repeat_monthday',
         'repeat_weekdays',

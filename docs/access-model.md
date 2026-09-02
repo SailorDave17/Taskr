@@ -7,14 +7,32 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0026` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-08-31 at 30 of 30*, after `0026` was applied in its own story's session (below).
+- Status: **`0001`–`0027` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-09-01 at 32 of 32*, after `0027` was applied in its own story's session (below).
   *(This range read `0001`–`0023` until 2026-08-31 while the entries below already recorded `0024`
   and `0025` applied — the headline is a second copy of what its own detail says, and it is the copy
   a reader acts on, so it is now bumped in the same edit that adds an entry.)* The denominator
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0027` on 2026-09-01 (#305, a chore that did not get done)**, applied with `npm run migrate:live`
+  (md5 `6ba7d36d46c23af1791a7061e0a72725` read back identical, 11090 characters, 11 statements) in
+  the story's own session, before the merge and the `release` promotion — `0020`'s safe order. One
+  nullable column, `chores.missed_at`, set only by two new definer functions (`miss_chore`,
+  `unmiss_chore`) from the database clock, `complete_chore` replaced with the same signature so
+  that Done clears the miss, and a CHECK forbidding both stamps at once. `check:live` sees THREE
+  parts of it and both sides were measured: **29 of 32 before the apply** — `chores` answering
+  `42703` on `chores.missed_at`, and `miss_chore` / `unmiss_chore` both `PGRST202` — and **32 of
+  32 immediately after**, all three clearing on exactly that action. The denominator moved from 30
+  to 32 because the story added the two RPC probes. What `check:live` cannot see — that the column
+  is granted `select` and NOTHING else to `authenticated` — is `npm run probe:live-grants`'s
+  fifteenth row, `chores.missed_at=r` (*measured 2026-09-01 at **15 of 15 agreeing**, the
+  `chores.repeat_since` negative control still carrying no column-level grant*); the withholding is
+  the absence of a grant rather than a revoke, and `missed.pglite.test.js` pins it by mutation. The
+  two directions coexist: a pre-`0027` client selects no `missed_at` and calls neither function, and
+  the column defaults null, so nothing it does changes; a post-`0027` client against a pre-`0027`
+  project fails loudly on the chores read, which is the window `check:live` exists to keep visible
+  and which the in-session apply closed within the hour.
   **`0026` on 2026-08-31 (#103, monthly repeats)**, applied with `npm run migrate:live` (md5
   `3897797d46d358a2c86d79fa85bea600` read back identical, 16949 characters, 12 statements) in the
   story's own session. **Applied TWICE that day, and the second is the one recorded above**: the
@@ -253,10 +271,14 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-08-31 at 30 of 30*, after `0026` was applied in
+- **The excused-red set is EMPTY. *Measured 2026-09-01 at 32 of 32*, after `0027` was applied in
+  #305's own session — the denominator moved from 30 when that story added two RPC probes
+  (`miss_chore`, `unmiss_chore`) beside widening the `chores` column list, and all three of its
+  pre-apply reds cleared on exactly the apply: *29 of 32 before, 32 of 32 after*.** Before that,
+  *measured 2026-08-31 at 30 of 30*, after `0026` was applied in
   #103's own session (denominator unmoved — that story widens the existing `chores` column list, and
   its one pre-apply red, `42703` on `chores.repeat_monthday`, cleared on exactly the apply: *29 of
-  30 before, 30 of 30 after*).** Earlier the same day, at the same figure after `0025` was applied
+  30 before, 30 of 30 after*). Earlier the same day, at the same figure after `0025` was applied
   in #105's own session — the denominator moved from 28 when that story added a table entry and an
   RPC probe, and both of its reds cleared on the apply (*measured 28 of 30 before, 30 of 30 after*).
   Before that: *measured 2026-08-28 at 28 of 28*, after `0023` was applied in

@@ -1,5 +1,5 @@
 import { periodStartFor } from './capacity.js'
-import { isOutstanding } from './chores.js'
+import { isCompleted, isOutstanding } from './chores.js'
 
 // Completed work, arranged for the Done surface — story #302.
 //
@@ -16,14 +16,30 @@ import { isOutstanding } from './chores.js'
 // week for the done list would be two answers to one question.
 
 /**
- * The capacity week a completed chore belongs to, or null for outstanding work.
+ * The instant a chore left the list: finished, or recorded as not done (#305).
  *
- * Keyed on `completed_at`, which is the database's own clock (#35 AC 1), never
- * on `due_on`: a chore due Sunday and finished Monday morning was Monday's work.
+ * Null for outstanding work. The two stamps are mutually exclusive (0027's
+ * constraint), so this is a lookup rather than a choice.
+ */
+export function settledAt(chore) {
+  if (isOutstanding(chore)) return null
+  return chore.completed_at ?? chore.missed_at
+}
+
+/**
+ * The capacity week a settled chore belongs to, or null for outstanding work.
+ *
+ * Keyed on `completed_at` — or, for a chore nobody did, `missed_at` — both the
+ * database's own clock (#35 AC 1, #305 AC 1), never on `due_on`: a chore due
+ * Sunday and finished Monday morning was Monday's work, and a chore given up on
+ * Monday belongs to Monday's week the same way. A missed row sits in its week's
+ * group on this surface, labelled as not done, because it is still that week's
+ * record of what the household did and did not get to.
  */
 export function doneWeekOf(chore, timeZone) {
-  if (isOutstanding(chore)) return null
-  return periodStartFor(chore.completed_at, timeZone)
+  const at = settledAt(chore)
+  if (at === null) return null
+  return periodStartFor(at, timeZone)
 }
 
 /**
@@ -47,22 +63,28 @@ export function groupDoneByWeek(chores, timeZone) {
     .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
     .map(([periodStart, group]) => ({
       periodStart,
-      chores: [...group].sort((a, b) =>
-        a.completed_at < b.completed_at ? 1 : a.completed_at > b.completed_at ? -1 : 0,
-      ),
+      chores: [...group].sort((a, b) => {
+        const at = settledAt(a)
+        const bt = settledAt(b)
+        return at < bt ? 1 : at > bt ? -1 : 0
+      }),
     }))
 }
 
 /**
- * How many chores were completed in the given capacity week — the one number
+ * How many chores were COMPLETED in the given capacity week — the one number
  * the Chores tab still says about finished work (#302 AC 1).
  *
  * `periodStart` is the week App derived at refresh, so the tab and the Done
  * surface agree about which week is "this" one by construction.
+ *
+ * Completed, not settled: the line reads "N done this week", and a chore
+ * nobody did is not done (#305). It still sits in that week's group on the
+ * Done surface, which the line leads to; it is not counted in the sentence.
  */
 export function countDoneInWeek(chores, timeZone, periodStart) {
   if (!periodStart) return 0
-  return chores.filter((c) => doneWeekOf(c, timeZone) === periodStart).length
+  return chores.filter((c) => isCompleted(c) && doneWeekOf(c, timeZone) === periodStart).length
 }
 
 /**

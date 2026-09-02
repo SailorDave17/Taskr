@@ -31,6 +31,8 @@ export default function Done({
   onRemove,
   onComplete,
   onUncomplete,
+  onMiss,
+  onUnmiss,
   onAssign,
   onUnassign,
   onExclude,
@@ -52,7 +54,8 @@ export default function Done({
       {groups.length === 0 ? (
         <p className="card__body">
           Nothing finished yet. A chore marked done on the Chores tab lands here, under the
-          week it was finished in.
+          week it was finished in — and so does one marked as not done (#305), under the week
+          it was given up on.
         </p>
       ) : null}
 
@@ -98,6 +101,8 @@ export default function Done({
                 onRemove={onRemove}
                 onComplete={onComplete}
                 onUncomplete={onUncomplete}
+                onMiss={onMiss}
+                onUnmiss={onUnmiss}
                 onAssign={onAssign}
                 onUnassign={onUnassign}
                 onExclude={onExclude}
@@ -140,6 +145,8 @@ Done.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onComplete: PropTypes.func.isRequired,
   onUncomplete: PropTypes.func.isRequired,
+  onMiss: PropTypes.func.isRequired,
+  onUnmiss: PropTypes.func.isRequired,
   onAssign: PropTypes.func.isRequired,
   onUnassign: PropTypes.func.isRequired,
   onExclude: PropTypes.func.isRequired,

@@ -573,6 +573,18 @@ body {
   text-decoration: line-through;
 }
 
+/* #305 — a chore nobody did, on the Done surface in its week's group. Dimmed
+   like a done row (it has left the list) but NOT struck through: a strike says
+   finished, and this was not. The label is the same quiet tone as "took N
+   min" — a missed chore is work, not a person, and nothing here is red. */
+.chore-list--done .chore--missed .chore__title {
+  text-decoration: none;
+}
+
+.chore__missed {
+  color: var(--ink-dim);
+}
+
 /* Assignment — story #36.
 
    The select sits inside .chore__identity rather than in the button row: it is

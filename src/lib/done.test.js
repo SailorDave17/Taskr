@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countDoneInWeek, doneWeekOf, groupDoneByWeek, weekRangeLabel } from './done.js'
+import { countDoneInWeek, doneWeekOf, groupDoneByWeek, settledAt, weekRangeLabel } from './done.js'
 
 // #302 — completed chores by capacity week. Chore names are synthetic (#19).
 //
@@ -116,5 +116,52 @@ describe('weekRangeLabel — a capacity week as people read it', () => {
 
   it('refuses something that is not a date', () => {
     expect(() => weekRangeLabel('not-a-week')).toThrow(/period start/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #305 — a chore nobody did belongs to the week it was given up on, sits in
+// that week's group beside the completions, and is NOT counted as done.
+// ---------------------------------------------------------------------------
+
+describe('#305 — a missed chore on the Done surface', () => {
+  const missed = (id, missedAt) => ({
+    id,
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
+    missed_at: missedAt,
+  })
+
+  it('settledAt is the completion or the miss, and null while outstanding', () => {
+    expect(settledAt(outstanding)).toBeNull()
+    expect(settledAt(done('d1', '2026-08-25T14:00:00Z'))).toBe('2026-08-25T14:00:00Z')
+    expect(settledAt(missed('m1', '2026-08-26T09:00:00Z'))).toBe('2026-08-26T09:00:00Z')
+  })
+
+  it('doneWeekOf keys a missed chore on missed_at, in the household zone', () => {
+    expect(doneWeekOf(missed('m1', '2026-08-26T09:00:00Z'), tz)).toBe('2026-08-24')
+    // Sunday 23:30 in New York: still the week of Aug 24, as it is for a completion.
+    expect(doneWeekOf(missed('m1', '2026-08-31T03:30:00Z'), tz)).toBe('2026-08-24')
+    expect(doneWeekOf(missed('m1', '2026-08-31T03:30:00Z'), 'UTC')).toBe('2026-08-31')
+  })
+
+  it('groupDoneByWeek files it in its week, ordered with the completions by the settled instant', () => {
+    const groups = groupDoneByWeek(
+      [done('d', '2026-08-25T10:00:00Z'), missed('m', '2026-08-26T09:00:00Z'), outstanding],
+      tz,
+    )
+    expect(groups).toHaveLength(1)
+    expect(groups[0].periodStart).toBe('2026-08-24')
+    expect(groups[0].chores.map((c) => c.id)).toEqual(['m', 'd'])
+  })
+
+  it('countDoneInWeek does NOT count it — a chore nobody did is not done', () => {
+    const rows = [missed('m', '2026-08-25T09:00:00Z'), done('d', '2026-08-25T10:00:00Z'), outstanding]
+    expect(countDoneInWeek(rows, tz, '2026-08-24')).toBe(1)
+    expect(countDoneInWeek(rows, tz, '2026-08-24')).not.toBe(2)
   })
 })

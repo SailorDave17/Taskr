@@ -1010,6 +1010,8 @@ describe('#19 — no real household name reaches version control', () => {
     'Placeholder Repeat': 'a chore title',
     'Placeholder Monthly': 'a chore title — the monthly anchor in #103’s skip-picker tests',
     'Placeholder Done Chore': 'a chore title',
+    // #305 — the missed fixture on the Chores and Done surfaces.
+    'Placeholder Missed Chore': 'a chore title',
     // #54 — the edit-form fixtures rename a chore and an occurrence, so the
     // renamed titles are literals the assertions match by accessible name.
     'Placeholder Renamed Chore': 'a chore title',

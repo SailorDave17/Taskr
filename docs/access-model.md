@@ -7,19 +7,58 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0027` are ALL applied to the live project, and the expected-red set is EMPTY** —
-  *measured 2026-09-01 at 32 of 32*, after `0027` was applied in its own story's session (below).
+- Status: **`0001`–`0028` are ALL applied to the live project, and the expected-red set is EMPTY** —
+  *measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s apply in its own story's session
+  (below), and at the same figure on 2026-09-01 after `0027` was applied in its.
   *(This range read `0001`–`0023` until 2026-08-31 while the entries below already recorded `0024`
   and `0025` applied — the headline is a second copy of what its own detail says, and it is the copy
   a reader acts on, so it is now bumped in the same edit that adds an entry.)* The denominator
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0028` on 2026-09-02 (#306, a missed occurrence does not stack up)**, applied with
+  `npm run migrate:live` in the story's own session, before the merge and the `release` promotion —
+  `0020`'s safe order — **and applied TWICE, the second being the one that stands**: first at md5
+  `050dbfdd61fb82f048df4d95adf2ce01` (15472 characters, 2 statements), then, after the story's review
+  fan-out added the `missed_at` column-comment restatement and the anchor-cost paragraph, at md5
+  `b09c21bce3940f315964f3b2b8216bd3` (17471 characters, 3 statements), both read back identical.
+  `0028` is idempotent by construction and had reached no project but this one, so the amended file
+  was re-applied rather than chased with a `0029` — `0026`'s precedent from two days earlier — and
+  both digests are kept because a recorded md5 whose file has moved is worse than none. One `create
+  or replace` of `catch_up_repeats_at` with the same signature and the same return type (so no
+  overload, and the ACLs `0012` set on it survive), plus two `comment on`s (the function's, and the
+  column's, whose live text now names the pass as a writer — *read back from `col_description` after
+  the second apply*): when the pass creates a new occurrence for an anchor, every outstanding member of
+  that anchor's family with an older `due_on` is marked missed with the pass's own clock — the
+  anchor row included, completed rows untouched, an already-missed row keeping its first stamp, a
+  put-back row surviving until the next occurrence really generates. It never entered the
+  excused-red set and could not have: `check:live` is structurally blind to it in BOTH directions —
+  it probes a function by name and argument set, and this file changes neither — *measured at 32 of
+  32 immediately before AND immediately after the apply, denominator unmoved*. `npm run
+  probe:live-grants` is blind to it for the same reason and reads **15 of 15** on both sides. What
+  testifies is a read-only `pg_get_functiondef` over the Management API (the same route
+  `probe:live-grants` uses), taken on both sides in the same session: the supersede step
+  (`set missed_at = as_of`) **absent** from the live body before the apply and **present** after
+  it, the function's comment naming #306 only afterwards, and the privileges unchanged across it —
+  the held form executable by neither `authenticated` nor `anon`, the client surface by
+  `authenticated`. The two directions coexist: the client is unchanged by this story (it reads
+  `missed_at` since `0027` and calls the same `catch_up_repeats()`), so a pre-`0028` project simply
+  goes on stacking and a post-`0028` project stops, with nothing for a phone to notice either way.
+  The hazard this file inherits from `0025` and `0026` is stated in its header and **measured, three
+  arms, in `superseded.pglite.test.js`** (the first draft of this entry said *measured* while no such
+  arm existed — the review fan-out caught the inference wearing the label, and the arms were added
+  rather than the word removed): re-pasting `0012`, `0025` or `0026` on top of it **succeeds
+  silently, leaves one function, and reverts the step**, and `check:live` cannot see that either —
+  the repair is re-pasting `0028`. The file also restates `missed_at`'s column comment, because
+  `0027`'s said *"Set only by miss_chore"* and the pass is now a writer; the catalog carries `0027`'s
+  sentence until `0028` is applied, which is the same one-clause repair `0026` made for `repeat_kind`.
   **`0027` on 2026-09-01 (#305, a chore that did not get done)**, applied with `npm run migrate:live`
   (md5 `6ba7d36d46c23af1791a7061e0a72725` read back identical, 11090 characters, 11 statements) in
   the story's own session, before the merge and the `release` promotion — `0020`'s safe order. One
   nullable column, `chores.missed_at`, set only by two new definer functions (`miss_chore`,
-  `unmiss_chore`) from the database clock, `complete_chore` replaced with the same signature so
+  `unmiss_chore`) from the database clock *(true when written; since `0028` on 2026-09-02 the
+  catch-up pass is a third writer — see the entry above — and the privilege claim is unchanged, since
+  that pass is granted to no client role either)*, `complete_chore` replaced with the same signature so
   that Done clears the miss, and a CHECK forbidding both stamps at once. `check:live` sees THREE
   parts of it and both sides were measured: **29 of 32 before the apply** — `chores` answering
   `42703` on `chores.missed_at`, and `miss_chore` / `unmiss_chore` both `PGRST202` — and **32 of
@@ -271,7 +310,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-09-01 at 32 of 32*, after `0027` was applied in
+- **The excused-red set is EMPTY. *Measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s
+  apply in #306's own session — the denominator unmoved, because that file replaces a function
+  body and this check probes a function only by name and argument set; the reading before the apply
+  is the same as the reading after, and what separates them is the `pg_get_functiondef` read
+  recorded in that migration's entry above.** Before that, *measured 2026-09-01 at 32 of 32*, after
+  `0027` was applied in
   #305's own session — the denominator moved from 30 when that story added two RPC probes
   (`miss_chore`, `unmiss_chore`) beside widening the `chores` column list, and all three of its
   pre-apply reds cleared on exactly the apply: *29 of 32 before, 32 of 32 after*.** Before that,
@@ -1006,7 +1050,15 @@ the stated reason. What it did not name:
 - **Dropping `household_devices` reintroduces the RLS recursion it was accidentally absorbing.** A
   policy on `members` whose predicate subqueries `members` is refused outright by Postgres, so the
   change needs a `security definer` helper it is easy not to see coming.
-- **The one-time re-claim is not re-runnable**, and every other file here is. Clearing `claimed_by`
+- **The one-time re-claim is not re-runnable**, and every other file here is — **re-applied in
+  order**. A single older file re-pasted on its own onto a schema that has moved past it is a
+  different question, and the answer is *no* for more than the pre-`0007` files the next bullet
+  measures: since `0025`, any file that carries its own body of a function a later file replaced
+  reverts that function when re-pasted alone, with the paste reporting success — today `0012`,
+  `0025` and `0026`, each carrying a `catch_up_repeats_at` that `0028` superseded (*measured under
+  #306, three arms in `superseded.pglite.test.js`*). `check:live` cannot see a function body, so the
+  reversion is silent to it too; the repair is re-pasting the newest file. *(This bullet read "every
+  other file here is" with no qualifier until 2026-09-02.)* Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
 - **AND NEITHER IS ANY PRE-`0007` FILE, RE-PASTED ON ITS OWN, ONTO TODAY'S SCHEMA** — which is a

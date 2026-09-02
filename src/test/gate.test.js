@@ -1031,6 +1031,7 @@ describe('#19 — no real household name reaches version control', () => {
     Split: 'a tab label — the split surface',
     Chores: 'a tab label — the chore surface',
     Who: 'a tab label — the roster surface',
+    Done: 'a tab label — the completed-work surface (#302)',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to

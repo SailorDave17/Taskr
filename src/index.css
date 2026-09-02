@@ -532,6 +532,39 @@ body {
   margin-top: 0.25rem;
 }
 
+/* #302 — the one line the chore list keeps about finished work, and the way
+   onto the Done tab. A quiet button inside a note: it is navigation, not an
+   action on any chore. */
+.chore-done-line {
+  margin-top: 0.75rem;
+}
+
+/* #302 — on the Done tab each week is a disclosure; only the newest opens.
+   The heading keeps `.card__subheading`'s look and sits in the summary with
+   the row count beside it, so a closed week still says how much it holds.
+   Measured 2026-09-01: eight weeks of daily repeats rendered as 27 screens at
+   360px with every week open, and a done row is 375px tall. */
+.chore-done__week {
+  margin: 0;
+}
+
+.chore-done__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.chore-done__summary > .card__subheading {
+  margin: 0;
+}
+
+.chore-done__count {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
 .chore-list--done .chore {
   opacity: 0.6;
 }
@@ -757,17 +790,23 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   The three surfaces, and the way between them — story #47, criterion 11.
+   The surfaces, and the way between them — story #47, criterion 11. Four
+   since #302 added Done.
 
    Buttons rather than links, so they inherit nothing from `.button`: a tab is
-   not an action, and giving it the accent would make three call-to-actions sit
+   not an action, and giving it the accent would make four call-to-actions sit
    above every screen.
 
-   `flex-wrap` is load-bearing at 360px rather than defensive. Three tabs fit
-   comfortably today; a fourth surface, or a longer word than "Chores" in some
-   future wording, would otherwise push the row wider than the viewport — and a
-   nav that overflows horizontally takes the whole page with it. Wrapping costs
-   a line of height and cannot overflow.
+   `flex-wrap` is load-bearing rather than defensive: a nav that overflows
+   horizontally takes the whole page with it, and wrapping costs a line of
+   height and cannot overflow. Whether four tabs actually NEED it at 360px was
+   MEASURED in a real browser on 2026-09-01 (#302 AC 4), against this
+   stylesheet and App.jsx's markup: the four labels' natural widths sum to
+   275px against the 320px the shell leaves, so all four sit on one row with
+   45px to spare — and at a 300px viewport (260px available) the same strip
+   wraps to two rows with the page still 300px wide, which is the control
+   showing the rule can fire. A fifth surface, or a longer word than "Chores",
+   spends that 45px and then wraps rather than overflows.
    --------------------------------------------------------------------------- */
 
 .tabs {

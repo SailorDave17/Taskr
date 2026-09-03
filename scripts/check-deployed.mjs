@@ -47,6 +47,7 @@ import { FUNCTION_NAMES, resolveSupabaseUrl } from './deploy-function.mjs'
 import {
   MANAGEMENT_API_ROOT,
   Refusal,
+  explainHttpFailure,
   projectRefFrom,
   readEnvLocal,
   requireAccessToken,
@@ -125,7 +126,12 @@ export async function listDeployedFunctions({
   if (!response.ok) {
     const detail =
       (parsed && (parsed.message || parsed.error || parsed.msg)) || text.slice(0, 500) || '(no body)'
-    return { ok: false, status: response.status, functions: null, error: `[${response.status}] ${detail}` }
+    return {
+      ok: false,
+      status: response.status,
+      functions: null,
+      error: explainHttpFailure(response.status, detail),
+    }
   }
 
   if (!Array.isArray(parsed)) {

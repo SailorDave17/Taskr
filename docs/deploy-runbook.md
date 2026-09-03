@@ -572,6 +572,30 @@ project in the account and can create, pause and delete them — there is no row
 front of it and no policy that limits it. It is the only credential of that class this repo has ever
 needed.
 
+**These tokens expire, and the failure is silent — #324.** A personal access token does not last
+forever, and it can be revoked from the account page at any time. When it goes, it goes for all three
+commands at once — `check:deployed`, `migrate:live`, `probe:live-grants` — and every one of them
+answers `401`.
+
+**A `401` from any of the three means re-mint. It does not mean re-check the project.** That is the
+whole of it: the token is already known to be the right *kind* of credential, because a project API
+key and a legacy JWT are refused by name before anything is sent (see the near-miss list above). So
+`401` leaves expiry or revocation as the likely cause, and the project ref, the endpoint and the URL
+are the wrong things to go and look at. Mint a new token at
+<https://supabase.com/dashboard/account/tokens>, replace `SUPABASE_ACCESS_TOKEN` in `.env.local`, and
+run the command again. The commands now say this themselves rather than leaving a bare
+`[401] Unauthorized`.
+
+**What is dark while it is dead is the drift detection.** All three commands answer one question —
+*has production drifted from the repo?* — and section 3 records the case they exist for: #161 changed
+both Edge Functions and merged, production served a three-day-old build, and `npm run check:live`
+read 24 of 24 green throughout. Nothing in CI notices a dead token, correctly: CI holds no token and
+is not supposed to. So the only place this failure can appear is an owner's machine, running a
+command nobody runs unless they already suspect something — and **how long it had been dead is not
+recoverable**, which is the point. When #324 found it on 2026-09-03 nothing could say whether it had
+been hours or weeks, because a dead token leaves no trace anywhere until somebody runs one of the
+three commands.
+
 So: **it is never committed.** `.gitignore` keeps `.env.local` out of git, and `src/test/gate.test.js`
 scans every file in the repo — tracked and untracked — for a token-shaped literal and fails the
 build on one. **Revoke it** at <https://supabase.com/dashboard/account/tokens>, which is immediate

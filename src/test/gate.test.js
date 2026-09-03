@@ -461,6 +461,141 @@ describe('#47 criterion 10 — nothing on the split surface can overflow a 360px
   })
 })
 
+// #303 — the shell uses the whole screen above phone width.
+//
+// THIS IS THE WEAKER INSTRUMENT, and the criterion says so in as many words.
+// jsdom applies no stylesheet and computes no layout, so nothing in this file
+// can measure a width; what it can do is prove the RULES are present and that
+// the phone path is still unconditional. The width claims themselves were
+// measured in a real browser at 360/768/1280px and the figures are on the
+// issue — 39.4% of the viewport at 1280px before, 95% after, with the 360px
+// readings identical across 33 compared fields before and after.
+//
+// The same reasoning as the three describes above, and worth restating because
+// this criterion names viewports and so reads like something a render test
+// could answer: a component test for it would pass identically with every rule
+// below deleted.
+describe('#303 — the shell is not a phone-width column on a wide screen', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('POSITIVE CONTROL: the shell rule is in the stylesheet at all', () => {
+    // Without this every assertion below passes the moment `.shell` is renamed
+    // — the empty-pass shape this file keeps finding.
+    expect(css).toMatch(/\.shell\s*\{/)
+  })
+
+  it('no longer pins the shell to a phone-width 34rem', () => {
+    // The literal the story removed. Asserted as an absence ON THE SHELL RULE
+    // rather than anywhere in the file, so an unrelated 34rem elsewhere cannot
+    // redden it and a reinstated one here cannot hide.
+    const shellRule = css.match(/\.shell\s*\{[^}]*\}/)
+    expect(shellRule, 'no .shell rule found').not.toBeNull()
+    expect(shellRule[0]).not.toMatch(/max-width:\s*34rem/)
+  })
+
+  it('carries a readable ceiling instead, so the width is used but not unbounded', () => {
+    const shellRule = css.match(/\.shell\s*\{[^}]*\}/)
+    expect(shellRule[0]).toMatch(/max-width:\s*80rem/)
+    // `width: 100%` is what makes the shell fill the space below the ceiling.
+    // Without it the flex column would shrink to its content on a wide screen
+    // and the ceiling would never be the operative bound.
+    expect(shellRule[0]).toMatch(/width:\s*100%/)
+  })
+
+  it('has the wide breakpoint, and it is a min-width so the phone never enters it', () => {
+    // A `max-width` query here would mean the phone takes the NEW path and the
+    // wide screen the old one — the exact inversion, and one that no assertion
+    // about the breakpoint merely EXISTING could tell apart.
+    expect(css).toMatch(/@media\s*\(min-width:\s*48rem\)/)
+    expect(css).not.toMatch(/@media\s*\(max-width:\s*48rem\)/)
+  })
+
+  it('lays the multi-card surfaces out in columns above the breakpoint', () => {
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)
+    expect(wide, 'the 48rem block is not at the end of the file').not.toBeNull()
+    expect(wide[0]).toMatch(/display:\s*grid/)
+    expect(wide[0]).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(20rem,\s*1fr\)\)/)
+  })
+
+  it('ORDER: the wide block is the LAST rule for these surfaces, not merely present', () => {
+    // The defect this caught, MEASURED in a real browser before it was fixed:
+    // `.onboarding, .roster` and `.split` each set `display: flex` at the same
+    // specificity, and a media query adds a condition without raising
+    // specificity. With the block written beside `.shell` at the top of the
+    // file, `grid-template-columns` applied and `display: grid` was overridden
+    // — the computed display read `flex` while the grid property read back
+    // exactly as intended, and every card kept the same left offset at 1280px.
+    //
+    // So "the rule exists" is not the property that makes the layout work.
+    //
+    // TWO EARLIER VERSIONS OF THIS TEST PASSED THE MUTATION THAT REPRODUCES THE
+    // DEFECT, and both were caught by running it rather than by reading:
+    //   1. It filtered occurrences to those after the breakpoint and then
+    //      asserted they were all after the breakpoint — a tautology.
+    //   2. It compared each surface's last declaration against the POSITION of
+    //      the breakpoint. Moving the block to the top moves that position too,
+    //      so every phone declaration was trivially "after" it and the test
+    //      stayed green on the exact stylesheet whose cards did not lay out.
+    //
+    // What the browser actually resolves is whether the grid declaration comes
+    // after the flex one. So that is what this asserts, by position of the
+    // DECLARATIONS themselves, with the block's own extent used to tell an
+    // inside-the-block occurrence from an outside one.
+    const wideOpen = css.search(/@media\s*\(min-width:\s*48rem\)/)
+    expect(wideOpen).toBeGreaterThan(-1)
+    const wideEnd = css.length - css.slice(wideOpen).split('').reverse().join('').indexOf('}') - 1
+
+    for (const name of ['onboarding', 'roster', 'split']) {
+      const pattern = new RegExp('(^|[,}\\s])\\.' + name + '\\s*[,{]', 'g')
+      const at = [...css.matchAll(pattern)].map((m) => m.index)
+      // POSITIVE CONTROL on the scan: each surface is declared twice — once for
+      // the phone, once inside the wide block. A zero or a one here means the
+      // regex stopped matching and everything below would be vacuous.
+      expect(at.length, `expected two declarations of .${name}`).toBeGreaterThanOrEqual(2)
+
+      const inside = at.filter((i) => i > wideOpen && i < wideEnd)
+      const outside = at.filter((i) => i < wideOpen || i > wideEnd)
+      expect(inside.length, `.${name} is not declared inside the wide block`).toBeGreaterThanOrEqual(1)
+      expect(outside.length, `.${name} has no phone declaration`).toBeGreaterThanOrEqual(1)
+
+      // THE PROPERTY THAT MAKES IT WORK: the grid declaration is later in the
+      // file than every flex one, so it wins the cascade at equal specificity.
+      expect(
+        Math.max(...inside),
+        `.${name} is re-declared after the wide block, so flex wins over grid`,
+      ).toBeGreaterThan(Math.max(...outside))
+    }
+  })
+
+  it('keeps the readable measure on the things the grid cannot bound', () => {
+    // The tagline is a direct child of the shell, and the Chores surface is a
+    // bare `.card` — neither has a grid neighbour, so both ran the full 1216px
+    // at 1280px until these rules. MEASURED, and it is criterion 2's own bound
+    // (about 40rem) that they broke.
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)[0]
+    expect(wide).toMatch(/\.shell__tagline[\s\S]*?max-width:\s*40rem/)
+    expect(wide).toMatch(/\.card__body[\s\S]*?max-width:\s*40rem/)
+    expect(wide).toMatch(/\.shell\s*>\s*\.card\s*\{[^}]*max-width:\s*48rem/)
+    // Criterion 3 — the text inputs stop at the readable column. The bound is
+    // on `.field` so the label travels with its input.
+    expect(wide).toMatch(/\.field\s*\{[^}]*max-width:\s*30rem/)
+  })
+
+  it('the phone path is untouched: no rule below the breakpoint changed', () => {
+    // The story's whole risk, stated as an assertion rather than trusted. Every
+    // #303 rule lives inside the min-width block, so the stylesheet a 360px
+    // screen resolves is the one #80/#82/#83 measured.
+    //
+    // The 44px touch target and the tab wrap are asserted unconditionally 40
+    // lines above; this adds that the wide block does not reach in and move
+    // them, which those assertions cannot see because they scan the whole file.
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)[0]
+    expect(wide).not.toMatch(/min-height:\s*44px/)
+    expect(wide).not.toMatch(/font-size/)
+    expect(wide).not.toMatch(/\.tab\s*[,{]/)
+  })
+})
+
 // #69 — the README carries two hand-maintained lists beside things that change:
 // the scripts table beside package.json, and the docs list beside docs/. Both
 // had already fallen behind (`npm run test:rls` and `docs/access-model.md` were

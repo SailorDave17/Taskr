@@ -219,12 +219,30 @@ matters more than either reading alone, because a rule that is present and not e
 | When | Pull request | `mergeStateStatus` |
 |---|---|---|
 | before the rules were added, 20:42Z | #321, checks pending | `UNSTABLE` — mergeable, nothing blocking |
-| after, with a check not yet successful | AC4_PR_PLACEHOLDER | `BLOCKED` |
+| after the rules were added, 21:26Z | #322, `Lint, test, build` **pending** | `BLOCKED` |
 
 `UNSTABLE` means *there is a failing or pending check and it does not stop you*; `BLOCKED` means the
-rule is refusing the merge. Read it with GraphQL — `gh pr view --json mergeable` answers
-`MERGEABLE` in **both** states, because it reports whether the branches merge cleanly, not whether
-you are allowed to merge them.
+rule is refusing the merge.
+
+**Read `mergeStateStatus`, not `mergeable`.** In the very same reading that returned `BLOCKED`, PR
+#322 also returned `mergeable: MERGEABLE` — and that is not a contradiction. `mergeable` answers
+*do these branches merge cleanly*, a question about content; `mergeStateStatus` answers *are you
+allowed to merge them*, which is the question a rule changes. `gh pr view --json mergeable` therefore
+reports `MERGEABLE` on both sides of this change and is the wrong instrument. The full reading, taken
+2026-09-03T21:26:48Z:
+
+```
+$ gh pr view 322 --json mergeable,mergeStateStatus
+{"mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE"}
+
+$ gh pr checks 322
+Lint, test, build   pending
+```
+
+#322 was a throwaway opened for exactly this reading and closed immediately; it delivered nothing.
+The reason a *pending* check is a fair test of the rule is that the criterion is "has not reported
+success", and pending is one of the two ways that happens — the other being an outright failure,
+which the rule treats identically.
 
 ---
 

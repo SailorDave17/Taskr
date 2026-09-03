@@ -291,6 +291,14 @@ whole rebuild rather than 2020 dead code.
 Confirm the default with `gh repo view --json defaultBranchRef` rather than trusting any document,
 including this one — it has been wrong here before (2026-08-05).
 
+**All three are enforced, not merely described.** Since 2026-09-03 (#289) ruleset 21859879 requires
+a pull request and a successful `Lint, test, build` on each of them, with no bypass actors — so a
+direct push to `develop`, `release` or `main` is refused whoever attempts it, and a pull request
+whose check is red or missing cannot merge. Read the live state with
+`gh api repos/SailorDave17/Taskr/rules/branches/<name>`, **never**
+`gh api repos/SailorDave17/Taskr/branches/<name>/protection`: the legacy endpoint cannot see a
+ruleset and answers `404 Branch not protected`, which is a true sentence and a misleading reading.
+
 Branch names follow `feature/<issue-number>-short-description`.
 
 ## CI and deployment
@@ -300,8 +308,9 @@ stale copy within a week.
 
 - **[`docs/ci-gate.md`](docs/ci-gate.md)** — what `.github/workflows/ci.yml` enforces (lint, test,
   build, and an assertion that the build emitted a real artefact), plus the recorded proof that each
-  step can actually fail. Note the honest limitation recorded there: the gate is **advisory**, not
-  enforced branch protection.
+  step can actually fail. Since 2026-09-03 (#289) the gate is **enforcing**, not advisory: ruleset
+  21859879 requires a pull request and a successful `Lint, test, build` on `develop`, `release` and
+  `main`, so a direct push to any of them is refused and a red run blocks the merge.
 - **[`docs/deploy-runbook.md`](docs/deploy-runbook.md)** — how hosting is set up and how a push
   becomes a deployment, including the settings that were wrong the first time and how they were
   found.

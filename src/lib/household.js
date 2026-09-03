@@ -217,6 +217,43 @@ export async function signIn({ email, password }) {
 }
 
 /**
+ * Where a confirmation email's link should land: the origin it was asked from — #129.
+ *
+ * Supabase's **Site URL** is a single global value, so with nothing passed here
+ * every confirmation link goes to whatever that one field says. *Measured
+ * 2026-08-21*, that field was still `http://localhost:3000` — the factory
+ * default, never changed — and a real organizer clicked a real link and landed
+ * on a dead page. The owner corrected the field the same day; this function is
+ * the half that stops the class rather than the instance.
+ *
+ * Reading `window.location.origin` is the point: a signup driven from
+ * `npm run dev` comes back to the dev server, and one driven from production
+ * comes back to production, without either depending on a dashboard field being
+ * right. The value the link carries is fixed at SEND time, which is also why
+ * this cannot be repaired after the fact for an email already in an inbox.
+ *
+ * **Preview origins are deliberately not in Supabase's Redirect URLs list, and
+ * that is a decision rather than an omission.** #121 put Vercel preview
+ * deployments behind Standard Protection precisely so they are not a public
+ * surface; adding `*.vercel.app` to the allow-list would sanction as an auth
+ * redirect target the thing that was just walled off, and the allow-list is
+ * matched against this value. So a signup driven from a preview deployment
+ * falls back to Site URL — a link to production, which is a mild surprise
+ * rather than a hole. Do not "fix" that by widening the list without revisiting
+ * #121; the two are one decision seen twice.
+ *
+ * Returns `undefined` rather than a string when there is no `window` (the test
+ * environment, or any non-browser caller). `undefined` is what makes
+ * supabase-js fall back to Site URL, which is the correct behaviour with no
+ * origin to speak of — a hard-coded default here would be the very constant
+ * this story exists to remove.
+ */
+export function confirmationRedirectTo() {
+  const origin = globalThis.window?.location?.origin
+  return origin ? String(origin) : undefined
+}
+
+/**
  * Register the organizer's own account, which is the one signup a client may do.
  *
  * The distinction is the whole reason #62 needs an Edge Function. `signUp()`
@@ -226,11 +263,15 @@ export async function signIn({ email, password }) {
  * caller's. Everybody else is provisioned server-side with the `service_role`
  * key, which must never reach this bundle — `src/lib/keyShape.js` fails the
  * build over it.
+ *
+ * `emailRedirectTo` is derived, never a constant — see `confirmationRedirectTo`
+ * above for why, and for why preview origins are excluded on purpose (#129).
  */
 export async function signUpOrganizer({ email, password }) {
   const { data, error } = await getSupabase().auth.signUp({
     email: String(email ?? '').trim(),
     password: String(password ?? ''),
+    options: { emailRedirectTo: confirmationRedirectTo() },
   })
   if (error) {
     const err = new Error(`Could not create your account: ${error.message}`)

@@ -345,7 +345,12 @@ at filing.
   someone presses is the negotiation moved rather than removed*. Reasoning: the change budget and the
   announcement both need a **before-state**, #6 already stores manual assignments, and the
   re-read-after-mutation pattern in `App.jsx` absorbs it. Costs a transactional RPC. This closes the
-  charter's "decide before #9" item.
+  charter's "decide before #9" item. *(Narrowed 2026-09-03 by #284, from #52's measurement: the
+  ruling is about work people already hold. Work NOBODY holds has no negotiation in it — no
+  before-state, nobody asked to give anything up — and at setup the capacity trigger can never fire,
+  because every capacity is set before any chore exists. So the split's needs-attention area now
+  carries one explicit "deal these out" action, which runs the same stored re-assignment and
+  nothing else, and exists only while that area does. There is still no re-balance button.)*
 - **The LLM extraction call runs in a Supabase Edge Function.** The secret sits next to the data, the
   auth context already exists, and one platform holds credentials. Rejected: a Vercel function (a
   second platform holding a provider secret) and any client-side key, which is the `VITE_` secret-key

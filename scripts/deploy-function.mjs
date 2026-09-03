@@ -86,11 +86,57 @@ export function projectRefFrom(url) {
   const match = value.match(/^https:\/\/([a-z0-9]{16,})\.supabase\.(co|in)\/?$/i)
   if (!match) {
     throw new Error(
-      `VITE_SUPABASE_URL is not a hosted Supabase project URL: ${value}\n` +
+      `VITE_SUPABASE_URL is not a hosted Supabase project URL: ${redactForRefusal(value)}\n` +
         'A local stack (127.0.0.1) has no project ref — deploy targets the hosted project only.',
     )
   }
   return match[1]
+}
+
+/** The most of a value any refusal here may quote back. */
+export const REFUSAL_VALUE_LIMIT = 80
+
+/**
+ * Everything a refusal is allowed to SAY about a value it was handed - #285.
+ *
+ * A refusal is right to name what it saw; it must never say more than the one
+ * value it was asked about. During #52 a `projectRefFrom` refusal printed the
+ * WHOLE of `.env.local` - `SUPABASE_ACCESS_TOKEN` and `TASKR_TEST_PASSWORD`
+ * included - because the "value" it interpolated was the entire file.
+ *
+ * Three rules, in order, each closing a different route to that:
+ *
+ *   1. ONE LINE. A value spanning lines is not one variable's value, so
+ *      everything after the first newline is by construction something this
+ *      function was not asked about, and is never quoted.
+ *   2. NO ASSIGNMENTS. If what arrived looks like env-file content - a line
+ *      beginning `NAME=` - the VALUE is elided and the NAME kept. A caller that
+ *      handed us a file needs to be told it handed us a file; it does not need
+ *      the file read back to it. This is the rule that holds when the secret is
+ *      on line ONE, which is exactly where rule 1 and the cap both fail.
+ *   3. A LENGTH CAP, so one enormous line cannot fill a terminal.
+ *
+ * All three are STRUCTURAL: none carries a list of secret variable names, so
+ * none goes stale when a new secret joins `.env.local` - which happens next
+ * (#206 adds `ANTHROPIC_API_KEY`). Redacting BY NAME was the other candidate
+ * and the one #285's body suggested; it was rejected because a guard whose
+ * subject is what a variable is CALLED must be edited every time somebody adds
+ * one, and the edit that gets forgotten is the silent one. A name list written
+ * today would not have covered `ANTHROPIC_API_KEY`, and nothing would have said so.
+ *
+ * A legitimate Supabase URL passes all three untouched, which is what keeps the
+ * refusal diagnostic - asserted as a POSITIVE CONTROL, because a sanitiser that
+ * ate every value would pass every leak test here while helping nobody.
+ */
+export function redactForRefusal(value) {
+  const text = String(value ?? '')
+  const firstLine = text.split(/\r?\n/)[0] ?? ''
+  const deassigned = firstLine.replace(/^([ \t]*[A-Z][A-Z0-9_]{2,}[ \t]*=).*$/, '$1<redacted>')
+  const capped =
+    deassigned.length > REFUSAL_VALUE_LIMIT
+      ? deassigned.slice(0, REFUSAL_VALUE_LIMIT) + '...'
+      : deassigned
+  return capped === text ? capped : capped + ' [truncated]'
 }
 
 /** `KEY=value` lines, enough for a two-line .env.local and no more. */

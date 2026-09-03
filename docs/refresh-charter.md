@@ -279,14 +279,46 @@ satisfies "fairness is seen" without a number having to be read.
    "Nora -1 Ava +1" — both true, and it read as broken. Every user-facing statement about the split
    is in minutes, because that is the unit the fairness claim is made in.
 
-### Open caveat, carried rather than closed
+### Caveat closed 2026-08-31 — the mismatch did not reproduce
 
 The owner reported the phone render not matching the browser. *Measured* on the prototype at 375×844:
 no horizontal overflow, zero overflowing elements, dark palette correct, numbers correct — so the
-prototype's own CSS is not implicated and the leading suspect is the viewer it was delivered in.
-**Mechanism not established.** It does not block this gate (judged in the browser, owner's call) and
-it is not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
-looked at on a phone before it is called done.**
+prototype's own CSS was not implicated and the leading suspect was the viewer it was delivered in.
+**Mechanism never established.** It did not block that gate (judged in the browser, owner's call) and
+it was not a Taskr defect, but the charter's bar names phones, so **the first real UI story must be
+looked at on a phone before it is called done.** That story is #47, the load surface, and #48 is the
+look.
+
+**It did not reproduce.** *Measured 2026-08-31* against the shipped load surface on
+<https://taskr.madcowhq.com>, one household, both sides confirmed on `build 28a757e` — read off the
+running page, not off the deploy — with the same two members and the same chores:
+
+| | phone | desktop browser |
+|---|---|---|
+| client | Samsung SM-S918U, Android 16, Chrome 151 | Chrome, 360 px viewport |
+| viewport | 384 CSS px, DPR 2.8125 | 360 CSS px, DPR 1 |
+| off-level statement | identical | identical |
+| per-member figures | identical | identical |
+| bar fill, declared and measured | 54% and 12% | 54% and 12% |
+| horizontal scroll | none | none |
+| elements past either edge | 0 | 0 |
+
+Every semantic field matched. The only differences were pixel widths, and they are accounted for
+exactly by viewport width plus the **15 px scrollbar gutter** a desktop browser reserves and mobile
+Chrome overlays: a control at a matched nominal 384 px gave a 287 px bar against the phone's 302.58,
+a difference of 15.58. Fill *ratios* were identical across all three measurements, which is the
+claim the surface actually makes.
+
+What is closed is the caveat as the charter framed it — *does the shipped surface render differently
+on a phone*. The original prototype's mechanism was never established and now cannot be, because the
+prototype is gone; that is recorded as unresolved rather than answered.
+
+**What this check nearly got wrong.** The desktop browser first reported `build cab59d9` while the
+phone reported `28a757e` — the same URL in the same minute, serving builds three days apart, because
+a stale workbox service worker in the automation browser's persistent profile was answering from its
+precache. Had the build not been read off the running page first, two different builds would have
+been compared and any difference between them attributed to this caveat. The first read of any
+on-device verification is *is this the build I think it is*, and it is answered from the running page.
 
 ## Consequences for the backlog
 
@@ -389,13 +421,52 @@ recorded in the decision log". This is that record.
   widening of a three-day story for a message whose whole content is "less work appeared than you
   might have expected".
 
+**AMENDED 2026-08-31 by the decision below — the seven days above now govern daily and weekly
+only.** Nothing in this entry was wrong when written; its subject grew. Two of its clauses have
+expired and are corrected there rather than edited away here: the authority is now `0026`, not
+`0012`, and the UI sentence no longer names the number at all.
+
+## Decision taken 2026-08-31 — the catch-up bound is KIND-DEPENDENT
+
+Owner decision at the commit gate of #103, taken on an escalation raised by that story's review
+fan-out. The bound above was ratified on 2026-08-24 when the only schedule kinds were daily and
+weekly; #103 added monthly and would have put it under the same seven days without anyone deciding
+that it should be.
+
+- **Seven days for daily and weekly — unchanged — and ONE MONTH for monthly.** The authority is the
+  pair of constants in `catch_up_repeats_at`, now in
+  `supabase/migrations/0026_repeat_monthly.sql`; `src/lib/chores.js` carries both, and
+  `repeats.pglite.test.js` holds all four copies equal.
+- **Why**: seven days costs a daily or weekly schedule at most a week of chores, which is the
+  reasoning above and still holds. For a monthly schedule the same number silently drops the
+  **entire occurrence** — a household that does not open the app within a week of rent day loses
+  rent day, with no row, no notice they can act on, and a skipped-count sentence that was worded for
+  a week. One interval means a missed monthly occurrence is caught up if it fired within the last
+  month and skipped if a further month has passed, so the bound keeps its purpose and changes its
+  units.
+- **Rejected**: keeping seven universally (cheapest, no code, and accepts the silent drop — refused
+  because the feature's headline case is a bill chore); and exempting monthly from the bound
+  entirely (simplest to reason about, at the cost of a chore dated weeks ago appearing as new work,
+  which is the walk-in pile the original decision exists to prevent).
+- **What it cost elsewhere**: the notice sentence stopped naming a window. The pass returns one
+  skipped count across every schedule it walked, so any single number in that sentence is wrong for
+  a household running both a daily and a monthly repeat — and it is the monthly case, the one
+  likeliest to be skipped, that the old wording described worst. Both constants remain exported and
+  unrendered, as the client-side record this log points at.
+
+**AMENDED 2026-09-02 by the decision below — the authority is now `0028`, not `0026`.** The values
+are unchanged; #306 replaced the pass again to add the supersede step, so `0026`'s declaration is
+historical text in a body that no longer runs, and `repeats.pglite.test.js` reads the constants out
+of `0028` for that reason.
+
 ## Decision taken 2026-08-25 — three tab surfaces, held in `useState`, split first
 
 Owner decision at the pickup of #47, whose criterion 11 required "the navigation approach chosen is
 recorded in the decision log". This is that record.
 
 - **Three surfaces — Split, Chores, Who — as a tab strip in `App.jsx`, with the current view held in
-  `useState`.** The split opens by default, which is not a new decision: the grooming section above
+  `useState`.** *(Four since 2026-09-01: #302 added Done — see that decision below.)* The split opens
+  by default, which is not a new decision: the grooming section above
   settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
   What #47 settled is the *mechanism*.
 - ~~**Why not a router.** `react-router` would be the largest dependency in the repo, added to move
@@ -573,6 +644,122 @@ RPC" — and #49 is that RPC. Two mechanism choices inside it:
   and clear. Rejected: overrides-only (a baseline edit would visibly change the bars and silently
   not move the split) and every-input-write (a re-balance on writes nobody experiences as a
   capacity change, beyond what #49 asserts).
+
+## Decision taken 2026-09-01 — completed work gets its own tab
+
+Owner decision at the pickup of #302, from the three options that issue tabled. The chore screen
+had rendered every completed chore ever under a heading reading "Done this week", which nothing
+bounded to a week — false from the household's second week and growing by a screen a week once the
+daily repeats (#53) landed.
+
+- **A fourth surface, Done, grouped by capacity week, newest first.** The Chores tab shows only
+  outstanding work plus one line — "N done this week" — that leads to Done. Groups use the week
+  `periodStartFor` derives in the household's zone, because the household already thinks in
+  capacity weeks (#46/#47); a second notion of a week here would be two answers to one question.
+  The 2026-08-25 tab decision above now reads four surfaces rather than three, and stands otherwise
+  — arrival on Done performs the same full re-read.
+- **Rejected: bound the group on the Chores tab to the current week with a "show earlier weeks"
+  disclosure.** Smallest change, but history keeps sharing a screen with the work and the disclosure
+  grows without bound behind one click.
+- **Rejected: archive or purge completed rows after N weeks.** Destroys the actuals #12 reads to
+  suggest estimates and the history #105 preserves on purpose. Only the screen changed; no row moves.
+- **What survives from #35 unchanged**: AC 8 (completed work stays visible somewhere) and AC 9 (no
+  streak, rank, score or per-person total, and nothing styled as an error or alert). The component
+  test moved to the new surface with the group it guards.
+- **The bar, set at the design-bar gate the same day — what must become true:** Done reads as a
+  **logbook** — dense rows, grouped by capacity week, the newest week open and the rest behind their
+  headings — the way Things 3's Logbook does, not the way a task list's hidden "completed" section
+  does. Judged on a running prototype of the real components at 360px, not on the issue text:
+  with eight weeks of daily repeats the first build rendered **27 screens**, because a done row is
+  the working row (375px tall, seven controls). Verdict *lands, but not at every size*. Half the
+  repair — only the newest week open — shipped inside #302; the other half, a compact done row
+  that keeps only "Not done after all" and "Took", is its own story, because it reopens #302 AC 2's
+  "exactly as it does today".
+
+## Decision taken 2026-09-02 — a superseded occurrence is marked missed, and the household is not told
+
+Owner decisions on #306: the rule on the issue itself (2026-09-02, from three options), and the
+notice question at pickup the same day (AC 7 asked for it to be decided rather than left implicit).
+
+- **The rule.** When the catch-up pass creates a new occurrence for a repeat anchor, every
+  outstanding member of that anchor's family with an older `due_on` is marked missed — #305's
+  state, written by `catch_up_repeats_at` in `0028` with the pass's own clock. It keys on the
+  anchor, not the kind, so a daily goes missed on the next app open, a weekly's window is its week
+  and a monthly's is its month; the anchor's own row is the first occurrence (0012) and is
+  superseded like any other. Completed work is history and is untouched (#105's rule); a row a
+  member put back stays on the list until the next occurrence really generates; a one-off has no
+  anchor and nothing supersedes it.
+- **Rejected**: marking missed at the end of the due day for every kind (a weekly done a day late
+  would read not-done first and Done-wins second, showing more misses than the household would feel
+  it earned); a per-kind grace window — daily 0, weekly 2, monthly 7 days (a third tunable plus copy
+  on the edit form, for a distinction the per-anchor rule already approximates); collapsing the
+  overdue copies into one row with a count (a tally on a person's chore is a shame mechanic); and
+  deleting the superseded rows (they are #105's history and the record #12's actuals may want).
+- **Cost, stated so it is not rediscovered as a defect**: an overdue weekly sits on the outstanding
+  list and in the Split for up to seven days, a monthly for up to a month, until its successor
+  generates. #305's manual "Didn't happen" is kept for exactly that gap, and for one-offs.
+- **Second cost, raised by #306's review fan-out and kept by the owner (2026-09-02)**: the anchor
+  row is the only row carrying a repeat's schedule controls (badge, Edit-schedule, #105's Skip, the
+  estimate offer), and once superseded it sits on the Done tab under the week it was superseded —
+  permanently, because a superseded row keeps its first stamp — so a repeat whose first day was not
+  ticked has those controls behind a collapsed old week. A completed anchor already lived on Done
+  under an old week before this decision; the rule extends that reach, it does not create it.
+  Rejected here: excluding the anchor from the rule (one permanent overdue row per repeat, counted
+  in the fairness figure — the stacking in miniature) and widening #306 to move the controls. The
+  repair is **#311**: a repeat's schedule controls reachable from its newest outstanding occurrence.
+- **The household is NOT told.** #53 AC 4's transient notice announces work that never appeared
+  because nobody opened the app for longer than the bound; a superseded occurrence has not vanished
+  — it is on the Done tab labelled *not done*, with "Put it back" beside it. A "N marked not done"
+  line would fire on most opens for any household with a daily repeat, a daily nag about work that
+  did not happen, which is the tone the design direction rules out; and it would need a third return
+  column from the pass, which a `create or replace` cannot add (a changed return type is a drop of
+  both catch-up functions and their privileges). So the pass's return shape is unchanged and
+  `skipped_count` still counts only what the bound skipped. Rejected: extending the notice with the
+  count; and saying it only when a skip is also announced (rare enough not to nag, but the same
+  function-drop cost and an inconsistently shown number).
+
+## Decision taken 2026-09-01 — completing an unassigned chore assigns it to the completer
+
+**This REVERSES #35's answer to the noticing question, and the reversal is the point of the entry.**
+Owner instruction, 2026-09-01: *"when a chore is clicked as complete, assign it to the person that
+clicked complete so they get credit — unless it has already been assigned, then leave it."* Shipped
+as #307 (`0029`). The decision it reverses lived on #35 and never reached this document; it does
+now, so the record and its correction sit together.
+
+- **What #35 decided (2026-08-08) and why it was right then.** Given three options for a completion
+  of work nobody held — (a) allow it, attribute it, build no surface; (b) refuse the completion;
+  (c) auto-assign to the completer — the owner took **(a)**. (b) makes the app argue with somebody
+  who has just done the dishes. (c) was rejected for a concrete reason: a holder written by a
+  completion would later surface in stored re-assignment as *a re-balance that never happened*,
+  because `assigned_member_id` said WHO without saying HOW.
+- **What changed.** #49 (`0018`) shipped stored re-assignment with `assigned_source`, so the column
+  now records how an assignment was decided and a manual holder is already never moved by the
+  allocator. The 2026-08-08 objection had no mechanism; it has one now. This is not a change of mind
+  about the risk — it is the risk having acquired an answer.
+- **The cost of leaving it.** `completed_by_member_id` was read by NOTHING on the Split:
+  `toAllocatorChores` carries only `assignedMemberId`, and `assess` drops a done chore with no
+  holder from the arithmetic entirely. So a member who did an unassigned chore was credited in the
+  done group and **invisible in the fairness figure** — the one place this charter says the
+  household's argument ends. *Measured* on the shipped fixture: 150 minutes of finished work against
+  30 minutes of somebody else's open work reported the household 25 minutes off level and **named
+  the person who had done less**.
+- **The rule.** Unassigned at completion → the completer becomes the holder, with a **third**
+  `assigned_source` value, `completed`. Already assigned → holder and source untouched, whoever
+  completes it; `completed_by_member_id` still records who actually did the work. Un-completing a
+  `completed`-sourced row clears both columns and restores the pre-completion state exactly;
+  un-completing a manual or auto row leaves the assignment alone. A missed chore (#305) is never
+  assigned by this rule, because nothing was completed.
+- **Why a third value rather than `manual`.** `manual` is read: `apply_assignments` treats a manual
+  holder as pinned. More importantly, un-completion has to know which kind it is looking at — with
+  `manual`, *"Not done after all"* on a chore nobody was ever assigned would leave the completer
+  holding it as though a person had chosen them, pinned against the allocator on the strength of a
+  tap that has since been taken back.
+- **No backfill, deliberately.** Every row completed before `0029` was completed under the old rule
+  and those weeks' fairness figures were computed without them. Writing holders onto them now would
+  restate history the household has already looked at and agreed about. The rule applies from here.
+- **What survives from #35 unchanged**: AC 8 (completed work stays visible somewhere) and **AC 9**
+  (no streak, rank, score or per-person total). Naming who holds one chore is a fact about that
+  chore; a count per person is a scoreboard, and the Done surface's tests still refuse one.
 
 ## Open decisions (still owed)
 

@@ -1,0 +1,4181 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-31T17:26:19.274Z",
+  "corpusSize": 60,
+  "runs": [
+    {
+      "config": {
+        "label": "claude-opus-5 effort-low",
+        "model": "claude-opus-5",
+        "prompt": "You extract structured facts from one short household message. The message describes\neither weekly time capacity or chores, and the input names which. Answer with a single\nJSON object and nothing else: no prose, no explanation, no code fences.\n\nFor kind \"capacity\" answer:\n  {\"kind\":\"capacity\",\"minutesByPerson\":{\"<person>\":<minutes>}}\n- One entry per person the text gives time for, spelled exactly as the text spells them.\n- Convert every duration to whole minutes for the week, summing parts the text splits\n  across days.\n- A person the text says has no time gets 0. A person the text never mentions gets no entry.\n\nFor kind \"chores\" answer:\n  {\"kind\":\"chores\",\"chores\":[{\"title\":\"<job>\",\"expectedMinutes\":<minutes>,\"dueDate\":\"<as stated>\"}]}\n- One entry per job, titled with the job as the text states it.\n- expectedMinutes is how long the job takes, in whole minutes.\n- dueDate is the due date EXACTLY as the text states it: copy the phrase, whether it is a\n  weekday, a relative word, a spelled-out date or a numeric date. Do not resolve it to a\n  calendar date and do not reword it. Where the text states no date for a job, omit\n  dueDate entirely. Never invent one.\n\nWhen the message cannot be answered - it names no usable quantity, refers to a baseline\nit does not state, or offers figures too far apart to choose between - answer:\n  {\"kind\":\"refusal\",\"reason\":\"<one sentence saying what is missing>\"}\nRefuse rather than guess: a confident number for an undecidable message is worse than a\nrefusal.\n\nFor an explicit range, answer the midpoint. Amounts may be written as words - half an\nhour is 30 minutes.",
+        "effort": "low"
+      },
+      "responses": [
+        {
+          "key": "input kind: capacity\ndescription: Alex has five hours this week and Robin has three.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDL3hBdU8BNcSydirHy",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":300,\"Robin\":180}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 601,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2275
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin can manage two hours and thirty minutes, and Sam has forty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLCWzsNCpauW3i786o",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":150,\"Sam\":45}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 615,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1983
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam only has half an hour this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLMDsuMJJ3XPbLDTK1",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":30}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1984
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has an hour on Monday, an hour on Wednesday and two hours on Saturday.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLVZBQm4u7Xs9rmyPy",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIStAIKjgEIERgCKkAN4Rg3oVw4Ly6kjH9H8iRwEiekeZvIqlZiJQIW4JkNJTroJAwhf6PY0RGG0Ee/rch7vBFYWGah8giDYVSeSPuoMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfHw1tQGEgwcGz8PUL1l7IwaJosaDBy7Y8CGKX8i2fX6OyIwRUh+ChQkytbHqiEpl6qxu6ahBQfKGGcrU9wmO7Z5tkgXQCYxpRhsoZfHahOnIrg1KlM2kZFnWOzM4p/R5Gd/7gjdHBzUFuoy2sdxJx5tVOD6PXWgrzrgOem55ZTjftesBqe75uVmycL9H8LGnj1Vyho7Ky5/O6/0PO4EdI0R8X86qi8V4RgB"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 616,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 38,
+              "output_tokens_details": {
+                "thinking_tokens": 37
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1977
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has about half an hour each weekday and nothing at the weekend.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLePVpGxTNNpzvzxbN",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":150}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 608,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1963
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam is away all week so nothing from Sam, and Alex has four hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLnd6cRVt4AqWwe2kx",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":0,\"Alex\":240}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2030
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex is off work this week and has ten hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDLw7paKwLmNNqPebyZ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISnwIKjgEIERgCKkB/dguvxZZwh6fteAUEyEFF9ritnBw3KsdVqBOVJcnMW7S6tpWeb8YJGM71mm+d34jtHTIZourDjFtVk1/yPyQUMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfjw1tQGEgzV9TKOSiajwXnzPWIaDFvNP1ex6gnZajG/yiIwEGJJucHilM/47+YX41pyp+d+9/ny2TOTOWhDKfVmxPXjvDVtgUXmuVU+qXuQSx6LKj6eCx1uBFPtL/CXqoheikjpHoLh0ZdYVOEg5FzyF9Ehx6fH+LBHR6trymZYmWAJFOV0b4wbGISB88HUgBEaZhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":600}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 50,
+              "output_tokens_details": {
+                "thinking_tokens": 21
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2803
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has somewhere between two and three hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDM94v64TSpQUCZnocr",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISgQIKjgEIERgCKkCfEGt14ruMR0gZMPw8PMHufVchv0GsOP3RgO93RDQpDAhM8ubln5jFBG3nm3AYom4BI0yjnlUtVz7QyqH3FTTqMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfrw1tQGEgybffCRzRmiq8qsu5EaDAuW9geFoJrn/Nup3yIwdWa5NzEYuAzGXG4bmWsJ9PDki1fUjwQXL6kO4sJJfrDKjWnoodbbwjJdCl+jv1byKiA2+qzOYhfeOZKhxSZUoEQ6ZywGVOf2vlhUxKL2sjK5+BgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":150}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "output_tokens_details": {
+                "thinking_tokens": 11
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2117
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has a couple of hours and Alex has most of a day, say six hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDMJ9MvQJJ9oZZ53BzK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISrwIKjgEIERgCKkDUFtC0Itv/bNUQ4mILHpOSvTEkeKfyl/7LKBZsG2rrcGGV6Vc/BwYyW/CTCW2BtofO0TSNc70Rry/PM0R8l7f1Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAf3w1tQGEgzwmVn2wuRfmn6Lf0AaDNzDCT1zMjTK9ghKySIwkGFdqEKPvV3aiyD2pOMj7qHnxIZoc1HUOKOeD0NFBvUlVHU/WEOqV8Pt8o9PqGvIKk5Pu3Gs/+gA76qc/CuQy2v6scsR+sjsax95hhElsHCCyCsPYVBZWxnkTfoH2cfQidN/4xyMLaKYPg8nuOCt95GtI9YIhO2mtXaKaGBxWZ8YAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":120,\"Alex\":360}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 70,
+              "output_tokens_details": {
+                "thinking_tokens": 35
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2617
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has six hours. Robin has half that.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDMVRGshy5ATD7hnjKk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISoQIKjgEIERgCKkBeZTw3tXGbbd8D4I4MMAlHCIdDC6cabq96xzhfoPCrF20VvcKtBzX45EM/NQDGA9OmAAvwM9eYy2SazYh3dd2uMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAf/w1tQGEgzlr1wMXHHn8lrPsNwaDDShenqtEUAB/CooTiIwHSyRRTmqFDw5nQnSrGSvZ2+S6OgnZFy1h+GvEcJXxSreTlCwYDJ1zQi7jiCImofYKkC+nuuP6fzBY0VHAV99utpn6Xa8s9I3+XjCISbn83LfjW6nT/IHfoqkTqLzrm0kED9gHxnvEDhQ5DDVn8C/0oOEGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":360,\"Robin\":180}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 60,
+              "output_tokens_details": {
+                "thinking_tokens": 24
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2658
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin normally has four hours but loses two of them to a work trip.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDMgndpAgZ9Mqo85mZL",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISmwIKjgEIERgCKkCdE25NMalYkYgvvF8ZhvwrJBPJR6GlM5PAAOY+kQjB0Z/QCHi9Yqn9+ETOpUB7P92+io9mN/Hbmkfhul9F0+koMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYLx1tQGEgycxsjI9C9Y+8nnUnkaDGKV6FbEqqdDtiw/SCIwDnFqDQH4mKBCBwdZsjvN1ya46cgJrM6yCGcfYs3w4S4FS5dhSWgACvKlcEkWsWkWKjpPEcva4VuJTU0MWDyHPoiwrGRKEkMxEqnK4K2ByoIg2bAQUUMv5/wlLLX6m6CCQs05L8xHERQb08kUGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":120}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 606,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 53,
+              "output_tokens_details": {
+                "thinking_tokens": 25
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2391
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has three hours, Robin has ninety minutes, and Sam has none.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDMrwL1JViD9iHVHxv7",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":180,\"Robin\":90,\"Sam\":0}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 611,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2217
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam cannot do anything Monday or Tuesday, but has an hour on each of the other five days.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDN2RqWN5pVrEjpVYqR",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":300}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 617,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2093
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has two and a half hours, and Sam has an hour and a quarter.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDNBG9t1SMNT5LoaRsW",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":150,\"Sam\":75}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2233
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin is free most evenings.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDNLu5pHr6EcJGBp2R9",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISiAIKjgEIERgCKkDBpo02h6IVQ4HofulaKrvpJgn+sK//HEmhFw92ePBRiVjGMaweL8bgG0hinWSSB9zs0o15lLMKKrVm6zqZU4JtMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYzx1tQGEgy04sjaL8xj+CV5i2gaDGZpbX+O5Th7IYFALCIwncoKYNBv1ZcDJh+iEfa179hNMj9rchUkdbCUqKEutJpjMoe/eedCMQPtF5o/v5mXKicMNZ1ivklDjMggHNAGvLlhalJVw7jnzSMEfiNXMHU9vmTuuFexhqAYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no stated amount of time for Robin, only a vague availability.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 595,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 54,
+              "output_tokens_details": {
+                "thinking_tokens": 14
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3526
+        },
+        {
+          "key": "input kind: capacity\ndescription: everyone is pretty busy this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDNcB6yexJXdYVtpXPw",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS/wEKjgEIERgCKkCzr5nZqaxk9eAOFYEacRhcIq2qZk31MN3Tat/Ot8v1qMLzuaH/L7MO/MTcpIme7JmqT1/y8YWfnshzZRcomiVKMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAY/x1tQGEgyJe4sGKD+I64kESkkaDDGt43jRkjbZfnMZiiIwoN8p+XfD8zr/gr6mlV3oqCgjWXUVBOnvxlBqQpPOTXKzrKw38WaSfjLhK9Vs334uKh6F+xoV9hwoppwkHYgLxalo4AY4jNWlsfzL07NP62UYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no specific times or people, only a vague statement of busyness.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 7
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3060
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has a bit more time than usual this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDNqLruiDNVXh9wbkVh",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIShAIKjgEIERgCKkDXxD/uNVfh+U2daNxyA+Ex7bUUja5INCitvxeBdZiijPiN3blkZFLylbUuEVD11cs6Dsz39kGDrkQ4hyLK2X9dMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZLx1tQGEgxu1+HfztzTqdw1xnEaDE9V8TQl0OZJ3UFKhiIwIsgwZb+9lEEQTZuRjM0g3Mn01hEKn4RtH46ZsRSQXWSm6FbWMqYRI0Tf2DC5A+sQKiMxjHbiU+4PGkBzdDVdylxLu2kjO+x+Z07jijx5KBLBrv0SxBgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no stated baseline or actual amount of time for Alex, only a vague comparison.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 56,
+              "output_tokens_details": {
+                "thinking_tokens": 9
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2990
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex is on holiday all week — call it thirty hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDP3mjJ1JYgb8FJhGmk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISvAIKjgEIERgCKkDAobAlHeEVG8u1xMxEJapFpK8WSvQhbXn3VnkxIvSq9LtoZtzE3UA1ATp4/xYwiAY0iAqXKJqefJlGblZK9uz4Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZTx1tQGEgyuKqxdul3h3XjubUcaDB4SN6xbecbNXXaTGyIwP6/GMRMWiJICzyNYbdoUYQc67ixWRWsx8/3pukOyPE1vr+XApqiJTfqfliCG0vFtKlttjzl9eU3nEO84hxTi7pv+kWhnLZabypcZCcRhF0mNFaMOgb3M5RBDxtyOd2L8GxkH5s4O1wWAatSeYgeBdsKMZgHKG/m+jDIL0z+K7tbHeZe1nBeLr0TlpkK2GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":1800}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 604,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 61,
+              "output_tokens_details": {
+                "thinking_tokens": 31
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2540
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has two hours. Sam is at a conference and will not be around at all.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDPEqV8VfqKKYs8icXr",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjAIKjgEIERgCKkADsCU996vcH/1KFnGn6TY+cTHaKnkA08vVnBwFIiHrbScCcLBvDavpW2qvvdZ0xnSlgy2AsNjoSk3GS5C3Q3t+Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZfx1tQGEgz4Q7WgigFPhx2lxFoaDGfpuSxtMFQy0Jt5qiIwcyqXkv4uKdc9YJPlKqORsKgkROCLBLNOu5yaqiJg51QM3N4KXOCdBa+r4ETp6yEaKivevEfoi4wGR+cEJlcGLrci/rns40RTdR/TK8pkX4nQuvBNVhtZDW/mzkiGGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":120,\"Sam\":0}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 609,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 19
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3034
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has thirty minutes on Monday, thirty on Tuesday, forty-five on Wednesday, nothing Thursday or Friday, two hours on Saturday and an hour on Sunday.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDPToqifzatNaQYnwmX",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISiAIKjgEIERgCKkA/P94flaYzfq2rsRESVUpbYYJgWeY5SAo5CFF/5IhBD+SU1GfRvHmtywLvMfxq2Op/UFiF+GI/nCvGt+5nVT3VMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZrx1tQGEgy2y9HoY1J4ZZqie0EaDEAsO2PV34qYBhiN3iIw0/+vkVkg2NhOJO75MD2MFsIpu8ef69uN6+NiBPheoxcgGYOOhfQtB3UXkZBL+i+RKifDGc3fm3TkB2ySapgz1txy/+4ip29q894xn7ZxwteSnsdGQxhVsyQYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":285}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 651,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 17
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2477
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has 1.5 hours and Robin has 0.5.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDPeBBZ6mo5zi2aVfCK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjgIKjgEIERgCKkBSKT4rkr7cwtMXBsQX/4J/pg9aVImRebQI9u6kdwm4MBjvya887ALlFnNyjTP+tANYI+Lh3DsD2JzT+Keghd2GMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZzx1tQGEgxjmROSrDYCshRdmRMaDCZfa/02Nexcx+OkUSIwo8KejOGDolSKlpVhibKHFX6WXK5rHjG9lZ53HyR/ghm/0M6ajZ0BvaqdJYNUvUgvKi06+EHUxQbElp4JtaZ9m9zIWF5i/SNGs4Sf0utqZUFND5+7fBLKvD1YDKgPD6YYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":90,\"Robin\":30}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 606,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 58,
+              "output_tokens_details": {
+                "thinking_tokens": 22
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2295
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has four hours, Robin has three, and Sam has one.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDPp5joHu9uECJMT5yo",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISlAIKjgEIERgCKkCOS1gQUE5Ydis0gPQD5rC4B3NwEdCgDfFq6joa+BLrkLQ8yU1NKhqut3klNePmHUBHL5wh3g+cSm9fjCF3wiI6Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZ/x1tQGEgx6r0RY1NVg7OwsvFUaDD6qWvfsMQ640HQqZyIw3cOE092JWq9GXnCuEnBa3rGH14r8a2ZpibyJoRveIPWiakXarX4LBfZshNcYy1AQKjMcSwJH1jmsJxs/+FvF9wkc+y7JkFZVxWf04NatISMRkanEC4w78NlNZX8CRZejIZxzpJgYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":240,\"Robin\":180,\"Sam\":60}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 606,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 67,
+              "output_tokens_details": {
+                "thinking_tokens": 24
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2428
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has no more than an hour this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDPzK9RKYEnwZ8vbvkQ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISqwIKjgEIERgCKkDJv/6HcFfp1UfaLoPdHkEYfvr85KbGXo8GYCbTFcjUgarGABh6oIRs+4NJTMGD6a0vXe1SZbXGbCRhwCb9J27HMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaHx1tQGEgydGwUjd4MVg3MGwF0aDJVvt6S929wpdBwZniIwjV9gFVfkIMzSboaj408pIbmzjmSgRSMQ7s4gskZJODm11eqGb1FaqGFf3Cy+hEREKko7yrkY3CeHNUkmK3e9cdJ5Ab66n54Af4UCmd3+UBH4yj9/h03b0xJCn1eYD7t5o6JmyHdbM03gPeGVBcLXwzZqPRfyCGiyXtzvqxgB"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 31,
+              "output_tokens_details": {
+                "thinking_tokens": 31
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2051
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has three hours, or maybe five, hard to say.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDQ9PbJcikPB4ZupSHL",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISpAMKjgEIERgCKkCG0m0mE/6MPF6r/zUZHVl0yAPxMPwX988HIuYGf3F6nXmJ3UE73LbJ6kTzCPxnVbZ09CrIpyEAYeJ43IwfNnVyMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaTx1tQGEgwOGqnwtA/cD/Kmu5waDDWt1sRm8GDE36/vCiIwGs/MPqlgel45+PdMQ4/6pnfms/yoSihpg0qOzoZhfAl1BejIm9zlxf/slX4v9AFdKsIBmhz1tsrXFwqqioqwizkm1cQ5C76+Mf9Ss/TG0uHL60AWGvVuH8Mup0T5Elc65LQY1QKUBj6TpbiPMKCzGJ6Dk9hOBfqIrNUBcqN4XcwKRYmqlSx1cskik6ZrT1g4fki7AbFuY4IqPah5d9p1G+aIrmgack4L4y825pP605Kz1J7pR8WYMDxV1tolW9AeSoAuaUMdH8sJtGuXcPhEp0DJ4YqiOWHbUYu62I/Cv+lqugpIJ2t86NTaOcDawvzcM9qEMi0YAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":240}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 604,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 113,
+              "output_tokens_details": {
+                "thinking_tokens": 84
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3051
+        },
+        {
+          "key": "input kind: capacity\ndescription: it is a write-off this week. Alex, Robin and Sam all have nothing.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDQNDmKB4gbft3EsxFr",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":0,\"Robin\":0,\"Sam\":0}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 611,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2305
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam can do seven until eight each evening from Monday to Friday.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDQYGGDh9EbQ9TiMHq4",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISnAIKjgEIERgCKkDPsTFAIiruwhx4tnOf+WVoUXRkk+XYBrTXecs2TefG7n23UskW/Qvq+/GyUQ9wbXAjrpIRfZVMy1F+y3eUGYqhMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAanx1tQGEgxuPg+9Do1jYt6yzaIaDBR7rMZmfB/jpMv2KSIwYlY3izbcle/cm7kRQOT1hJS0B8mQMYNqISDAv+C2v6Jg6WdF5m/J6fkRts7cyOiEKjsOaeG2BgNu31gjWzGB1FRmV2xWOL8XTmfl7hPAMItY8CHlvIw8FIGx/aQxazFy6rKVyAZcK+el3M7pGRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":300}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 54,
+              "output_tokens_details": {
+                "thinking_tokens": 25
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2538
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has forty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDQj2R49q6vAqNSQ2EE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":45}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2156
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has about the same as last week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDQtCZeoLEM9haKV3TC",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS7QIKjgEIERgCKkCFQjipk8kUrwkMb0vWAGfGivOOkBxetE0/KEzQpbz9s/2YbDjwts8ZQIaErIB6MJzYq0FdfEyifiIIxcgyqGo/Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAa3x1tQGEgzVAFeMLd/zXr0bXo4aDA80m6shyNiqYy7iOSIwNwVi8UFkt5Mo86jnp2ua2dG2WEQ4VIJQ0n7IsCmNnPXgL0TMXxWsboVCGDQ/YSNmKosBdYGrEgE0D2/tW1iMjnPUS3WtNiPbBBc1vk4TtWpj4KMn2pa17um95sUY3t92hFcsu7e1wMIeJOnbgasxVV8U93QV8LFCmtl6XulSshwxhc7Ugh8DnnFAqyEqFvk6RajnJt7AKi9/W00m7Eo863zTmzvnrObUQfuZCLgS7hE4KmOSNDTWpDoF1srBlRgB"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 596,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "output_tokens_details": {
+                "thinking_tokens": 42
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2269
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex works late Monday through Thursday so has nothing until Friday, then two hours on Friday and three on each weekend day.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDR4AbVJX3rBHEoERHn",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISqQIKjgEIERgCKkDy4RNtNymsr6YTfzpeNyPtCmyLt4gOiiRVW76kDweR4/hn7R76PqJvNA+HUyReCoTm1659fn5FMVMyhX4SH8hWMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbDx1tQGEgyt5Zda/8YPo/0x6fQaDJbudbshl1amGOwFayIwxsXfUKyD6T+x2/XmowpLhvYQZcpwQQzYaakh2gRnmOM6Unqlbe3XVuiq2/BPD5nzKkj87PnctDq/E+M8bG3jlJgmvhngPi7KWNNxHntRZ+azOxXzy4gUdz3Na1Nsb5T+XpSggT0oepsFy8eWiYIcIn1UxuumEsnFT2IYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":480}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 625,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 67,
+              "output_tokens_details": {
+                "thinking_tokens": 39
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2722
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has an hour a day every day, and Alex has twenty minutes a day on weekdays only.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDRFwGsPSDnCSZqrNsm",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISrwIKjgEIERgCKkCGbAUCdYzYRH1YzZUW5vm4F5OtWy3jp1u6do2oe3MSHB2JfPk8QluGST7jAFrdVtjEN3R8XJDU/6Xee/1erbNwMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbLx1tQGEgyo4e47LASr/FmQm/IaDAVcQzHds6z9h68JdiIwq88OxtSBY1FK+IGl1rJ/pxjvOH8kWRg07KCfOTpCd9/Cw86K+D9MPfDKGhJtXpwYKk5rhFhq7IVaJJzH8SiqH41vonh4nHhlJoOnozefAnhgmUq4Df6+gGVAoNk+qW7YGNwPZiI5vKzI/t0T4LC8r6zt5Ydriyb3N7Yt+hHLDFQYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":420,\"Alex\":100}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 617,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 72,
+              "output_tokens_details": {
+                "thinking_tokens": 36
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2488
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the bathroom, about half an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDRSUnH47y1RWHT5x6w",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS7wIKjgEIERgCKkDvWA3k70dvkaO76mppo3FV4i6dwNa7AK+r1HqyRvN+5XI34cD0SMLTkzU5SrnGV7XYdkTX6QNk1YIkYmjkaYqQMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbXx1tQGEgwSBN2gMZy+G/ZsyIcaDO1wbP0YbarYujmRziIw+VzYoVrYU/LmGYtDMb4UyT1vBrTCJLY74ccHtUgYGP2LqxJqXE4m5czHss1IfDEJKo0BY42wM8NWnnH377SsrqoWTPOB+IG9pWA6hlsSIAcFEQmgeLwsPlciLm+yeITxy67lkvj6bXvEZvguxBZAOWLj5ny+vUPWjxOzw65jhMmLYB65wwMM5k7uALTs7uQ7+x6pPjiFbXbNayAr5ocezZ5WkHXj/+KEkYdcP7eQB2NbI/Uxb6SNN6c1yyLyVU6qGAE="
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 59,
+              "output_tokens_details": {
+                "thinking_tokens": 58
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2739
+        },
+        {
+          "key": "input kind: chores\ndescription: mow the lawn takes an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDReLugskZHznqmvsMK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"mow the lawn\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 596,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2195
+        },
+        {
+          "key": "input kind: chores\ndescription: take the bins out on Tuesday night, five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDRoGgYghKAvoW1N2kM",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"take the bins out\",\"expectedMinutes\":5,\"dueDate\":\"Tuesday night\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 602,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 53,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2305
+        },
+        {
+          "key": "input kind: chores\ndescription: vacuum the downstairs, twenty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDRy9zq4TU9tojmA3Jk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"vacuum the downstairs\",\"expectedMinutes\":20}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 601,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2222
+        },
+        {
+          "key": "input kind: chores\ndescription: change the bed sheets, fifteen minutes a bed and there are three beds.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDS8ekZQsamYMdjBDen",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"change the bed sheets\",\"expectedMinutes\":45}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 609,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2070
+        },
+        {
+          "key": "input kind: chores\ndescription: wash the dishes after dinner, ten minutes, and wipe the counters, another five.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDSHgDts3iCB1sKeXxi",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISgwIKjgEIERgCKkBzHR52CuhURSXRED6PYs5WEH4R14NCKFlVDmsoMmesDLQST8V7bwYE/4QNt8Z/hei+/+oGmLXJd4O6PdBMoicEMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcHx1tQGEgxq/Rc2j7EoAfMmUScaDJfDz7BXOd1nQuFhliIwVwBe9CyWr7OuNh7TjTJC9I/ebQXRlJ/Ejg5hf64fK43xtOm7U1c+4VXD3tPo0wMnKiIn4zbOhtSwcaJbcE+tu6tO4V+gSWrsb59Vzc+OZnjyT783GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"wash the dishes after dinner\",\"expectedMinutes\":10},{\"title\":\"wipe the counters\",\"expectedMinutes\":5}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 612,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 74,
+              "output_tokens_details": {
+                "thinking_tokens": 9
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2875
+        },
+        {
+          "key": "input kind: chores\ndescription: do the weekly shop on Saturday, an hour and a half, and put the shopping away, fifteen minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDSVswaWS9fN88EoKNE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS5wIKjgEIERgCKkAzvKWEugd9SQwhaLJhdbs60OwoP6tPSES7OCdkaiqcfwFdaFKyAMTQT4upWTBNMUl+XuQB3CUQdaquGWCtOZ+KMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcPx1tQGEgw6x8ej1XfZF8gvfyIaDGfEySS/ObMM1GA6vyIwFs0pOumYa23OfNcma4AnR8WeCxFse1FhmKHFwgLHZudk7MOvc7mo1/lXf777maNeKoUBZCiYTdelh6doae5CDKI5fwKrEgVtb5wXJ8vOvUQqtGzOcwSexqdS1gmrGtfnNBlkCBbDrDG9xY4e92oKkpdrAQd6TmOUjVxOxV3jagiExqvJ++SBodN8QFU36a/bHhWWnfepNZtnjcA+hLk6+tLNL0jI2Ccn4LkZ7BbAw8E3SWbHQ8IcVxgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"do the weekly shop\",\"expectedMinutes\":90,\"dueDate\":\"Saturday\"},{\"title\":\"put the shopping away\",\"expectedMinutes\":15}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 620,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 121,
+              "output_tokens_details": {
+                "thinking_tokens": 46
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2868
+        },
+        {
+          "key": "input kind: chores\ndescription: the usual: dishes, laundry, vacuuming.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDSi7toaDFpHgCntRas",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIShAIKjgEIERgCKkCxPfGZ2HLlYBloHnmle3aAavnvxxNcLkZJmHbpIPEOtsO/jySZVYg9gkscJ2Mo4E4vgFpOp81VmcJ0PTq3QqKuMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcbx1tQGEgwTd3YwI3L9+SZGWrUaDMbCa+GVsgqSMEPCPCIw9lF3faHKr7TIxlCIRirmJNxL9viwc+nYhcoICERzPchV/NB9qifmkYHZqXybYzbsKiPzrtxN4X5LifRQgDg16qYHO46YAcM0MCu/0CsUpmk/pVnaoBgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message lists chores but gives no time estimates or due dates for any of them.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 602,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 47,
+              "output_tokens_details": {
+                "thinking_tokens": 7
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2275
+        },
+        {
+          "key": "input kind: chores\ndescription: sort out the garage sometime.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDStKKAcy9qYGU17NUL",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISgwIKjgEIERgCKkBjwCDN2J20VC915qlwzA4gA4sIXl3ncxuk4AcuT7TEEL4ttkbYlClAmZbKNZzGjNzRxC/5m2MO0hWQCfpHorbZMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcjx1tQGEgwm3K9zC9BsFJR1hGkaDD0YjtMtChPprVJnOCIw7ocNLz58cTt3M9CRU8WsP535tmxR8ANPOgrUWWD5BcgNKka4+CGr+viHdMsaVsKJKiIGfJ6nLHrzCdg5ZrrRnBzzM3n040H5groJeTUgZStjWC07GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for sorting out the garage.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 594,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "output_tokens_details": {
+                "thinking_tokens": 7
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2471
+        },
+        {
+          "key": "input kind: chores\ndescription: walk the dog today, twenty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDT4wXvy3MyZWtVWPJ2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"walk the dog\",\"expectedMinutes\":20,\"dueDate\":\"today\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 48,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2331
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the oven, that is a good two hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDTEJ75GT2WB75AwNPu",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISpQIKjgEIERgCKkDYt6PjTpaQk4d5c4XGNJvZ8NGyvarMAZ3tdjJZt2R8hXiSIlKi42yu6Wp8RNBjKwVedD5+iy0UAcPdwBSEN7EqMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAc3x1tQGEgzLr5140M8mfO2pRBwaDIYmYy4j9sgWvq7dLSIwH4yZp7TUNPIsEWQm+GP2D1fIoI+/OBDGsKpL50XSO9EpR2GHiZjS/cc/d+V0s/W3KkSqbdWJUbAJOdsc5HmwbQnP6wXTBZG9o3386sBZEa8gvi+7AnyyJY8ezPO9dS2I3RlIUUOf041hXbTVdgm4478f4jxInxgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the oven\",\"expectedMinutes\":120}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 61,
+              "output_tokens_details": {
+                "thinking_tokens": 24
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2261
+        },
+        {
+          "key": "input kind: chores\ndescription: fold the laundry tomorrow, twenty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDTQ3z5PppupfbZTALJ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"fold the laundry\",\"expectedMinutes\":25,\"dueDate\":\"tomorrow\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 605,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 53,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2262
+        },
+        {
+          "key": "input kind: chores\ndescription: water the plants, five minutes, and feed the fish, two minutes, both today.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDTZhAoff3qQ49aeq9b",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"water the plants\",\"expectedMinutes\":5,\"dueDate\":\"today\"},{\"title\":\"feed the fish\",\"expectedMinutes\":2,\"dueDate\":\"today\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 609,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 78,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2853
+        },
+        {
+          "key": "input kind: chores\ndescription: hoover the stairs on Sunday, ten minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDTmqAkAmZWub7jWLAd",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"hoover the stairs\",\"expectedMinutes\":10,\"dueDate\":\"Sunday\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 603,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 53,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2460
+        },
+        {
+          "key": "input kind: chores\ndescription: tidy up.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDTxLgyDa5B5qVaGKqn",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjwIKjgEIERgCKkAqNGHeo6jqjP+eYeLhEzQ2kLlXWUSKyHjE/RKnYwQnlkEejfjQ9uYM0gM2xaJdFMa4Jf6u3RVQxmNZxW+s3KOvMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAdfx1tQGEgzXaFdWnn0iZ6ydYpwaDOXtrA09iqutRiTQESIwZF17hOu2YFf5qP8sOHWD77T0yUgHL0+dpJB85ZHEDwJ/T/itaTwhLn4eFe2dUUmNKi4HYzW8lspBPcpVTbCddxDLyC2Q1R+kDlS0HX2T1766acI8bsYVOWqTuzdMQ99iGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time estimate for the tidying job, so its expected minutes cannot be determined.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 589,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 61,
+              "output_tokens_details": {
+                "thinking_tokens": 14
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2765
+        },
+        {
+          "key": "input kind: chores\ndescription: scrub the kitchen floor, three quarters of an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDUA5svTwJGZWfeokLU",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"scrub the kitchen floor\",\"expectedMinutes\":45}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 604,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2115
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the windows by Friday, roughly two hours for the whole house.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDUKNUi4jFRXoCCumXU",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the windows\",\"expectedMinutes\":120,\"dueDate\":\"Friday\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 606,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 50,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2288
+        },
+        {
+          "key": "input kind: chores\ndescription: empty the dishwasher, four minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDUUxgse6xuJ2pEfUn4",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"empty the dishwasher\",\"expectedMinutes\":4}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2087
+        },
+        {
+          "key": "input kind: chores\ndescription: weed the front bed, somewhere between thirty and fifty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDUdxBGQhE6qLxw1mhj",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISgwIKjgEIERgCKkATQ1ZuQ8btV2GGu39fx1EMdlXfJccBCdDo3swfSmNq0xDkL37hdAKWMENImUGcPPIPgKjk2MJ5DX562A8DH2RxMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAeHx1tQGEgzXTFSvIj04SWpsvgYaDOwqyrzgVKy/u+JwjSIwg2Z2jDAt2tK6hZc3SAmtGllWTovVJ0AdAE5qpYOrRl8e9i0Fsc95rMPS6A4M4+JGKiKIoJGc3HVCP0aQKLLlHfSSjN1WntfUYMFiOEb2k5u+oUTnGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"weed the front bed\",\"expectedMinutes\":40}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 51,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2851
+        },
+        {
+          "key": "input kind: chores\ndescription: iron the shirts, five minutes a shirt, six shirts.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDUrDNaMQWobyWr5CWB",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjAIKjgEIERgCKkCTk88M2nDnT2eBWSuikB1lQD55XDTlywsNwKxa7NT9e15rITo2GJyRV7CS2GWFa5AHhinRdYRmQLVqnMn51exfMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAePx1tQGEgyyKTEeiovtnyQy0DgaDLU+Hw9t0KusBlhCDSIwCJu57XW0XklqyLshv0WWA8FICfuA0aQD49GxDrB+XrXfgC1Yn2pYkP7kNeiEuXadKitWRNqL9205KF7n2EKyvg833r4owvKpq/7MvYs4BXsRZTlABew+FvX6rUVuGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"iron the shirts\",\"expectedMinutes\":30}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 605,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 51,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2378
+        },
+        {
+          "key": "input kind: chores\ndescription: make the packed lunches, ten minutes; sweep the porch, five; and take the recycling out, five.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDV2xmwk3KjkYV8y94m",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"make the packed lunches\",\"expectedMinutes\":10},{\"title\":\"sweep the porch\",\"expectedMinutes\":5},{\"title\":\"take the recycling out\",\"expectedMinutes\":5}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 617,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 84,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3035
+        },
+        {
+          "key": "input kind: chores\ndescription: defrost the freezer by the 12th of september, about an hour and a half.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDVFDyTP8fm57EEvHpf",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"defrost the freezer\",\"expectedMinutes\":90,\"dueDate\":\"the 12th of september\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3445
+        },
+        {
+          "key": "input kind: chores\ndescription: deal with the shed at some point, could be an afternoon or could be ten minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDVVw15zfhMrJmsa6oy",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The time for the shed job is given as figures too far apart (ten minutes to an afternoon) to pick a value.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 52,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2524
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the car inside and out, ninety minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDVguYymp6TckFPxauu",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the car inside and out\",\"expectedMinutes\":90}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2133
+        },
+        {
+          "key": "input kind: chores\ndescription: change the smoke alarm batteries, ten minutes, due 2026-09-18.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDVr3EFjPj73JS8PK5Q",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"change the smoke alarm batteries\",\"expectedMinutes\":10,\"dueDate\":\"2026-09-18\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 611,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 59,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2723
+        },
+        {
+          "key": "input kind: chores\ndescription: prune the hedge, half a day, so call it four hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDW3bkeHsKhVnvF1bcB",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISpgIKjgEIERgCKkCXUJBY45VBA2TI6mvy3XJBHNplsXvQmWeJgIa1Z3aa8BgFYyojWB17Mu0JGNqXbIVc/rzMffuwPj3hnXquNphLMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfPx1tQGEgySJiGDMerSn33QKP4aDLmFGgTkQ79UAySEACIwJ+iX6QjcPn3RkdUqvm8VMOL6qt7Xnu2HYOAWsR/GOXdBpQpiaNCNO39a6g+PUiKdKkUhzacam+uJtJQyI1JrI9INp3tt/GmDP//b+It4W/3k3BUlU9Wnaxp9nKwhtrELfBCKcnUJpAtfl6YqYOMOjIFntiEHI3gYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"prune the hedge\",\"expectedMinutes\":240}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 602,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 64,
+              "output_tokens_details": {
+                "thinking_tokens": 25
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2300
+        },
+        {
+          "key": "input kind: chores\ndescription: wash the bedding on Monday, forty minutes including hanging it out.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDWDJQmmjziq1mP4BQf",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"wash the bedding\",\"expectedMinutes\":40,\"dueDate\":\"Monday\"}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 51,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2210
+        },
+        {
+          "key": "input kind: chores\ndescription: something needs doing about the loft.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDWNnuu2if3mQP7TRaq",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message names no specific job, duration, or due date for the loft.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 594,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2198
+        },
+        {
+          "key": "input kind: chores\ndescription: clear the gutters, two hours, and it needs doing before the weather turns.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDWYDhNXT3yich4Hpnh",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISywQKjgEIERgCKkC+alWiBXpCpjDjP5TBB58DK5uyiaLVQNT+Pci+xRtJzivq4pCGE1NCmUkraNCCNwczddg8ckB6T49ulnuWax0/Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfvx1tQGEgyTTipYzGRF3Mn0qq4aDPYP6VefiLVQI2zjhyIwBEbhSbq6F4npxnJCgMbhn/j5IGX3rj//Xc10rMDlgPf6OplGtiWB0gMZzOW7uky3KukCyjHe6SiG4feBg5zwyXAfy7nP8hrhyL41vWectMrPnlEf9btOba5bCVLCV/mFKkRjBec0XrKOKqHuvM/05N2ZSu2g2p+yH5T4+anZR0lj+f8zILsoRfzdMMvhKJxpTTj79VTpM0xv9oudRH5zBZwSyiekNmSH3lgcJFk0o29oJwZhjK3EeaZjh/yEIYpV5YA+HemFbqxd/c3/famsrhn9oQ3TdPB5eZujqnUE3DgjrEOCn13kXtBdCkWUnIkBnx4FSYOHZ+fDBmNk/Zc+bAajunbnxepMv82I0sFlN6fLxUfor4BD4o94uORXi+o8EmTjaqgZ0sYYl2i4Gfewy/LyQaWT1HD6daiMBQppQBsoXQdxujfQyKNd2CufF96VczATcMmdrmo7oACDur3yqJMdxID2t1di13TIV9884dXsw85RatbB0D0L466IkZFjAjzz6JVqFs5g4c7wL99BdXDQsLIEA+KhpzOa/xgB"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 608,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 139,
+              "output_tokens_details": {
+                "thinking_tokens": 138
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3317
+        },
+        {
+          "key": "input kind: chores\ndescription: do the ironing for an hour and a quarter.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CebDWnGYbcJcLjNAhDoeW",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"the ironing\",\"expectedMinutes\":75}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 599,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 37,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2179
+        }
+      ]
+    },
+    {
+      "config": {
+        "label": "claude-haiku-4-5",
+        "model": "claude-haiku-4-5",
+        "prompt": "You extract structured facts from one short household message. The message describes\neither weekly time capacity or chores, and the input names which. Answer with a single\nJSON object and nothing else: no prose, no explanation, no code fences.\n\nFor kind \"capacity\" answer:\n  {\"kind\":\"capacity\",\"minutesByPerson\":{\"<person>\":<minutes>}}\n- One entry per person the text gives time for, spelled exactly as the text spells them.\n- Convert every duration to whole minutes for the week, summing parts the text splits\n  across days.\n- A person the text says has no time gets 0. A person the text never mentions gets no entry.\n\nFor kind \"chores\" answer:\n  {\"kind\":\"chores\",\"chores\":[{\"title\":\"<job>\",\"expectedMinutes\":<minutes>,\"dueDate\":\"<as stated>\"}]}\n- One entry per job, titled with the job as the text states it.\n- expectedMinutes is how long the job takes, in whole minutes.\n- dueDate is the due date EXACTLY as the text states it: copy the phrase, whether it is a\n  weekday, a relative word, a spelled-out date or a numeric date. Do not resolve it to a\n  calendar date and do not reword it. Where the text states no date for a job, omit\n  dueDate entirely. Never invent one.\n\nWhen the message cannot be answered - it names no usable quantity, refers to a baseline\nit does not state, or offers figures too far apart to choose between - answer:\n  {\"kind\":\"refusal\",\"reason\":\"<one sentence saying what is missing>\"}\nRefuse rather than guess: a confident number for an undecidable message is worse than a\nrefusal.\n\nFor an explicit range, answer the midpoint. Amounts may be written as words - half an\nhour is 30 minutes."
+      },
+      "responses": [
+        {
+          "key": "input kind: capacity\ndescription: Alex has five hours this week and Robin has three.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDWwZtddTFKDbcFvM2k",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":300,\"Robin\":180}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 801
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin can manage two hours and thirty minutes, and Sam has forty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDWzz2L9P5u2qxjp2Ua",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":150,\"Sam\":45}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 452,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 731
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam only has half an hour this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDX3ut7ve415se6FCXh",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":30}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 805
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has an hour on Monday, an hour on Wednesday and two hours on Saturday.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDX7KXKKDZUanL7DfYV",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":300}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 452,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1764
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has about half an hour each weekday and nothing at the weekend.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXFCni4rC6Mt4fxEs9",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":150}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 742
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam is away all week so nothing from Sam, and Alex has four hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXJpKfTPEz9D9rh9NY",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":0,\"Alex\":240}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 451,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 965
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex is off work this week and has ten hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXNKfYmZXYW8CQgobB",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":600}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 944
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has somewhere between two and three hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXSMkatVCbA2dhZgUp",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message gives a range (two to three hours) without enough precision to determine a single weekly capacity value.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 993
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has a couple of hours and Alex has most of a day, say six hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXWZWhCLkKLvSCVqVt",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message uses vague phrases ('a couple of hours', 'most of a day') that cannot be reliably converted to specific minute quantities.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 47,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1051
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has six hours. Robin has half that.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXbAqCkRaoQzaixFTT",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":360,\"Robin\":180}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 848
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin normally has four hours but loses two of them to a work trip.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXeXytAc7VxPy8UqXB",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":120}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 767
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has three hours, Robin has ninety minutes, and Sam has none.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXi7Y8HyvxdJrMmQ6V",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":180,\"Robin\":90,\"Sam\":0}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 451,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 952
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam cannot do anything Monday or Tuesday, but has an hour on each of the other five days.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXnZBdbKB3iGmLLXh3",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":300}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 455,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1308
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has two and a half hours, and Sam has an hour and a quarter.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDXvtEu581Y1yspK2sS",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":150,\"Sam\":75}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 452,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1766
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin is free most evenings.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDY1cFnU1EZAoaX7Lt2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message does not specify a concrete number of minutes per week for Robin's availability.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 442,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1280
+        },
+        {
+          "key": "input kind: capacity\ndescription: everyone is pretty busy this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYCEy5mqWWZiFm587R",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message provides no specific time capacity for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 442,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 2305
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has a bit more time than usual this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYGwVNGgQjPbVau8bF",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message states Alex has more time than usual but provides no actual time quantity or baseline to extract a specific minute value.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1659
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex is on holiday all week — call it thirty hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYQmHV6Hp9QQNvX81p",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":1800}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 25,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1249
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has two hours. Sam is at a conference and will not be around at all.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYUw4hWXZeXapYWTn8",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":120,\"Sam\":0}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 733
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has thirty minutes on Monday, thirty on Tuesday, forty-five on Wednesday, nothing Thursday or Friday, two hours on Saturday and an hour on Sunday.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYZHkSVDiQ3P7okLWm",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":510}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 467,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1163
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has 1.5 hours and Robin has 0.5.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYd1UvyUq3f8UczznK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":90,\"Robin\":30}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 451,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 800
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has four hours, Robin has three, and Sam has one.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYgT7CPRkrtyYFo7Lz",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":240,\"Robin\":180,\"Sam\":60}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 449,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 735
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has no more than an hour this week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYjebDsutMkEGxqfjQ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":60}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 688
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex has three hours, or maybe five, hard to say.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYnVViA1cWSLG8bUQX",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message gives a range (three to five hours) too far apart to choose a single value between.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 38,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 876
+        },
+        {
+          "key": "input kind: capacity\ndescription: it is a write-off this week. Alex, Robin and Sam all have nothing.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYrCz8fyDzpRmzCL9o",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":0,\"Robin\":0,\"Sam\":0}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 720
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam can do seven until eight each evening from Monday to Friday.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYuPUgCZJwk8afjJun",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Sam\":300}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 872
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has forty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDYyHPEgR2bRqdJpPZq",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":45}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 442,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 819
+        },
+        {
+          "key": "input kind: capacity\ndescription: Sam has about the same as last week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZ2fXcpEnKeqifMdQU",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message references last week's capacity but does not state what that baseline was.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1125
+        },
+        {
+          "key": "input kind: capacity\ndescription: Alex works late Monday through Thursday so has nothing until Friday, then two hours on Friday and three on each weekend day.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZ7fAhUX2og3SAYMqg",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Alex\":500}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 459,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1066
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robin has an hour a day every day, and Alex has twenty minutes a day on weekdays only.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZCaaeCPmDbb8Btpxs",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":420,\"Alex\":100}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 456,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 926
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the bathroom, about half an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZG1xF6AsRjzmpGsbU",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the bathroom\",\"expectedMinutes\":30}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 796
+        },
+        {
+          "key": "input kind: chores\ndescription: mow the lawn takes an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZKSamp4faFtBNejmn",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"mow the lawn\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1030
+        },
+        {
+          "key": "input kind: chores\ndescription: take the bins out on Tuesday night, five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZQ9rYoq2UVNfHpey6",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"take the bins out\",\"expectedMinutes\":5,\"dueDate\":\"Tuesday night\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1009
+        },
+        {
+          "key": "input kind: chores\ndescription: vacuum the downstairs, twenty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZUEB9Qnf8veuqQpo7",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"vacuum the downstairs\",\"expectedMinutes\":20}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1139
+        },
+        {
+          "key": "input kind: chores\ndescription: change the bed sheets, fifteen minutes a bed and there are three beds.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZZTCESvJ7LeJtpfpZ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"change the bed sheets\",\"expectedMinutes\":45}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 451,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 998
+        },
+        {
+          "key": "input kind: chores\ndescription: wash the dishes after dinner, ten minutes, and wipe the counters, another five.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZdMMDBJgidDVn39P2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"wash the dishes after dinner\",\"expectedMinutes\":10},{\"title\":\"wipe the counters\",\"expectedMinutes\":5}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 455,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 49,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 922
+        },
+        {
+          "key": "input kind: chores\ndescription: do the weekly shop on Saturday, an hour and a half, and put the shopping away, fifteen minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZhPSExuaa9YvqL57u",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\n  \"kind\": \"chores\",\n  \"chores\": [\n    {\n      \"title\": \"weekly shop\",\n      \"expectedMinutes\": 90,\n      \"dueDate\": \"Saturday\"\n    },\n    {\n      \"title\": \"put the shopping away\",\n      \"expectedMinutes\": 15\n    }\n  ]\n}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 458,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 91,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1327
+        },
+        {
+          "key": "input kind: chores\ndescription: the usual: dishes, laundry, vacuuming.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZoDBShTRrPSf3N9Sm",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not specify how long each chore takes or when they are due.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1085
+        },
+        {
+          "key": "input kind: chores\ndescription: sort out the garage sometime.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZsW9m9xDtpctHDjuE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not specify how long sorting out the garage takes.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 442,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 30,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 909
+        },
+        {
+          "key": "input kind: chores\ndescription: walk the dog today, twenty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDZwZj3GYQTWJhCAUer",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"walk the dog\",\"expectedMinutes\":20,\"dueDate\":\"today\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 38,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1026
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the oven, that is a good two hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDa1qwwZtMhRBYcEHvb",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the oven\",\"expectedMinutes\":120}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 849
+        },
+        {
+          "key": "input kind: chores\ndescription: fold the laundry tomorrow, twenty-five minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDa5WDMuyghbMkWbwS4",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"fold the laundry\",\"expectedMinutes\":25,\"dueDate\":\"tomorrow\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 778
+        },
+        {
+          "key": "input kind: chores\ndescription: water the plants, five minutes, and feed the fish, two minutes, both today.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDa8jw7cYZWZwGzjYwt",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"water the plants\",\"expectedMinutes\":5,\"dueDate\":\"today\"},{\"title\":\"feed the fish\",\"expectedMinutes\":2,\"dueDate\":\"today\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 454,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 57,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1060
+        },
+        {
+          "key": "input kind: chores\ndescription: hoover the stairs on Sunday, ten minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDaE5tvznZaYwXEu4GP",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"hoover the stairs\",\"expectedMinutes\":10,\"dueDate\":\"Sunday\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1166
+        },
+        {
+          "key": "input kind: chores\ndescription: tidy up.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDaJPcJcozjhDiKCDBj",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message does not specify how long the job takes or when it is due.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 440,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 28,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1150
+        },
+        {
+          "key": "input kind: chores\ndescription: scrub the kitchen floor, three quarters of an hour.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDaP9Moxo2LhtSUany2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"scrub the kitchen floor\",\"expectedMinutes\":45}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1045
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the windows by Friday, roughly two hours for the whole house.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDaUQs3vustz2KSeEx2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the windows\",\"expectedMinutes\":120,\"dueDate\":\"Friday\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 38,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1218
+        },
+        {
+          "key": "input kind: chores\ndescription: empty the dishwasher, four minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDaZ5A8WoivtBL9B5tD",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"empty the dishwasher\",\"expectedMinutes\":4}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 35,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1048
+        },
+        {
+          "key": "input kind: chores\ndescription: weed the front bed, somewhere between thirty and fifty minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDadFg29nJ46mNEDRMR",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"weed the front bed\",\"expectedMinutes\":40}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 449,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 830
+        },
+        {
+          "key": "input kind: chores\ndescription: iron the shirts, five minutes a shirt, six shirts.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDagiHkJc7dMF1QQR2k",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"iron the shirts\",\"expectedMinutes\":30}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 792
+        },
+        {
+          "key": "input kind: chores\ndescription: make the packed lunches, ten minutes; sweep the porch, five; and take the recycling out, five.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDak5gpbcReXn97LKaJ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\n  \"kind\": \"chores\",\n  \"chores\": [\n    {\n      \"title\": \"make the packed lunches\",\n      \"expectedMinutes\": 10\n    },\n    {\n      \"title\": \"sweep the porch\",\n      \"expectedMinutes\": 5\n    },\n    {\n      \"title\": \"take the recycling out\",\n      \"expectedMinutes\": 5\n    }\n  ]\n}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 461,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 110,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1540
+        },
+        {
+          "key": "input kind: chores\ndescription: defrost the freezer by the 12th of september, about an hour and a half.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDas2uHAkabtF8qCfRz",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"defrost the freezer\",\"expectedMinutes\":90,\"dueDate\":\"the 12th of september\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 456,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 45,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 950
+        },
+        {
+          "key": "input kind: chores\ndescription: deal with the shed at some point, could be an afternoon or could be ten minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDavjtudQfRqEMjfECr",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The text does not state a specific duration for dealing with the shed, only that it could range from ten minutes to an afternoon, which are too far apart to choose between.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 454,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 52,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 947
+        },
+        {
+          "key": "input kind: chores\ndescription: clean the car inside and out, ninety minutes.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDb12N69RUg8C1cCa1w",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean the car inside and out\",\"expectedMinutes\":90}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 35,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 841
+        },
+        {
+          "key": "input kind: chores\ndescription: change the smoke alarm batteries, ten minutes, due 2026-09-18.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDb4Uj5Zw7gLTM7MtRs",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"change the smoke alarm batteries\",\"expectedMinutes\":10,\"dueDate\":\"2026-09-18\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 454,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 45,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1055
+        },
+        {
+          "key": "input kind: chores\ndescription: prune the hedge, half a day, so call it four hours.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDb97nJoNN7bGWZg744",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"prune the hedge\",\"expectedMinutes\":240}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 451,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 941
+        },
+        {
+          "key": "input kind: chores\ndescription: wash the bedding on Monday, forty minutes including hanging it out.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDbD3RWUwW5rLV3gUsD",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"wash the bedding\",\"expectedMinutes\":40,\"dueDate\":\"Monday\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 768
+        },
+        {
+          "key": "input kind: chores\ndescription: something needs doing about the loft.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDbGNqgwEi1WCwrwTVc",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not specify what job needs doing in the loft, how long it takes, or when it is due.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 978
+        },
+        {
+          "key": "input kind: chores\ndescription: clear the gutters, two hours, and it needs doing before the weather turns.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDbLbqs3C13KAuyF8Eo",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clear the gutters\",\"expectedMinutes\":120,\"dueDate\":\"before the weather turns\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 972
+        },
+        {
+          "key": "input kind: chores\ndescription: do the ironing for an hour and a quarter.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CebDbRMqctzAxFRDwc8K6",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"do the ironing\",\"expectedMinutes\":75}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1083
+        }
+      ]
+    }
+  ]
+}

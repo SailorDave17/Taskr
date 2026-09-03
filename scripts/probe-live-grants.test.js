@@ -141,6 +141,7 @@ describe('what it asks for — AC 3', () => {
       'chore_exclusions',
       'calendar_connections',
       'member_split_seen',
+      'chore_repeat_exceptions',
     ])
   })
 
@@ -313,7 +314,7 @@ describe('reconciling against what #150 measured — AC 4', () => {
     }
   })
 
-  it('the expectation set covers exactly what AC 4 names, plus 0022 and 0023', () => {
+  it('the expectation set covers exactly what AC 4 names, plus 0022 through 0027', () => {
     expect(MEASURED_GRANTS.map((entry) => `${entry.table}.${entry.column}=${entry.privileges}`)).toEqual([
       'households.id=r',
       'households.created_at=r',
@@ -335,6 +336,20 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // to updatable would move the row and be reported, where no client-side
       // probe can report being allowed a write it never attempts.
       'chores.source=ar',
+      // 0024, story #54. One grant — the repeat pair becomes editable — and
+      // `check:live` is blind to it in both directions, so these rows are the
+      // only instrument that can say whether it reached the project.
+      'chores.repeat_kind=arw',
+      'chores.repeat_weekdays=arw',
+      // 0026, story #103. The monthly day joins all three sets as the pair
+      // did; `check:live` sees only the select half (42703 until the apply),
+      // so the INSERT and UPDATE halves are this probe's alone.
+      'chores.repeat_monthday=arw',
+      // 0027, story #305. `r` and nothing else: the missed stamp is set by
+      // `miss_chore` from the database clock and no client role may write it.
+      // `check:live` sees the select half (42703 until the apply); the ABSENCE
+      // of `a` and `w` is this probe's alone.
+      'chores.missed_at=r',
     ])
   })
 })

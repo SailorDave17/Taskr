@@ -26,7 +26,7 @@
 
 import { reallocate, minutesOf } from './allocation.js'
 import { capacitiesFor, listCapacity, periodStartFor } from './capacity.js'
-import { isOutstanding, listChores } from './chores.js'
+import { isMissed, isOutstanding, listChores } from './chores.js'
 import { isExcluded, listExclusions } from './exclusions.js'
 import { listMembers } from './household.js'
 import { getSupabase } from './supabase.js'
@@ -62,6 +62,17 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  *   minutes are why someone who already did 200 min gets less open work. Same
  *   mapping as the split's reachability probe (#47).
  * - A done chore nobody holds is history and is dropped, as `assess` drops it.
+ * - A MISSED chore (#305's state) is dropped whoever holds it — #306. It is not
+ *   finished work (nobody did it) and not open work (it is not going to
+ *   happen), so it is neither pinned nor freed; `toAllocatorChores` drops it
+ *   for the Split the same way. This is the one allocator-input builder that
+ *   does not go through that function, and until #306 a missed row fell into
+ *   the done branch below — `!isOutstanding` is true of it — and was pinned to
+ *   its holder at the estimate: phantom credit in every future re-assignment,
+ *   permanently, since nothing ever removes a missed row. Reachable by hand
+ *   through `miss_chore` since #305; `0028` fires it on every superseded
+ *   occurrence that had a holder, which is why it is fixed here rather than
+ *   filed.
  * - An open chore a person placed by hand (`assigned_source = 'manual'`) is
  *   pinned — #49 AC 4, the allocator's own pass-1 rule (#40 AC 8).
  * - Every other open chore is FREED, and its current holder (if any) enters
@@ -88,6 +99,10 @@ export function planReassignment({ members, chores, exclusions, overrides, perio
   const freed = new Set()
 
   for (const chore of chores) {
+    // #306 — before the done branch, because a missed row is not outstanding
+    // and would otherwise be pinned as finished work. See the docblock.
+    if (isMissed(chore)) continue
+
     const holder = chore.assigned_member_id ?? null
     const done = !isOutstanding(chore)
 

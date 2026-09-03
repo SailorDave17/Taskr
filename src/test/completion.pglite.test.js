@@ -158,14 +158,26 @@ describe('completing a chore, run against a real Postgres', () => {
             and grantee = 'authenticated' and privilege_type = 'UPDATE'
           order by column_name`,
       )
-      // 0003's set plus 0015's `actual_minutes` (#12) — the set is the
-      // schema's, not this story's. What #35 claims is that the two completion
-      // columns are NOT in it, asserted by name so the point survives the next
-      // migration widening the list again.
+      // 0003's set plus 0015's `actual_minutes` (#12), 0024's repeat pair
+      // (#54) and 0026's monthly day (#103) — the set is the schema's, not
+      // this story's. What #35 claims is
+      // that the two completion columns are NOT in it, asserted by name so the
+      // point survives the next migration widening the list again. 0027's
+      // `missed_at` (#305) is the third stamp held out of it, for the same
+      // clock reason; missed.pglite.test.js is where that is proven.
       const writable = rows.map((r) => r.column_name)
       expect(writable).not.toContain('completed_at')
       expect(writable).not.toContain('completed_by_member_id')
-      expect(writable).toEqual(['actual_minutes', 'due_on', 'expected_minutes', 'title'])
+      expect(writable).not.toContain('missed_at')
+      expect(writable).toEqual([
+        'actual_minutes',
+        'due_on',
+        'expected_minutes',
+        'repeat_kind',
+        'repeat_monthday',
+        'repeat_weekdays',
+        'title',
+      ])
     })
 
     it('but both are readable, because the list has to render them', async () => {
@@ -181,11 +193,11 @@ describe('completing a chore, run against a real Postgres', () => {
       // completion columns being present, which is asserted by name below so the
       // point survives the next migration widening the list again.
       //
-      // It has now survived four of them, `source` (0023, #211) being the
-      // latest. Worth knowing before the fifth: this whole-set assertion is the
-      // SECOND copy of the readable set — chores.pglite.test.js AC 5 holds the
-      // other — so a migration that widens the grant reddens two tests in two
-      // files, and both are the same finding rather than two.
+      // It has now survived six of them, `missed_at` (0027, #305) being the
+      // latest. Worth knowing before the sixth: this whole-set assertion is
+      // the SECOND copy of the readable set — chores.pglite.test.js AC 5 holds
+      // the other — so a migration that widens the grant reddens two tests in
+      // two files, and both are the same finding rather than two.
       const readable = rows.map((r) => r.column_name)
       expect(readable).toContain('completed_at')
       expect(readable).toContain('completed_by_member_id')
@@ -201,7 +213,9 @@ describe('completing a chore, run against a real Postgres', () => {
         'generated_from',
         'household_id',
         'id',
+        'missed_at',
         'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'source',
         'title',
@@ -392,11 +406,21 @@ describe('completing a chore, run against a real Postgres', () => {
   // AC 7 — the noticing signal: unassigned completion is allowed and attributed
   // -------------------------------------------------------------------------
 
+  // PARTLY SUPERSEDED by #307 (0029), 2026-09-01: option (a)'s "surface
+  // nothing" half is reversed — completing an unassigned chore now also sets
+  // `assigned_member_id` to the completer, with `assigned_source = 'completed'`.
+  // Everything asserted BELOW is untouched by that and still true: the
+  // completion is accepted, and `completed_by_member_id` records the member
+  // rather than the auth id. The new behaviour is proved in
+  // completion-assignment.pglite.test.js, and the charter's 2026-09-01 decision
+  // records why the 2026-08-08 objection stopped applying. These tests are left
+  // as #35's evidence rather than rewritten into #307's.
   describe('AC 7 — completing a chore nobody was assigned', () => {
     it('is ACCEPTED, and records who did it', async () => {
       // Owner decision, 2026-08-08, option (a): allow it, attribute it, surface
       // nothing. Refusing would make the app argue with someone who has just
-      // done the dishes.
+      // done the dishes. (The "surface nothing" half was reversed by #307 —
+      // see the block comment above.)
       const done = await asDevice(db, deviceA, async () => {
         const { rows } = await db.query(`select ${READABLE} from public.complete_chore($1)`, [
           choreId,

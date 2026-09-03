@@ -34,6 +34,28 @@ const chores = [
 /** The same two chores with the second one finished — #35's mixed fixture. */
 const mixed = [chores[0], { ...chores[1], completed_at: '2026-08-08T10:00:00Z', completed_by_member_id: 'm1' }]
 
+/**
+ * #302 — one outstanding chore and two completed ones from TWO capacity weeks
+ * (New York): the second chore finished in the week of Aug 24, which is the
+ * week `setup` passes as current, and a third finished in the week of Aug 10.
+ * The chore tab must render neither completed row and count exactly one; the
+ * Done surface (Done.test.jsx, same fixture) must group them in two.
+ */
+const twoWeeks = [
+  chores[0],
+  { ...chores[1], completed_at: '2026-08-25T10:00:00Z', completed_by_member_id: 'm1' },
+  {
+    id: 'c7',
+    household_id: 'h1',
+    title: 'Placeholder Done Chore',
+    expected_minutes: 30,
+    due_on: '2026-08-12',
+    completed_at: '2026-08-12T10:00:00Z',
+    completed_by_member_id: 'm1',
+    actual_minutes: 45,
+  },
+]
+
 // #36 — the roster the assignee control and the load list are built from.
 // Two people with DIFFERENT capacities, because a fixture where everyone has the
 // same budget cannot tell "remaining" from "capacity minus committed".
@@ -57,11 +79,15 @@ function setup(overrides = {}) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
+    onShowDone: vi.fn(),
   }
   render(
     <Chores
@@ -69,6 +95,12 @@ function setup(overrides = {}) {
       members={members}
       capacities={capacities}
       exclusions={[]}
+      repeatExceptions={[]}
+      todayIso="2026-08-24"
+      // #302 — the current capacity week, as App derives it, and the zone the
+      // completions are read in. Aug 24 2026 is a Monday.
+      timezone="America/New_York"
+      periodStart="2026-08-24"
       {...handlers}
       {...overrides}
     />,
@@ -87,13 +119,23 @@ function setupRerenderable() {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, exclusions: [], ...handlers }
+  const props = {
+    members,
+    capacities,
+    exclusions: [],
+    repeatExceptions: [],
+    todayIso: '2026-08-24',
+    ...handlers,
+  }
   const view = render(<Chores chores={chores} {...props} />)
   return {
     handlers,
@@ -160,9 +202,11 @@ describe('AC 2 — the form refuses with a sentence, before any request is sent'
       title: 'Dishes',
       expectedMinutes: '20',
       dueOn: '2026-08-10',
-      // #53 — the untouched form declares no repeat, explicitly.
+      // #53 — the untouched form declares no repeat, explicitly. #103 made
+      // the declared schedule a triple.
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -392,26 +436,18 @@ describe('while a write is in flight', () => {
 })
 
 // ---------------------------------------------------------------------------
-// #35 — completion. ACs 5, 8 and 9.
+// #35 — completion. AC 5 here; ACs 8 and 9 moved to Done.test.jsx with #302,
+// because the completed group moved to its own surface. The undo and the
+// "Took" control went with it (same fixtures, different render target).
 // ---------------------------------------------------------------------------
 
-describe('completion — #35', () => {
+describe('completion — #35, and what #302 took off this tab', () => {
   const outstandingRow = () => screen.getByText('Placeholder Chore').closest('li')
 
   it('offers Done on an outstanding chore and calls the handler', async () => {
     const { onComplete } = setup()
     await clickAndSettle(within(outstandingRow()).getByRole('button', { name: /mark placeholder chore done/i }))
     expect(onComplete).toHaveBeenCalledWith('c1')
-  })
-
-  it('offers the undo on a completed one instead', async () => {
-    const { onUncomplete, onComplete } = setup({ chores: mixed })
-    const doneRow = screen.getByText('Placeholder Other Chore').closest('li')
-    expect(within(doneRow).queryByRole('button', { name: /mark .* done/i })).not.toBeInTheDocument()
-
-    await clickAndSettle(within(doneRow).getByRole('button', { name: /put placeholder other chore back/i }))
-    expect(onUncomplete).toHaveBeenCalledWith('c2')
-    expect(onComplete).not.toHaveBeenCalled()
   })
 
   it('AC 5: the outstanding total counts only unfinished work', () => {
@@ -426,32 +462,42 @@ describe('completion — #35', () => {
     expect(total).toHaveTextContent(/1 still to do/i)
   })
 
-  it('AC 8: completed chores stay visible, in their own group', () => {
-    setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(within(done).getByText('Placeholder Other Chore')).toBeInTheDocument()
-    // And the outstanding one is NOT in that group.
-    expect(within(done).queryByText('Placeholder Chore')).not.toBeInTheDocument()
+  it('#302 AC 1 / AC 5: no completed chore renders here — finished work moved to the Done tab', () => {
+    setup({ chores: twoWeeks })
+    // Neither completed row, in either week, and none of a done row's controls.
+    expect(screen.queryByText('Placeholder Other Chore')).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Done Chore')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /back on the list/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/actually took/)).not.toBeInTheDocument()
+    // The outstanding list, its total and the forms are exactly as they were.
+    expect(within(outstandingRow()).getByRole('button', { name: /mark placeholder chore done/i })).toBeInTheDocument()
+    expect(screen.getByTestId('outstanding-total')).toHaveTextContent(/1 still to do · 20 min/i)
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
   })
 
-  it('AC 9: the completed group carries no streak, rank, score or per-person total', () => {
-    setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(done).not.toHaveTextContent(/streak|rank|score|points|leaderboard|best|winner/i)
-    // No per-person figure: the member id in the fixture must not surface.
-    expect(done).not.toHaveTextContent(/m1/)
+  it('#302 AC 1: one line counts THIS capacity week’s completions and leads to Done', async () => {
+    const { onShowDone } = setup({ chores: twoWeeks })
+    // Two completed rows; one finished in the current week (Aug 24), one in the
+    // week of Aug 10. A count over every completed row reads 2 and fails.
+    const line = screen.getByTestId('done-this-week')
+    expect(line).toHaveTextContent('1 done this week')
+    expect(line).not.toHaveTextContent('2 done')
+    expect(onShowDone).not.toHaveBeenCalled()
+    await clickAndSettle(line)
+    expect(onShowDone).toHaveBeenCalledTimes(1)
   })
 
-  it('AC 9: and nothing in it is styled as an error or an alert — red is for work, never people', () => {
+  it('#302: the line still shows, reading zero, when the only finished work is from an earlier week', () => {
+    // mixed's completion is 2026-08-08; the current week is Aug 24. The line is
+    // the way to the Done tab, so it must not vanish with the count.
     setup({ chores: mixed })
-    const done = screen.getByRole('region', { name: /done this week/i })
-    expect(within(done).queryByRole('alert')).not.toBeInTheDocument()
-    expect(done.querySelector('.error')).toBeNull()
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
   })
 
-  it('shows no completed group at all when nothing is done', () => {
+  it('shows no done line at all when nothing has ever been done', () => {
     setup()
-    expect(screen.queryByRole('region', { name: /done this week/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('done-this-week')).not.toBeInTheDocument()
   })
 })
 
@@ -578,12 +624,15 @@ function setupExclusionRerender(initialChores, initialExclusions) {
     onRemove: vi.fn().mockResolvedValue(undefined),
     onComplete: vi.fn().mockResolvedValue(undefined),
     onUncomplete: vi.fn().mockResolvedValue(undefined),
+    onMiss: vi.fn().mockResolvedValue(undefined),
+    onUnmiss: vi.fn().mockResolvedValue(undefined),
     onAssign: vi.fn().mockResolvedValue(undefined),
     onUnassign: vi.fn().mockResolvedValue(undefined),
     onExclude: vi.fn().mockResolvedValue(undefined),
     onAllow: vi.fn().mockResolvedValue(undefined),
+    onSkip: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, ...handlers }
+  const props = { members, capacities, repeatExceptions: [], todayIso: '2026-08-24', ...handlers }
   const view = render(
     <Chores chores={initialChores} exclusions={initialExclusions} {...props} />,
   )
@@ -828,9 +877,9 @@ describe('#53 — the repeat is set where the chore is created', () => {
     const options = within(kindSelect())
       .getAllByRole('option')
       .map((o) => o.value)
-    // Monthly is #103, exceptions are #105 — named follow-ups. Their absence
-    // here is the decision, so it is asserted rather than implied.
-    expect(options).toEqual(['none', 'daily', 'weekly'])
+    // Monthly joined with #103 — a KIND in the select, so the AC 6 contract
+    // holds: there is still no field a phrase could arrive through.
+    expect(options).toEqual(['none', 'daily', 'weekly', 'monthly'])
   })
 
   it('reveals the weekday picker only for weekly', () => {
@@ -840,6 +889,22 @@ describe('#53 — the repeat is set where the chore is created', () => {
     expect(screen.getByLabelText(/repeat on mon/i)).toBeInTheDocument()
     chooseKind('daily')
     expect(screen.queryByLabelText(/repeat on mon/i)).not.toBeInTheDocument()
+  })
+
+  it('reveals the day-of-month picker only for monthly — #103', () => {
+    setup()
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
+    chooseKind('monthly')
+    expect(screen.getByLabelText(/which day of the month/i)).toBeInTheDocument()
+    // The clamp is said where the risky days are picked: a person choosing the
+    // 31st is exactly the person who needs to know February still fires.
+    const dayOptions = within(screen.getByLabelText(/which day of the month/i))
+      .getAllByRole('option')
+      .map((o) => o.textContent)
+    expect(dayOptions).toContain('31st (or last day of the month)')
+    expect(dayOptions).toContain('12th')
+    chooseKind('daily')
+    expect(screen.queryByLabelText(/which day of the month/i)).not.toBeInTheDocument()
   })
 
   it('submits a weekly repeat with the chosen days', async () => {
@@ -856,6 +921,56 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'weekly',
       repeatWeekdays: [1, 4],
+      repeatMonthday: '',
+    })
+  })
+
+  it('submits a monthly repeat with the chosen day of the month — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '31' },
+    })
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('refuses monthly with no day chosen, with a sentence, and sends nothing — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    await submitAdd()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/needs a day of the month/i)
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale monthday when the kind leaves monthly, so it cannot silently re-arm — #103', async () => {
+    const { onAdd } = setup()
+    fillAddForm()
+    chooseKind('monthly')
+    fireEvent.change(screen.getByLabelText(/which day of the month/i), {
+      target: { value: '15' },
+    })
+    chooseKind('none')
+    await submitAdd()
+
+    expect(onAdd).toHaveBeenCalledWith({
+      title: 'Dishes',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -883,6 +998,7 @@ describe('#53 — the repeat is set where the chore is created', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
   })
 
@@ -908,6 +1024,149 @@ describe('#53 — the repeat is set where the chore is created', () => {
     // chore on the screen.
     const occurrence = screen.getByText('Placeholder Other Chore').closest('li')
     expect(occurrence).not.toHaveTextContent(/repeats/i)
+  })
+})
+
+describe('#54 — the repeat is edited where the chore is edited', () => {
+  const repeatAnchor = { ...chores[0], repeat_kind: 'weekly', repeat_weekdays: [1, 4] }
+  const occurrence = {
+    ...chores[1],
+    repeat_kind: 'none',
+    repeat_weekdays: null,
+    generated_from: 'c1',
+  }
+  const openAnchorEditor = () =>
+    clickAndSettle(screen.getByRole('button', { name: /edit placeholder chore/i }))
+  const saveEdit = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+  it('seeds the editor with the schedule the row actually has', async () => {
+    setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    expect(screen.getByLabelText(/how often placeholder chore repeats/i)).toHaveValue('weekly')
+    expect(screen.getByLabelText(/repeat placeholder chore on mon/i)).toBeChecked()
+    expect(screen.getByLabelText(/repeat placeholder chore on thu/i)).toBeChecked()
+    expect(screen.getByLabelText(/repeat placeholder chore on tue/i)).not.toBeChecked()
+  })
+
+  it('switching off sends the whole schedule — kind none, days emptied, no monthday', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/how often placeholder chore repeats/i), {
+      target: { value: 'none' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
+    })
+  })
+
+  it('a weekly anchor can become monthly, seeded and sent as a whole schedule — #103', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/how often placeholder chore repeats/i), {
+      target: { value: 'monthly' },
+    })
+    fireEvent.change(screen.getByLabelText(/which day of the month placeholder chore repeats on/i), {
+      target: { value: '31' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+      repeatKind: 'monthly',
+      repeatWeekdays: [],
+      repeatMonthday: '31',
+    })
+  })
+
+  it('a monthly anchor seeds its editor with the day it actually has — #103', async () => {
+    setup({
+      chores: [{ ...chores[0], repeat_kind: 'monthly', repeat_weekdays: null, repeat_monthday: 12 }],
+    })
+    await openAnchorEditor()
+
+    expect(screen.getByLabelText(/how often placeholder chore repeats/i)).toHaveValue('monthly')
+    expect(
+      screen.getByLabelText(/which day of the month placeholder chore repeats on/i),
+    ).toHaveValue('12')
+  })
+
+  it('an untouched schedule travels in NO save — an ordinary edit needs no repeat privilege', async () => {
+    // Not an optimisation: the pair is only sent when it changed, so a
+    // title-only edit works against a project where 0024 is not yet applied —
+    // the client and the migration deploy on different clocks.
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.change(screen.getByLabelText(/name for placeholder chore/i), {
+      target: { value: 'Placeholder Renamed Chore' },
+    })
+    await saveEdit()
+
+    // Exact-match on purpose: repeatKind present at all would fail this.
+    expect(onSave).toHaveBeenCalledWith('c1', {
+      title: 'Placeholder Renamed Chore',
+      expectedMinutes: '20',
+      dueOn: '2026-08-10',
+    })
+  })
+
+  it('a generated occurrence offers no schedule controls, and its save carries none', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor, occurrence] })
+    await clickAndSettle(screen.getByRole('button', { name: /edit placeholder other chore/i }))
+
+    expect(
+      screen.queryByLabelText(/how often placeholder other chore repeats/i),
+    ).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/name for placeholder other chore/i), {
+      target: { value: 'Placeholder Renamed Occurrence' },
+    })
+    await saveEdit()
+
+    expect(onSave).toHaveBeenCalledWith('c2', {
+      title: 'Placeholder Renamed Occurrence',
+      expectedMinutes: '90',
+      dueOn: '2026-08-11',
+    })
+  })
+
+  it('weekly with every day unchecked is refused with a sentence, and sends nothing', async () => {
+    const { onSave } = setup({ chores: [repeatAnchor] })
+    await openAnchorEditor()
+
+    fireEvent.click(screen.getByLabelText(/repeat placeholder chore on mon/i))
+    fireEvent.click(screen.getByLabelText(/repeat placeholder chore on thu/i))
+    await saveEdit()
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least one weekday/i)
+  })
+
+  it('AC 4 — removing a repeat says the recorded choice out loud: occurrences stay', async () => {
+    setup({ chores: [repeatAnchor, chores[1]] })
+
+    await clickAndSettle(screen.getByRole('button', { name: /remove placeholder chore$/i }))
+    expect(screen.getByText(/ends the repeat/i)).toHaveTextContent(
+      'Chores it already put on the list stay there.',
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /keep/i }))
+
+    // A plain chore's confirmation says no such thing — there is no schedule
+    // to end and nothing generated to speak for.
+    await clickAndSettle(screen.getByRole('button', { name: /remove placeholder other chore$/i }))
+    expect(screen.queryByText(/ends the repeat/i)).not.toBeInTheDocument()
   })
 })
 
@@ -947,12 +1206,10 @@ describe('#12 — expected-vs-actual capture and feedback', () => {
     actual_minutes: 45,
   }
 
-  it('AC 2 — a completed chore says what it took beside what was expected', () => {
-    setup({ chores: [doneOneOff] })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    expect(row).toHaveTextContent('30 min')
-    expect(row).toHaveTextContent('took 45 min')
-  })
+  // AC 2's one-off half ("took 45 min" beside "30 min") and every AC 1 test on
+  // the "Took (minutes)" control moved to Done.test.jsx with #302: a completed
+  // row no longer renders on this tab. Their fixture (`doneOneOff`) is copied
+  // there unchanged, which is #302 AC 2's condition.
 
   it('AC 2 — the anchor shows expected versus average-actual, side by side', () => {
     setup({ chores: [anchor, occurrence('o1', 24), occurrence('o2', 32)] })
@@ -968,44 +1225,15 @@ describe('#12 — expected-vs-actual capture and feedback', () => {
     expect(screen.getByTestId('feedback-r1')).not.toHaveTextContent(/actually/)
   })
 
-  it('AC 1 — the done row offers the stored actual, prefilled', () => {
-    setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    expect(input).toHaveValue(45)
-  })
-
-  it('AC 1 — a row completed before the column existed prefills with the estimate', () => {
-    setup({ chores: [{ ...doneOneOff, actual_minutes: null }] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    expect(input).toHaveValue(30)
-  })
-
-  it('AC 1 — saving an adjusted actual calls the handler with the normalized value', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '50' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 50)
-  })
-
-  it('AC 1 — a bad actual is refused with a sentence before any request', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '-5' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(screen.getByRole('alert')).toHaveTextContent(/negative/i)
-    expect(handlers.onRecordActual).not.toHaveBeenCalled()
-  })
-
-  it('AC 1 — zero is a legal actual: "it was already done" saves rather than argues', async () => {
-    const handlers = setup({ chores: [doneOneOff] })
-    const input = screen.getByLabelText('Minutes Placeholder Done Chore actually took')
-    fireEvent.change(input, { target: { value: '0' } })
-    const row = screen.getByText('Placeholder Done Chore').closest('li')
-    await clickAndSettle(within(row).getByRole('button', { name: /^save$/i }))
-    expect(handlers.onRecordActual).toHaveBeenCalledWith('c7', 0)
+  it('#302: a completed one-off does not render here at all, so neither does its actual control', () => {
+    // Beside an OUTSTANDING row on purpose. With the done chore alone the
+    // outstanding list never renders, and the assertion passes through that
+    // wrapper whatever the list maps over — measured: rendering every chore in
+    // the list reddened 0 here until the anchor was added, and 1 after.
+    setup({ chores: [anchor, doneOneOff] })
+    expect(screen.getByText('Placeholder Repeat')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Done Chore')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/actually took/)).not.toBeInTheDocument()
   })
 
   it('an outstanding chore offers no actual control — there is nothing to have taken time yet', () => {
@@ -1254,6 +1482,277 @@ describe('batch entry — #220, several chores in one pass', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #105 — skipping one occurrence of a repeat
+//
+// Everything here is about the SCREEN: what is offered, what is said, and which
+// handler fires. The rules — the exception stored, the uncompleted instance
+// removed and a completed one kept, the pass honouring the stored date — live
+// in Postgres and are exercised by src/test/repeats.pglite.test.js, exactly as
+// the #37 block above splits its story.
+// ---------------------------------------------------------------------------
+
+describe('skipping one occurrence — #105', () => {
+  // A weekly-on-Monday anchor with one completed instance (history) and one
+  // outstanding one (today's). todayIso is the setup default, 2026-08-24 — a
+  // Monday — so the upcoming offers are the following Mondays.
+  const anchor = {
+    id: 'r1',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-10',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'weekly',
+    repeat_weekdays: [1],
+  }
+  const doneInstance = {
+    id: 'r2',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-17',
+    generated_from: 'r1',
+    completed_at: '2026-08-17T20:00:00Z',
+    completed_by_member_id: 'm1',
+  }
+  const openInstance = {
+    id: 'r3',
+    household_id: 'h1',
+    title: 'Placeholder Repeat',
+    expected_minutes: 10,
+    due_on: '2026-08-24',
+    generated_from: 'r1',
+    completed_at: null,
+    completed_by_member_id: null,
+  }
+  const repeatFixture = [anchor, doneInstance, openInstance]
+
+  const skipSelect = () =>
+    screen.getByLabelText(/skip one date placeholder repeat repeats on/i)
+
+  it('offers the upcoming schedule dates from the anchor, and choosing one calls onSkip', () => {
+    const { onSkip } = setup({ chores: repeatFixture })
+    const options = within(skipSelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    // Today's generated instance, then the next Mondays — twelve entries, the
+    // select's cap. This was five under the old 28-day horizon; #103's review
+    // replaced a day count with a count of occurrences, which is what lets a
+    // monthly schedule offer anything at all. Spelled literally rather than
+    // derived from SKIP_OFFER_MAX_DATES, so changing the cap reddens this.
+    expect(options).toEqual([
+      '2026-08-24',
+      '2026-08-31',
+      '2026-09-07',
+      '2026-09-14',
+      '2026-09-21',
+      '2026-09-28',
+      '2026-10-05',
+      '2026-10-12',
+      '2026-10-19',
+      '2026-10-26',
+      '2026-11-02',
+      '2026-11-09',
+    ])
+
+    fireEvent.change(skipSelect(), { target: { value: '2026-08-31' } })
+    expect(onSkip).toHaveBeenCalledTimes(1)
+    expect(onSkip).toHaveBeenCalledWith('r1', '2026-08-31')
+  })
+
+  it("a generated outstanding date is offered as already on the list; a completed one is history and is not", () => {
+    setup({ chores: repeatFixture })
+    const select = within(skipSelect())
+    expect(select.getByRole('option', { name: /2026-08-24 — already on the list/i })).toBeInTheDocument()
+    // 2026-08-17 was completed: skipping it would read as a way to un-do work.
+    expect(select.queryByRole('option', { name: /2026-08-17/ })).toBeNull()
+  })
+
+  it('a date already skipped is not offered again, and is announced', () => {
+    setup({
+      chores: repeatFixture,
+      repeatExceptions: [{ id: 'e1', chore_id: 'r1', excluded_on: '2026-08-31' }],
+    })
+    expect(within(skipSelect()).queryByRole('option', { name: '2026-08-31' })).toBeNull()
+    expect(screen.getByText(/won't repeat on 2026-08-31/i)).toBeInTheDocument()
+  })
+
+  it('a spent skip — today or older — is neither offered nor restated', () => {
+    setup({
+      chores: repeatFixture,
+      repeatExceptions: [{ id: 'e1', chore_id: 'r1', excluded_on: '2026-08-24' }],
+    })
+    // The instance's date is skipped, so it is not offered again; its effect
+    // (the row leaving the list on the next refresh) is not a future fact to
+    // announce.
+    expect(within(skipSelect()).queryByRole('option', { name: /2026-08-24/ })).toBeNull()
+    expect(screen.queryByText(/won't repeat on/i)).toBeNull()
+  })
+
+  it('no skip control on a one-off, and none on a generated occurrence row', () => {
+    setup({ chores: repeatFixture })
+    // The default fixtures c1/c2 are one-offs; r3 is a generated occurrence.
+    // Exactly one control exists on this screen and it is the anchor's.
+    expect(screen.getAllByLabelText(/skip one date/i)).toHaveLength(1)
+    expect(screen.queryByTestId('skip-c1')).toBeNull()
+    expect(screen.queryByTestId('skip-r3')).toBeNull()
+    expect(screen.getByTestId('skip-r1')).toBeInTheDocument()
+  })
+
+  it('with no todayIso the control renders nothing rather than guessing a calendar', () => {
+    setup({ chores: repeatFixture, todayIso: null })
+    expect(screen.queryByLabelText(/skip one date/i)).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // #103's review — the monthly skip picker, which had NO test of any kind.
+  //
+  // The gap was not that the monthly path was unreached: it was rendered by an
+  // edit-form test and simply never asserted, so feeding the monthday slot the
+  // wrong-but-well-typed `repeat_weekdays` returned an empty list and the whole
+  // suite stayed green. These assert what the control offers, which is the only
+  // thing that could have caught either that or the horizon defect below.
+  // -------------------------------------------------------------------------
+
+  const monthlyAnchor = {
+    id: 'm1',
+    household_id: 'h1',
+    title: 'Placeholder Monthly',
+    expected_minutes: 10,
+    due_on: '2026-08-15',
+    completed_at: null,
+    completed_by_member_id: null,
+    repeat_kind: 'monthly',
+    repeat_weekdays: null,
+    repeat_monthday: 15,
+  }
+  const monthlySelect = () =>
+    screen.getByLabelText(/skip one date placeholder monthly repeats on/i)
+
+  it('a monthly anchor offers its next dates, one per month', () => {
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-24' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).toEqual([
+      '2026-09-15',
+      '2026-10-15',
+      '2026-11-15',
+      '2026-12-15',
+      '2027-01-15',
+      '2027-02-15',
+      '2027-03-15',
+      '2027-04-15',
+      '2027-05-15',
+      '2027-06-15',
+      '2027-07-15',
+      '2027-08-15',
+    ])
+  })
+
+  it('REGRESSION: the control does not vanish the day after a monthly occurrence', () => {
+    // The defect four of six review lenses found. Under the 28-day horizon,
+    // upcomingOccurrenceDates('monthly', null, 15, '2026-08-16', 28) returned
+    // [] — measured — so with no outstanding generated instance the control
+    // returned null and the whole affordance disappeared from the row with no
+    // explanation, coming back two days later with no user action.
+    setup({ chores: [monthlyAnchor], todayIso: '2026-08-16' })
+    expect(screen.getByTestId('skip-m1')).toBeInTheDocument()
+    expect(
+      within(monthlySelect()).getByRole('option', { name: '2026-09-15' }),
+    ).toBeInTheDocument()
+  })
+
+  it('REGRESSION: a monthly anchor first due beyond the horizon can still be skipped', () => {
+    // The larger half, which no lens claimed and the refuter measured: for an
+    // anchor whose first due date is more than a horizon away, `from` is that
+    // future due date and a 28-day window still fell short of the NEXT
+    // occurrence — empty from 2026-08-01 through 2026-09-16, so roughly six
+    // weeks in which a member who set up a monthly chore could not skip
+    // anything. The anchor's own due date is deliberately not offered: that row
+    // IS the first occurrence, and removing it would remove the schedule.
+    setup({ chores: [{ ...monthlyAnchor, due_on: '2026-09-15' }], todayIso: '2026-08-01' })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options).not.toHaveLength(0)
+    expect(options[0]).toBe('2026-10-15')
+    expect(options).not.toContain('2026-09-15')
+  })
+
+  it('a monthly day-31 anchor offers the clamped date a short month really produces', () => {
+    // The clamp reaching the picker, not just the pass: February 2027 has no
+    // 31st, and what the household is offered has to be the date the schedule
+    // will actually create, or skipping it stores an exception for a day
+    // nothing fires on.
+    setup({
+      chores: [{ ...monthlyAnchor, due_on: '2027-01-31', repeat_monthday: 31 }],
+      todayIso: '2027-02-01',
+    })
+    const options = within(monthlySelect())
+      .getAllByRole('option')
+      .map((o) => o.value)
+      .filter(Boolean)
+    expect(options[0]).toBe('2027-02-28')
+    expect(options[1]).toBe('2027-03-31')
+    expect(options[2]).toBe('2027-04-30')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #305 — the third exit. An outstanding row offers "Didn't happen" beside
+// Done; a chore marked missed leaves this tab entirely and is NOT counted as
+// done. What it looks like on the Done surface is Done.test.jsx.
+// ---------------------------------------------------------------------------
+
+describe('#305 — a chore that did not get done, on the Chores tab', () => {
+  const outstandingRow = () => screen.getByText('Placeholder Chore').closest('li')
+  const missedChore = {
+    id: 'c8',
+    household_id: 'h1',
+    title: 'Placeholder Missed Chore',
+    expected_minutes: 40,
+    due_on: '2026-08-20',
+    completed_at: null,
+    completed_by_member_id: null,
+    // The current week in setup() is Aug 24 — so if this were counted as
+    // "done this week" the line below would read 1 rather than 0.
+    missed_at: '2026-08-25T09:00:00Z',
+  }
+
+  it('AC 6: an outstanding row offers "Didn’t happen" beside Done, and it calls the miss handler alone', async () => {
+    const { onMiss, onComplete, onRemove } = setup()
+    const row = outstandingRow()
+    expect(within(row).getByRole('button', { name: /mark placeholder chore done/i })).toBeInTheDocument()
+    const control = within(row).getByRole('button', { name: /say placeholder chore did not happen/i })
+    expect(control).toHaveTextContent(/didn.t happen/i)
+
+    await clickAndSettle(control)
+    expect(onMiss).toHaveBeenCalledWith('c1')
+    // No confirmation step, and no other handler: it is not a removal.
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onRemove).not.toHaveBeenCalled()
+  })
+
+  it('AC 6: a missed chore has left the outstanding list, its total and the done count', () => {
+    setup({ chores: [...chores, missedChore] })
+    expect(screen.queryByText('Placeholder Missed Chore')).not.toBeInTheDocument()
+    // 20 + 90, never 150: the miss is not still-to-do.
+    const total = screen.getByTestId('outstanding-total')
+    expect(total).toHaveTextContent(/2 still to do · 110 min/i)
+    expect(total).not.toHaveTextContent('150')
+    // And it is not "done" either: the line to the Done tab shows (something
+    // has left the list) and counts zero.
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
   })
 })

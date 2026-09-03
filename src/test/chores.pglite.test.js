@@ -435,15 +435,20 @@ describe('chores, run against a real Postgres', () => {
       }
 
       // Widened by 0004 (completion), 0006 (assignment), 0012 (repeats), 0015
-      // (actuals, #12) and 0023 (provenance, #211), each making its columns
+      // (actuals, #12), 0023 (provenance, #211) and 0026 (the monthly day,
+      // #103), each making its columns
       // READABLE; 0012 is the first to widen the INSERT set, because a repeat
       // is DECLARED where the chore is created, and 0015 the first to widen the
       // UPDATE set since 0003 — an actual is adjustable after the fact, and
-      // actuals.pglite proves it stays out of INSERT. The convention holds:
-      // additive by column, and no later story revokes a shipped grant.
-      // `repeat_since`, the watermark and `generated_from` are absent from
-      // insert and update — the trigger and the catch-up pass are their only
-      // authors, and repeats.pglite.test.js proves the refusals.
+      // actuals.pglite proves it stays out of INSERT. 0024 (#54) widens UPDATE
+      // second, with the repeat pair, and 0026 puts repeat_monthday in all
+      // three sets exactly as the pair sits. 0027 (#305) adds `missed_at` to
+      // SELECT alone — the third stamp, after the two completion columns, that
+      // moves only through a function. The convention holds: additive by column,
+      // and no later story revokes a shipped grant. `repeat_since`, the
+      // watermark and `generated_from` are absent from insert and update — the
+      // trigger and the catch-up pass are their only authors, and
+      // repeats.pglite.test.js proves the refusals.
       //
       // `source` (0023) is the second column after `repeat_kind` to join INSERT
       // and stay out of UPDATE, and the reason is the same one stated the other
@@ -461,7 +466,9 @@ describe('chores, run against a real Postgres', () => {
         'generated_from',
         'household_id',
         'id',
+        'missed_at',
         'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'source',
         'title',
@@ -471,6 +478,7 @@ describe('chores, run against a real Postgres', () => {
         'expected_minutes',
         'household_id',
         'repeat_kind',
+        'repeat_monthday',
         'repeat_weekdays',
         'source',
         'title',
@@ -479,6 +487,9 @@ describe('chores, run against a real Postgres', () => {
         'actual_minutes',
         'due_on',
         'expected_minutes',
+        'repeat_kind',
+        'repeat_monthday',
+        'repeat_weekdays',
         'title',
       ])
     })

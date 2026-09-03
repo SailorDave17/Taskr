@@ -50,7 +50,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
 // `repeat_caught_up_through` as well, so `select('*')` on `chores` still fails
 // outright. 0003 carries the original reasoning; #157 measured this asymmetry.
 export const CHORE_COLUMNS =
-  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, generated_from, actual_minutes, source'
+  'id, household_id, title, expected_minutes, due_on, created_at, completed_at, completed_by_member_id, missed_at, assigned_member_id, assigned_source, repeat_kind, repeat_weekdays, repeat_monthday, generated_from, actual_minutes, source'
 
 /**
  * How a chore came to exist — `chores_source_known` in `0023`, story #211.
@@ -76,15 +76,32 @@ export const MIN_EXPECTED_MINUTES = 1
 export const MAX_EXPECTED_MINUTES = 1440
 
 /**
- * The catch-up bound, in days — #53 AC 4. Owner decision 2026-08-24, recorded
- * in docs/refresh-charter.md's decision log.
+ * The catch-up bounds — #53 AC 4, made KIND-DEPENDENT by #103.
  *
- * THE AUTHORITY IS THE MIGRATION: `catch_up_repeats_at` in `0012` carries the
- * same number, and that copy is the one that decides what exists. This copy
- * only words the notice, and repeats.pglite.test.js holds the two equal so
- * they cannot drift apart silently.
+ * Seven days for daily and weekly (owner decision 2026-08-24), one month for
+ * monthly (owner decision 2026-08-31, taken on a review escalation): the same
+ * seven days would have dropped a monthly chore's whole occurrence in silence,
+ * which for a rent chore is the feature's headline case failing.
+ *
+ * THE AUTHORITY IS THE MIGRATION. `catch_up_repeats_at` in `0028` (the body
+ * that runs — `0026` declared the same two values and #306 replaced the pass
+ * again) carries both numbers and its copy is the one that decides what
+ * exists; these are the client-side record, and repeats.pglite.test.js holds
+ * them equal so they cannot drift apart silently.
+ *
+ * NEITHER IS RENDERED, and that is a change worth stating rather than leaving
+ * to be noticed. Until #103 the notice sentence below named the seven days,
+ * which was honest while one number governed every kind. The pass returns ONE
+ * skipped count across every schedule it walked, so a sentence naming one
+ * window would now be wrong whenever a household has both a daily and a
+ * monthly repeat — and it is the monthly case, the one likeliest to be
+ * skipped, that the old wording would have described incorrectly. So the
+ * sentence names no window, and these constants survive as the record the
+ * charter's decision log points at, kept true by a test rather than by a
+ * reader.
  */
 export const CATCH_UP_BOUND_DAYS = 7
+export const CATCH_UP_BOUND_MONTHS = 1
 
 /**
  * The estimate-update thresholds — #12 AC 4. Owner-ratified tunable defaults,
@@ -103,7 +120,24 @@ export const MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE = 3
 export const ESTIMATE_DEVIATION_THRESHOLD = 0.25
 
 /** The schedule kinds `chores_repeat_kind_known` accepts, in the UI's order. */
-export const REPEAT_KINDS = ['none', 'daily', 'weekly']
+export const REPEAT_KINDS = ['none', 'daily', 'weekly', 'monthly']
+
+/**
+ * The days a monthly repeat can be pinned to — #103. 1..31 because 31 is a
+ * real choice: `0026`'s clamp makes it fire on every month's last day when the
+ * month is shorter, which is the owner-ratified rule (skip-the-month was
+ * rejected at the groom gate).
+ */
+export const MONTHDAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+
+/** "1" → "1st", "22" → "22nd" — how a screen says a day of the month. */
+export function ordinalOf(day) {
+  const n = Number(day)
+  const tens = n % 100
+  if (tens >= 11 && tens <= 13) return `${n}th`
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'
+  return `${n}${suffix}`
+}
 
 /** ISO weekdays as the schema stores them (1 = Monday … 7 = Sunday). */
 export const WEEKDAYS = [
@@ -179,29 +213,59 @@ export function normalizeActualMinutes(value) {
 export { normalizeDueDate }
 
 /**
+ * The skip picker's date arithmetic — #105, re-exported from dueDates.js for
+ * normalizeDueDate's reason: one implementation, living in the leaf module, so
+ * the schedule mirror and the due-date rules cannot drift apart by having two
+ * homes.
+ */
+export { localTodayIn, upcomingOccurrenceDates } from './dueDates.js'
+
+/**
  * A schedule the columns will accept — #53 AC 6: structured, never free text.
  *
- * Takes the form's shape (`repeatKind` + `repeatWeekdays`) and returns the two
- * COLUMN values, so a caller cannot send half a schedule: weekly without days
- * is refused here with a sentence, and the check constraint
- * `chores_repeat_weekdays_shape` refuses it again at the database for any
- * caller that skips this function.
+ * Takes the form's shape (`repeatKind` + `repeatWeekdays` + `repeatMonthday`,
+ * #103) and returns the three COLUMN values, so a caller cannot send part of
+ * a schedule: weekly without days, or monthly without a day of the month, is
+ * refused here with a sentence, and the check constraints
+ * `chores_repeat_weekdays_shape` and `chores_repeat_monthday_shape` refuse it
+ * again at the database for any caller that skips this function.
  *
  * Weekdays come back sorted and deduplicated. The constraint tolerates a
  * duplicate (it is harmless to the schedule arithmetic), but a stored
  * `{5,1,5}` would render back as a different-looking set than was saved.
  */
-export function normalizeRepeat({ repeatKind, repeatWeekdays } = {}) {
+export function normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday } = {}) {
   const kind = repeatKind === undefined || repeatKind === null ? 'none' : String(repeatKind)
   if (!REPEAT_KINDS.includes(kind)) {
-    throw new Error('A repeat is daily or weekly — anything fancier is not a schedule yet.')
+    throw new Error('A repeat is daily, weekly or monthly — anything fancier is not a schedule yet.')
+  }
+
+  const hasMonthday =
+    repeatMonthday !== undefined && repeatMonthday !== null && String(repeatMonthday).trim() !== ''
+
+  if (kind !== 'monthly' && hasMonthday) {
+    throw new Error('A day of the month only makes sense on a monthly repeat.')
+  }
+
+  if (kind === 'monthly') {
+    if (Array.isArray(repeatWeekdays) && repeatWeekdays.length > 0) {
+      throw new Error('Weekdays only make sense on a weekly repeat.')
+    }
+    if (!hasMonthday) {
+      throw new Error('A monthly repeat needs a day of the month.')
+    }
+    const day = Number(repeatMonthday)
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      throw new Error('A day of the month is 1 through 31.')
+    }
+    return { repeat_kind: 'monthly', repeat_weekdays: null, repeat_monthday: day }
   }
 
   if (kind !== 'weekly') {
     if (Array.isArray(repeatWeekdays) && repeatWeekdays.length > 0) {
       throw new Error('Weekdays only make sense on a weekly repeat.')
     }
-    return { repeat_kind: kind, repeat_weekdays: null }
+    return { repeat_kind: kind, repeat_weekdays: null, repeat_monthday: null }
   }
 
   const days = Array.isArray(repeatWeekdays) ? repeatWeekdays.map(Number) : []
@@ -211,7 +275,11 @@ export function normalizeRepeat({ repeatKind, repeatWeekdays } = {}) {
   if (days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
     throw new Error('A weekday is 1 (Monday) through 7 (Sunday).')
   }
-  return { repeat_kind: 'weekly', repeat_weekdays: [...new Set(days)].sort((a, b) => a - b) }
+  return {
+    repeat_kind: 'weekly',
+    repeat_weekdays: [...new Set(days)].sort((a, b) => a - b),
+    repeat_monthday: null,
+  }
 }
 
 /** A chore title the column will accept. */
@@ -261,6 +329,7 @@ export async function addChore({
   dueOn,
   repeatKind,
   repeatWeekdays,
+  repeatMonthday,
   householdId,
   // #211 — where the chore came from. Defaulted rather than required, so every
   // existing call site keeps its current meaning without being edited: App.jsx
@@ -282,7 +351,7 @@ export async function addChore({
   // #53 — the repeat is set where the chore is created, as a property of the
   // chore. There is no templates screen to route through, and callers that say
   // nothing get 'none', which is the column's own default.
-  const repeat = normalizeRepeat({ repeatKind, repeatWeekdays })
+  const repeat = normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday })
 
   if (!householdId) throw new Error('Which household? Adding a chore must name one.')
 
@@ -296,6 +365,7 @@ export async function addChore({
         due_on: due,
         repeat_kind: repeat.repeat_kind,
         repeat_weekdays: repeat.repeat_weekdays,
+        repeat_monthday: repeat.repeat_monthday,
         // Written explicitly rather than left to the column's DEFAULT. The two
         // are identical for a typed chore, and stating it is what makes the
         // insert path a thing a mutation can remove and a test can miss — the
@@ -343,12 +413,43 @@ export async function addChores(rows, { householdId } = {}) {
   return outcomes
 }
 
-/** Edit a chore's title, minutes or due date — AC 6. */
-export async function updateChore(id, { title, expectedMinutes, dueOn }) {
+/**
+ * Edit a chore's title, minutes, due date — #34 AC 6 — or its repeat — #54.
+ *
+ * The repeat fields travel TOGETHER, never partially: the shape constraints
+ * (`chores_repeat_weekdays_shape`, `chores_repeat_monthday_shape`) tie
+ * `repeat_kind` to `repeat_weekdays` and `repeat_monthday`, so a patch naming
+ * any of them names all three, through the same `normalizeRepeat` the add
+ * path calls. A weekdays-only or monthday-only patch is refused here with a
+ * sentence rather than sent — `normalizeRepeat` would read the missing kind
+ * as 'none' and silently switch the repeat off, which is not what a caller
+ * editing the schedule meant.
+ *
+ * Propagation is #54's ratified option (b) BY CONSTRUCTION, and this function
+ * is where the claim is easiest to mis-fix later, so it is stated here: an
+ * occurrence copies its minutes at creation (0012), so an estimate edit on the
+ * anchor reaches only occurrences created AFTER it, and never rewrites work
+ * already on somebody's list. There is deliberately no second statement here
+ * updating occurrence rows — #54 AC 6 mutates that shape in and records which
+ * tests redden.
+ */
+export async function updateChore(
+  id,
+  { title, expectedMinutes, dueOn, repeatKind, repeatWeekdays, repeatMonthday },
+) {
   const patch = {}
   if (title !== undefined) patch.title = normalizeTitle(title)
   if (expectedMinutes !== undefined) patch.expected_minutes = normalizeExpectedMinutes(expectedMinutes)
   if (dueOn !== undefined) patch.due_on = normalizeDueDate(dueOn)
+  if (repeatKind === undefined && (repeatWeekdays !== undefined || repeatMonthday !== undefined)) {
+    throw new Error('A schedule edit names how often — pass repeatKind with the schedule fields.')
+  }
+  if (repeatKind !== undefined) {
+    const repeat = normalizeRepeat({ repeatKind, repeatWeekdays, repeatMonthday })
+    patch.repeat_kind = repeat.repeat_kind
+    patch.repeat_weekdays = repeat.repeat_weekdays
+    patch.repeat_monthday = repeat.repeat_monthday
+  }
 
   // An empty patch would issue `update chores set` — a syntax error from
   // Postgres reported as "saving the change: ...", which reads like the row was
@@ -378,6 +479,26 @@ export async function completeChore(id) {
 export async function uncompleteChore(id) {
   return unwrap(
     await getSupabase().rpc('uncomplete_chore', { chore_id: id }),
+    'putting it back on the list',
+  )
+}
+
+/**
+ * Record that a chore did not get done — #305.
+ *
+ * Through an RPC for the same reason completion is (0027, quoting 0004): the
+ * CLOCK. `missed_at` decides which capacity week the Done surface files the
+ * row under, so the server stamps it and the client cannot. The column is in
+ * no update grant, so this is the only path there is.
+ */
+export async function missChore(id) {
+  return unwrap(await getSupabase().rpc('miss_chore', { chore_id: id }), 'marking it not done')
+}
+
+/** Undo a miss — the chore returns to the outstanding list. */
+export async function unmissChore(id) {
+  return unwrap(
+    await getSupabase().rpc('unmiss_chore', { chore_id: id }),
     'putting it back on the list',
   )
 }
@@ -418,6 +539,15 @@ export async function recordActualMinutes(id, actualMinutes) {
  * Exactly-once under a double-fire is the DATABASE's unique index, not
  * anything here — two devices calling this in the same second is the designed
  * case, not a race to defend against in JavaScript.
+ *
+ * Since #306 (`0028`) the pass also WRITES `missed_at`: when it creates a new
+ * occurrence for an anchor, every older outstanding member of that anchor's
+ * family is marked missed with the pass's clock, so at most one occurrence
+ * of a repeat is on the list at a time. Nothing here changes for that — the
+ * return shape is the same two counts by decision (the household is not
+ * told; docs/refresh-charter.md, 2026-09-02) — but a caller reading
+ * `missed_at` after this resolves may see rows that were outstanding a
+ * moment ago, which is the point.
  */
 export async function catchUpRepeats() {
   const rows = unwrap(await getSupabase().rpc('catch_up_repeats'), 'catching up repeats')
@@ -440,8 +570,96 @@ export function formatSkippedNotice(skipped) {
   if (n <= 0) return null
   const what = n === 1 ? '1 repeat occurrence' : `${n} repeat occurrences`
   return (
-    `${what} more than ${CATCH_UP_BOUND_DAYS} days old ` +
+    `${what} older than the catch-up window ` +
     `${n === 1 ? 'was' : 'were'} skipped rather than piled onto this week.`
+  )
+}
+
+/**
+ * How far ahead the skip picker looks, and how many dates it offers — #105,
+ * REWORKED by #103's review.
+ *
+ * Presentation only: the exception table takes any date, and the pass honours
+ * whatever is stored.
+ *
+ * WHY THIS IS NO LONGER A DAY COUNT. It was `SKIP_OFFER_HORIZON_DAYS = 28`,
+ * argued from "four weeks covers 'we're away next week'" and from capping a
+ * daily repeat at 28 options. Both halves are about DAILY, and 28 days is
+ * shorter than a monthly period — so the moment #103 added monthly, the
+ * control offered nothing at all for days at a time, and `SkipControl`
+ * returns null when it has nothing to offer, so the whole affordance
+ * disappeared from the row with no explanation and came back with no user
+ * action. *Measured during review*: for a monthly-on-the-15th chore the offer
+ * list is empty on 2026-08-16 and 08-17, and for a NEWLY CREATED anchor first
+ * due 2026-09-15 it is empty from 2026-08-01 right through 2026-09-16 —
+ * roughly six weeks in which #105's stated purpose is unreachable on the
+ * first use of a monthly schedule.
+ *
+ * A day count cannot fit all three kinds: any window wide enough for monthly
+ * offers a daily repeat a hundred-odd options. What fits every kind is a
+ * COUNT OF OCCURRENCES — the next N dates this schedule produces, whatever
+ * its period — with a scan ceiling so the loop is bounded for a schedule that
+ * produces nothing (a monthly anchor needs ~366 days to yield twelve).
+ *
+ * Twelve is the select's constraint rather than the calendar's: it is a
+ * comfortable list on a phone, and it means daily now offers twelve days
+ * where it offered twenty-eight. That narrowing is deliberate and is the
+ * trade — "we're away next week" fits inside twelve days, and the kinds that
+ * gain are the two the old number was never chosen for.
+ */
+export const SKIP_OFFER_MAX_DATES = 12
+export const SKIP_OFFER_SCAN_DAYS = 400
+
+// The columns a client may read, matching the select grant in 0025 exactly.
+// `household_id` stays absent and a wildcard select still fails loudly here —
+// 0010's reasoning, restated in 0025.
+export const REPEAT_EXCEPTION_COLUMNS = 'id, chore_id, excluded_on, created_at'
+
+/**
+ * Every exception date this household's repeating chores carry — #105.
+ *
+ * Scoped by ANCHOR ids rather than a household id, because `household_id` is
+ * deliberately not in the select grant (0025) — the same shape as
+ * `listExclusions`, which scopes by the member set for the same reason. Only
+ * anchors can carry exceptions, so the caller passes the anchor ids it is
+ * showing and the list stays as small as the household's schedules.
+ */
+export async function listRepeatExceptions(anchorIds) {
+  if (!Array.isArray(anchorIds)) {
+    throw new Error('Which repeats? An exception read must name their anchor chores.')
+  }
+  if (anchorIds.length === 0) return []
+  return (
+    unwrap(
+      await getSupabase()
+        .from('chore_repeat_exceptions')
+        .select(REPEAT_EXCEPTION_COLUMNS)
+        .in('chore_id', anchorIds),
+      'loading the skipped dates',
+    ) ?? []
+  )
+}
+
+/**
+ * Skip one occurrence of a repeating chore — #105.
+ *
+ * Through an RPC for the house's ACCESS reason in its strongest form: the
+ * client holds no write privilege on the exception table at all, so this is
+ * not the preferred path but the only one. The function stores the exception
+ * AND removes that date's uncompleted generated instance in one transaction —
+ * the ratified retroactivity rule (uncompleted goes, completed stays as
+ * history) lives in `0025` where no client can apply half of it.
+ *
+ * Returns the number of instance rows removed (0 for an upcoming date, 1 when
+ * catch-up had already generated the occurrence). Callers refresh afterwards
+ * like every other mutation, so the value is informational.
+ */
+export async function skipRepeatOccurrence(choreId, skipDate) {
+  if (!choreId) throw new Error('Which repeating chore is being skipped?')
+  const date = normalizeDueDate(skipDate)
+  return unwrap(
+    await getSupabase().rpc('skip_repeat_occurrence', { chore_id: choreId, skip_date: date }),
+    'skipping that date',
   )
 }
 
@@ -453,6 +671,16 @@ export function formatSkippedNotice(skipped) {
 export function describeRepeat(chore) {
   if (!chore || chore.repeat_kind === 'none' || !chore.repeat_kind) return null
   if (chore.repeat_kind === 'daily') return 'repeats daily'
+  if (chore.repeat_kind === 'monthly') {
+    // #103. Days 29–31 do not exist in every month, and the clamp is a fact a
+    // person planning rent day needs on screen — a bare "on the 31st" reads as
+    // skipping February, which is exactly the rejected behaviour.
+    const day = Number(chore.repeat_monthday)
+    if (!Number.isInteger(day)) return 'repeats monthly'
+    return day >= 29
+      ? `repeats monthly on the ${ordinalOf(day)} (last day of shorter months)`
+      : `repeats monthly on the ${ordinalOf(day)}`
+  }
   const names = (chore.repeat_weekdays ?? [])
     .map((d) => WEEKDAYS.find((w) => w.isoDow === Number(d))?.label)
     .filter(Boolean)
@@ -482,9 +710,33 @@ export async function unassignChore(choreId) {
   )
 }
 
-/** Is this chore still to do? The whole definition of outstanding, in one place. */
+/** Was this chore recorded as not done? — #305. Null and absent both mean no. */
+export function isMissed(chore) {
+  return chore.missed_at !== null && chore.missed_at !== undefined
+}
+
+/**
+ * Was this chore finished? — keyed on `completed_at` alone.
+ *
+ * Until #305 this was `!isOutstanding`, and the two were one question. A
+ * missed chore is neither outstanding nor completed, so every reader that
+ * meant FINISHED — the actuals, the "took" line, the count on the Chores tab —
+ * asks this, and every reader that meant STILL TO DO asks `isOutstanding`.
+ * A row satisfies at most one of the three (0027's constraint forbids both
+ * stamps at once), which is what lets each reader ask only its own question.
+ */
+export function isCompleted(chore) {
+  return chore.completed_at !== null && chore.completed_at !== undefined
+}
+
+/**
+ * Is this chore still to do? The whole definition of outstanding, in one place.
+ *
+ * Both stamps null — #305 taught it the second column. A row that carries
+ * neither is on the list; a row that carries either has left it.
+ */
 export function isOutstanding(chore) {
-  return chore.completed_at === null || chore.completed_at === undefined
+  return !isCompleted(chore) && !isMissed(chore)
 }
 
 /**
@@ -509,10 +761,16 @@ export function outstandingMinutes(chores) {
  * not-template-only without a second rule. An occurrence row's family is also
  * itself alone — its history belongs to the anchor, and double-counting it
  * under both would weight the average by nothing real.
+ *
+ * COMPLETED, not "not outstanding" — #305. A missed occurrence has left the
+ * list and carries no actual, so counting it here would put its estimate into
+ * the average as though somebody had done the work in exactly the expected
+ * time, and would count toward the completion floor an estimate update waits
+ * for. It is ignored: the family's history is the work that happened.
  */
 export function completedInstances(chore, chores) {
   return chores.filter(
-    (c) => (c.id === chore.id || c.generated_from === chore.id) && !isOutstanding(c),
+    (c) => (c.id === chore.id || c.generated_from === chore.id) && isCompleted(c),
   )
 }
 
@@ -585,15 +843,25 @@ export function estimateSuggestion(chore, chores) {
  * back to the estimate for exactly those — the same fallback `actualsSummary`
  * uses, so the bar and the feedback line cannot disagree about what an old
  * completion cost.
+ *
+ * A MISSED chore is dropped here rather than passed through — #305. It
+ * contributes nothing: not open load (it is not going to happen) and not done
+ * minutes (nobody did it). Passing it as `done: true` would credit its holder
+ * with the estimate; passing it as `done: false` would count it as work still
+ * to do and the allocator would try to place it. Neither is the fact, so the
+ * allocator never sees the row — which is also why `announce.js`'s snapshot
+ * and the split surface's probe drop it for free, both being built from this.
  */
 export function toAllocatorChores(chores) {
-  return chores.map((chore) => ({
-    id: chore.id,
-    expectedMinutes: chore.expected_minutes || 0,
-    actualMinutes: chore.actual_minutes ?? null,
-    assignedMemberId: chore.assigned_member_id ?? null,
-    done: !isOutstanding(chore),
-  }))
+  return chores
+    .filter((chore) => !isMissed(chore))
+    .map((chore) => ({
+      id: chore.id,
+      expectedMinutes: chore.expected_minutes || 0,
+      actualMinutes: chore.actual_minutes ?? null,
+      assignedMemberId: chore.assigned_member_id ?? null,
+      done: !isOutstanding(chore),
+    }))
 }
 
 // `committedMinutes` and `commitmentByMember` lived here until #47.

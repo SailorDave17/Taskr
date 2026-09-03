@@ -76,10 +76,25 @@ describe('which keys are safe to publish', () => {
     ['GOCSPX-placeholder_client_secret', 'google-client-secret'],
     ['1//0gPlaceholderRefreshTokenValue', 'google-refresh-token'],
     ['ya29.a0Placeholder-access-token', 'google-access-token'],
+    // #203 AC 5 — the provider key the extraction adapter's transport needs,
+    // planted by shape. This entry lands in the story that first gives the key
+    // a reason to exist, on #56 AC 5's stated principle: the guard should
+    // exist before the key does.
+    ['sk-ant-api03-placeholder0000', 'anthropic-api-key'],
   ])('plants %s and the guard refuses it as %s', (planted, kind) => {
     expect(isSecretKey(planted)).toBe(true)
     expect(secretKeyKind(planted)).toBe(kind)
     expect(() => assertPublishableKey(planted, 'the production build')).toThrow(/SECRET key/)
+  })
+
+  it('#203 AC 5 — refuses the planted provider shape while passing a Supabase publishable key unchanged', () => {
+    // The criterion's own pairing, in one test: the refusal and its negative
+    // control together, so neither half can quietly go vacuous alone.
+    expect(() => assertPublishableKey('sk-ant-api03-placeholder0000', 'the production build')).toThrow(
+      /SECRET key/,
+    )
+    expect(secretKeyKind('sb_publishable_AbCdEf123456')).toBeNull()
+    expect(() => assertPublishableKey('sb_publishable_AbCdEf123456', 'the production build')).not.toThrow()
   })
 
   it('does NOT refuse the value that is supposed to be there', () => {
@@ -100,6 +115,7 @@ describe('which keys are safe to publish', () => {
     expect(() => assertPublishableKey('sb_secret_x')).toThrow(/Supabase → Project Settings/)
     expect(() => assertPublishableKey('GOCSPX-x')).toThrow(/Google Cloud console/)
     expect(() => assertPublishableKey('1//x')).toThrow(/myaccount\.google\.com/)
+    expect(() => assertPublishableKey('sk-ant-x')).toThrow(/console\.anthropic\.com/)
   })
 
   it('treats an absent key as not-secret, so an unconfigured build is not a security error', () => {
@@ -138,33 +154,26 @@ describe('the build itself is wired to the guard', () => {
   // that nothing invokes is the failure mode this whole file exists against.
   const config = readFileSync(resolve(process.cwd(), 'vite.config.js'), 'utf8')
 
-  it('calls assertPublishableKey at build time', () => {
-    expect(config).toMatch(/assertPublishableKey\(\s*process\.env\.VITE_SUPABASE_ANON_KEY/)
+  it('asks about EVERY VITE_ variable in the environment, not an enumerated list (#203 AC 5)', () => {
+    // Until #203 the build asserted two variables BY NAME — the Supabase anon
+    // key and the Google client id — which covered exactly the mistakes
+    // already made and nothing arriving next: the provider key the extraction
+    // transport needs would land under a name no list here had heard of. The
+    // build now quantifies over the property that makes a value reach the
+    // bundle at all — the VITE_ prefix — so a new variable is covered by
+    // existing, and the two names this test used to assert are covered as two
+    // instances of the rule. (The earlier per-name assertions were removed
+    // WITH this one replacing them, not before it.)
+    expect(config).toMatch(/Object\.entries\(process\.env\)/)
+    expect(config).toMatch(/startsWith\('VITE_'\)/)
+    expect(config).toMatch(/assertPublishableKey\(value/)
   })
 
-  it('#95 AC 4 — and over the Google client id too, which is the second dashboard value', () => {
-    // The extended detector is worth nothing over a variable nothing passes to
-    // it. This is the wiring half of AC 4: the guard exists AND the build
-    // actually asks it about the value that could carry a `GOCSPX-`.
-    expect(config).toMatch(/assertPublishableKey\(\s*process\.env\.VITE_GOOGLE_CLIENT_ID/)
-  })
-
-  it('asks about EVERY VITE_ variable the build reads, so a third one cannot slip in', () => {
-    // The rule rather than the two instances. A `VITE_` variable is inlined into
-    // the bundle by definition, so any new one is a new way to publish a secret
-    // — and the failure would be silent in exactly the way #95 AC 4 and the
-    // 2026-08-05 incident both describe. Deriving the list from the config
-    // itself means the next variable is covered by being added, or this reddens.
-    const declared = [...config.matchAll(/process\.env\.(VITE_[A-Z0-9_]+)/g)].map((m) => m[1])
-    const asserted = [...config.matchAll(/assertPublishableKey\(\s*process\.env\.(VITE_[A-Z0-9_]+)/g)]
-      .map((m) => m[1])
-
-    expect(declared.length, 'the scan found no VITE_ variables at all').toBeGreaterThan(1)
-    const unchecked = [...new Set(declared)].filter((name) => !asserted.includes(name))
-    expect(
-      unchecked,
-      `these are inlined into the bundle with no key-shape check: ${unchecked.join(', ')}`,
-    ).toEqual([])
+  it('names the variable in the refusal, so the message says which value to go and fix', () => {
+    // The loop's caller string interpolates the variable name. Asserted because
+    // a refusal reading only "the production build" leaves somebody grepping
+    // a dashboard for which of several variables carried the secret.
+    expect(config).toMatch(/assertPublishableKey\(value, `the production build \(\$\{name\}\)`\)/)
   })
 
   it('imports it from the module these tests exercise', () => {

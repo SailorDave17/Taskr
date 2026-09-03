@@ -17,13 +17,20 @@ import { planReassignment } from './reassign.js'
 // capital-first word as a name candidate.
 
 /** A raw chores row as the client reads it, with only what matters varied. */
-function row(id, minutes, { holder = null, source = null, done = false, actual = null } = {}) {
+function row(
+  id,
+  minutes,
+  { holder = null, source = null, done = false, missed = false, actual = null } = {},
+) {
   return {
     id,
     expected_minutes: minutes,
     assigned_member_id: holder,
     assigned_source: source,
     completed_at: done ? '2026-08-26T12:00:00Z' : null,
+    // #305's third state; 0027's constraint forbids both stamps, so a fixture
+    // never sets both either.
+    missed_at: missed ? '2026-08-27T09:00:00Z' : null,
     actual_minutes: actual,
   }
 }
@@ -111,6 +118,31 @@ describe('planReassignment — input mapping', () => {
         ['c-f2', 'm-robin'],
       ]),
     )
+  })
+
+  it('drops a MISSED chore whoever holds it — neither pinned as done nor freed as open (#306)', () => {
+    const members = [
+      { id: 'm-alex', weekly_minutes: 300 },
+      { id: 'm-robin', weekly_minutes: 300 },
+    ]
+    const chores = [
+      // A superseded occurrence that kept its holder (0028 leaves the
+      // assignment on the row as a record). Until #306 this fell into the done
+      // branch and pinned 200 phantom minutes on alex, so both open chores
+      // went to robin; the fact is that alex carries nothing.
+      row('c-missed', 200, { holder: 'm-alex', source: 'auto', missed: true }),
+      row('c-f1', 100),
+      row('c-f2', 100),
+    ]
+
+    const placed = placementMap(plan({ members, chores }).placements)
+
+    // The missed row is in no payload — not a pin, not a placement.
+    expect(placed.has('c-missed')).toBe(false)
+    // And nobody was charged for it: the two open chores split one each,
+    // where the phantom pin sent both to robin.
+    expect(placed.size).toBe(2)
+    expect(new Set(placed.values())).toEqual(new Set(['m-alex', 'm-robin']))
   })
 
   it('treats an open assigned row without a manual mark as an incumbent, not a pin', () => {

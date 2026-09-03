@@ -274,11 +274,14 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     expect(extra, `in LIVE_RPCS but called nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the six the app still calls, and none of the four `0007` drops', () => {
+  it('covers the eight the app still calls, and none of the four `0007` drops', () => {
     for (const fn of [
       'create_household',
       'complete_chore',
       'uncomplete_chore',
+      // #305 — the third state's writer and its undo, arriving with `0027`.
+      'miss_chore',
+      'unmiss_chore',
       'assign_chore',
       'unassign_chore',
       'catch_up_repeats',

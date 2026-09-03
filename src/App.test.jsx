@@ -47,6 +47,9 @@ const choresApi = {
   // reason: pure, own tests, and a stub could disagree with the boundary the
   // suggestion sits on.
   recordActualMinutes: vi.fn(),
+  // #305 — the third state's writer and its undo, stubbed like completion.
+  missChore: vi.fn(),
+  unmissChore: vi.fn(),
 }
 
 // #46 — only the three IMPURE capacity functions are stubbed. periodStartFor,
@@ -742,6 +745,7 @@ describe('chores — the write path and the re-read', () => {
       dueOn: '2026-08-10',
       repeatKind: 'none',
       repeatWeekdays: [],
+      repeatMonthday: '',
       householdId: household.id,
     })
     await waitFor(() =>
@@ -821,6 +825,42 @@ describe('chores — the write path and the re-read', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /remove placeholder chore\?/i })))
 
     expect(choresApi.removeChore).toHaveBeenCalledWith('c1')
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('#305: "Didn’t happen" goes through missChore with the chore on screen, then re-reads', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /say placeholder chore did not happen/i })),
+    )
+
+    expect(choresApi.missChore).toHaveBeenCalledWith('c1')
+    await waitFor(() =>
+      expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Written before it is re-read, as every other write here is.
+    expect(choresApi.missChore.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('#305: "Put it back" on the Done tab goes through unmissChore, then re-reads', async () => {
+    choresApi.listChores.mockResolvedValue([{ ...chore, missed_at: '2026-08-25T09:00:00Z' }])
+    await renderApp('Done')
+    const back = await screen.findByRole('button', {
+      name: /put placeholder chore back on the list — it was marked not done/i,
+    })
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(back))
+
+    expect(choresApi.unmissChore).toHaveBeenCalledWith('c1')
+    expect(choresApi.missChore).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore),
     )
@@ -998,7 +1038,7 @@ describe('moving between surfaces — #47 criterion 11', () => {
     expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
   })
 
-  it('marks the surface you are on, so the tabs are not three identical buttons', async () => {
+  it('marks the surface you are on, so the tabs are not four identical buttons', async () => {
     await renderApp()
     expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
@@ -1006,6 +1046,68 @@ describe('moving between surfaces — #47 criterion 11', () => {
     await tab('Who')
     expect(screen.getByRole('button', { name: 'Who' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Split' })).not.toHaveAttribute('aria-current')
+
+    // #302 AC 4 — the fourth tab is marked the same way.
+    await tab('Done')
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('#302 AC 4: arriving on Done re-reads everything, as every other tab does', async () => {
+    await renderApp()
+    const before = {
+      members: api.listMembers.mock.calls.length,
+      chores: choresApi.listChores.mock.calls.length,
+      capacity: capacityApi.listCapacity.mock.calls.length,
+    }
+
+    await tab('Done')
+
+    expect(screen.getByRole('region', { name: 'Done' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /the split/i })).not.toBeInTheDocument()
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(before.members)
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before.chores)
+    expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(before.capacity)
+  })
+
+  it('#302 AC 1: the chore tab’s "done this week" line leads to Done, re-reading on the way', async () => {
+    // One finished just now, so it falls in whatever capacity week App derives
+    // from the real clock, and one outstanding. The chore tab must show the
+    // outstanding one, count the finished one on its line, and not render it.
+    choresApi.listChores.mockResolvedValue([
+      {
+        id: 'c1',
+        household_id: 'h1',
+        title: 'Placeholder Chore',
+        expected_minutes: 20,
+        due_on: '2026-08-10',
+        completed_at: null,
+        completed_by_member_id: null,
+      },
+      {
+        id: 'c2',
+        household_id: 'h1',
+        title: 'Placeholder Other Chore',
+        expected_minutes: 30,
+        due_on: '2026-08-10',
+        completed_at: new Date().toISOString(),
+        completed_by_member_id: 'm1',
+      },
+    ])
+    await renderApp('Chores')
+    expect(screen.getByText('Placeholder Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Other Chore')).not.toBeInTheDocument()
+    expect(screen.getByTestId('done-this-week')).toHaveTextContent(/done this week/)
+
+    const before = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByTestId('done-this-week')))
+
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('Placeholder Other Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Chore')).not.toBeInTheDocument()
+    // Through goTo, not a bare setView: the arrival re-read (criterion 11)
+    // holds for this route onto the surface as it does for the tab.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before)
   })
 
   it('offers no surfaces at all until there is a household to look at', async () => {
@@ -1880,7 +1982,7 @@ describe('#53 — the boot-time catch-up pass', () => {
     // real), so the sentence asserted is the sentence a person reads.
     const notice = await screen.findByRole('status')
     expect(notice).toHaveTextContent(
-      '3 repeat occurrences more than 7 days old were skipped rather than piled onto this week.',
+      '3 repeat occurrences older than the catch-up window were skipped rather than piled onto this week.',
     )
     // Told, not alarmed: nothing failed, so the error surface stays empty.
     expect(screen.queryAllByRole('alert')).toEqual([])
@@ -1945,7 +2047,10 @@ describe('#12 — adjusting how long a chore took', () => {
   })
 
   it('saves the adjusted value through the data layer, then re-reads from the server', async () => {
-    await renderApp('Chores')
+    // On the Done tab since #302 — a completed row no longer renders on the
+    // chore tab. The subject (the write, then the re-read) is unchanged; only
+    // the arrangement moved with the row.
+    await renderApp('Done')
     await screen.findByText('Placeholder Chore')
 
     const readsBefore = choresApi.listChores.mock.calls.length

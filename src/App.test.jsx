@@ -2070,3 +2070,118 @@ describe('#12 — adjusting how long a chore took', () => {
     )
   })
 })
+
+describe('#284 — dealing out the work nobody has, from the split', () => {
+  // The state #52's driven setup run stalled in: two people with minutes,
+  // every chore entered, nothing assigned, and the household on its FIRST
+  // screen. Two chores stand in for thirteen.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const nobodyHas = [
+    {
+      id: 'c1',
+      household_id: 'h1',
+      title: 'Placeholder Chore',
+      expected_minutes: 60,
+      due_on: '2026-08-10',
+      assigned_member_id: null,
+    },
+    {
+      id: 'c2',
+      household_id: 'h1',
+      title: 'Placeholder Other Chore',
+      expected_minutes: 45,
+      due_on: '2026-08-10',
+      assigned_member_id: null,
+    },
+  ]
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 200, claimed_by: 'person-a' },
+      { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 240 },
+    ])
+    choresApi.listChores.mockResolvedValue(nobodyHas)
+  })
+
+  const pressDealOut = async () => {
+    await act(async () =>
+      void fireEvent.click(await screen.findByRole('button', { name: /deal these out/i })),
+    )
+  }
+
+  it('AC 1: the action runs the stored re-assignment for the household on screen, then re-reads', async () => {
+    await renderApp()
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+    // Re-read from the server after the run, never patched from the response:
+    // what the next device to load will see is what this one now shows.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore)
+    expect(reassignApi.reassignHousehold.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('AC 3: one press on the first screen — no capacity write, no per-chore assignment, no tab', async () => {
+    // `renderApp()` with no surface: the split is where a joined household
+    // lands (the 2026-08-06 decision), so the route is reachable with no
+    // navigation at all. Nothing that a capacity edit or a Who dropdown would
+    // reach is touched — the side door #52 named stays shut.
+    await renderApp()
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(capacityApi.clearCapacity).not.toHaveBeenCalled()
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(choresApi.updateChore).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: it is the one run a capacity change makes — no planner of its own', async () => {
+    // The manual pin (#49 AC 4) is a property of `reassignHousehold`, so the
+    // claim at this level is that App reached THAT and built no second path:
+    // `planReassignment` is stubbed too and must stay untouched.
+    await renderApp()
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(reassignApi.planReassignment).not.toHaveBeenCalled()
+  })
+
+  it('POSITIVE CONTROL: with every chore held, the split offers no such action', async () => {
+    choresApi.listChores.mockResolvedValue(
+      nobodyHas.map((c, i) => ({ ...c, assigned_member_id: i ? 'm2' : 'm1', assigned_source: 'manual' })),
+    )
+    await renderApp()
+    await screen.findByTestId('split-verdict')
+    expect(screen.queryByRole('button', { name: /deal these out/i })).toBeNull()
+  })
+
+  it('is disabled while the run is in flight — the tabs and this control alike', async () => {
+    let finish
+    reassignApi.reassignHousehold.mockImplementation(
+      () => new Promise((resolve) => (finish = resolve)),
+    )
+    await renderApp()
+    const button = await screen.findByRole('button', { name: /deal these out/i })
+    await act(async () => void fireEvent.click(button))
+    expect(button).toBeDisabled()
+    await act(async () => void finish({ applied: 2, assignments_version: 1 }))
+    expect(screen.getByRole('button', { name: /deal these out/i })).not.toBeDisabled()
+  })
+
+  it('a refused run reports itself on the split and leaves the control usable', async () => {
+    reassignApi.reassignHousehold.mockRejectedValue(
+      new Error('applying the re-assignment: the household moved'),
+    )
+    await renderApp()
+    await pressDealOut()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/the household moved/i)
+    expect(screen.getByRole('button', { name: /deal these out/i })).not.toBeDisabled()
+  })
+})

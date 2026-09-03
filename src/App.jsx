@@ -657,6 +657,17 @@ export default function App() {
     },
     [mutate, periodStart, household],
   )
+  // #284 — deal out the work nobody has. The SAME run the two capacity
+  // handlers above make, with no write of its own in front of it: at setup
+  // every capacity edit lands before any chore exists, so the trigger #49
+  // wired never fires and the split's needs-attention area was a dead end
+  // (measured on #52). `reassignHousehold` re-reads everything, computes with
+  // the real allocator, pins what was placed by hand, and stores through the
+  // one transactional RPC; `mutate()`'s refresh then shows the stored result.
+  const handleDealOut = useCallback(
+    () => mutate(() => reassignHousehold({ householdId: household?.id })),
+    [mutate, household],
+  )
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
   // same state object `isOrganizer` compares against below, so who-you-are and
@@ -813,6 +824,8 @@ export default function App() {
           error={error}
           fairnessNoteDismissed={fairnessNoteDismissed}
           onDismissFairnessNote={handleDismissFairnessNote}
+          onDealOut={handleDealOut}
+          busy={busy}
         />
       ) : null}
 

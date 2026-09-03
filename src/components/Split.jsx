@@ -337,6 +337,8 @@ export default function Split({
   error,
   fairnessNoteDismissed,
   onDismissFairnessNote,
+  onDealOut,
+  busy = false,
 }) {
   const { actual, reachable, reason } = verdictFor({ capacities, chores, exclusions })
 
@@ -452,6 +454,54 @@ export default function Split({
             {unassignedMinutes} min of work nobody has yet
             <span className="chore__cost-human"> ({formatMinutes(unassignedMinutes)})</span>
           </p>
+          {/* #284 — the route from "everything entered" to a first fair split.
+              Measured on #52: a from-nothing household reached this screen
+              with every member, capacity, chore and exclusion in and found
+              NO control at all, because #49's automatic run is triggered by a
+              capacity change and at setup every capacity is set before any
+              chore exists. The only route was thirteen Who dropdowns.
+
+              This is deliberately not the re-balance button the charter's
+              decision log ruled out. That ruling is about work people already
+              hold — a button there is the negotiation moved rather than
+              removed. Work NOBODY holds has no negotiation in it: there is no
+              before-state to defend and no one being asked to give something
+              up. So the action lives inside the needs-attention area and
+              nowhere else — it exists exactly when this area does.
+
+              It runs the SAME re-assignment a capacity change runs
+              (`reassignHousehold` → `apply_assignments`, "like any other
+              run" in the issue's words), so a chore somebody placed by hand
+              is pinned and its minutes counted (#49 AC 4), the stability
+              rule and change budget apply to anything auto-placed, and the
+              verdict is stored where `LastRebalance` reads it. A second code
+              path that only touched the unassigned set would be a second
+              placement rule, which #40 AC 9 forbids.
+
+              Offered only while somebody has minutes this week: with nobody
+              at capacity the allocator can place nothing (#49 AC 5), and a
+              button that visibly does nothing is worse than none. The
+              verdict above already says there is no split to make. */}
+          {onDealOut && actual.load.length > 0 ? (
+            <div className="split__deal">
+              {/* The refusal is on screen already — `mutate()` put it in
+                  `error`, rendered above — so the promise is settled here the
+                  way every other control's is, rather than left to reject
+                  unhandled. */}
+              <button
+                type="button"
+                className="button"
+                onClick={() => onDealOut().then(() => {}, () => {})}
+                disabled={busy}
+              >
+                Deal these out
+              </button>
+              <p className="split__deal-note">
+                Shares this work out by each person&rsquo;s minutes. Anything you placed by hand
+                stays where it is.
+              </p>
+            </div>
+          ) : null}
           <ul className="split__attention">
             {unassigned.map((chore) => (
               <li className="split__attention-row" key={chore.id}>
@@ -475,4 +525,6 @@ Split.propTypes = {
   error: PropTypes.string,
   fairnessNoteDismissed: PropTypes.bool.isRequired,
   onDismissFairnessNote: PropTypes.func.isRequired,
+  onDealOut: PropTypes.func,
+  busy: PropTypes.bool,
 }

@@ -1169,6 +1169,16 @@ describe('#19 — no real household name reaches version control', () => {
     Chores: 'a tab label — the chore surface',
     Who: 'a tab label — the roster surface',
     Done: 'a tab label — the completed-work surface (#302)',
+    // #291 — the two sign-out controls and the confirm's back-out, asserted by
+    // EXACT accessible name rather than /sign out/i. The exactness is the
+    // point and is why they are literals at all: two controls on the roster
+    // header now start with "Sign out", and a substring match would take
+    // either — a test that cannot tell apart the two scopes this story exists
+    // to separate. Declared rather than lower-cased for the tab labels'
+    // reason: a button label is capitalised by design.
+    'Sign out': 'a button label — the this-device-only sign-out control',
+    'Sign out everywhere': 'a button label — the every-session sign-out control',
+    'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to

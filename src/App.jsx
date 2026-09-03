@@ -441,7 +441,15 @@ export default function App() {
     (credentials) => mutate(() => signIn(credentials)),
     [mutate],
   )
-  const handleSignOut = useCallback(() => mutate(() => signOut()), [mutate])
+  // #291 — two scopes, one handler. The ordinary control ends this device's
+  // session and nothing else; `everywhere` revokes every session for the
+  // account, which is the lost-or-stolen-device answer and the only reason the
+  // library's `global` default is still reachable at all. The scope is decided
+  // by the control the person pressed, never by an unstated default.
+  const handleSignOut = useCallback(
+    (options) => mutate(() => signOut(options)),
+    [mutate],
+  )
   // #159 AC 4 — every write names the household THIS SCREEN IS SHOWING, taken
   // from the `household` state that `refresh()` set, rather than re-resolving it
   // inside the data layer. Re-resolving was the defect: it went through the same

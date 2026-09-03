@@ -249,9 +249,27 @@ export async function signUpOrganizer({ email, password }) {
   return data.session
 }
 
-/** End the session on this phone. */
-export async function signOut() {
-  const { error } = await getSupabase().auth.signOut()
+/**
+ * End the session, on this device only or everywhere.
+ *
+ * The scope is passed EXPLICITLY and is not the library's default, which is
+ * `global` — supabase-js signs out every session for the account on every
+ * device unless told otherwise. That default was never chosen here: it shipped
+ * because nobody wrote an argument, and it meant tidying up the kitchen tablet
+ * silently locked the same person out on their phone (#291).
+ *
+ * `local` is the right default for THIS app because a session is a person and
+ * the devices are a household's: a family sharing a tablet hands it over
+ * without anybody losing the phone in their pocket. `global` stays reachable
+ * because the one case that genuinely wants it — a lost or stolen device — is
+ * a case the person cannot reach the device to fix.
+ *
+ * @param {{ everywhere?: boolean }} [options] `everywhere: true` revokes every
+ *   session for this account, on every device, including this one.
+ */
+export async function signOut({ everywhere = false } = {}) {
+  const scope = everywhere ? 'global' : 'local'
+  const { error } = await getSupabase().auth.signOut({ scope })
   if (error) {
     const err = new Error(`Could not sign out: ${error.message}`)
     err.cause = error

@@ -192,3 +192,5 @@ and pull requests, and nothing stops a direct push that fails it. The options, i
 enough later, are: make the repo public, buy GitHub Pro, or add a `githooks/pre-push` — and a
 pre-push hook stops the habit, not an adversary, since it lives in one checkout and `--no-verify`
 skips it silently.
+
+<!-- #289 AC 4 probe: a PR whose required check has not reported success. Closed immediately. -->

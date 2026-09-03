@@ -133,6 +133,7 @@ vi.mock('./supabase.js', () => ({
 
 const {
   addMember,
+  confirmationRedirectTo,
   currentHousehold,
   listHouseholds,
   createHousehold,
@@ -335,10 +336,13 @@ describe('signing in as a person', () => {
   it('creates the organizer their own account, which is the one signup a client may do', async () => {
     const session = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
     expect(session.user.id).toBe('organizer-1')
-    expect(calls).toContainEqual({
-      op: 'signUp',
-      credentials: { email: 'alex@example.com', password: 'longenough' },
-    })
+    // The address and password only. `options.emailRedirectTo` rides on the
+    // same object since #129 and has three tests of its own below; asserting
+    // the whole object here would make this test fail whenever that value
+    // changes, which is not what it is about.
+    const signUpCall = calls.find((c) => c.op === 'signUp')
+    expect(signUpCall.credentials.email).toBe('alex@example.com')
+    expect(signUpCall.credentials.password).toBe('longenough')
   })
 
   it('says plainly when the account needs email confirmation, rather than returning a null session', async () => {
@@ -360,6 +364,73 @@ describe('signing in as a person', () => {
     await expect(
       signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
     ).rejects.toThrow(/already registered/i)
+  })
+
+  // #129 AC 2 — these three assert that the confirmation link's destination
+  // REACHES `auth.signUp()` and that it is DERIVED, and the second half is the
+  // one that needed designing rather than writing.
+  //
+  // jsdom's default origin is `http://localhost:3000` — byte-identical to the
+  // Supabase Site URL default that caused the defect this story repairs. So a
+  // test that merely asserted the literal `http://localhost:3000` arrived would
+  // pass just as well against `emailRedirectTo: 'http://localhost:3000'`
+  // hard-coded at the call site, which is precisely the implementation AC 2
+  // says must redden. The fixture cannot tell the two apart because the
+  // environment made them identical
+  // (cairn `a-fixture-copied-from-production-cannot-tell-them-apart`).
+  //
+  // What separates them is MOVING the origin and requiring the value to follow.
+  // Hence `withOrigin` below: any constant, including the true production URL
+  // and including jsdom's own default, fails at least one of these.
+  const withOrigin = async (origin, run) => {
+    const original = Object.getOwnPropertyDescriptor(window, 'location')
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, origin, href: `${origin}/`, toString: () => `${origin}/` },
+    })
+    try {
+      return await run()
+    } finally {
+      if (original) Object.defineProperty(window, 'location', original)
+    }
+  }
+
+  it('sends the confirmation link back to the origin the signup came from', async () => {
+    await withOrigin('https://taskr.example.test', () =>
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    )
+    expect(calls).toContainEqual({
+      op: 'signUp',
+      credentials: {
+        email: 'alex@example.com',
+        password: 'longenough',
+        options: { emailRedirectTo: 'https://taskr.example.test' },
+      },
+    })
+  })
+
+  it('follows the origin to a DIFFERENT one, so no constant can satisfy both', async () => {
+    // The pair is the assertion. One origin is satisfiable by a literal; two
+    // are satisfiable only by reading the origin. This is the mutation AC 2
+    // names, written as a test rather than left to a one-off run.
+    await withOrigin('http://localhost:5173', () =>
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    )
+    const signUpCall = calls.find((c) => c.op === 'signUp')
+    expect(signUpCall.credentials.options.emailRedirectTo).toBe('http://localhost:5173')
+  })
+
+  it('falls back to Site URL rather than inventing a default when there is no window', () => {
+    // `undefined` is the value that makes supabase-js defer to the project's
+    // Site URL. A string here — any string — would be the constant this story
+    // exists to remove, so the absence is asserted rather than assumed.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: undefined })
+    try {
+      expect(confirmationRedirectTo()).toBeUndefined()
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'window', original)
+    }
   })
 
   // #291 — these three assert the SCOPE the call is made with, and that is the

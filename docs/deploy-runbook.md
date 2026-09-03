@@ -202,7 +202,45 @@ persists anything.
    time**, so adding them changed nothing about the deployment already live. Set the variables
    *before* building the first code that reads them, or you get a runtime failure with values that
    look simply absent, no build error, and nothing to suggest the deployment is stale.
-5. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
+5. **Authentication → URL Configuration. Set `Site URL` to the production origin** — the deployed
+   app's own URL, e.g. `https://<the deployed app>`. **Do not leave it at the factory default**,
+   which is `http://localhost:3000`.
+
+   This step did not exist on this page until **#129**, and its absence is the root cause of a live
+   failure rather than a tidiness point. *Measured 2026-08-21*: the field was still
+   `http://localhost:3000`, untouched since the project was created on 2026-08-05, and an organizer
+   clicked a real confirmation email and landed on a dead page. A probe with a deliberately invalid
+   token reproduced it exactly:
+
+   ```
+   GET https://<project ref>.supabase.co/auth/v1/verify?token=deliberately-invalid-probe&type=signup
+
+   303 See Other
+   Location: http://localhost:3000#error=access_denied&error_code=otp_expired&…
+   ```
+
+   Nothing in this repo could have caught it. It is a dashboard field, and every check was green
+   for the sixteen days it was wrong — which is why it is a numbered step here and not a caution.
+
+   **Also set `Redirect URLs`** to the production origin and the local dev origin
+   (`http://localhost:5173`, Vite's default). **Preview origins are deliberately excluded** — #121
+   put Vercel previews behind Standard Protection, and adding `*.vercel.app` here would make a
+   deliberately walled-off surface a sanctioned auth redirect target. The same decision is recorded
+   at the call site in `src/lib/household.js` (`confirmationRedirectTo`); the two are one decision
+   seen twice, so change both or neither.
+
+   **The ordering hazard, which is the part that costs an hour if it is not known:** a confirmation
+   email's `redirect_to` is fixed **at send time**, baked into the link when the mail goes out.
+   Correcting `Site URL` afterwards does **not** repair links already in an inbox — those still
+   point where they pointed. The person has to request a fresh email. So set this **before** the
+   first signup, and after any correction assume every outstanding link is still broken.
+
+   Since **#129** the app also passes `emailRedirectTo` from the running origin at the call site, so
+   a signup driven from `npm run dev` comes back to the dev server rather than to production. That
+   makes the value checkable in code rather than only in a dashboard — but it does not replace this
+   step: the redirect must still be in `Redirect URLs` to be honoured, and anything the app does not
+   pass a value for still falls back to `Site URL`.
+6. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
 
 ## 3. The Edge Functions

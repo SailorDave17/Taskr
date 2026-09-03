@@ -639,6 +639,12 @@ export default function Roster({
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
   const [email, setEmail] = useState('')
+  // #291 — the second sign-out is two taps, matching the Remove idiom below.
+  // Not because it is destructive to data (it is not) but because it is
+  // destructive to a session you are not holding: the point of pressing it is
+  // to end a session on a device that is not in front of you, and a mis-tap
+  // ends one that is.
+  const [confirmingSignOutAll, setConfirmingSignOutAll] = useState(false)
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -672,15 +678,61 @@ export default function Roster({
               sign back in as. Now the session is a person, and a family sharing
               one tablet needs to hand it over without handing over an identity.
               Also the only way to correct a sign-in as the wrong person. */}
+          {/* #291 put a second control beside it, so the pair sits in a bare
+              `.row` — deliberately WITHOUT #82's wrapped-line stretch opt-in.
+              That class is a measured decision, held by gate.test.js to one
+              row per screen (which is why it is not spelled in this comment:
+              the guard is a raw text scan). This header was never part of that
+              measurement, and borrowing the opt-in would widen a stretch rule
+              onto a row nobody measured — the thing #82's own comment refuses.
+              Plain `.row` already gives flex, wrap and the gap. */}
           {onSignOut ? (
-            <button
-              className="button button--quiet"
-              type="button"
-              onClick={onSignOut}
-              disabled={busy}
-            >
-              Sign out
-            </button>
+            <div className="row">
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => onSignOut({ everywhere: false })}
+                disabled={busy}
+              >
+                Sign out
+              </button>
+              {/* #291 — the lost-or-stolen-device answer, and the ONLY control
+                  in the app that ends a session on a device the person is not
+                  holding. It sits beside the ordinary one rather than behind a
+                  settings screen because the moment somebody needs it they are
+                  not browsing; they have just realised where their phone is
+                  not. Confirm-in-place, like Remove: the mistake this guards
+                  against is pressing the wrong one of two adjacent buttons. */}
+              {confirmingSignOutAll ? (
+                <>
+                  <button
+                    className="button button--danger"
+                    type="button"
+                    onClick={() => onSignOut({ everywhere: true })}
+                    disabled={busy}
+                  >
+                    Sign out on every device?
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    type="button"
+                    onClick={() => setConfirmingSignOutAll(false)}
+                    disabled={busy}
+                  >
+                    Keep them
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  onClick={() => setConfirmingSignOutAll(true)}
+                  disabled={busy}
+                >
+                  Sign out everywhere
+                </button>
+              )}
+            </div>
           ) : null}
         </div>
         {/* The join code lived here, with a note conceding it was "deterrence,

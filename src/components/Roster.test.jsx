@@ -99,9 +99,50 @@ describe('the household header — #62', () => {
   it('offers a way to sign out, which device auth never needed', () => {
     // A session is a PERSON now. On a shared tablet this is the only way to
     // stop being them, and the only way to undo signing in as the wrong one.
+    //
+    // #291 — the name is EXACT now rather than /sign out/i. There are two
+    // sign-out controls on this row and a substring match would have taken
+    // either, which is a test that cannot tell apart the two things this story
+    // exists to separate.
     const { onSignOut } = setup()
-    fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
-    expect(onSignOut).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(onSignOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  // #291 — the lost-or-stolen-device route. The assertions are on the OPTION
+  // each control passes, because "a sign-out happened" is satisfied by both and
+  // is the assertion that let a `global` default ship unnoticed.
+  it('offers a second, confirmed route that ends every session for the account', () => {
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out on every device?' }))
+    expect(onSignOut).toHaveBeenCalledWith({ everywhere: true })
+  })
+
+  it('does not end every session on the first tap of it', () => {
+    // The confirm is the point: this control ends sessions on devices the
+    // person is not holding, so a mis-tap on the button beside the ordinary
+    // one must not be enough.
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' }))
+    expect(onSignOut).not.toHaveBeenCalled()
+  })
+
+  it('backs out of the confirm without signing out at all', () => {
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Keep them' }))
+    expect(onSignOut).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Sign out everywhere' })).toBeInTheDocument()
+  })
+
+  it('leaves the ordinary sign-out local while the confirm is open', () => {
+    // Both controls are on screen at once in the confirming state. The
+    // ordinary one must still mean this device only.
+    const { onSignOut } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(onSignOut).toHaveBeenCalledWith({ everywhere: false })
   })
 })
 

@@ -143,7 +143,7 @@ export default function Onboarding({ onCreate, onSignIn, onSignOut, signedIn = f
               <button
                 className="button button--quiet"
                 type="button"
-                onClick={onSignOut}
+                onClick={() => onSignOut({ everywhere: false })}
                 disabled={busy}
               >
                 Sign out

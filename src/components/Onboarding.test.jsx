@@ -109,8 +109,12 @@ describe('signed in, but not in a household yet — the half-finished state', ()
   it('offers a way out, so the state is not a trap', () => {
     const onSignOut = vi.fn()
     render(<Onboarding onCreate={vi.fn()} onSignIn={vi.fn()} onSignOut={onSignOut} signedIn />)
-    fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
-    expect(onSignOut).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    // #291 — the option, not just the call. This screen's sign-out is the
+    // half-finished-signup escape hatch and must never revoke the person's
+    // other devices; there is no sign-out-everywhere here, deliberately,
+    // because somebody stuck without a household is not reporting a theft.
+    expect(onSignOut).toHaveBeenCalledWith({ everywhere: false })
   })
 
   it('does not offer to sign in somebody already signed in', () => {

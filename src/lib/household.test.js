@@ -115,8 +115,12 @@ const fakeClient = {
         error: null,
       })
     },
-    signOut: () => {
-      calls.push({ op: 'signOut' })
+    // #291 — records the OPTIONS, not just the call. The old fake took no
+    // argument and pushed `{ op: 'signOut' }`, so a test asserting the call
+    // happened passed identically whichever scope the call was made with,
+    // which is exactly how a `global` default shipped unnoticed.
+    signOut: (options) => {
+      calls.push({ op: 'signOut', options })
       return Promise.resolve({ error: authState.signOutError ? { message: authState.signOutError } : null })
     },
   },
@@ -358,9 +362,36 @@ describe('signing in as a person', () => {
     ).rejects.toThrow(/already registered/i)
   })
 
-  it('signs out, which is the only way off a shared phone', async () => {
+  // #291 — these three assert the SCOPE the call is made with, and that is the
+  // whole point of them. supabase-js defaults `signOut()` to `scope: 'global'`,
+  // which revokes every session for the account on every device; the app called
+  // it with no argument for months and nothing here could see it, because the
+  // only assertion was that a sign-out happened. Asserting the option is what
+  // makes the two behaviours distinguishable to a test at all.
+  it('signs out of THIS device only, leaving other devices signed in', async () => {
     await signOut()
-    expect(calls).toContainEqual({ op: 'signOut' })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'local' } })
+  })
+
+  it('takes the same local scope when asked explicitly, not the library default', async () => {
+    await signOut({ everywhere: false })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'local' } })
+  })
+
+  it('signs out everywhere when asked, which is the lost-device answer', async () => {
+    await signOut({ everywhere: true })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'global' } })
+  })
+
+  it('never reaches the library default, whichever way it is called', async () => {
+    // The defect was an ABSENT argument, so the thing worth asserting is that
+    // no call leaves the scope to be decided by somebody else.
+    await signOut()
+    await signOut({ everywhere: true })
+    await signOut({})
+    const scopes = calls.filter((c) => c.op === 'signOut').map((c) => c.options?.scope)
+    expect(scopes).toEqual(['local', 'global', 'local'])
+    expect(scopes).not.toContain(undefined)
   })
 })
 

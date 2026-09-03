@@ -766,6 +766,82 @@ now, so the record and its correction sit together.
   (no streak, rank, score or per-person total). Naming who holds one chore is a fact about that
   chore; a count per person is a scoreboard, and the Done surface's tests still refuse one.
 
+## Decision taken 2026-09-03 — sign-out is local by default, and "everywhere" is its own control
+
+**The scope was never chosen.** `src/lib/household.js` called `getSupabase().auth.signOut()` with
+no argument from #62 until #291. supabase-js defaults that to `scope: 'global'`
+(*verified in the installed 2.112.1: `async signOut(options = { scope: 'global' })`*), which revokes
+**every** session for the account on every device. So tidying up the kitchen tablet signed the same
+person out on their phone, and nothing in the repo disagreed with anything — there was no edit, no
+author and no moment at which anybody decided. This is cairn's `a-default-is-not-a-decision` shape:
+a wrong value implies a person, a default implies none.
+
+- **The rule.** The ordinary control is `scope: 'local'` — it ends the session on the device in front
+  of you and touches no other. A second control, `Sign out everywhere`, is `scope: 'global'`. The
+  scope is passed **explicitly at the call site in both directions**, so the library's default is
+  never what decides; `signOut()` with no argument means local *here*, by this app's choice, not by
+  supabase-js's.
+- **Why local is right for this app.** A session is a **person** and the devices are a **household's**
+  (#62). The Roster's own sign-out comment already said it: *"a family sharing one tablet needs to
+  hand it over without handing over an identity."* Global scope made the tablet's tidy-up reach into
+  a pocket two rooms away, which is the opposite of that.
+- **Why "everywhere" still exists, rather than being argued away.** Owner decision, 2026-09-03,
+  against the recommendation to record a no. There is one case local genuinely cannot serve — a lost
+  or stolen device — and it is defined by the person **not being able to reach the device**. The
+  alternative offered was to lean on the organizer's `resetMemberCredential`, and it was rejected as
+  a real answer: it makes a member's own security depend on somebody else being available, and the
+  organizer cannot reset **their own** credential that way at all. A route the person can take alone,
+  from any device they still hold, is the honest answer to the case.
+- **Why it is confirmed in place, and why it sits beside the ordinary control.** Two taps, matching
+  the Remove idiom on the member row. Not because it destroys data — it destroys none — but because
+  it is the only control in the app that ends a session **on a device the person is not holding**, so
+  the mistake worth guarding is a mis-tap on the wrong one of two adjacent buttons. It is beside the
+  ordinary control rather than behind a settings screen because somebody who needs it is not
+  browsing; they have just realised where their phone is not.
+- **Not on the onboarding screen, deliberately.** That screen's sign-out is the escape hatch out of
+  the half-finished-signup state (#88). Somebody stuck without a household is not reporting a theft,
+  and offering to revoke their other sessions there would answer a question nobody asked.
+- **The confirming state is three stacked lines on a phone, and that was looked at and accepted.**
+  *Measured 2026-09-03* in a real browser against the real `index.css` (jsdom has no layout engine):
+  at **360×800** the resting header is one wrapped line and a 123px card; while confirming, the three
+  buttons stack on **three** lines and the card is **227px**. At 414×896 the confirm is two lines and
+  175px. Nothing overflows horizontally at either width (`scrollWidth` == viewport). The screenshot
+  showed the sharper half of it: while confirming, the safe `Sign out` sits directly above the red
+  `Sign out on every device?`, so the two adjacent controls both begin with the same two words.
+  Three alternatives were priced and put to the owner — hide the ordinary control while confirming
+  (175px, kills the adjacency), shorten the confirm to `Confirm` (93px, one line, 123px card), or
+  move the control off the header entirely. The owner took **none of them**: ship the three-line
+  stack. The reasoning to preserve is that the state is transient and deliberately entered, and the
+  red button names its action **in full** — which is the property `Confirm` would have traded away,
+  and the same property the `Remove {display_name}?` idiom already spends a line on.
+- **What this does NOT do.** A revoked session is not a changed password. `global` ends the sessions
+  that exist; it does not stop whoever holds the device signing back in with a password they also
+  hold. Recovering from that needs a credential change, which this app still has no in-app route to
+  for an organizer — the charter says so above and it remains true. The two are complementary and
+  the second is not filed here.
+- **What must become true — this control is below the field's bar, deliberately and on the record.**
+  `design-bar` ran at #291's verification step, *2026-09-03*. Verdict: the tablet-handover moment
+  **lands**; the lost-device control is **correct and inert**. The field puts "sign out everywhere"
+  in **device management** — Google's *Manage all devices* names each session and offers per-device
+  revoke — never beside the everyday control. Ours revokes **blind**: somebody who lost a phone and
+  somebody who suspects a shared tablet want different actions and are offered one. *Measured* the
+  same day across six cases (short / typical / long household name × resting / confirming) at
+  360×800: hit targets all pass at ≥44px, nothing overflows, and in **every** case the safe
+  `Sign out` sits **8px above the red confirm, in the same column, sharing its first two words** —
+  in a state entered precisely because somebody is stressed. The confirm step exists to lower
+  mis-tap risk and this layout raises it. It is mis-tuned rather than impossible: hiding the
+  ordinary control while confirming was measured at 175px and removes the adjacency entirely.
+  Owner decision, 2026-09-03, having been shown the field bar and the 8px measurement: **ship it
+  and file the device list as its own story** rather than close the adjacency now or hold #291.
+  So what must become true is the device-management surface, and the version shipped here is the
+  stopgap — not the answer.
+- **How the recurrence is guarded.** The scope-asserting tests are the deliverable, not a
+  by-product. `household.test.js`'s fake now records the **options** (`{ op: 'signOut', options }`),
+  because the old one took no argument and a test asserting the call happened passed identically
+  under either scope — which is precisely how this shipped unnoticed for a month. `App.test.jsx`
+  walks from the tab to the tap and asserts what reaches the data layer, since a unit test cannot
+  answer whether the button passes anything at all (cairn: `exported-is-not-reachable`).
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

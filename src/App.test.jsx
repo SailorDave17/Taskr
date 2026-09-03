@@ -422,6 +422,35 @@ describe('when the signed-in person belongs to a household', () => {
     expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
   })
 
+  // #291 — the SCOPE reaches the data layer, from the control a person presses.
+  //
+  // This is the reachability half, and it is the half that was missing. The
+  // library's `signOut()` defaults to `scope: 'global'`, which the unit test
+  // now catches; but a unit test calls the function directly and cannot answer
+  // "does the button on the roster pass anything at all?" — cairn's
+  // `exported-is-not-reachable`. So these walk from the tab to the tap.
+  it('signs out of this device only from the ordinary control', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  it('signs out everywhere only through the confirmed control', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' })),
+    )
+    expect(api.signOut).not.toHaveBeenCalled()
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: 'Sign out on every device?' })),
+    )
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: true })
+  })
+
   // AC 3: the roster is read from the server on load. If it were cached
   // locally, a passing "survives a restart" check would be indistinguishable
   // from a device that merely remembered.

@@ -81,6 +81,7 @@ import {
   describeSchemaError,
   describeSignInError,
   probeEdgeFunction,
+  rpcArgNames,
   rpcProbeArgs,
 } from '../lib/liveSchema.js'
 
@@ -387,12 +388,32 @@ describe('#78 AC 2 — POSITIVE CONTROL: this check can actually fail', () => {
  *
  * `{ get: true }` turns `.rpc()` from a POST into a GET, and PostgREST serves a
  * GET inside a READ-ONLY TRANSACTION. That is the whole trick, and it is the
- * function-shaped equivalent of `limit(0)`: every one of these RPCs writes, so
- * the database refuses the write and answers `25006` — which proves the function
- * resolved and ran, and proves it changed nothing, in the same round trip.
+ * function-shaped equivalent of `limit(0)`: these RPCs write, so the database
+ * refuses the write and answers `25006` — which proves the function resolved,
+ * proves this role may execute it, and proves it changed nothing, in the same
+ * round trip.
  *
- * Every argument gets a nil-UUID placeholder, so even the read the function does
- * before its write matches no row of any household.
+ * Every argument gets the placeholder for its declared TYPE, and each of those is
+ * a value of that type which matches no row, so even the read a function does
+ * before its write finds nothing.
+ *
+ * #268 CORRECTED THIS DOCBLOCK, and the sentence it replaced is worth keeping in
+ * view because it was the thing that hid the defect. It read "every one of these
+ * RPCs writes, so the database refuses the write and answers `25006` — which
+ * proves the function resolved and ran". Two of the ten never ran:
+ * `apply_assignments` and `skip_repeat_occurrence` take an argument that is not a
+ * `uuid`, the one nil-UUID placeholder could not coerce to it, and Postgres
+ * refused the CALL before the privilege check — `22P02` and `22007`, both green
+ * under a classifier that reads any five-character SQLSTATE as proof of presence.
+ *
+ * So the claim is now stated at the strength the weakest row can carry, and
+ * `describeRpcError` REFUSES a class-22 answer rather than leaving the claim to a
+ * comment. Not every row answers `25006` even now: with the placeholders it is
+ * handed, `apply_assignments` is refused by its own first argument guard before
+ * it reads anything. That is a plpgsql `raise` past the privilege check, so it
+ * proves what this file claims — the function is there and this role may call it —
+ * and the read-only transaction is a second wall behind it rather than the one
+ * that fired.
  */
 async function probeRpc(fn, args) {
   const { error } = await supabase.rpc(fn, rpcProbeArgs(args), { get: true })
@@ -424,7 +445,7 @@ describe('#85 — the live project has every function this app calls', () => {
     // Dropping the option makes this the test that fails, which is the only
     // arrangement where AC 3 is guarded rather than asserted.
     requireSession()
-    const error = await probeRpc('complete_chore', ['chore_id'])
+    const error = await probeRpc('complete_chore', { chore_id: 'uuid' })
     expect(error?.code, 'the probe is no longer read-only — every probe below now WRITES').toBe(
       '25006',
     )
@@ -433,13 +454,60 @@ describe('#85 — the live project has every function this app calls', () => {
   // One test per function, for the table half's reason: a failure should name the
   // function in the run output, so the person who just pasted a migration reads
   // which one is missing without opening a file.
-  for (const { fn, args } of LIVE_RPCS) {
-    it(`${fn}(${args.join(', ')}) exists, with the arguments the app passes`, async () => {
+  for (const entry of LIVE_RPCS) {
+    const { fn, args } = entry
+    const names = rpcArgNames(args)
+    it(`${fn}(${names.join(', ')}) exists, with the arguments the app passes`, async () => {
       requireSession()
       const error = await probeRpc(fn, args)
-      expect(describeRpcError(fn, args, error) ?? 'ok').toBe('ok')
+      expect(describeRpcError(fn, names, error) ?? 'ok').toBe('ok')
+      // #268 AC 2, and it is a SEPARATE assertion on purpose. The line above
+      // already refuses a class-22 answer, but it refuses it inside
+      // `describeRpcError` — so a future edit that widened the classifier back
+      // would take this row's meaning with it and nothing here would notice. This
+      // one says the thing the row is FOR, at the call site, in its own words.
+      expect(
+        error?.code ?? 'no error',
+        `${fn} was answered while COERCING an argument, so this row proves less than the ` +
+          `rows beside it: the call never reached the privilege check, and would look ` +
+          `identical against a project granting this role no execute at all (#268)`,
+      ).not.toMatch(/^22/)
     })
   }
+
+  // #268 AC 2 and AC 3 for the two rows the story was filed about, pinned to the
+  // exact answer each gives. The loop above says "not a coercion error", which is
+  // the general property and the one that protects a row added tomorrow; these
+  // say what these two functions actually answered on the day the types were
+  // measured, so a change in that answer is a thing somebody has to look at
+  // rather than a silent drift back.
+  it('apply_assignments is answered by the FUNCTION, past the privilege check — #268', async () => {
+    requireSession()
+    const args = LIVE_RPCS.find((entry) => entry.fn === 'apply_assignments').args
+    const error = await probeRpc('apply_assignments', args)
+    // P0001 is the function's own `raise`. Reaching it means PostgREST resolved
+    // the overload, Postgres checked `execute` and allowed it, and plpgsql began
+    // — which is everything the row claims, and none of which the pre-#268
+    // `22P02` established.
+    expect(error?.code).toBe('P0001')
+    // AC 3: shown to change nothing, rather than assumed to. This is the message
+    // of the FIRST guard in the body — `jsonb_typeof(placements) is distinct from
+    // 'array'` — so the probe was refused before the membership lookup, before the
+    // `for update` on `households`, and before any statement that could write. The
+    // read-only transaction asserted above never had to fire.
+    expect(error?.message).toContain('placements must be an array')
+  })
+
+  it('skip_repeat_occurrence is refused by the read-only transaction — #268', async () => {
+    requireSession()
+    const args = LIVE_RPCS.find((entry) => entry.fn === 'skip_repeat_occurrence').args
+    const error = await probeRpc('skip_repeat_occurrence', args)
+    // The other half of AC 3, and the cleaner one: this function's first act is a
+    // row lock, so the answer IS the read-only transaction stopping a write —
+    // observed, on the live project, with the same placeholders every other row
+    // uses. Before #268 this row answered `22007` and could not have said so.
+    expect(error?.code).toBe('25006')
+  })
 })
 
 describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () => {
@@ -450,7 +518,7 @@ describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () =>
   it('fails on a function that does not exist, and names it', async () => {
     requireSession()
     const fn = 'taskr_no_such_function_positive_control'
-    const error = await probeRpc(fn, ['chore_id'])
+    const error = await probeRpc(fn, { chore_id: 'uuid' })
     expect(error, 'a missing function must be an error, not an empty result').toBeTruthy()
     expect(error.code).toBe('PGRST202')
     const line = describeRpcError(fn, ['chore_id'], error)
@@ -470,7 +538,7 @@ describe('#85 AC 2 — POSITIVE CONTROL: the RPC check can actually fail', () =>
     // drifts away from the client is exactly the live failure this check is for,
     // and a name-only check would call it healthy.
     requireSession()
-    const error = await probeRpc('complete_chore', ['chore'])
+    const error = await probeRpc('complete_chore', { chore: 'uuid' })
     expect(error, 'a changed signature must be an error, not an empty result').toBeTruthy()
     expect(error.code).toBe('PGRST202')
     expect(describeRpcError('complete_chore', ['chore'], error)).toContain('signature changed')

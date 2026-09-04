@@ -116,65 +116,170 @@ export const LIVE_TABLES = Object.freeze(LIVE_SCHEMA.map((entry) => entry.table)
 // with the sign flipped. What covers their paste is the `chore_exclusions` entry
 // above: both functions and the table arrive in one file, so a project with the
 // table has run the whole of it.
+//
+// #268 — EVERY ARGUMENT DECLARES ITS TYPE, and the declaration is not decoration
+// either. `args` was a list of names until this story, and one placeholder — the
+// nil UUID — was passed for all of them. That was correct while every probed
+// function took only `uuid`, and it silently stopped being correct the moment one
+// did not: a `bigint`, a `jsonb` or a `date` parameter refuses the nil UUID at
+// COERCION, which is *before* PostgREST's privilege check, so the row went green
+// having proved nothing about whether this role may execute the function at all.
+// Measured against the live project on 2026-09-04, one GET each:
+//
+//   as `anon`            old args              typed args
+//   apply_assignments    22P02 (coercion)      42501 (permission denied)
+//   skip_repeat_occurr.  22007 (coercion)      42501 (permission denied)
+//
+// The whole difference between a weak row and a real one is in that table: with
+// the old arguments both functions answered identically as `anon` and as
+// `authenticated`, so the row would have read the same with `0018`'s
+// `grant execute … to authenticated` missing entirely.
+//
+// So the type is part of the entry, exactly as the argument NAMES are, and for
+// the same reason: it is what the probe has to know, and a convention held in
+// somebody's head is what this story is fixing. A type with no placeholder in
+// `RPC_PROBE_VALUES` makes `rpcProbeArgs` throw, `liveSchema.test.js` calls it for
+// every entry, and `migrations.pglite.test.js` compares every declared type
+// against `pg_proc` in a database built from `supabase/migrations/` — so a type
+// that is absent, misspelled or simply wrong fails in CI rather than producing
+// another green row that proves less than it claims.
 export const LIVE_RPCS = Object.freeze([
   Object.freeze({
     fn: 'create_household',
-    args: Object.freeze(['household_name', 'organizer_name', 'household_timezone']),
+    args: Object.freeze({
+      household_name: 'text',
+      organizer_name: 'text',
+      household_timezone: 'text',
+    }),
   }),
-  Object.freeze({ fn: 'complete_chore', args: Object.freeze(['chore_id']) }),
+  Object.freeze({ fn: 'complete_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
   // #53, arriving with `0012` — red on purpose until that file is pasted, the
   // same deliberate window every migration-borne entry here has had. No
   // arguments: a bare GET resolves a parameter-free function, and PostgREST
   // serves it in a read-only transaction, so the probe cannot create anything
   // — the pass either finds nothing to do (an empty household) or is refused
   // by Postgres with `25006`, and both classify as PRESENT.
-  Object.freeze({ fn: 'catch_up_repeats', args: Object.freeze([]) }),
-  Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze(['chore_id']) }),
+  Object.freeze({ fn: 'catch_up_repeats', args: Object.freeze({}) }),
+  Object.freeze({ fn: 'uncomplete_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
   // #305, arriving with `0027` — red on purpose until that file is applied,
   // the same deliberate window every migration-borne entry here has had. Both
   // write, so the read-only GET answers `25006` once the function resolves,
   // which classifies as PRESENT exactly as `complete_chore` above does.
-  Object.freeze({ fn: 'miss_chore', args: Object.freeze(['chore_id']) }),
-  Object.freeze({ fn: 'unmiss_chore', args: Object.freeze(['chore_id']) }),
-  Object.freeze({ fn: 'assign_chore', args: Object.freeze(['chore_id', 'member_id']) }),
-  Object.freeze({ fn: 'unassign_chore', args: Object.freeze(['chore_id']) }),
+  Object.freeze({ fn: 'miss_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
+  Object.freeze({ fn: 'unmiss_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
+  Object.freeze({
+    fn: 'assign_chore',
+    args: Object.freeze({ chore_id: 'uuid', member_id: 'uuid' }),
+  }),
+  Object.freeze({ fn: 'unassign_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied
   // — the same deliberate window every migration-borne entry here has had — and
-  // `0018` was applied on 2026-08-27 (#231), so this reads green now. The probe
-  // passes the nil UUID for all four arguments; `expected_version` is a bigint
-  // and `placements`/`verdict` are jsonb, so a resolved function refuses the
-  // CAST (`22P02`, Postgres answering) before it could check anything — which
-  // classifies as PRESENT, exactly like `25006` on the writers above.
+  // `0018` was applied on 2026-08-27 (#231), so this reads green now.
+  //
+  // #268: this is the entry the whole typed-argument change was filed for. Until
+  // it, the probe passed the nil UUID for all four arguments and `expected_version`
+  // refused the cast, so the row was answered by COERCION rather than by the
+  // function — `22P02` from both roles, indistinguishable from a project with no
+  // execute grant at all. *Measured 2026-09-04 with the types below*: `42501` as
+  // `anon` and `P0001` as `authenticated`, so the two roles now differ and the row
+  // is evidence about the grant. The `authenticated` answer is the function's own
+  // first argument guard (`placements must be an array …`) refusing the `null`
+  // jsonb placeholder — a plpgsql `raise`, which classifies as PRESENT for the
+  // same reason `25006` does on the writers above.
   Object.freeze({
     fn: 'apply_assignments',
-    args: Object.freeze(['household_id', 'expected_version', 'placements', 'verdict']),
+    args: Object.freeze({
+      household_id: 'uuid',
+      expected_version: 'bigint',
+      placements: 'jsonb',
+      verdict: 'jsonb',
+    }),
   }),
   // #105, arriving with `0025` — red on purpose until that file is applied.
-  // `skip_date` is a `date`, so the nil-UUID placeholder fails its CAST
-  // (`22P02`, Postgres answering) before the privilege check could run — the
-  // same shape as `apply_assignments` above, and the same limit: this probe
-  // proves the function resolves with these argument names and says nothing
-  // about the execute privilege (#268 tracks that class). The pglite suite is
-  // what proves the privilege against a real Postgres.
-  Object.freeze({ fn: 'skip_repeat_occurrence', args: Object.freeze(['chore_id', 'skip_date']) }),
+  // `skip_date` is a `date`, and it was the SECOND weak row #268 found: the
+  // nil-UUID placeholder failed its cast with `22007` rather than `22P02`, which
+  // is why looking for one code would have missed it. *Measured 2026-09-04 with
+  // the types below*: `42501` as `anon`, `25006` as `authenticated` — the
+  // read-only transaction refusing the row lock, exactly like the writers above.
+  Object.freeze({
+    fn: 'skip_repeat_occurrence',
+    args: Object.freeze({ chore_id: 'uuid', skip_date: 'date' }),
+  }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */
 export const LIVE_RPC_NAMES = Object.freeze(LIVE_RPCS.map((entry) => entry.fn))
 
 /**
- * The one value every probe passes for every argument.
+ * The nil UUID — the value that names nothing, for the two types it is text for.
  *
- * A nil UUID is text that coerces to `uuid`, so one placeholder serves both
- * argument types this app passes and the probe needs no type table alongside the
- * name table. It matches no row of any household, which is the second half of
- * why it is safe.
+ * It coerces to `uuid` and it is ordinary `text`, and it matches no row of any
+ * household either way, which is half of why the probe is safe. It was the ONLY
+ * placeholder until #268; the type table below is what it became.
  */
 export const RPC_PROBE_VALUE = '00000000-0000-0000-0000-000000000000'
 
-/** The arguments to probe `fn` with — every name it takes, all set to the placeholder. */
+/**
+ * One placeholder per Postgres argument type — #268.
+ *
+ * The probe sends these as query parameters on a GET, so every one is text that
+ * Postgres coerces, and each is chosen to be the value of its type that names
+ * nothing: the nil UUID, version zero, the first representable date, and the
+ * JSON `null`. A function handed these can find no row to act on, which is why
+ * the placeholders can be sent to PRODUCTION at all.
+ *
+ * `jsonb` is `'null'` rather than `'[]'` or `'{}'` deliberately, and the choice
+ * is the conservative one rather than an oversight. *Measured 2026-09-04*: with
+ * `'[]'`/`'{}'` the probe reaches `apply_assignments`' membership lookup and is
+ * refused there ("no such household for this member"); with `'null'` it is
+ * refused one step earlier by the function's own `jsonb_typeof` guard, having
+ * read nothing at all. Both are the function answering, so both prove exactly
+ * what the row claims — the caller may execute it — and the earlier refusal
+ * reaches less far into a live database for the same evidence. One value per
+ * type also keeps this a TYPE table: a value picked to suit one argument's role
+ * would be the convention-in-somebody's-head that #268 exists to remove.
+ *
+ * A type absent from here is a hard error rather than a default, because a
+ * default is precisely how the nil UUID came to be passed for a `bigint`.
+ */
+export const RPC_PROBE_VALUES = Object.freeze({
+  uuid: RPC_PROBE_VALUE,
+  text: RPC_PROBE_VALUE,
+  bigint: '0',
+  date: '0001-01-01',
+  jsonb: 'null',
+})
+
+/**
+ * The arguments to probe `fn` with — every name it takes, at its type's placeholder.
+ *
+ * Throws on a type with no placeholder. That is the point of the throw: the
+ * alternative is a value that fails coercion, and a coercion failure is answered
+ * by Postgres BEFORE the privilege check, so the row goes green having proved
+ * less than the rows beside it. `liveSchema.test.js` calls this for every entry
+ * in `LIVE_RPCS`, so the throw lands in CI rather than in `check:live`, which CI
+ * cannot run.
+ */
 export function rpcProbeArgs(args) {
-  return Object.fromEntries(args.map((name) => [name, RPC_PROBE_VALUE]))
+  return Object.fromEntries(
+    Object.entries(args).map(([name, type]) => {
+      if (!Object.hasOwn(RPC_PROBE_VALUES, type)) {
+        throw new Error(
+          `liveSchema: no probe placeholder for the type \`${type}\` (argument \`${name}\`).\n` +
+            `Add one to RPC_PROBE_VALUES — a value of that type that matches no row — or the ` +
+            `probe would die at argument coercion, before the privilege check, and its ` +
+            `check:live row would prove less than the rows beside it (#268).\n` +
+            `Known types: ${Object.keys(RPC_PROBE_VALUES).join(', ')}`,
+        )
+      }
+      return [name, RPC_PROBE_VALUES[type]]
+    }),
+  )
+}
+
+/** The argument names of an entry's `args`, in the order they were declared. */
+export function rpcArgNames(args) {
+  return Object.keys(args)
 }
 
 /**
@@ -199,9 +304,20 @@ export function rpcProbeArgs(args) {
  *   to this role, so the client cannot call it either. Distinct cause, identical
  *   consequence, so it is reported rather than tolerated. Same treatment the
  *   table probe gives a missing grant.
- * - Any OTHER five-character SQLSTATE means Postgres ran the call far enough to
- *   raise it, so the function resolved. `25006` (write refused), `22P02` (a bad
- *   UUID), `P0001` (the function's own `raise`) all say the same thing: present.
+ * - A class `22` SQLSTATE — `data_exception` — is the one Postgres answer that
+ *   is NOT good enough, and #268 is why. `22P02` and `22007` are raised while
+ *   COERCING an argument, which happens before the privilege check, so a row
+ *   answered that way proves the function resolved with these argument names and
+ *   nothing else: it reads identically against a project where this role holds no
+ *   `execute` at all. That is not a broken project, so the message says what to
+ *   FIX — the declared type in `LIVE_RPCS` — rather than blaming the database.
+ *   Reported rather than tolerated, because it was tolerated for eleven days and
+ *   two functions, and the whole cost of that was a row nobody could tell from a
+ *   working one.
+ * - Any OTHER five-character SQLSTATE means Postgres ran the call past the
+ *   privilege check, so the function resolved AND this role may execute it.
+ *   `25006` (write refused) and `P0001` (the function's own `raise`) both say
+ *   the same thing: present, and callable.
  * - No error at all means a non-volatile function simply ran and returned. Also
  *   present — and safe, because a function Postgres allows in a read-only
  *   transaction is one that cannot write by definition.
@@ -232,6 +348,21 @@ export function describeRpcError(fn, args, error) {
     '42501': 'the function exists and this role may not execute it, so the app cannot either',
   }[code]
   if (failures) return `${fn}: ${failures} [${code}] — ${detail}${asked}`
+
+  // #268. Class 22 is `data_exception`, and on this probe it means one thing:
+  // a placeholder did not coerce to its argument's type. Postgres answers that
+  // before the privilege check, so the row would otherwise pass while proving
+  // strictly less than every row beside it. The fault is in this repo, so the
+  // line names the repair rather than the project.
+  if (/^22[0-9A-Z]{3}$/.test(code)) {
+    return (
+      `${fn}: the probe died at ARGUMENT COERCION, so this row proves the function ` +
+      `resolved and nothing more — it never reached the privilege check, and would read ` +
+      `the same with no execute grant at all. Fix the argument types declared for this ` +
+      `function in LIVE_RPCS, and the placeholder for each in RPC_PROBE_VALUES ` +
+      `[${code}] — ${detail}${asked}`
+    )
+  }
 
   // A SQLSTATE is five characters. Postgres raised it, so the call resolved.
   if (/^[0-9A-Z]{5}$/.test(code)) return null

@@ -266,6 +266,10 @@ export function confirmationRedirectTo() {
  *
  * `emailRedirectTo` is derived, never a constant — see `confirmationRedirectTo`
  * above for why, and for why preview origins are excluded on purpose (#129).
+ *
+ * Resolves to `{ session, needsConfirmation }`. On the live project the session
+ * is always null and the flag always true, because confirmation is on; the
+ * caller says so and does NOT go on to create a household (#154).
  */
 export async function signUpOrganizer({ email, password }) {
   const { data, error } = await getSupabase().auth.signUp({
@@ -278,16 +282,24 @@ export async function signUpOrganizer({ email, password }) {
     err.cause = error
     throw err
   }
-  // Null when the project requires email confirmation. Not an error and not
-  // something this app can work around — say so plainly rather than leaving the
-  // caller with a session-shaped null.
-  if (!data.session) {
-    throw new Error(
-      'Your account was created but needs email confirmation before you can sign in. ' +
-        'Check your inbox, or turn off email confirmation in Supabase → Authentication → Providers.',
-    )
-  }
-  return data.session
+  // Null when the project requires email confirmation — which it does:
+  // `mailer_autoconfirm: false`, measured live 2026-08-26 (#154). That is the
+  // ORDINARY outcome of this call against the real project, not a fault, so it
+  // is reported as a named result rather than thrown. This function threw here
+  // until #154, which made every first signup against production end in an
+  // error the person could do nothing about, with an account already created
+  // underneath it.
+  //
+  // Not a bare `data.session` either: a caller handed a session-shaped null has
+  // to remember to check it, and the failure surfaces three steps later as
+  // "not signed in". The flag is the claim, spelled out.
+  //
+  // GoTrue answers a signup for an address that ALREADY has an account, with
+  // confirmations on, exactly like a fresh one — obfuscated user, no session,
+  // no error — so that this call cannot be used to list who has an account.
+  // `needsConfirmation` is therefore also what a returning person sees if they
+  // take the sign-up route by mistake, and the screen's wording fits both.
+  return { session: data.session ?? null, needsConfirmation: !data.session }
 }
 
 /**

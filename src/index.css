@@ -310,6 +310,30 @@ body {
   font-weight: 500;
 }
 
+/* #154 — the secondary route on the sign-in screen. A link rather than a
+   button, deliberately: "Start a household" must not sit at equal weight with
+   Sign in, because the person opening the app on a new phone almost always
+   has one already. It is still a <button> (it changes state, it does not
+   navigate), styled to read as a link, and it keeps the 44px target every
+   other control here has — a small link is the wrong trade on a phone. */
+.button--link {
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.button--link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .button--danger {
   background: #7f2b2b;
   color: #ffeaea;

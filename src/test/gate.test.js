@@ -1453,15 +1453,20 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
   })
 
   it('the onboarding step count is unchanged from before this story', () => {
-    // TWO cards and TWO forms — create a household, or sign in — which is what
-    // Onboarding carried before #37 and what it carries now. A capability step
-    // would be a third of each, and this is the number that says so.
+    // THREE cards and THREE forms since #154 — sign in, create your own
+    // account, name the household — of which a person is shown exactly one at
+    // a time. It was TWO and TWO from #37 to #154 (create a household, or sign
+    // in), and the rework that moved it is what this literal exists to make
+    // visible in a diff: #154 split the organizer's signup out of the household
+    // form, because the two could only ever succeed together on a project with
+    // email confirmation off. A capability step would be a FOURTH of each, and
+    // this is the number that says so.
     //
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(2)
-    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(2)
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(3)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(3)
   })
 
   it('no component offers a capability screen, by any of the words one would be called', () => {

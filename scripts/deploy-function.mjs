@@ -48,7 +48,14 @@ import { pathToFileURL } from 'node:url'
  *
  * `npm run deploy:function -- <name>` narrows it when that is genuinely wanted.
  */
-export const FUNCTION_NAMES = Object.freeze(['provision-member', 'calendar-connect'])
+export const FUNCTION_NAMES = Object.freeze([
+  'provision-member',
+  'calendar-connect',
+  // #96. Deploying it is the other half of `0030` — the migration creates the
+  // table this function is the only writer of, and neither action does anything
+  // useful without the other.
+  'calendar-busy',
+])
 
 /**
  * Which functions this invocation should deploy.

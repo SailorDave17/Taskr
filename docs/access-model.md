@@ -7,7 +7,9 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0029` are ALL applied to the live project, and the expected-red set is EMPTY** —
+- Status: **`0001`–`0029` are ALL applied to the live project; `0030` (#96) is in the repo and is
+  NOT, so the expected-red set holds TWO — see the `0030` entry below.** Up to `0029`, and at the
+  moment `0029` landed, that set was EMPTY —
   *measured 2026-09-02 at 32 of 32*, on both sides of `0029`'s apply in its own story's session
   (below), and at the same figure on both sides of `0028`'s earlier the same day, and on 2026-09-01
   after `0027` was applied in its.
@@ -285,8 +287,25 @@
     wrong `grant select (...)` line is a one-word diff that reads like the twenty others in these
     files and fails silently. The equivalent mistake here is a whole new grant statement, which is a
     thing a reader argues with.
-  - **`0011` also needed a DEPLOY, not only a paste**, and it is the only migration on this page
-    that does: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
+  - **`0030`** (#96) — `calendar_busy`, the derived busy-minutes table the roster reads. **NOT
+    applied at merge**, and the second migration on this page to need a DEPLOY as well as a paste:
+    `calendar-busy` is an Edge Function, so `npm run deploy:function` is the other half. Two
+    actions, two expected reds, and `0011`'s entry below is the worked example of what to expect —
+    the paste clears only its own. The stored shape is the whole of this story's minimization
+    decision (owner, 2026-08-16): `member_id`, `period_start`, `busy_minutes`, `event_count`,
+    `computed_at` and nothing a calendar could have put there, enforced as an absent column rather
+    than as a rule in the function. `service_role` is the only writer, exactly as for `0011`'s two
+    tables, because the figure is derived from a credential no client can reach. Live confirmation
+    of the grants is #100's — **not** because the local half is vacuous. *This entry said exactly
+    that until the same day it was written*, copying `0011`'s comment, and the measurement in
+    `0030`'s own privilege comment contradicts it: since #91 (the `0013` entry below) the harness
+    default is `Dxtm` with no DML, so deleting `0030`'s `service_role` grant reddens
+    `grants.pglite.test.js` — predicted 1, actual 1. What no local suite can say is whether the
+    **live** project has had the migration applied at all, because the harness builds the schema
+    it certifies; that is what #100 owns. The superseded sentence still stands in `0011`'s comment
+    and in `calendar.pglite.test.js`, tracked by #334.
+  - **`0011` also needed a DEPLOY, not only a paste**, and it was the only migration on this page
+    that did until `0030`: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
     there. Two actions, two expected reds — and, as this page said it would, **the paste cleared
     only its own**. Both have now happened.
   - **`check:live` is blind to `0009` and NOT blind to `0010` or `0011`, and the difference is worth
@@ -336,7 +355,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY. *Measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s
+- **The excused-red set holds TWO, both from #96 and both unmeasured as yet**: the `calendar_busy`
+  table probe until `0030` is applied, and the `calendar-busy` Edge Function probe until it is
+  deployed. They are written down here at the moment they are created rather than at the moment
+  somebody notices, because this page has gone stale on exactly this seam three times and the
+  entry below says so. The denominator moves from 32 to 34 with them.
+- **Before #96, the excused-red set was EMPTY. *Measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s
   apply in #306's own session — the denominator unmoved, because that file replaces a function
   body and this check probes a function only by name and argument set; the reading before the apply
   is the same as the reading after, and what separates them is the `pg_get_functiondef` read

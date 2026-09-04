@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -92,12 +92,13 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // SIX since #95 added `calendar_connections` — five after #37's
-    // `chore_exclusions`, four after #62 dropped `household_devices`. The number
-    // is a floor against a vacuous pass, not a target: it goes DOWN when a table
-    // legitimately leaves and UP when one arrives, and either edit should be
-    // visible in review rather than automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(6)
+    // SEVEN since #96 added `calendar_busy` — six after #95's
+    // `calendar_connections`, five after #37's `chore_exclusions`, four after
+    // #62 dropped `household_devices`. The number is a floor against a vacuous
+    // pass, not a target: it goes DOWN when a table legitimately leaves and UP
+    // when one arrives, and either edit should be visible in review rather than
+    // automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(7)
     expect(readTables).toContain('chores')
   })
 
@@ -117,12 +118,12 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the six tables the app still reads', () => {
+  it('covers the seven tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
-    // fifth — and to six with #95's `calendar_connections`. Every edit is
-    // stated, because a required-set that changes size silently is exactly how
-    // somebody quietly weakens a check.
+    // fifth — to six with #95's `calendar_connections`, and to seven with #96's
+    // `calendar_busy`. Every edit is stated, because a required-set that changes
+    // size silently is exactly how somebody quietly weakens a check.
     for (const table of [
       'households',
       'members',
@@ -130,6 +131,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'member_capacity',
       'chore_exclusions',
       'calendar_connections',
+      'calendar_busy',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
@@ -144,6 +146,16 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(LIVE_TABLES).not.toContain('calendar_tokens')
   })
 
+  it('#96 — the derived table is here and the credential still is not', () => {
+    // `0030` adds the THIRD calendar table, and the split it inherits is the
+    // whole minimization decision: the household reads derived minutes, nobody
+    // reads the refresh token. Asserted as a pair, because the failure worth
+    // catching is not a missing entry — it is a future migration granting the
+    // client something on `calendar_tokens` and this list quietly following.
+    expect(LIVE_TABLES).toContain('calendar_busy')
+    expect(LIVE_TABLES).not.toContain('calendar_tokens')
+  })
+
   it('takes its column lists from the data layer rather than restating them', () => {
     // The point of AC 3: these are the SAME strings the queries use, so adding a
     // column to a select cannot leave the check behind. Asserting identity here
@@ -154,6 +166,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.members).toBe(MEMBER_COLUMNS)
     expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
     expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
+    expect(byTable.calendar_busy).toBe(CALENDAR_BUSY_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -169,6 +182,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(household).toContain('.select(MEMBER_COLUMNS)')
     expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
     expect(calendar).toContain('.select(CALENDAR_CONNECTION_COLUMNS)')
+    expect(calendar).toContain('.select(CALENDAR_BUSY_COLUMNS)')
   })
 })
 

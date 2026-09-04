@@ -44,6 +44,14 @@ vi.mock('./supabase.js', () => ({
           calls.push({ op: 'in', table, column, value })
           return q
         },
+        // #96 — `listBusyWeeks` filters by the week as well as the member set,
+        // and the recorded call is what proves it: a read that matched on the
+        // member alone would return every week this household has ever had and
+        // the roster would show whichever row came first.
+        eq: (column, value) => {
+          calls.push({ op: 'eq', table, column, value })
+          return q
+        },
         then: (onOk, onErr) => Promise.resolve(selectResult).then(onOk, onErr),
       }
       return q
@@ -52,6 +60,7 @@ vi.mock('./supabase.js', () => ({
 }))
 
 const {
+  CALENDAR_BUSY_COLUMNS,
   CALENDAR_CONNECTION_COLUMNS,
   CONSENT_HOUSEHOLD_KEY,
   CONSENT_STATE_KEY,
@@ -62,6 +71,10 @@ const {
   consentUrl,
   hasCalendarConfig,
   isRealEmailMember,
+  busyComputedLabel,
+  busyWeekFor,
+  fetchBusyWeek,
+  listBusyWeeks,
   listCalendarConnections,
   newConsentState,
   readConsentReturn,
@@ -507,5 +520,176 @@ describe('whether this build was given a Google client', () => {
     expect(() => consentUrl({ redirectUri: 'https://x.test/', state: 's', clientId: '' })).toThrow(
       /VITE_GOOGLE_CLIENT_ID/,
     )
+  })
+})
+
+// ===========================================================================
+// #96 — the derived busy figure, client half
+// ===========================================================================
+
+const WEEK = '2026-09-07'
+
+describe('listBusyWeeks', () => {
+  it('asks for exactly the columns `0030` grants, never `*`', async () => {
+    // `household_id` is withheld from the select grant, so `select('*')` fails
+    // OUTRIGHT on this table — the device 0003, 0005, 0010 and 0011 all use.
+    // This constant is what `LIVE_SCHEMA` imports, so a column added to one is
+    // added to the live check with it.
+    await listBusyWeeks(WEEK, MEMBER_IDS)
+    expect(calls).toEqual([
+      { op: 'select', table: 'calendar_busy', cols: CALENDAR_BUSY_COLUMNS },
+      { op: 'in', table: 'calendar_busy', column: 'member_id', value: MEMBER_IDS },
+      { op: 'eq', table: 'calendar_busy', column: 'period_start', value: WEEK },
+    ])
+    expect(CALENDAR_BUSY_COLUMNS).not.toContain('*')
+    expect(CALENDAR_BUSY_COLUMNS).not.toContain('household_id')
+  })
+
+  it('asks for nothing a calendar could have put in it', () => {
+    // The minimization decision as a property of the column list rather than a
+    // promise in a comment. There is no column here that COULD hold a title, so
+    // this is really an assertion that `0030`'s shape has not grown one.
+    //
+    // Asserted as the EXACT SET of names, not by substring, and that is not
+    // fastidiousness — the substring form was written first and failed on
+    // `period_start`, which contains `start`. A substring test that has to be
+    // weakened until it passes ends up matching nothing anybody meant, which is
+    // the shape cairn calls `a-substring-match-is-satisfied-by-a-longer-neighbour`.
+    const columns = CALENDAR_BUSY_COLUMNS.split(',').map((c) => c.trim())
+    expect(columns).toEqual([
+      'id',
+      'member_id',
+      'period_start',
+      'busy_minutes',
+      'event_count',
+      'computed_at',
+    ])
+    for (const forbidden of ['summary', 'title', 'attendee', 'location', 'event_start']) {
+      expect(columns).not.toContain(forbidden)
+    }
+  })
+
+  it('reads nothing at all when the household has no members', async () => {
+    expect(await listBusyWeeks(WEEK, [])).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a read that names no week', async () => {
+    // The week is not optional, and the failure is loud rather than a read of
+    // every week this household has ever had — which would return rows the
+    // roster then matches by period anyway, so the fault would be invisible.
+    await expect(listBusyWeeks(null, MEMBER_IDS)).rejects.toThrow(/Which week/)
+  })
+
+  it('refuses a read that names no member set', async () => {
+    await expect(listBusyWeeks(WEEK, undefined)).rejects.toThrow(/Which household/)
+  })
+
+  it('returns an empty list when nobody has a figure, rather than null', async () => {
+    selectResult = { data: null, error: null }
+    expect(await listBusyWeeks(WEEK, MEMBER_IDS)).toEqual([])
+  })
+
+  it('reports a failure in this app’s words, keeping the cause', async () => {
+    selectResult = { data: null, error: { message: 'permission denied', code: '42501' } }
+    await expect(listBusyWeeks(WEEK, MEMBER_IDS)).rejects.toThrow(/loading calendar busy minutes/)
+  })
+})
+
+describe('busyWeekFor', () => {
+  const ROWS = [
+    { member_id: 'm1', period_start: WEEK, busy_minutes: 300 },
+    { member_id: 'm1', period_start: '2026-08-31', busy_minutes: 60 },
+    { member_id: 'm2', period_start: WEEK, busy_minutes: 90 },
+  ]
+
+  it('matches on the person AND the week', () => {
+    expect(busyWeekFor(ROWS, 'm1', WEEK).busy_minutes).toBe(300)
+    expect(busyWeekFor(ROWS, 'm2', WEEK).busy_minutes).toBe(90)
+  })
+
+  it('does not answer with another week’s figure', () => {
+    // The fault `overrideFor` had in #46 and `capacitiesFor` guards against: a
+    // figure from a foreign period beside this week's minutes is invisible,
+    // because every number on screen stays plausible.
+    expect(busyWeekFor(ROWS, 'm1', '2026-09-14')).toBeNull()
+  })
+
+  it('returns null rather than undefined for a member with no figure', () => {
+    expect(busyWeekFor(ROWS, 'm3', WEEK)).toBeNull()
+    expect(busyWeekFor([], 'm1', WEEK)).toBeNull()
+  })
+})
+
+describe('fetchBusyWeek', () => {
+  it('names the household and the week, and never who it is about', async () => {
+    // Owner decision, 2026-09-04: the function reads the CALLER'S own calendar,
+    // so a member id in this body would be a value the server must ignore. The
+    // cheapest way to be sure it is ignored is not to send one.
+    invoke.mockResolvedValue({ data: { ok: true }, error: null })
+    await fetchBusyWeek({ householdId: 'h1', periodStart: WEEK })
+    expect(invoke).toHaveBeenCalledWith('calendar-busy', {
+      body: { householdId: 'h1', periodStart: WEEK },
+    })
+    const [, options] = invoke.mock.calls[0]
+    expect(Object.keys(options.body).sort()).toEqual(['householdId', 'periodStart'])
+  })
+
+  it('refuses to ask without a household or a week', async () => {
+    await expect(fetchBusyWeek({ periodStart: WEEK })).rejects.toThrow(/Which household/)
+    await expect(fetchBusyWeek({ householdId: 'h1' })).rejects.toThrow(/Which week/)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('shows the FUNCTION’S sentence, not the SDK’s', async () => {
+    // #112's lesson. `functions.invoke` reports every non-2xx as "Edge Function
+    // returned a non-2xx status code", which names nothing and reads like the
+    // network is down — while the handler distinguishes a revoked connection
+    // from an unreachable Google from a missing configuration, and AC 5 puts
+    // that sentence on the screen.
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: { json: async () => ({ error: 'That calendar connection is no longer valid.' }) },
+      },
+    })
+    await expect(fetchBusyWeek({ householdId: 'h1', periodStart: WEEK })).rejects.toThrow(
+      /no longer valid/,
+    )
+  })
+
+  it('falls back to the SDK’s message when the body cannot be read', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Failed to send a request to the Edge Function',
+        context: {
+          json: async () => {
+            throw new SyntaxError('not json')
+          },
+        },
+      },
+    })
+    await expect(fetchBusyWeek({ householdId: 'h1', periodStart: WEEK })).rejects.toThrow(
+      /Failed to send a request/,
+    )
+  })
+})
+
+describe('busyComputedLabel', () => {
+  it('says which day the figure was read, in the household’s zone', () => {
+    // 21:00 in New York on the 4th is 01:00 UTC on the 5th. The zone is what
+    // decides which day this happened on, and asking UTC would name the wrong
+    // one for every household west of Greenwich — which is all of them.
+    expect(busyComputedLabel('2026-09-05T01:00:00Z', 'America/New_York')).toBe('Sep 4')
+    expect(busyComputedLabel('2026-09-05T01:00:00Z', 'UTC')).toBe('Sep 5')
+  })
+
+  it('costs the date and never the figure when it cannot parse', () => {
+    expect(busyComputedLabel('whenever', 'America/New_York')).toBeNull()
+    expect(busyComputedLabel(null, 'America/New_York')).toBeNull()
+    expect(busyComputedLabel('2026-09-05T01:00:00Z', null)).toBeNull()
+    expect(busyComputedLabel('2026-09-05T01:00:00Z', 'Nowhere/Atlantis')).toBeNull()
   })
 })

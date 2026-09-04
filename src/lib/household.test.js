@@ -334,8 +334,9 @@ describe('signing in as a person', () => {
   })
 
   it('creates the organizer their own account, which is the one signup a client may do', async () => {
-    const session = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
-    expect(session.user.id).toBe('organizer-1')
+    const result = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
+    expect(result.session.user.id).toBe('organizer-1')
+    expect(result.needsConfirmation).toBe(false)
     // The address and password only. `options.emailRedirectTo` rides on the
     // same object since #129 and has three tests of its own below; asserting
     // the whole object here would make this test fail whenever that value
@@ -345,14 +346,17 @@ describe('signing in as a person', () => {
     expect(signUpCall.credentials.password).toBe('longenough')
   })
 
-  it('says plainly when the account needs email confirmation, rather than returning a null session', async () => {
+  it('reports that the account needs email confirmation, as a result rather than a throw', async () => {
     // Supabase returns `{ session: null }` with NO error when confirmation is
-    // on. Passing that back would hand the caller a session-shaped null and the
-    // failure would surface three steps later as "not signed in".
+    // on — and it IS on, for the live project (`mailer_autoconfirm: false`,
+    // #154). Until #154 this threw, which made the ordinary outcome of a first
+    // signup against production an error. Passing a bare null back would be
+    // the other wrong answer: a session-shaped null the caller has to remember
+    // to check, surfacing three steps later as "not signed in". So the claim
+    // is spelled out on the result.
     authState.signUpNeedsConfirmation = true
-    await expect(
-      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
-    ).rejects.toThrow(/email confirmation/i)
+    const result = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
+    expect(result).toEqual({ session: null, needsConfirmation: true })
   })
 
   it('surfaces a signup refusal with its reason, unlike sign-in', async () => {

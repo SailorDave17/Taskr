@@ -62,7 +62,7 @@ import {
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
-import Onboarding from './components/Onboarding.jsx'
+import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 import Split from './components/Split.jsx'
 
@@ -301,7 +301,7 @@ export default function App() {
         // reads were already skipped — but that clause was a claim about the
         // grant layer, and the grant layer moved.
         const session = await currentSession()
-        if (!session) {
+        if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
           if (!cancelled) setStatus('onboarding')
           return
         }
@@ -365,7 +365,11 @@ export default function App() {
 
         const found = await refresh()
         if (!cancelled) {
-          setStatus(found ? 'joined' : 'onboarding')
+          // #154 — the entry decision has ONE implementation, beside the screen
+          // it picks, and its three branches are proven in Onboarding.test.jsx.
+          setStatus(
+            entryStateFor({ session, household: found }) === ENTRY.JOINED ? 'joined' : 'onboarding',
+          )
           if (skippedNotice) setNotice(skippedNotice)
           // The consent complaint wins the strip: it answers the thing the
           // person just did, where the catch-up is housekeeping they did not.
@@ -411,31 +415,54 @@ export default function App() {
     [refresh],
   )
 
-  // Two steps in one action, and the order is load-bearing. `create_household`
-  // refuses an unauthenticated caller and claims the organizer's member row to
-  // `auth.uid()` in the same statement — so the account has to exist first, and
-  // the household created second is already reachable by the person who made it.
-  // Reversing them is not merely wrong, it is unrecoverable from the client:
-  // a household whose organizer row is unclaimed is visible to nobody.
+  // #154 — ONE step, and the account is no longer part of it. Until this story
+  // the organizer's signup and `create_household` ran inside one submit, and
+  // the pair could only ever work on a project with email confirmation OFF:
+  // with it on — which the live project has, `mailer_autoconfirm: false`,
+  // measured 2026-08-26 — `signUp` returns no session, so the RPC that
+  // followed ran unauthenticated and was refused, leaving an account with no
+  // household on every first signup.
   //
-  // The signup is CONDITIONAL, and that is the repair for a dead end. These are
-  // two durable steps with no transaction between them, so the second can fail
-  // on its own — and it did more than hypothetically: against a project without
-  // 0007 applied, `create_household` fails every time. That left an auth account
-  // with no household, on a screen whose only Create button would call `signUp`
-  // again for an address that now exists, throw, and never reach the RPC.
-  //
-  // So when a session already exists, this skips straight to the household. The
-  // person who got half-way through is offered the half they are missing rather
-  // than the half they already have, and `Onboarding` renders `Sign out` in that
-  // state so the other way out exists too.
+  // The order is still load-bearing: `create_household` refuses an
+  // unauthenticated caller and claims the organizer's member row to
+  // `auth.uid()` in the same statement, so the account has to exist first.
+  // It is now enforced by the SCREEN rather than by a sequence inside a
+  // closure — `Onboarding` renders the household form only to a signed-in
+  // person — so there is no path that reaches this without a session, and no
+  // path that performs both writes in one submit (AC 5). `email` and
+  // `password` are deliberately no longer accepted here; a caller passing them
+  // would be asking for the old shape back.
   const handleCreate = useCallback(
-    (name, { organizerName, email, password }) =>
-      mutate(async () => {
-        if (!userId) await signUpOrganizer({ email, password })
-        return createHousehold(name, { organizerName })
-      }),
-    [mutate, userId],
+    (name, { organizerName }) => mutate(() => createHousehold(name, { organizerName })),
+    [mutate],
+  )
+  // #154 — the organizer's own account, on its own. NOT through `mutate`, and
+  // the reason is the grant layer: `mutate` re-reads the household after every
+  // action, and after a signup that needs email confirmation there is no
+  // session, so that read would run as `anon` — which 0017 (#186) stripped of
+  // every privilege — and be REFUSED, with the refusal then reported over the
+  // top of a signup that succeeded. So the re-read happens only when a session
+  // came back (confirmation off, which no live project here has), and
+  // otherwise the result is handed to the screen, which says what to do next.
+  const handleSignUp = useCallback(
+    async (credentials) => {
+      setBusy(true)
+      setError(null)
+      try {
+        const result = await signUpOrganizer(credentials)
+        if (result.session) {
+          const found = await refresh()
+          setStatus(found ? 'joined' : 'onboarding')
+        }
+        return result
+      } catch (err) {
+        setError(err.message)
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refresh],
   )
   const handleSignIn = useCallback(
     (credentials) => mutate(() => signIn(credentials)),
@@ -770,6 +797,7 @@ export default function App() {
       {status === 'onboarding' ? (
         <Onboarding
           onCreate={handleCreate}
+          onSignUp={handleSignUp}
           onSignIn={handleSignIn}
           onSignOut={handleSignOut}
           // Non-null only when boot found a session, because the signed-out path

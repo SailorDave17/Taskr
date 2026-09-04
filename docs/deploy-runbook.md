@@ -467,6 +467,62 @@ and callable by a browser* — it does not and cannot answer *are its Google sec
 preflight carries no body and invokes nothing. The first real connection is the proof, and it is
 [#100](https://github.com/SailorDave17/Taskr/issues/100)'s job rather than this page's.
 
+### The same client, as a sign-in — #304
+
+Since #304 the sign-in screen carries **Continue with Google**, which runs Supabase Auth's own
+Google provider through the app's Supabase client — no second OAuth client, no ID-token exchange,
+nothing new in the bundle. It needs two dashboard steps, both owner-only, and until they are done
+the control sends a person to Supabase, which answers *"Unsupported provider: provider is not
+enabled"* and returns them to the sign-in screen with that sentence. Both steps are tracked as their
+own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330), by
+the same convention as #150.
+
+1. **Add Supabase's callback to the OAuth client from step 3** — one more entry under **Authorized
+   redirect URIs**, exactly:
+   - `https://<project ref>.supabase.co/auth/v1/callback`
+
+   The Google-side redirect is Supabase's, not the app's: Google hands the grant to Supabase, and
+   Supabase sends the person back to the app. The app's own origins stay on the list for the
+   calendar, which still redirects to the app root directly.
+2. **Enable the provider**: Supabase dashboard → Authentication → Providers → Google → on, and
+   paste the **same** client ID and client secret from step 4 (the secret goes here as well as into
+   the function secrets — two homes for one value, both on the Supabase side and neither in git).
+   Leave *Skip nonce checks* off. Read it back with the unauthenticated probe, which is also the
+   check for "is this done yet":
+
+   ```
+   GET https://<project ref>.supabase.co/auth/v1/settings   (header: apikey: <anon key>)
+   → "external": { … "google": true … }
+   ```
+
+   *Measured 2026-09-04*: `false`.
+3. **Nothing to add to Redirect URLs.** The app passes the origin it is running on as
+   `redirectTo` (the same value as `emailRedirectTo`, §2 step 5), so the production origin and the
+   dev origin already on the list cover it; a preview origin falls back to Site URL, deliberately.
+
+**Three facts that each produce a confident wrong diagnosis when met cold:**
+
+- **The consent screen names `<project ref>.supabase.co`, not Taskr.** Google displays the root
+  domain of the redirect URI, and with a managed provider that is Supabase's. The App name from the
+  consent-screen branding appears nowhere on it. This is not a misconfiguration and there is
+  nothing on the Google side to fix; the only remedy is Supabase's paid Custom Domain, which is out
+  of scope for a project chartered at $0.
+- **Testing mode gates sign-in exactly as it gates the calendar.** Only the test users registered
+  in step 2 above get past Google; anyone else is refused at Google with *"The developer hasn't
+  given you access to this app"*. The sign-in screen says who can fix that — the organizer — when
+  the refusal reaches it as `access_denied`.
+- **The flow is implicit, not PKCE** — owner decision 2026-09-04, recorded on #304. The session
+  comes back in the URL **fragment** and the client consumes it on boot; the app never exchanges a
+  `?code=`. Switching the client to PKCE would switch the confirmation email (§2 step 5) to a
+  same-browser `?code=` as well, which is why it was not done. GoTrue's stale-flow redirects
+  (`bad_oauth_state`, five minutes from pressing the control) arrive at **Site URL** as a query
+  string with no `state`, which is how the app tells them from the calendar's return.
+
+**Who it helps.** A Google address equal to a member's confirmed sign-in address resolves to the
+same auth user — Supabase links identities on a matching verified email — so the roster is
+untouched. A member on a synthetic `<id>@taskr.invalid` address can never sign in this way, because
+no Google account carries that address; they keep their PIN.
+
 ## 4. Verifying AC 1 and AC 2
 
 Both **verified 2026-08-05** on the owner's Android phone.

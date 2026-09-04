@@ -334,6 +334,26 @@ body {
   cursor: default;
 }
 
+/* #304 — between the password form and Continue with Google. A word, not a
+   rule: the two routes carry equal weight for the people they apply to, and
+   the divider only says the second is an alternative rather than a further
+   step. Dim ink, like every other aside on a card. */
+.divider {
+  margin: 0.75rem 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+/* #304 — a button outside a .stack is inline and shrinks to its label. The
+   Google control sits under a full-width Sign in, and design-bar measured it
+   at 192px against 278px at 360 wide: the field renders a social sign-in at
+   the primary's width, and a narrower one reads as an afterthought. */
+.button--block {
+  display: block;
+  width: 100%;
+}
+
 .button--danger {
   background: #7f2b2b;
   color: #ffeaea;

@@ -243,12 +243,20 @@ describe('the return from Google', () => {
     })
   })
 
-  it.each([['', 'an empty query'], ['?foo=1', 'an unrelated query'], [undefined, 'no query at all']])(
-    'is null for %s — %s',
-    (search) => {
-      expect(readConsentReturn(search)).toBeNull()
-    },
-  )
+  it.each([
+    ['', 'an empty query'],
+    ['?foo=1', 'an unrelated query'],
+    [undefined, 'no query at all'],
+    // #304 AC 4 — the discriminator. Google echoes this flow's `state` on every
+    // return, so a query WITHOUT one did not come from the calendar consent: a
+    // Supabase sign-in error lands on the same root with no state, and so
+    // would a PKCE `?code=`. Neither may reach `completeConnect`.
+    ['?code=abc', 'a code with no state — not this flow’s, and never sent to calendar-connect'],
+    ['?error=invalid_request&error_code=bad_oauth_state', 'a Supabase sign-in error, which carries no state'],
+    ['?state=xyz', 'a state with neither a code nor an error'],
+  ])('is null for %s — %s', (search) => {
+    expect(readConsentReturn(search)).toBeNull()
+  })
 
   it('builds the redirect address from where the app is actually running', () => {
     // Not written down anywhere, so a preview deployment, the custom domain and

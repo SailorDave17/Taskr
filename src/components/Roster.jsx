@@ -36,7 +36,7 @@ import { connectionFor, isRealEmailMember } from '../lib/calendar.js'
  * - **Not dependent on anything but the database.** No model, no network
  *   service, no credential beyond the one the app already holds. #46 AC 6 makes
  *   that a test rather than a promise, because the manual road in is the floor
- *   the charter requires on day one and the extraction bet (#57) is an
+ *   the charter requires on day one and the extraction bet (#210) is an
  *   accelerator on top of it, never the only way in.
  *
  * `effectiveCapacity` is called rather than reimplemented — #44 AC 7's rule, and

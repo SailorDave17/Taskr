@@ -7,10 +7,12 @@
 // this command disagree, so the record cannot quietly fall behind the corpus.
 //
 // It grades the TWO CONTROL EXTRACTORS (AC 4 and AC 5) rather than a real one,
-// because there is no real one yet — #56 stands up the endpoint and #43 drives
-// a live model through this same grader. What this command prints today is the
-// SCALE: the floor a do-nothing extractor reaches and the ceiling the corpus's
-// own answers reach. A later score is read as a position between them.
+// and goes on doing so now that a real one exists: `npm run extraction:run`
+// drives the adapter, #208 stands up the endpoint and #206 drove a live model
+// through this same grader. What this command prints is the SCALE: the floor a
+// do-nothing extractor reaches and the ceiling the corpus's own answers reach.
+// A later score is read as a position between them. Independence from the
+// adapter is #203 AC 8 — a stop verdict must not take the instrument with it.
 //
 // Figures are reported PER KIND as well as overall, which is the charter's
 // 2026-08-08 widening stated as a number: a good capacity score must not be
@@ -80,6 +82,6 @@ console.log(
 console.log(
   `The due-date axis (#202), scored separately: ${floor.overall.dueExact} of ${floor.overall.dueApplicable} to ${ceiling.overall.dueExact} of ${ceiling.overall.dueApplicable} exact.`,
 )
-console.log('No network call, no API key, no provider account. #56 stands up the endpoint; #43 takes the verdict.')
+console.log('No network call, no API key, no provider account. #208 stands up the endpoint; #207 takes the verdict.')
 
 export const FIGURES = { floor, ceiling }

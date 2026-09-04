@@ -1380,7 +1380,7 @@ describe('capacity — this week, set by hand (#46)', () => {
 
   it('AC 6: the manual path depends on nothing but the data layer', () => {
     // The charter's fallback principle, as a check rather than a promise: manual
-    // entry must work on day one and the extraction bet (#57) is an accelerator
+    // entry must work on day one and the extraction bet (#210) is an accelerator
     // on top of it, never the only road in. If capacity.js ever grows a model
     // client, an HTTP call or a second credential, the floor has quietly become
     // the ceiling — and by then the story that would notice is the one that

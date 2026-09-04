@@ -712,7 +712,7 @@ export default function App() {
   //
   // Nothing here touches a model, a network service or a credential beyond the
   // database (AC 6): the manual road in is the floor the charter requires on day
-  // one, and the extraction bet (#57) is an accelerator on top of it, never the
+  // one, and the extraction bet (#210) is an accelerator on top of it, never the
   // only way in. A test asserts that this path imports nothing else.
   // #49 — the capacity write is what the grooming decision named as the
   // trigger: the household's assignments follow it with nobody pressing an

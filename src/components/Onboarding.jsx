@@ -62,9 +62,11 @@ export function entryStateFor({ session, household }) {
 export default function Onboarding({
   onCreate,
   onSignIn,
+  onSignInWithGoogle,
   onSignUp,
   onSignOut,
   signedIn = false,
+  signInNotice = null,
   busy,
 }) {
   // Which of the two signed-out cards is showing. Irrelevant once signed in.
@@ -197,6 +199,15 @@ export default function Onboarding({
           <h2 id="signin-heading" className="card__heading">
             Sign in
           </h2>
+          {/* #304 — what Supabase put on the URL when a sign-in did not
+              complete, read at boot (App.jsx, readSignInReturn) and worded by
+              describeSignInReturn. Above the form because it answers the thing
+              the person just did, and cleared the moment they try again. */}
+          {signInNotice ? (
+            <p className="error" role="alert" data-testid="sign-in-return">
+              {signInNotice}
+            </p>
+          ) : null}
           {pendingEmail ? (
             // Worded to fit BOTH readings of a no-session signup, because
             // GoTrue answers a signup for an address that already has an
@@ -212,7 +223,12 @@ export default function Onboarding({
               that address, nothing has changed: sign in with the password you
               had.
             </p>
-          ) : (
+          ) : signInNotice ? null : (
+            // Stepped aside while a return notice is showing (#304). design-bar
+            // measured the notice at 122–170px at 360×800, and with these four
+            // lines still under it the Continue with Google control the notice
+            // points at sat 3–47px below the fold. The notice already says what
+            // to do; this paragraph is for somebody arriving cold.
             <p className="card__body">
               Use the email and password the organizer set up for you. If you
               have a PIN rather than a password, type the PIN here &mdash; it is
@@ -251,6 +267,25 @@ export default function Onboarding({
               Sign in
             </button>
           </form>
+          {/* #304 — the other way in, for a member whose sign-in address is a
+              Google account. A button, not a link like "Start a household":
+              for the person it applies to this is a primary route, not a
+              once-only one. Quiet rather than filled so the password form still
+              leads — it is the route that works for EVERY member, PIN members
+              included, where this one works only for a confirmed real address
+              Google also knows. Pressing it leaves the page (Supabase's own
+              flow); nothing here awaits a result, and the return is read at
+              the next boot. Not a form: gate.test.js counts three forms on
+              this screen and this is not a fourth. */}
+          <p className="divider">or</p>
+          <button
+            className="button button--quiet button--block"
+            type="button"
+            onClick={() => run(() => onSignInWithGoogle?.())}
+            disabled={busy}
+          >
+            Continue with Google
+          </button>
           {/* The secondary route. A link, not a second button of equal weight
               (AC 1): the person opening this app on a new phone almost always
               has a household already, and the organizer starts one once. */}
@@ -340,8 +375,12 @@ export default function Onboarding({
 Onboarding.propTypes = {
   onCreate: PropTypes.func.isRequired,
   onSignIn: PropTypes.func.isRequired,
+  // #304. Optional in the type so the #154 tests, which predate it, render
+  // without a fixture edit; App always passes it, and gate.test.js says so.
+  onSignInWithGoogle: PropTypes.func,
   onSignUp: PropTypes.func.isRequired,
   onSignOut: PropTypes.func,
   signedIn: PropTypes.bool,
+  signInNotice: PropTypes.string,
   busy: PropTypes.bool,
 }

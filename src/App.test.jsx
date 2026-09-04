@@ -19,6 +19,10 @@ const api = {
   currentUserId: vi.fn(),
   createHousehold: vi.fn(),
   signIn: vi.fn(),
+  // #304. Stubbed because the real one navigates the browser; readSignInReturn
+  // and describeSignInReturn stay REAL (importActual below) because they are
+  // pure and the sentence a person reads should be the one the app words.
+  signInWithGoogle: vi.fn(),
   signUpOrganizer: vi.fn(),
   signOut: vi.fn(),
   addMember: vi.fn(),
@@ -447,6 +451,47 @@ describe('when nobody is signed in', () => {
     expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/household name/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('#304 — Continue with Google, from the sign-in screen', () => {
+  it('AC 1: the control is on the sign-in screen and starts the Google flow through the data layer', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+    // Not routed through the password path, and no re-read as `anon`: the page
+    // is leaving for Google, and a refresh here would be refused by 0017 and
+    // painted over a sign-in that is working.
+    expect(api.signIn).not.toHaveBeenCalled()
+    expect(api.currentHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a Google account matching nobody lands signed in with no household, and nothing is minted', async () => {
+    // What the app does with the session Supabase hands back for a Google
+    // address that is nobody's sign-in address: a fresh auth user, no roster
+    // row, no household. That is #154's signed-in-with-no-household state,
+    // and invitation redemption (#173/#191) is what later attaches it — not
+    // this screen, which offers to START one and creates nothing unasked.
+    api.currentSession.mockResolvedValue({
+      user: { id: 'google-person', app_metadata: { provider: 'google', providers: ['google'] } },
+    })
+    api.currentUserId.mockResolvedValue('google-person')
+    api.currentHousehold.mockResolvedValue(null)
+    api.listMembers.mockResolvedValue([])
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create household/i })).toBeInTheDocument()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    expect(api.addMember).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /continue with google/i })).not.toBeInTheDocument()
   })
 })
 
@@ -1894,13 +1939,14 @@ describe('connecting a calendar (#95)', () => {
    * anything — and the query string has to be on the URL BEFORE App boots, which
    * cannot be arranged with the real one either.
    */
-  const atUrl = (search = '') => {
+  const atUrl = (search = '', hash = '') => {
     assign = vi.fn()
     replaceState = vi.fn()
     Object.defineProperty(globalThis, 'location', {
       configurable: true,
       writable: true,
-      value: { origin: 'https://taskr.example.test', pathname: '/', search, assign },
+      // `hash` since #304: the implicit flow's error channel is the fragment.
+      value: { origin: 'https://taskr.example.test', pathname: '/', search, hash, assign },
     })
     Object.defineProperty(globalThis, 'history', {
       configurable: true,
@@ -2038,6 +2084,91 @@ describe('connecting a calendar (#95)', () => {
     expect(calendarApi.completeConnect).not.toHaveBeenCalled()
     expect(screen.queryAllByRole('alert')).toEqual([])
     expect(replaceState).not.toHaveBeenCalled()
+  })
+
+  describe('#304 AC 4 — the root is shared with the Google sign-in, and the calendar’s `state` tells them apart', () => {
+    // Every shape below lands on the same URL the calendar consent does.
+    // Google echoes the calendar's own `state` on every calendar return and
+    // Supabase's returns never carry one — so a query WITHOUT a state is not the
+    // calendar's, whatever else it carries, and is never sent to
+    // `calendar-connect`. The app exchanges no code at all under the implicit
+    // flow (gate.test.js asserts the word is absent), so the other half of the
+    // criterion — a calendar code never handed to the exchange — has nothing
+    // to reach.
+
+    it('a code with no state is nobody’s: not sent to calendar-connect, and nothing is said', async () => {
+      atUrl('?code=orphan-code')
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      expect(screen.queryAllByRole('alert')).toEqual([])
+    })
+
+    it('a Supabase sign-in error in the query (no state) is a sign-in failure, not a calendar one', async () => {
+      // GoTrue's bad-flow-state redirect, as probed live 2026-09-04. Before
+      // #304 this read as "Google could not complete that connection", which
+      // sent a person to the calendar to fix a sign-in.
+      api.currentSession.mockResolvedValue(null)
+      atUrl('?error=invalid_request&error_code=bad_oauth_state&error_description=OAuth+state+not+found+or+expired')
+      await renderApp()
+      await screen.findByRole('button', { name: /^sign in$/i })
+
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      const note = screen.getByTestId('sign-in-return')
+      expect(note).toHaveTextContent(/took too long or was already used/i)
+      expect(note).not.toHaveTextContent(/calendar|connection/i)
+      // Spent, and stripped so a reload does not announce it twice.
+      expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    })
+
+    it('AC 5: a Google refusal in the fragment names the organizer on the sign-in screen', async () => {
+      // The implicit flow's error channel. The consent screen is in Testing, so
+      // an account the organizer has not registered is refused by Google; the
+      // sentence says who can fix that and does not blame a password nobody
+      // typed. The SHAPE here is GoTrue's documented one, not a measured
+      // refusal — the provider is not enabled on the live project yet, so the
+      // live half of AC 5 is the confirmation story's.
+      api.currentSession.mockResolvedValue(null)
+      atUrl('', '#error=access_denied&error_description=The+user+denied+access')
+      await renderApp()
+      await screen.findByRole('button', { name: /^sign in$/i })
+
+      const note = screen.getByTestId('sign-in-return')
+      expect(note).toHaveTextContent(/has not been opened to your account/i)
+      expect(note).toHaveTextContent(/organizer/i)
+      expect(note).not.toHaveTextContent(/did not match/i)
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    })
+
+    it('the calendar’s own return — a code WITH a state — still reaches calendar-connect and only it', async () => {
+      // The other side of the discriminator, so the three tests above cannot be
+      // satisfied by an App that ignores every query string.
+      atUrl('?code=the-code&state=the-state')
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+
+      expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+        code: 'the-code',
+        error: null,
+        state: 'the-state',
+      })
+      expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    })
+
+    it('a fresh attempt clears the notice about the last one', async () => {
+      api.currentSession.mockResolvedValue(null)
+      atUrl('', '#error=access_denied')
+      await renderApp()
+      await screen.findByTestId('sign-in-return')
+
+      await act(async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+      )
+      expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+      expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    })
   })
 })
 

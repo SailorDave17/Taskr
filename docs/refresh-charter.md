@@ -842,6 +842,45 @@ a wrong value implies a person, a default implies none.
   walks from the tab to the tap and asserts what reaches the data layer, since a unit test cannot
   answer whether the button passes anything at all (cairn: `exported-is-not-reachable`).
 
+## Decision taken 2026-09-04 — Google is a way in, on the implicit flow
+
+Owner decisions at the pickup and the design-bar gate of #304, which put **Continue with Google**
+on the sign-in screen through Supabase Auth's own Google provider — the same OAuth client the
+calendar connection (#95) uses, with Supabase's callback added to it and the provider enabled in the
+dashboard (`docs/deploy-runbook.md` §3b, *The same client, as a sign-in*; both steps are their own
+confirmation story under #257).
+
+- **Implicit, not PKCE — against the story's own AC 1, on the record.** The issue asked for PKCE. In
+  supabase-js the flow type is a **client-wide** setting, and the installed auth-js (2.112.1) sends a
+  code challenge on `signUp` too once it is set — so the organizer's confirmation email (#129) would
+  return a `?code=` that only exchanges in the browser that signed up. The owner chose to keep the
+  default so confirmation keeps working from any device; the session comes back in the URL fragment,
+  the client consumes it on boot, and **the app never exchanges a code**. `gate.test.js` holds that:
+  a `flowType:` in the client or an `exchangeCodeForSession(` call anywhere reddens, so switching
+  later is a visible decision that has to revisit the calendar's `?code=` discriminator in the same
+  change.
+- **The calendar's own `state` is the discriminator.** Google echoes it on every calendar return and
+  Supabase's returns never carry one, so a query with a state is the calendar's, a query without one
+  is a sign-in failure (GoTrue's stale-flow redirects land on Site URL as `?error=…&error_code=…`,
+  probed live that day), and a `?code=` with no state is nobody's. The alternative — a marker on the
+  sign-in's `redirectTo` — was rejected because Supabase validates redirect URLs **including the
+  query string**, so it would have needed the Redirect URLs allow-list widened for it.
+- **The bar, set at the design-bar gate — what must become true:** a housemate on a new phone taps
+  one button and is back in the household, and when Google says no the screen says **who can fix
+  it** rather than blaming a password nobody typed. *Measured* at 360×800 on the real component and
+  stylesheet, across resting / refused / stale flows: the resting screen fits in one viewport with
+  every control at 44px; before the fix the Google control was **192px wide under a 278px Sign in**
+  (the field renders a social sign-in at the primary's width) and a return notice of 122–170px pushed
+  it **3–47px below the fold** — the sentence *press Continue with Google again* pointed at a button
+  the person could not see. Verdict **lands, but not at every size**; owner decision: fix both. The
+  button is full width and the cold-arrival paragraph steps aside while a notice is showing, after
+  which every control sits within 800px in every case (refused: Google at 692–736).
+- **What this does NOT do, deliberately.** The consent screen names `<project ref>.supabase.co`, not
+  Taskr — a property of the redirect URI's domain that only Supabase's paid custom domain changes,
+  out of scope at $0. A member on a synthetic `<id>@taskr.invalid` address cannot use this route and
+  keeps their PIN. Linking a Google identity to an already-signed-in password account is a different
+  surface with a known library hazard and is not here.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

@@ -116,6 +116,94 @@ describe('no session — the sign-in screen', () => {
   })
 })
 
+describe('continuing with Google — #304', () => {
+  const googleButton = () => screen.getByRole('button', { name: /continue with google/i })
+
+  it('AC 1: sits beside the password form, on the sign-in card, as a button', () => {
+    // A button of equal weight rather than a link like "Start a household":
+    // for the member it applies to this is a primary route. It is NOT a form —
+    // gate.test.js counts three forms on this screen and this is not a fourth —
+    // and the password form is still there beside it, untouched.
+    setup({ onSignInWithGoogle: vi.fn() })
+    expect(googleButton()).toBeInTheDocument()
+    expect(googleButton()).toHaveClass('button')
+    // Full width, like the Sign in above it — design-bar measured 192px against
+    // 278px without this, and the field renders a social sign-in at the
+    // primary's width. The class is the claim; index.css carries the rule and
+    // gate.test.js holds the two together.
+    expect(googleButton()).toHaveClass('button--block')
+    expect(googleButton()).not.toHaveClass('button--link')
+    expect(googleButton()).toHaveAttribute('type', 'button')
+    expect(signInButton()).toBeInTheDocument()
+    expect(screen.getByLabelText(/password or pin/i)).toBeInTheDocument()
+  })
+
+  it('starts the Google flow, and nothing else — no credential is read or sent', async () => {
+    const onSignInWithGoogle = vi.fn().mockResolvedValue(undefined)
+    const { onSignIn } = setup({ onSignInWithGoogle })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    await clickAndSettle(googleButton())
+
+    expect(onSignInWithGoogle).toHaveBeenCalledTimes(1)
+    expect(onSignInWithGoogle).toHaveBeenCalledWith()
+    expect(onSignIn).not.toHaveBeenCalled()
+  })
+
+  it('is enabled with the boxes empty — it needs no password', () => {
+    setup({ onSignInWithGoogle: vi.fn() })
+    expect(signInButton()).toBeDisabled()
+    expect(googleButton()).toBeEnabled()
+  })
+
+  it('is disabled while a request is in flight, like every other control here', () => {
+    setup({ onSignInWithGoogle: vi.fn(), busy: true })
+    expect(googleButton()).toBeDisabled()
+  })
+
+  it('shows the reason when the flow cannot start', async () => {
+    setup({
+      onSignInWithGoogle: vi
+        .fn()
+        .mockRejectedValue(new Error('Could not start signing in with Google: provider is not enabled')),
+    })
+    fireEvent.click(googleButton())
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/provider is not enabled/i)
+  })
+
+  it('is not offered to somebody already signed in', () => {
+    setup({ onSignInWithGoogle: vi.fn(), signedIn: true })
+    expect(screen.queryByRole('button', { name: /continue with google/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 5: shows what the last attempt came back with, above the form, as an alert', () => {
+    // The sentence is App’s (describeSignInReturn); this screen’s job is to put
+    // it where the person who just came back from Google is looking, and to
+    // let them try the password box underneath it.
+    setup({
+      onSignInWithGoogle: vi.fn(),
+      signInNotice:
+        'Google did not sign you in. If Google said this app has not been opened to your account, the organizer is the one who can add it — ask them.',
+    })
+    const note = screen.getByTestId('sign-in-return')
+    expect(note).toHaveAttribute('role', 'alert')
+    expect(note).toHaveTextContent(/organizer/i)
+    expect(signInButton()).toBeInTheDocument()
+    // The cold-arrival paragraph steps aside for the notice: design-bar measured
+    // the two together pushing Continue with Google 3–47px below the fold at
+    // 360×800, and the notice already says what to do.
+    expect(screen.queryByText(/use the email and password the organizer set up/i)).not.toBeInTheDocument()
+    expect(googleButton()).toBeInTheDocument()
+  })
+
+  it('shows no such notice on an ordinary load, and the cold-arrival paragraph instead', () => {
+    setup({ onSignInWithGoogle: vi.fn() })
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText(/use the email and password the organizer set up/i)).toBeInTheDocument()
+  })
+})
+
 describe('starting a household — the account comes first, on its own', () => {
   it('the link opens the account form, and the sign-in form steps aside', () => {
     setup()

@@ -182,13 +182,27 @@ export function redirectUriFor(location = globalThis.location) {
   return `${location.origin}/`
 }
 
-/** The `?code=` / `?state=` pair Google puts on the return, or null if this is an ordinary load. */
+/**
+ * The `?code=` / `?state=` pair Google puts on the return, or null if this is
+ * an ordinary load — or somebody else's return.
+ *
+ * `state` is REQUIRED since #304. Google echoes the state `startConnect` sent
+ * on every return, success or refusal, so a query without one did not come
+ * from this flow: Supabase's own sign-in redirects put `error`/`error_code` on
+ * the root with no state, and a PKCE client would put a `code` there too.
+ * Before this, a stale Google sign-in was reported as "Google could not
+ * complete that connection", which sent a person to the calendar to fix a
+ * sign-in. `readSignInReturn` in household.js is the other half of the rule,
+ * and a `?code=` with no state is read by neither.
+ */
 export function readConsentReturn(search) {
   const params = new URLSearchParams(String(search ?? ''))
+  const state = params.get('state')
+  if (!state) return null
   const code = params.get('code')
   const error = params.get('error')
   if (!code && !error) return null
-  return { code, error, state: params.get('state') }
+  return { code, error, state }
 }
 
 /**

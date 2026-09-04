@@ -60,11 +60,47 @@ describe('the credential flow is reachable from the app, not just exported', () 
     // made at all, since `create_household` refuses an unauthenticated caller.
     expect(app).toMatch(/\bsignIn\b/)
     expect(app).toMatch(/\bsignUpOrganizer\b/)
+    // #304 — the third way in. Exported, unit-tested and reachable by nobody is
+    // exactly the shape this guard exists for, and an optional prop on the
+    // screen (kept optional so #154's tests render unchanged) is how it would
+    // happen: the button renders either way, and only App can wire it.
+    expect(app).toMatch(/\bsignInWithGoogle\b/)
   })
 
   it('hands them to onboarding, which is the only place a person can reach them', () => {
     expect(app).toMatch(/onSignIn=\{/)
     expect(app).toMatch(/onCreate=\{/)
+    expect(app).toMatch(/onSignInWithGoogle=\{/)
+  })
+
+  it('#304 AC 4: exchanges no code — the flow is implicit, so a `?code=` on the root is never a sign-in', () => {
+    // Owner decision 2026-09-04 (recorded on #304): the client stays on the
+    // implicit flow, because `flowType: 'pkce'` is client-wide and would put
+    // the confirmation email onto a same-browser `?code=` too. The
+    // consequence this guards is the half of AC 4 that has nothing left to
+    // reach: no code is ever handed to `exchangeCodeForSession`, because
+    // nothing here calls it. If somebody switches the flow, this reddens and
+    // the calendar's `?code=` discriminator has to be revisited in the same
+    // change — read the note on `readSignInReturn` first.
+    const household = readFileSync(resolve(process.cwd(), 'src/lib/household.js'), 'utf8')
+    const supabaseClient = readFileSync(resolve(process.cwd(), 'src/lib/supabase.js'), 'utf8')
+    for (const [name, source] of [
+      ['App.jsx', app],
+      ['household.js', household],
+      ['supabase.js', supabaseClient],
+    ]) {
+      // A CALL, with its paren — in either spelling. The first version matched
+      // `name(` only, and a mutation written as `?.exchangeCodeForSession?.(`
+      // reddened 0 against a predicted 1 (measured 2026-09-04): an optional call
+      // is still a call. Prose mentions of the name stay legal, because a guard
+      // that fires on its own explanation is the failure cairn already records.
+      expect(source, `${name} exchanges a code`).not.toMatch(/exchangeCodeForSession\s*(\?\.)?\s*\(/)
+    }
+    // The flow type is set in exactly one place — where the client is built —
+    // so that is the only file asked. household.js explains `flowType: 'pkce'`
+    // in a comment; asking it too would redden on the explanation.
+    expect(supabaseClient).toMatch(/createClient\(/)
+    expect(supabaseClient, 'supabase.js sets a flow type').not.toMatch(/flowType\s*:/)
   })
 
   it('and offers a way back out, which device auth never needed', () => {

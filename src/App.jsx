@@ -7,12 +7,15 @@ import {
   currentHousehold,
   currentSession,
   currentUserId,
+  describeSignInReturn,
   findClaimedMember,
   listMembers,
   provisionMember,
+  readSignInReturn,
   removeMember,
   resetMemberCredential,
   signIn,
+  signInWithGoogle,
   signOut,
   signUpOrganizer,
   updateMember,
@@ -127,6 +130,11 @@ export default function App() {
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // #304 — the reason a sign-in did not complete, read off the URL at boot and
+  // shown on the sign-in screen. Separate from `error` because that strip is not
+  // rendered while a person is signed out, and this is a sentence for exactly
+  // that person.
+  const [signInNotice, setSignInNotice] = useState(null)
   // #53 AC 4 — the catch-up pass skipped occurrences older than the bound and
   // the household is told rather than left to wonder. Transient and on the
   // device whose open performed the skip (owner decision, 2026-08-24): the
@@ -300,9 +308,27 @@ export default function App() {
         // read would be REFUSED rather than empty. Nothing here changes — the
         // reads were already skipped — but that clause was a claim about the
         // grant layer, and the grant layer moved.
+        // #304 — a sign-in that did not complete comes back to this root with
+        // its reason on the URL: in the fragment for a provider refusal or an
+        // expired confirmation link, in the query — with no `state`, which is
+        // how it is told from the calendar's return below — for GoTrue's
+        // bad-flow-state redirects. Read BEFORE `currentSession()`: that call
+        // constructs the client, and the client reads the URL once, at
+        // construction, to pick up a SUCCESSFUL return's `#access_token` — so
+        // the URL has to be intact when it looks. Stripped AFTER, for the same
+        // reason, and so that a reload does not announce a spent failure twice.
+        const signInReturn = readSignInReturn(globalThis.location)
         const session = await currentSession()
+        if (signInReturn) {
+          const { pathname } = globalThis.location
+          globalThis.history?.replaceState?.(null, '', pathname)
+        }
+        const signInComplaint = signInReturn ? describeSignInReturn(signInReturn) : null
         if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
-          if (!cancelled) setStatus('onboarding')
+          if (!cancelled) {
+            setSignInNotice(signInComplaint)
+            setStatus('onboarding')
+          }
           return
         }
 
@@ -374,6 +400,7 @@ export default function App() {
           // The consent complaint wins the strip: it answers the thing the
           // person just did, where the catch-up is housekeeping they did not.
           if (consentComplaint) setError(consentComplaint)
+          else if (signInComplaint) setError(signInComplaint)
           else if (catchUpComplaint) setError(catchUpComplaint)
         }
       } catch (err) {
@@ -465,9 +492,31 @@ export default function App() {
     [refresh],
   )
   const handleSignIn = useCallback(
-    (credentials) => mutate(() => signIn(credentials)),
+    (credentials) => {
+      // #304 — a fresh attempt answers the notice about the last one.
+      setSignInNotice(null)
+      return mutate(() => signIn(credentials))
+    },
     [mutate],
   )
+  // #304 — leaves the page. NOT through `mutate`: a successful start is a
+  // navigation to Google, and the re-read `mutate` runs afterwards would go out
+  // as `anon` — refused since 0017 (#186) — with the refusal painted over a
+  // sign-in that is working. Busy is released in `finally` for the failure
+  // case; on success the page is gone before anybody reads the flag.
+  const handleSignInWithGoogle = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    setSignInNotice(null)
+    try {
+      await signInWithGoogle()
+    } catch (err) {
+      setError(err.message)
+      throw err
+    } finally {
+      setBusy(false)
+    }
+  }, [])
   // #291 — two scopes, one handler. The ordinary control ends this device's
   // session and nothing else; `everywhere` revokes every session for the
   // account, which is the lost-or-stolen-device answer and the only reason the
@@ -799,7 +848,9 @@ export default function App() {
           onCreate={handleCreate}
           onSignUp={handleSignUp}
           onSignIn={handleSignIn}
+          onSignInWithGoogle={handleSignInWithGoogle}
           onSignOut={handleSignOut}
+          signInNotice={signInNotice}
           // Non-null only when boot found a session, because the signed-out path
           // returns before refresh() runs. Signed in AND on this screen is
           // precisely the half-finished state described above.

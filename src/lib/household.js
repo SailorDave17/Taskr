@@ -217,6 +217,156 @@ export async function signIn({ email, password }) {
 }
 
 /**
+ * Start signing in with Google — #304.
+ *
+ * Supabase's own OAuth flow, through the client this app already has: the
+ * browser leaves for `/auth/v1/authorize?provider=google`, Google hands the
+ * grant to Supabase's callback, and Supabase sends the person back to the
+ * origin they left from with the session in the URL FRAGMENT, which the client
+ * reads on the next boot. There is no second OAuth client and no ID-token
+ * exchange here — the client id and secret live in the Supabase dashboard
+ * (`docs/deploy-runbook.md` §3b), so nothing new is inlined into the bundle.
+ *
+ * IMPLICIT, NOT PKCE — owner decision 2026-09-04, recorded on #304. The issue
+ * asked for PKCE, and in supabase-js the flow type is a CLIENT-WIDE setting:
+ * `flowType: 'pkce'` makes `signUp` send a code challenge too (measured in
+ * auth-js 2.112.1), so every confirmation email (#129) would come back as a
+ * `?code=` that only exchanges in the browser that signed up. Keeping the
+ * default keeps confirmation working from any device — and it means this app
+ * never exchanges a code at all, so a `?code=` on the root is the calendar's
+ * (#95) or nobody's. `readSignInReturn` below and `readConsentReturn` in
+ * calendar.js are the two halves of that rule.
+ *
+ * `redirectTo` is the origin the person is on, for the reason
+ * `confirmationRedirectTo` gives — a dev server comes back to the dev server —
+ * and it has to be in the project's Redirect URLs list or Supabase falls back
+ * to Site URL (production). Preview origins are excluded on purpose: the same
+ * decision, seen a third time.
+ *
+ * Who this reaches is decided by Supabase, not here. A Google address equal to
+ * a member's confirmed sign-in address resolves to the SAME auth user
+ * (same-verified-email linking), so the roster does not change; a Google
+ * address matching nobody gets a fresh auth user with no household, which is
+ * the state invitation redemption (#173/#191) later attaches. A member on a
+ * synthetic `<id>@taskr.invalid` address can never match a Google account and
+ * keeps their PIN.
+ *
+ * WHAT THE PERSON SEES AT GOOGLE is not this app's name: the consent screen
+ * names the redirect URI's domain, `<project ref>.supabase.co`, and the only
+ * fix is Supabase's paid custom domain (cairn:
+ * google-consent-screen-names-the-callback-domain). Recorded so nobody hunts
+ * a misconfiguration.
+ */
+export async function signInWithGoogle() {
+  const { error } = await getSupabase().auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: confirmationRedirectTo() },
+  })
+  if (error) {
+    const err = new Error(`Could not start signing in with Google: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+}
+
+/**
+ * The failure Supabase put on the URL when a sign-in did not complete, or null.
+ *
+ * Two shapes, both landing on the app ROOT, because `redirectTo` and Site URL
+ * both point there:
+ *
+ *   - `#error=…&error_code=…&error_description=…` in the FRAGMENT: a provider
+ *     refusal (Google said no, or the account is not one of the consent
+ *     screen's registered test users), or an expired confirmation link. This
+ *     is the implicit flow's error channel, the counterpart of the
+ *     `#access_token` it puts there on success.
+ *   - `?error=…&error_code=…` in the QUERY, with NO `state`: GoTrue's
+ *     bad-flow-state redirects (`bad_oauth_state`, `bad_oauth_callback`,
+ *     `flow_state_already_used`) come from middleware that never read the
+ *     flow, so they go to Site URL as a query string whatever flow started
+ *     them. Probed live 2026-09-04: `GET /auth/v1/callback?state=probe` is a
+ *     303 to the production root carrying exactly this shape (cairn:
+ *     gotrue-provider-callback-errors-bypass-redirect-to).
+ *
+ * THE DISCRIMINATOR AGAINST THE CALENDAR — #304 AC 4. Google echoes the
+ * calendar's own `state` (calendar.js `startConnect`) on every return, success
+ * or refusal, and Supabase's returns never carry one. So a query carrying
+ * `state` is the calendar's and is not read here; a query without one is not
+ * the calendar's, and `readConsentReturn` refuses it. A `?code=` with no state
+ * is therefore NOBODY'S — this app never exchanges a code (see
+ * `signInWithGoogle`) — and both readers leave it alone rather than one of them
+ * guessing. Before this, a stale Google sign-in landing as `?error=…` was
+ * reported as "Google could not complete that connection".
+ *
+ * `error_code` is the contract and `error_description` is prose: GoTrue
+ * rewords descriptions without versioning them, so `describeSignInReturn`
+ * branches on the code and quotes the description only as a fallback.
+ */
+export function readSignInReturn(location = globalThis.location) {
+  const fragment = new URLSearchParams(String(location?.hash ?? '').replace(/^#/, ''))
+  if (fragment.get('error') || fragment.get('error_code') || fragment.get('error_description')) {
+    return {
+      error: fragment.get('error'),
+      code: fragment.get('error_code'),
+      description: fragment.get('error_description'),
+      source: 'fragment',
+    }
+  }
+  const query = new URLSearchParams(String(location?.search ?? ''))
+  if (query.get('state')) return null
+  if (query.get('error') || query.get('error_code')) {
+    return {
+      error: query.get('error'),
+      code: query.get('error_code'),
+      description: query.get('error_description'),
+      source: 'query',
+    }
+  }
+  return null
+}
+
+// GoTrue's codes for a flow that is gone rather than refused — the 5-minute
+// window from pressing the control, a state Google mangled, a state used twice.
+// Keyed on `error_code`, never on the description (see readSignInReturn).
+const STALE_FLOW_CODES = new Set([
+  'bad_oauth_state',
+  'bad_oauth_callback',
+  'flow_state_already_used',
+  'flow_state_not_found',
+  'flow_state_expired',
+])
+
+/**
+ * The sentence for a sign-in return, in words the person can act on — #304.
+ *
+ * Two things arrive as `access_denied` and cannot be told apart from here: the
+ * person pressing Cancel at Google, and Google refusing an account the consent
+ * screen has not been opened to — it is in Testing, so only the registered
+ * test users get past it (`docs/deploy-runbook.md` §3b step 2). The sentence
+ * fits both and names who can fix the second: the organizer, not Supabase and
+ * not Google. It is NOT the collapsed "did not match" sentence — that one is
+ * about a credential, and nothing here was a credential.
+ *
+ * An expired confirmation link also arrives as `access_denied`, with
+ * `error_code=otp_expired` — that is #129's flow, not this one, and it falls
+ * through to the generic sentence, which quotes GoTrue's own description
+ * ("Email link is invalid or has expired") rather than inventing a second one.
+ */
+export function describeSignInReturn({ error, code, description }) {
+  if (error === 'access_denied' && code !== 'otp_expired') {
+    return (
+      'Google did not sign you in. If Google said this app has not been opened to your ' +
+      'account, the organizer is the one who can add it — ask them. Or sign in with your ' +
+      'password here.'
+    )
+  }
+  if (STALE_FLOW_CODES.has(code)) {
+    return 'That Google sign-in took too long or was already used — press Continue with Google again.'
+  }
+  return `Sign-in did not complete: ${description || error || 'no reason was given'}.`
+}
+
+/**
  * Where a confirmation email's link should land: the origin it was asked from — #129.
  *
  * Supabase's **Site URL** is a single global value, so with nothing passed here

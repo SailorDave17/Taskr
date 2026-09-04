@@ -303,3 +303,112 @@ export async function listCalendarConnections(memberIds) {
   }
   return data ?? []
 }
+
+/**
+ * Matches the select grant in `0030` exactly; `select('*')` fails on this table.
+ *
+ * `household_id` is absent for the reason it is absent from the capacity and
+ * connection column lists: this table is scoped from an already-scoped member
+ * set, so the client never needs to name a household — and withholding the
+ * column is what makes a forgotten column list a loud refusal instead of a quiet
+ * superset.
+ */
+export const CALENDAR_BUSY_COLUMNS =
+  'id, member_id, period_start, busy_minutes, event_count, computed_at'
+
+/** The derived row for a member in a week, or null. */
+export function busyWeekFor(busyWeeks, memberId, periodStart) {
+  return (
+    busyWeeks.find((row) => row.member_id === memberId && row.period_start === periodStart) ?? null
+  )
+}
+
+/**
+ * Every derived busy figure ONE household has for a week — #96 AC 4.
+ *
+ * Scoped by `memberIds` like capacity, exclusions and connections: `0030` grants
+ * `member_id` and withholds `household_id`, so a row belongs to this household
+ * exactly when its member does. An empty member set short-circuits rather than
+ * issuing `in ()`, for `listCapacity`'s reason — the answer is knowable without
+ * the round trip.
+ *
+ * The rows carry no credential and nothing out of anybody's calendar: `0030`'s
+ * column list is the whole minimization decision, so there is no version of this
+ * read that could return an event title.
+ */
+export async function listBusyWeeks(periodStart, memberIds) {
+  if (!periodStart) throw new Error('Which week? A busy read must name one.')
+  if (!Array.isArray(memberIds)) throw new Error('Which household? A busy read must name its members.')
+  if (memberIds.length === 0) return []
+  const { data, error } = await getSupabase()
+    .from('calendar_busy')
+    .select(CALENDAR_BUSY_COLUMNS)
+    .in('member_id', memberIds)
+    .eq('period_start', periodStart)
+
+  if (error) {
+    const err = new Error(`loading calendar busy minutes: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data ?? []
+}
+
+/**
+ * Ask the Edge Function to read this week and store the derived figure — AC 1.
+ *
+ * The function acts on the CALLER's own member row (owner decision, 2026-09-04),
+ * so the body names only which household and which week: who it is about is
+ * `auth.uid()` off the JWT, exactly as `completeConnect` sends no member id.
+ *
+ * The failure sentence is read off the function's own body for #112's reason —
+ * `functions.invoke` collapses everything into "Edge Function returned a non-2xx
+ * status code", and the handler deliberately distinguishes a revoked connection
+ * from an unreachable Google from a missing configuration. AC 5 renders that
+ * sentence beside the last figure, so collapsing them would put the same words
+ * on a problem the member can fix and one they cannot.
+ */
+export async function fetchBusyWeek({ householdId, periodStart }) {
+  if (!householdId) throw new Error('Which household? A calendar read must name one.')
+  if (!periodStart) throw new Error('Which week? A calendar read must name one.')
+
+  const { data, error } = await getSupabase().functions.invoke('calendar-busy', {
+    body: { householdId, periodStart },
+  })
+
+  if (error) {
+    let detail = ''
+    try {
+      detail = (await error.context?.json?.())?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    throw new Error(detail || `Could not read that calendar: ${error.message}`)
+  }
+
+  return data
+}
+
+/**
+ * When a derived figure was read, as a person reads it — "Sep 4".
+ *
+ * In the HOUSEHOLD's zone, and that is the opposite call from `weekRangeLabel`
+ * in done.js, which formats in UTC. The difference is the data: a period start
+ * is a pure calendar date and formatting it in a zone west of Greenwich moves it
+ * a day, while `computed_at` is an INSTANT — an actual moment — and the only
+ * honest way to say which day it happened on is to ask the household's clock.
+ *
+ * Null for an unreadable value rather than throwing. This decorates a figure;
+ * a timestamp the app cannot parse must cost the date beside the number, never
+ * the number.
+ */
+export function busyComputedLabel(computedAt, timeZone) {
+  if (!computedAt || !timeZone) return null
+  const at = new Date(computedAt)
+  if (Number.isNaN(at.getTime())) return null
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(at)
+  } catch {
+    return null
+  }
+}

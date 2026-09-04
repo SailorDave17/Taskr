@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildInfo } from './buildInfo.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
 import {
@@ -57,7 +57,11 @@ import {
   writeSplitSeen,
 } from './lib/announce.js'
 import {
+  busyWeekFor,
   completeConnect,
+  connectionFor,
+  fetchBusyWeek,
+  listBusyWeeks,
   listCalendarConnections,
   readConsentReturn,
   startConnect,
@@ -127,6 +131,34 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #96 — this week's calendar-derived busy minutes, one row per member who has
+  // one. Server state read through the same refresh as everything else, and the
+  // rows carry nothing out of anybody's calendar: `0030`'s column list is the
+  // whole minimization decision, so the most this state could ever hold is an
+  // integer, a count and a timestamp.
+  const [busyWeeks, setBusyWeeks] = useState([])
+  // #96 AC 5 — why the figure on screen is the one it is. Separate from `error`
+  // because a calendar Google would not answer must not read as the app being
+  // broken: the manual capacity path is untouched, the last derived figure is
+  // still shown, and this is the sentence that says so beside it.
+  //
+  // TWO of them, because two different things can fail and one state cannot
+  // hold both honestly. The first version had one, and its two writers fought:
+  // `refresh()` clearing it on a successful READ of the table wiped the sentence
+  // the Edge Function's FAILURE had just put there, since a table that reads
+  // fine says nothing about whether Google answered. Each writer now owns its
+  // own, and the roster is handed whichever is standing — the fetch's first,
+  // because it is the one about this member's own calendar.
+  const [busyReadComplaint, setBusyReadComplaint] = useState(null)
+  const [busyFetchComplaint, setBusyFetchComplaint] = useState(null)
+  // #96 AC 1 — which (member, week) pairs this session has already asked about.
+  // A ref rather than state, and set BEFORE the call rather than after: the
+  // criterion is "once for that week", and a guard written after the await
+  // would let a re-render during the round trip start a second one. It also
+  // makes a failure quiet rather than a loop — a week that could not be read
+  // is not asked again until the app is reloaded, which is the one moment a
+  // person has done something that might have fixed it.
+  const askedForBusy = useRef(new Set())
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -218,8 +250,54 @@ export default function App() {
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
     setConnections(found ? await listCalendarConnections(memberIds) : [])
+    // #96 — the derived figures, read like every other row here. Its OWN
+    // try/catch, and that is not decoration: `0030` is unapplied on the live
+    // project until somebody pastes it, and an unguarded read of a missing
+    // table would fail this whole refresh — taking the roster, the chores and
+    // the manual capacity path down with it. AC 5 says the manual path stays
+    // untouched when the calendar half cannot answer, and a table that is not
+    // there yet is the largest instance of that. Reported rather than
+    // swallowed, for the reason the announcement read below gives: a red
+    // nobody can see is how a paste stays forgotten.
+    let busyRows = null
+    if (found && period) {
+      try {
+        busyRows = await listBusyWeeks(period, memberIds)
+        setBusyWeeks(busyRows)
+        // Cleared on a SUCCESSFUL read, which the first version of this did not
+        // do — the complaint was set here and cleared nowhere a member who
+        // already has a figure could reach, so a transient failure left a
+        // sentence standing under a figure that had since been read perfectly
+        // well, for the rest of the session. Found by review-fanout, 2026-09-04.
+        setBusyReadComplaint(null)
+      } catch (err) {
+        // The figures are NOT discarded, and that reversal is what makes AC 5
+        // reachable at all. Clearing them here meant the only state the
+        // criterion describes — the last figure, its date, and a sentence
+        // saying the calendar could not be read — could not occur in the
+        // running app: this story's fetch fires only when there is no row, so
+        // its own failures never coexist with a figure, and the one path that
+        // could produce both was throwing the figure away. Keeping them is also
+        // what BusyReadout's docblock already claimed happened.
+        setBusyReadComplaint(err.message)
+      }
+    } else {
+      setBusyWeeks([])
+      setBusyReadComplaint(null)
+      setBusyFetchComplaint(null)
+    }
     const uid = await currentUserId()
     setUserId(uid)
+    // #96 — the FETCH's complaint clears only once a figure for THIS member and
+    // THIS week has actually arrived, from another device or a reload: "the
+    // calendar could not be read" stops being true the moment a read of it is
+    // on the screen, and not before, whatever the table says. Resolved against
+    // the roster just read and the uid just fetched, not the render's `me`,
+    // which is the previous refresh's answer.
+    if (busyRows && period) {
+      const mine = findClaimedMember(roster, uid, found.id)
+      if (mine && busyWeekFor(busyRows, mine.id, period)) setBusyFetchComplaint(null)
+    }
 
     // #50 — is this member owed a statement about a re-balance they have not
     // seen? Checked on EVERY refresh rather than only at boot, deliberately: a
@@ -761,6 +839,102 @@ export default function App() {
   // whichever row the list happens to put first.
   const me = findClaimedMember(members, userId, household?.id)
 
+  // #96 AC 1 — THE trigger, and the only one this story owns.
+  //
+  // "A connected member with no derived row for the current week, when the
+  // capacity screen opens." Each clause below is one of those words, and the
+  // boundary is drawn deliberately hard against #98's refresh story: no row
+  // means this fetches, a row existing means this does NOTHING, and how old
+  // that row is belongs entirely to #98. The two invocation-count tests are
+  // disjoint by construction rather than by care — there is no staleness test
+  // here to get wrong, because there is no staleness clause.
+  //
+  // `view === 'who'` is what "opens" means: the app boots on the split, and the
+  // capacity control lives on the roster. Booting straight into a Google call
+  // on a screen that shows no capacity would spend a member's credential for a
+  // figure nobody asked to see.
+  //
+  // The member is `me` — resolved within the household on screen (#160) — for
+  // the owner decision at pickup, 2026-09-04: this reads the CALLER'S OWN
+  // calendar and nobody else's. A housemate's figure arrives when they open
+  // their own app.
+  //
+  // THE DEPENDENCIES ARE VALUES, NOT OBJECTS, and the first version of this got
+  // that wrong in a way every test passed over. `goTo('who')` starts a
+  // `refresh()` in the same breath as it sets the view, and `refresh()` replaces
+  // `household`, `members`, `connections` and `busyWeeks` with freshly decoded
+  // objects — new identities, same contents. With those objects in the dep
+  // array the cleanup ran before the Edge Function answered, `cancelled` went
+  // true, the result was dropped on BOTH branches, and `askedForBusy` then
+  // refused a retry for the rest of the session. The suite could not see it
+  // because every mock returns the same reference each call, so React bailed
+  // out of the re-render and no identity ever moved (review-fanout,
+  // 2026-09-04: `a-fake-cannot-disagree-with-its-author`). So the effect keys
+  // on the ids and booleans it actually decides by, and a refresh that changes
+  // nothing it cares about leaves it alone.
+  const householdId = household?.id
+  const myMemberId = me?.id
+  const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
+  const hasBusyRow = Boolean(
+    myMemberId && periodStart && busyWeekFor(busyWeeks, myMemberId, periodStart),
+  )
+  // A stable array while its members are the same ids, so the re-read below can
+  // name the household without the effect re-running on every refresh.
+  const memberIdsKey = members.map((m) => m.id).join(',')
+  const memberIds = useMemo(() => (memberIdsKey ? memberIdsKey.split(',') : []), [memberIdsKey])
+
+  useEffect(() => {
+    if (status !== 'joined' || view !== 'who') return
+    if (!householdId || !periodStart || !myMemberId) return
+    if (!isConnected || hasBusyRow) return
+
+    const key = `${myMemberId}:${periodStart}`
+    if (askedForBusy.current.has(key)) return
+    askedForBusy.current.add(key)
+
+    // NO CLEANUP, and NO CANCELLATION — the second review-fanout pass reversed
+    // both. The first version released the key when the effect was torn down
+    // mid-flight, so that a genuine change could ask again; but `view` is a
+    // dependency, so leaving Who and coming back inside the round trip tore it
+    // down too, released the key, and started a SECOND Edge Function call for
+    // the same week — two token exchanges and two Google reads — while the test
+    // named "once for that week" stayed green. And the `cancelled` flag that
+    // dropped the first answer was the original bug one layer down.
+    //
+    // So the key is kept for the session whatever happens, and a settled answer
+    // LANDS whenever it settles: the key already identifies the (member, week)
+    // it is about, `setBusyWeeks` re-reads by that week, and `refresh()` will
+    // overwrite either state on the next load if the household on screen has
+    // moved on. React 18 tolerates a state write after unmount, and App never
+    // unmounts. The member gets the figure on the visit it arrived, once.
+    ;(async () => {
+      try {
+        await fetchBusyWeek({ householdId, periodStart })
+      } catch (err) {
+        // AC 5. Nothing is cleared: the last derived figure — if there is one —
+        // stays on screen with its date, and this sentence goes beside it.
+        setBusyFetchComplaint(err.message)
+        return
+      }
+      setBusyFetchComplaint(null)
+      // Re-read rather than trusting the response body, for the reason every
+      // write on this screen re-reads: what the next device to load will see
+      // is exactly what this one now shows. The function's own answer would
+      // be a second representation of the row it just wrote.
+      //
+      // In its OWN try, because a failure here is a failure of the TABLE, not
+      // of Google, and the two complaints are cleared by different things — a
+      // read failure filed under the fetch's complaint would outlive the next
+      // successful read, which is what one version of this did.
+      try {
+        setBusyWeeks(await listBusyWeeks(periodStart, memberIds))
+        setBusyReadComplaint(null)
+      } catch (err) {
+        setBusyReadComplaint(err.message)
+      }
+    })()
+  }, [status, view, householdId, periodStart, myMemberId, isConnected, hasBusyRow, memberIds])
+
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
   // makes that a rule and capacity.test.js enforces it with an allowlist.
@@ -788,8 +962,8 @@ export default function App() {
   // says rather than an optimistic local flip. `me` is resolved within the
   // household on screen (#160), so the dismissal cannot land on another
   // household's row; with no claimed row the write refuses with a sentence
-  // rather than guessing whose dismissal it was.
-  const myMemberId = me?.id
+  // rather than guessing whose dismissal it was. `myMemberId` is declared
+  // above, beside the calendar trigger that also keys on it.
   const handleDismissFairnessNote = useCallback(
     () => mutate(() => dismissFairnessNote(myMemberId)),
     [mutate, myMemberId],
@@ -936,6 +1110,16 @@ export default function App() {
           onClearCapacity={handleClearCapacity}
           connections={connections}
           onConnectCalendar={handleConnectCalendar}
+          busyWeeks={busyWeeks}
+          // The READ complaint only reaches a member who has connected a
+          // calendar (owner decision, 2026-09-04, at the second review pass): a
+          // failed read of the busy table only means something to somebody whose
+          // figure would have been there. Otherwise every member would read a
+          // PostgREST sentence under their minutes for the whole window between
+          // this merging and `0030` being applied, on a row that has nothing to
+          // do with calendars. The FETCH complaint is about this member's own
+          // calendar by construction, so it needs no such gate.
+          busyComplaint={busyFetchComplaint ?? (isConnected ? busyReadComplaint : null)}
         />
       ) : null}
 

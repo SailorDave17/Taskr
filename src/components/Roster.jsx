@@ -7,7 +7,7 @@ import {
   effectiveCapacity,
   normalizeCapacityMinutes,
 } from '../lib/capacity.js'
-import { connectionFor, isRealEmailMember } from '../lib/calendar.js'
+import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
 // change is what every other device shows on next load) and the "pick yourself"
@@ -161,6 +161,72 @@ CapacityControl.propTypes = {
   busy: PropTypes.bool,
   onSet: PropTypes.func.isRequired,
   onClear: PropTypes.func.isRequired,
+}
+
+/**
+ * What the calendar says about this week, beside the number it informs — #96.
+ *
+ * A READOUT AND NOTHING ELSE. It has no control, writes nothing, and sits next
+ * to the manual input rather than inside it: AC 4 says nothing is written to
+ * `member_capacity`, and the thinnest way to be sure of that is a component with
+ * no handler to call. Applying the suggestion is #97's story and arrives here as
+ * a prefill on the editor above.
+ *
+ * The date is always shown, not only when something went wrong. This story
+ * fetches a week ONCE — staleness is #98's — so a figure read on Monday is still
+ * on screen on Friday, and a number presented without its age would be claiming
+ * a freshness it does not have.
+ *
+ * AC 5 is the second branch: when Google could not be read, the last figure
+ * stays exactly where it was with its date, and the sentence goes underneath.
+ * Nothing is cleared and nothing is zeroed — a confident zero is the harmful
+ * version of handling this error, because zero busy minutes is a perfectly
+ * plausible week and nobody would question it.
+ *
+ * THE SENTENCE IS RENDERED UNCHANGED, and that is a decision the design-bar pass
+ * of 2026-09-04 reversed. It was prefixed with "Couldn’t read that calendar — ",
+ * which read on a 360px screen as *"Couldn’t read that calendar — That calendar
+ * connection is no longer valid. Connect it again."*: one fact told twice, three
+ * wrapped lines, and the only actionable clause at the end of the third. Every
+ * sentence that reaches here already names the calendar or Google — the Edge
+ * Function distinguishes a revoked connection from an unreachable Google from a
+ * missing configuration, and `fetchBusyWeek` reads that sentence off the
+ * function's own body rather than the SDK's generic one. A wrapper around a
+ * sentence chosen that carefully is a wrapper that can only blur it.
+ *
+ * `role="status"` is a POLITE live region, which is right for a sentence that
+ * appears after the screen has settled — and it is deliberately not the only way
+ * to find this element. The roster already carries a `role="status"` (the
+ * no-organizer note), so a document-wide query by role is ambiguous on this
+ * screen: the testid is what lets a test name THIS one. Found by a test that
+ * asserted the absence of any status region and matched the other one instead.
+ */
+function BusyReadout({ busyWeek, complaint, timeZone }) {
+  if (!busyWeek && !complaint) return null
+  const read = busyWeek ? busyComputedLabel(busyWeek.computed_at, timeZone) : null
+
+  return (
+    <div className="member__busy">
+      {busyWeek ? (
+        <span className="member__busy-figure" data-testid={`busy-${busyWeek.member_id}`}>
+          Calendar suggests: {busyWeek.busy_minutes} min busy
+          <span className="member__budget-human"> ({formatMinutes(busyWeek.busy_minutes)})</span>
+          {read ? <span className="member__busy-read"> · read {read}</span> : null}
+        </span>
+      ) : null}
+      {complaint ? (
+        <span className="member__busy-complaint" role="status" data-testid="busy-complaint">
+          {complaint}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+BusyReadout.propTypes = {
+  busyWeek: PropTypes.object,
+  complaint: PropTypes.string,
+  timeZone: PropTypes.string,
 }
 
 /**
@@ -361,6 +427,9 @@ function MemberRow({
   onClearCapacity,
   connection,
   onConnectCalendar,
+  busyWeek,
+  busyComplaint,
+  timeZone,
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
@@ -500,6 +569,16 @@ function MemberRow({
           onSet={onSetCapacity}
           onClear={onClearCapacity}
         />
+        {/* #96 — directly under this week's minutes, which is the number it
+            exists to inform. Own row only for the COMPLAINT (it is about a read
+            this device attempted), household-wide for the FIGURE: the derived
+            rows are readable by everybody `0030`'s policy scopes them to, the
+            same way a housemate's weekly minutes have always been. */}
+        <BusyReadout
+          busyWeek={busyWeek}
+          complaint={isMe ? busyComplaint : null}
+          timeZone={timeZone}
+        />
         {/* #95 — the calendar sits directly under this week's minutes, because
             that is the number it exists to inform (#96 turns the connection into
             a suggested busy figure here). Own row only, and only for a member
@@ -602,6 +681,9 @@ MemberRow.propTypes = {
   onClearCapacity: PropTypes.func.isRequired,
   connection: PropTypes.object,
   onConnectCalendar: PropTypes.func,
+  busyWeek: PropTypes.object,
+  busyComplaint: PropTypes.string,
+  timeZone: PropTypes.string,
 }
 
 // `ShareCode` stood here until #62 — a button that copied or sent the household's
@@ -635,6 +717,8 @@ export default function Roster({
   onClearCapacity,
   connections = [],
   onConnectCalendar,
+  busyWeeks = [],
+  busyComplaint = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -818,6 +902,14 @@ export default function Roster({
                 // above.
                 connection={connectionFor(connections, member.id)}
                 onConnectCalendar={onConnectCalendar}
+                // #96 — resolved here for the reason `override` is: at most one
+                // row per person per week (`0030`'s unique constraint), matched
+                // on the PERIOD as well as the person so a figure from another
+                // week cannot appear beside this week's minutes. That is the
+                // exact fault a first version of `overrideFor` had.
+                busyWeek={busyWeekFor(busyWeeks, member.id, periodStart)}
+                busyComplaint={busyComplaint}
+                timeZone={household.timezone}
               />
             ))}
           </ul>
@@ -931,4 +1023,6 @@ Roster.propTypes = {
   onClearCapacity: PropTypes.func.isRequired,
   connections: PropTypes.array,
   onConnectCalendar: PropTypes.func,
+  busyWeeks: PropTypes.array,
+  busyComplaint: PropTypes.string,
 }

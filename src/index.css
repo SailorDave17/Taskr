@@ -478,6 +478,46 @@ body {
   opacity: 0.75;
 }
 
+/* What the calendar says about this week — story #96.
+
+   Under the week's minutes, in the same quiet register as `.member__access` and
+   `.member__calendar` above: it is a SUGGESTION beside a number the person
+   owns, and drawing it as loudly as the figure it informs would invert that.
+   #97 turns it into a control; today it is text.
+
+   `display: block` and its own margin for `.member__calendar`'s reason — at
+   360px a name, a baseline, the week's figure and a Change button already fill
+   the row, and this drops beneath them rather than competing for the line. The
+   figure is tabular like `.member__week-figure` so the two numbers stack in
+   alignment down the roster. */
+.member__busy {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.member__busy-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.member__busy-read {
+  opacity: 0.75;
+}
+
+/* The read that did not happen — AC 5.
+
+   `display: block` so it sits under the figure it qualifies rather than running
+   on from it: the two say different things, and a sentence about a failure
+   appended to a number reads as though it describes that number. Not styled as
+   an error — nothing is broken, the manual path is untouched, and the figure
+   above is still true of the last time the calendar could be read. */
+.member__busy-complaint {
+  display: block;
+  margin-top: 0.125rem;
+  opacity: 0.75;
+}
+
 /* #87 — the provisioning form, opened from a member row. Same shape as the
    week form above it: it replaces the row's button in place rather than
    opening a dialog, so the organizer stays on the roster they are reading. */

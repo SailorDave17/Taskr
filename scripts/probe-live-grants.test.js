@@ -142,6 +142,11 @@ describe('what it asks for — AC 3', () => {
       'calendar_connections',
       'member_split_seen',
       'chore_repeat_exceptions',
+      // #96 — the derived busy figure. Added here in the same change that adds
+      // it to LIVE_SCHEMA, which is the friction this assertion exists to
+      // create: a table reaching the client without anybody deciding what
+      // `authenticated` should hold on it is the thing being prevented.
+      'calendar_busy',
     ])
   })
 

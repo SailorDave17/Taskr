@@ -1,6 +1,6 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
 import { SPLIT_SEEN_COLUMNS } from './announce.js'
-import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -79,6 +79,12 @@ export const LIVE_SCHEMA = Object.freeze([
   // that is the whole write model — `skip_repeat_occurrence` is the one writer,
   // and it is probed as an RPC below.
   Object.freeze({ table: 'chore_repeat_exceptions', columns: REPEAT_EXCEPTION_COLUMNS }),
+  // #96, arriving with `0030` — RED on purpose until that migration reaches the
+  // live project, exactly as every migration-borne entry above was for its file.
+  // `0030`'s table is the third calendar one and the second the client reads:
+  // the derived figures are readable by the household, the refresh token is not,
+  // and that split is the whole of the minimization decision.
+  Object.freeze({ table: 'calendar_busy', columns: CALENDAR_BUSY_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -390,7 +396,14 @@ export function describeRpcError(fn, args, error) {
  * set - which would pass vacuously. The scan resolves the const and asserts it
  * resolved.
  */
-export const LIVE_EDGE_FUNCTIONS = Object.freeze(['provision-member', 'calendar-connect'])
+export const LIVE_EDGE_FUNCTIONS = Object.freeze([
+  'provision-member',
+  'calendar-connect',
+  // #96. Deployed by hand like the other two, and — the whole reason this list
+  // is separate from `LIVE_RPCS` — arriving with no migration that mentions it,
+  // so `0030` reaching the project says nothing about whether this is there.
+  'calendar-busy',
+])
 
 /**
  * The headers a browser names in the preflight before `functions.invoke`.

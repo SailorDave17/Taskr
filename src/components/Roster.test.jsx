@@ -1034,3 +1034,158 @@ describe('#95 AC 5 — a connected member sees so on reload', () => {
     ).toBeInTheDocument()
   })
 })
+
+// ===========================================================================
+// #96 — the calendar's suggestion, beside the number it informs
+// ===========================================================================
+//
+// A READOUT, and every assertion below is really about that: it renders a
+// figure, it never offers to apply it, and it writes nothing. Applying is #97.
+describe('#96 — calendar-suggested busy minutes', () => {
+  const zoned = { ...household, timezone: 'America/New_York' }
+  const busyRow = {
+    id: 'busy-1',
+    member_id: 'm1',
+    period_start: PERIOD,
+    busy_minutes: 320,
+    event_count: 6,
+    // 01:00 UTC on the 12th is 21:00 on the 11th in this fixture's zone. Chosen
+    // so the date the readout shows DEPENDS on the zone reaching it: the first
+    // fixture was 14:00Z, which formats identically in New York and UTC, so
+    // hard-coding `timeZone="UTC"` in Roster.jsx reddened nothing
+    // (review-fanout, 2026-09-04).
+    computed_at: '2026-08-12T01:00:00Z',
+  }
+
+  it('AC 4 — shows the suggestion beside this week’s minutes', () => {
+    setup({ household: zoned, busyWeeks: [busyRow] })
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+    // Beside the manual input, not instead of it: the number the person owns is
+    // still the one the split divides, and it is still on screen.
+    expect(within(row).getByTestId('week-m1')).toBeInTheDocument()
+  })
+
+  it('AC 4 — offers no way to apply it, because that is #97', () => {
+    // The thinnest proof that nothing is written to `member_capacity`: there is
+    // no control here to write with. A test asserting "the handler was not
+    // called" would pass just as well against a button nobody pressed.
+    const handlers = setup({ household: zoned, busyWeeks: [busyRow] })
+    const row = rowFor('Placeholder One')
+    expect(within(row).queryByRole('button', { name: /calendar/i })).not.toBeInTheDocument()
+    expect(handlers.onSetCapacity).not.toHaveBeenCalled()
+    expect(handlers.onClearCapacity).not.toHaveBeenCalled()
+  })
+
+  it('says WHEN it was read, because this story fetches a week once', () => {
+    // Staleness is #98's story, so a figure read on Monday is still on screen on
+    // Friday. A number shown without its age would be claiming a freshness it
+    // does not have.
+    setup({ household: zoned, busyWeeks: [busyRow] })
+    // 'Aug 11', not 'Aug 12': the household's zone, not UTC, decides which day
+    // the read happened on. This is the assertion that fails when the roster
+    // stops passing the household's timezone through.
+    expect(within(rowFor('Placeholder One')).getByText(/calendar suggests:/i)).toHaveTextContent(
+      'Aug 11',
+    )
+    expect(within(rowFor('Placeholder One')).getByText(/calendar suggests:/i)).not.toHaveTextContent(
+      'Aug 12',
+    )
+  })
+
+  it('renders no readout for a member with no figure', () => {
+    setup({ household: zoned, busyWeeks: [busyRow] })
+    expect(
+      within(rowFor('Placeholder Two')).queryByText(/calendar suggests:/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('ignores a figure belonging to somebody else', () => {
+    setup({ household: zoned, busyWeeks: [{ ...busyRow, member_id: 'm2' }] })
+    expect(
+      within(rowFor('Placeholder One')).queryByText(/calendar suggests:/i),
+    ).not.toBeInTheDocument()
+    expect(within(rowFor('Placeholder Two')).getByText(/calendar suggests:/i)).toBeInTheDocument()
+  })
+
+  it('ignores a figure from ANOTHER WEEK', () => {
+    // The fault `overrideFor` had, in a second table: a figure from a foreign
+    // period beside this week's minutes is invisible, because every number on
+    // screen stays plausible and only the arithmetic is wrong.
+    setup({ household: zoned, busyWeeks: [{ ...busyRow, period_start: '2026-08-03' }] })
+    expect(
+      within(rowFor('Placeholder One')).queryByText(/calendar suggests:/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows a zero rather than hiding it — an empty week is an answer', () => {
+    // `0` is falsy, and a readout guarded on the FIGURE instead of the ROW would
+    // silently drop the one week a member most wants to see confirmed.
+    setup({ household: zoned, busyWeeks: [{ ...busyRow, busy_minutes: 0, event_count: 0 }] })
+    expect(within(rowFor('Placeholder One')).getByText(/calendar suggests:/i)).toHaveTextContent(
+      '0 min busy',
+    )
+  })
+
+  it('AC 5 — keeps the last figure and says the calendar could not be read', () => {
+    const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+    setup({
+      household: zoned,
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      busyWeeks: [busyRow],
+      busyComplaint: 'That calendar connection is no longer valid.',
+    })
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+    // The server's sentence, rendered UNCHANGED. Asserted as an exact match
+    // rather than a substring, because the fault the design-bar pass found was a
+    // wrapper around it: any prefix restates a sentence the Edge Function
+    // already worded to distinguish a revoked connection from an unreachable
+    // Google, and this is what refuses one.
+    expect(within(row).getByTestId('busy-complaint')).toHaveTextContent(
+      /^That calendar connection is no longer valid\.$/,
+    )
+    // Untouched, which is the half of AC 5 that matters: a calendar that cannot
+    // be read costs a suggestion and never the way the person sets their week.
+    expect(within(row).getByRole('button', { name: /set this week/i })).toBeEnabled()
+  })
+
+  it('AC 5 — says it even when there is no figure to fall back to', () => {
+    const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+    setup({
+      household: zoned,
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      busyWeeks: [],
+      busyComplaint: 'Could not reach Google. Try again in a moment.',
+    })
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByTestId('busy-complaint')).toHaveTextContent(
+      /^Could not reach Google\. Try again in a moment\.$/,
+    )
+    expect(within(row).queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+  })
+
+  it('puts the complaint on the OWN row only, never on a housemate’s', () => {
+    // It is about a read THIS device attempted with THIS member's credential.
+    // On somebody else's row it would read as a statement about their calendar,
+    // which this device knows nothing about.
+    const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+    setup({
+      household: zoned,
+      members: [withEmail, roster[1]],
+      me: withEmail,
+      busyWeeks: [{ ...busyRow, member_id: 'm2' }],
+      busyComplaint: 'Could not reach Google. Try again in a moment.',
+    })
+    expect(within(rowFor('Placeholder Two')).queryByTestId('busy-complaint')).not.toBeInTheDocument()
+    expect(within(rowFor('Placeholder One')).getByTestId('busy-complaint')).toBeInTheDocument()
+  })
+
+  it('renders nothing at all when there is neither a figure nor a complaint', () => {
+    setup({ household: zoned })
+    expect(screen.queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+})

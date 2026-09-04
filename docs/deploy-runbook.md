@@ -245,15 +245,23 @@ persists anything.
 
 ## 3. The Edge Functions
 
-**Two of them since #95** — `provision-member` and `calendar-connect`. `npm run deploy:function`
-deploys both; `npm run deploy:function -- <name>` narrows it to one, and a name this repo does not
-have is refused by the script rather than handed to the CLI, which would fail with a message about a
-directory and send you to look at the filesystem instead of at what you typed.
+**Three of them since #96** — `provision-member`, `calendar-connect` and `calendar-busy`.
+`npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
+and a name this repo does not have is refused by the script rather than handed to the CLI, which would
+fail with a message about a directory and send you to look at the filesystem instead of at what you
+typed. *(This said "two since #95" until 2026-09-04, a day after the third arrived — the count lives
+in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
+disagree, the script is right.)*
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
 and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
 sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
-the Connect Google Calendar button on the capacity screen fails when it is pressed.
+the Connect Google Calendar button on the capacity screen fails when it is pressed. Until
+`calendar-busy` has, a connected member's roster row shows a sentence under this week's minutes —
+the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
+"Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
+and `npm run check:live` is what tells the two apart, since it probes the table and the function as
+separate rows.
 
 **A source change to an Edge Function needs a deploy of its own, and `npm run check:deployed`
 reports when one is owed.** Merging does not deploy a function, and neither does pasting a migration —

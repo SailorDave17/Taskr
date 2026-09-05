@@ -1079,10 +1079,11 @@ describe('#96 — calendar-suggested busy minutes', () => {
     expect(handlers.onClearCapacity).not.toHaveBeenCalled()
   })
 
-  it('says WHEN it was read, because this story fetches a week once', () => {
-    // Staleness is #98's story, so a figure read on Monday is still on screen on
-    // Friday. A number shown without its age would be claiming a freshness it
-    // does not have.
+  it('says WHEN it was read, because a figure can outlive the day it describes', () => {
+    // #96 fetched a week once; #98 refreshes a figure older than twelve hours
+    // on app open, and a phone left open or a Google that keeps refusing still
+    // draws the last read. Either way a number shown without its age would be
+    // claiming a freshness it does not have.
     setup({ household: zoned, busyWeeks: [busyRow] })
     // 'Aug 11', not 'Aug 12': the household's zone, not UTC, decides which day
     // the read happened on. This is the assertion that fails when the roster

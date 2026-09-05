@@ -2524,7 +2524,14 @@ describe('calendar-suggested busy minutes (#96)', () => {
     period_start: WEEK,
     busy_minutes: 320,
     event_count: 6,
-    computed_at: '2026-09-08T14:00:00Z',
+    // Read NOW, not on a fixed date. This was '2026-09-08T14:00:00Z' until #98
+    // — a date in the future when written — and #98 makes a row older than
+    // twelve hours a TRIGGER, so on the evening of 2026-09-09 this fixture
+    // would have aged across the bound and turned "does NOT fetch when a row
+    // exists" into one call, on a diff that touched nothing. Every test in
+    // this block is about a row EXISTING; none is about its age, and a fresh
+    // timestamp is the only value that keeps it that way indefinitely.
+    computed_at: new Date().toISOString(),
   }
 
   beforeEach(() => {
@@ -2839,6 +2846,231 @@ describe('calendar-suggested busy minutes (#96)', () => {
     await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
     expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
     expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument()
+  })
+})
+
+// #98 — the busy figure refreshes itself on app open when it is stale. The
+// mirror of the #96 block above, and written to stay disjoint from it: that
+// block proves the fetch fires on NO row and never on a row; this one proves it
+// fires on a STALE row and never on a fresh one, on the APP opening rather than
+// the capacity screen, and once a session. `isBusyWeekStale` is real here — the
+// bound and its boundary are calendar.test.js's — so every row below is aged
+// against the actual clock rather than against a stubbed answer.
+describe('busy figure refreshes itself on app open (#98)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = {
+    id: 'c1',
+    member_id: 'm1',
+    scope: 'freebusy',
+    connected_at: '2026-08-24T00:00:00Z',
+  }
+  const HOUR = 60 * 60 * 1000
+  /** This week, by the app's own arithmetic in the household's zone. */
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  /** A derived row for `me`, read `msAgo` before now. */
+  const rowReadAgo = (msAgo, extra = {}) => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 320,
+    event_count: 6,
+    computed_at: new Date(Date.now() - msAgo).toISOString(),
+    ...extra,
+  })
+  // Thirteen hours and eleven — an hour either side of the twelve-hour bound,
+  // so a slow run cannot walk a fixture across it. The boundary itself is
+  // pinned with an injected clock in calendar.test.js, not sampled here.
+  const staleRow = (extra) => rowReadAgo(13 * HOUR, extra)
+  const freshRow = (extra) => rowReadAgo(11 * HOUR, extra)
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  it('AC 1: a row older than the bound is refreshed when the APP opens — on the split, before any tab', async () => {
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp()
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    const [call] = calendarApi.fetchBusyWeek.mock.calls
+    expect(call[0]).toEqual({ householdId: 'h1', periodStart: week() })
+    // The capacity screen was never opened, so #96's trigger — which keys on
+    // that screen — cannot have been the caller. "When the app opens" is the
+    // whole of this criterion's clause, and the split is where the app opens.
+    expect(
+      screen.queryByRole('region', { name: /who is in the household/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('AC 2: a row fresher than the bound is left alone, across repeated opens', async () => {
+    // The rate bound, as the criterion asks for it: three opens, zero calls.
+    // Each open is a fresh mount — a phone opening the app three times in a
+    // morning — and each one draws the figure it already has.
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow()])
+    for (let open = 0; open < 3; open += 1) {
+      await renderApp('Who')
+      await waitFor(() =>
+        expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+      )
+      cleanup()
+    }
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1/AC 2: the bound is the ROW’S age, so a row that never freshens costs one call per open and never a loop', async () => {
+    // The other half of the rate statement. A member whose Google keeps
+    // refusing keeps a stale row; each open asks once — bounded by the key —
+    // and a session never asks twice. Three opens, three calls, not thirty.
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    for (let open = 0; open < 3; open += 1) {
+      await renderApp()
+      await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(open + 1))
+      // Settle anything the mount left in flight before counting the next open.
+      await act(async () => {})
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(open + 1)
+      cleanup()
+    }
+  })
+
+  it('AC 1: once a session — refreshes, tab switches and re-renders do not ask again', async () => {
+    // Fresh references throughout, as the network hands them back, so this is
+    // the version of the claim that can disagree with the mocks' author: the
+    // trigger keys on the timestamp as a VALUE, and a refresh that decodes the
+    // same row into a new object leaves it alone. The row stays stale on every
+    // re-read (the mock never freshens it), so nothing the effect decides by
+    // ever moves and this is one call BY CONSTRUCTION — the value-keyed
+    // dependency list is what it witnesses. The session KEY is witnessed
+    // separately, by the roster-change test at the end of this block, which is
+    // the one that makes a dependency move after a failure.
+    api.currentHousehold.mockImplementation(async () => ({ ...household }))
+    api.listMembers.mockImplementation(async () => [{ ...me }, { ...housemate }])
+    calendarApi.listCalendarConnections.mockImplementation(async () => [{ ...connection }])
+    const row = staleRow()
+    calendarApi.listBusyWeeks.mockImplementation(async () => [{ ...row }])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    }
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    // Exactly one, with the capacity screen open the whole time: #96's trigger
+    // saw a row and did nothing, which is the disjointness both stories claim.
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: does not refresh for a member who has connected nothing, however old the row', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+    )
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: does not refresh a HOUSEMATE’s stale row', async () => {
+    // Owner decision on #96, inherited: this device reads the signed-in
+    // member's own calendar. My row is fresh; the housemate's is a day old and
+    // is theirs to refresh when they open their own app.
+    calendarApi.listBusyWeeks.mockResolvedValue([
+      freshRow(),
+      staleRow({ id: 'b2', member_id: 'm2', busy_minutes: 90 }),
+    ])
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getAllByText(/calendar suggests:/i)).toHaveLength(2))
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a refresh that lands while the capacity screen is open updates the figure in place', async () => {
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    // The stale figure is on screen and the refresh is in flight — started at
+    // boot, before the tab was pressed. Both refreshes goTo started have
+    // settled by now with the same stale row, so what lands next lands late.
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+    )
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(0, { busy_minutes: 400, event_count: 7 })])
+    await act(async () => finish({ ok: true }))
+    // No reload, no refresh button, no tab: the promise settled and the screen
+    // followed. The date beside it is the new read's.
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('400 min busy'),
+    )
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent(/· read /)
+    // And the fresh row did not re-arm the trigger: still one call.
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4: a refresh that fails leaves the stale figure and its date on screen, and interrupts nothing', async () => {
+    calendarApi.fetchBusyWeek.mockRejectedValue(
+      new Error('Could not reach Google. Try again in a moment.'),
+    )
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/),
+    )
+    // The figure the member had, with the date it was read — not zeroed, not
+    // cleared, not replaced by the sentence.
+    const figure = inRoster().getByText(/calendar suggests:/i)
+    expect(figure).toHaveTextContent('320 min busy')
+    expect(figure).toHaveTextContent(/· read /)
+    // "No error interrupts the session": nothing is in the app's error strip,
+    // no alert is on the page, and the manual path is there to use. The one
+    // sentence that appears is a polite status beside the figure, which is
+    // #96 AC 5's surface reused rather than a new one.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not reach the household/i)).not.toBeInTheDocument()
+    expect(
+      inRoster().getByRole('button', { name: /set this week for placeholder one/i }),
+    ).toBeEnabled()
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4: a failed refresh is not asked again when the roster changes underneath it', async () => {
+    // The witness that reaches the session KEY rather than the dependency list.
+    // After a failure the row is unchanged, so no dependency moves and the
+    // effect is silent by construction — until something it decides by DOES
+    // move. A housemate joining changes the member set the re-read names; the
+    // effect re-runs, the row is still stale, and only the key stands between
+    // that and a second call for a week Google just refused.
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/),
+    )
+    api.listMembers.mockResolvedValue([
+      me,
+      housemate,
+      { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null },
+    ])
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    await waitFor(() => expect(inRoster().getByText('Placeholder Three')).toBeInTheDocument())
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/)
   })
 })
 

@@ -299,10 +299,12 @@ function sourceLabel(source) {
  * no handler to call. Applying the suggestion is #97's story and arrives here as
  * a prefill on the editor above.
  *
- * The date is always shown, not only when something went wrong. This story
- * fetches a week ONCE — staleness is #98's — so a figure read on Monday is still
- * on screen on Friday, and a number presented without its age would be claiming
- * a freshness it does not have.
+ * The date is always shown, not only when something went wrong. #96 fetched a
+ * week ONCE, so a figure read on Monday was still on screen on Friday; since
+ * #98 an app open refreshes a figure older than twelve hours, which narrows the
+ * gap and does not close it — a phone left open all week, or a Google that
+ * keeps refusing, keeps drawing the last read. A number presented without its
+ * age would be claiming a freshness it does not have, in either story.
  *
  * AC 5 is the second branch: when Google could not be read, the last figure
  * stays exactly where it was with its date, and the sentence goes underneath.

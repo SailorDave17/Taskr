@@ -154,12 +154,13 @@ create policy calendar_busy_select_same_household
 -- all. An Edge Function holding the service_role key would be refused 42501 on
 -- its own table.
 --
--- `0011`'s equivalent comment adds that the pglite harness disagrees, being
--- `grant all` and "deliberately more permissive than the platform", so that a
--- grant like this one is vacuous there. **That has not been true since #91**,
--- which narrowed the harness to the platform's real default; the sentence is
--- kept in 0011 and repeated in two test headers, which is why it is contradicted
--- here rather than quietly not copied. *Measured 2026-09-04*: deleting the grant
+-- `0011`'s equivalent comment added, until #334, that the pglite harness
+-- disagrees, being `grant all` and "deliberately more permissive than the
+-- platform", so that a grant like this one is vacuous there. **That has not
+-- been true since #91**, which narrowed the harness to the platform's real
+-- default; the sentence was kept in 0011 and repeated in two test headers, which
+-- is why it was contradicted here rather than quietly not copied, and #334 is
+-- what corrected the other copies. *Measured 2026-09-04*: deleting the grant
 -- below reddens `and service_role reaches only what the Edge Functions need` in
 -- src/test/grants.pglite.test.js — predicted 1, actual 1. So this line is
 -- load-bearing in production AND proven in CI, and the direction rule that

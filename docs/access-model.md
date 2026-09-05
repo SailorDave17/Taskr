@@ -7,10 +7,14 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0030` are ALL applied to the live project, and the expected-red set is EMPTY —
-  *measured 2026-09-04 at 36 of 36* in #100's session, after `0030` was applied and `calendar-busy`
-  deployed there (34 of 36 immediately before, exactly #96's two rows red; see the `0030` entry
-  below).** Up to `0029`, and at the moment `0029` landed, that set was EMPTY too —
+- Status: **`0001`–`0030` are ALL applied to the live project, and the expected-red set holds ONE
+  row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
+  it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
+  the name was listed and 36 of 37 immediately after*, in #210's own session (see the #210 bullet
+  under *What is not done*).** Before #210, the set was EMPTY — *measured 2026-09-04 at 36 of 36*
+  in #100's session, after `0030` was applied and `calendar-busy` deployed there (34 of 36
+  immediately before, exactly #96's two rows red; see the `0030` entry below). Up to `0029`, and at
+  the moment `0029` landed, that set was EMPTY too —
   *measured 2026-09-02 at 32 of 32*, on both sides of `0029`'s apply in its own story's session
   (below), and at the same figure on both sides of `0028`'s earlier the same day, and on 2026-09-01
   after `0027` was applied in its.
@@ -363,7 +367,17 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
+- **The excused-red set holds ONE row since 2026-09-04 (#210): the `extract-description` Edge
+  Function probe, cleared by #209's deploy and by nothing else.** The plain-language capacity flow
+  (`src/lib/capture.js`) invokes that function by name ahead of #208 writing it — owner decision at
+  #210's pickup — and `LIVE_EDGE_FUNCTIONS` lists what the app invokes, so the probe answers NOT
+  DEPLOYED: *measured 2026-09-04 at 36 of 36 immediately before the name was listed and 36 of 37
+  immediately after*, in #210's own session, the one red naming exactly that function. Not a
+  migration's row and not a paste's: the action that clears it is `npm run deploy:function` once
+  the directory exists, and until then a bare deploy skips the name (`PENDING_FUNCTIONS` in
+  `scripts/deploy-function.mjs`, whose test refuses the entry the day the directory appears). Every
+  other red, on any subject, is real.
+- **Before #210 the set was EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
   `calendar_busy` table probe on `0030`'s apply, and the `calendar-busy` Edge Function probe on
   its deploy, each on its own action and neither on the other's — *measured 2026-09-04 at 34 of
   36 before and 36 of 36 after*, in #100's session. They were written down here at the moment they
@@ -452,7 +466,8 @@
   asking in one bit.
 
   **The excused-red set held nothing between `0018`'s application and #50, held `0020`'s one row
-  within #50's session, and is EMPTY again — see the head of this bullet.** *Measured 2026-08-27 at
+  within #50's session, and was EMPTY again until #210 opened the `extract-description` row on
+  2026-09-04 — see the head of this bullet.** *Measured 2026-08-27 at
   25 of 25* after `0018` was
   applied under
   #231. It held TWO rows between #49's merge and that application, and both are moved into
@@ -708,7 +723,9 @@
   negative control. There is no excused moved row left, so any moved row now is a real finding.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted fifteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted many times; this list is the record and the count is not, because the count said
+  "fifteen" while the list stopped at #50 and four stories had inverted it since (#210, 2026-09-04):
+  EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
@@ -722,13 +739,19 @@
   later that day when `0018` was applied under #231 — the first inversion cleared by
   `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
   #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
-  was applied by `migrate:live` in the same session, the shortest-lived population yet.
-  **#250 is deliberately NOT a sixteenth inversion either, and for the opposite reason to `0016`'s.**
+  was applied by `migrate:live` in the same session, the shortest-lived population yet — then
+  **TWO at a measured 28 of 30** with #105's `0025` unapplied and **EMPTY at 30 of 30** the same
+  hour, **THREE at 29 of 32** with #305's `0027` unapplied and **EMPTY at 32 of 32** in that
+  session, **TWO at 34 of 36** with #96's `0030` unapplied and `calendar-busy` undeployed and
+  **EMPTY at 36 of 36** when #100 took both actions, and **ONE at 36 of 37** when #210 listed
+  `extract-description` ahead of its function existing — the row standing as this is written,
+  cleared by #209's deploy and by nothing else.
+  **#250 is deliberately NOT an inversion either, and for the opposite reason to `0016`'s.**
   It moved the denominator 26 → 28 while the set stayed EMPTY, because its two rows are about the
   seeded test account rather than about the live project — the first time this number has moved on
   something no migration could ever change. A denominator that moves is not an inversion; a
   population that moves is.
-  **`0016` (#198) is deliberately NOT one of the fifteen
+  **`0016` (#198) is deliberately NOT one of the
   inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
   could go red. The check was *re-measured* at 24 of 24 on 2026-08-27 after that paste — a

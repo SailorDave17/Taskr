@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FUNCTION_NAMES,
+  PENDING_FUNCTIONS,
   functionsToDeploy,
   parseEnvFile,
   projectRefFrom,
@@ -104,7 +105,32 @@ describe('the script deploys the functions the checks look for', () => {
     // more likely mistake now — a name added to `LIVE_EDGE_FUNCTIONS` (where the
     // check would go red and prompt you) and forgotten here (where nothing
     // would).
-    expect([...FUNCTION_NAMES].sort()).toEqual([...LIVE_EDGE_FUNCTIONS].sort())
+    //
+    // Since #210 the invoked set is the DEPLOYABLE set plus the PENDING set: a
+    // name the client calls ahead of its function existing is in
+    // `LIVE_EDGE_FUNCTIONS` (so check:live reports it honestly) and in
+    // `PENDING_FUNCTIONS` (so a bare deploy does not try to ship it). The
+    // union is what must match, and the two halves must not overlap.
+    expect([...FUNCTION_NAMES, ...PENDING_FUNCTIONS].sort()).toEqual([...LIVE_EDGE_FUNCTIONS].sort())
+    expect(FUNCTION_NAMES.filter((name) => PENDING_FUNCTIONS.includes(name))).toEqual([])
+  })
+
+  it('a pending function has NO directory yet — the entry expires the day #208 lands', () => {
+    // The mirror of the directory test below, and what makes PENDING_FUNCTIONS
+    // an exemption that cannot outlive its reason: once the directory exists
+    // this reddens until the name moves up into FUNCTION_NAMES.
+    for (const name of PENDING_FUNCTIONS) {
+      const entry = resolve(process.cwd(), 'supabase/functions', name, 'index.ts')
+      expect(
+        existsSync(entry),
+        `supabase/functions/${name}/index.ts exists — move ${name} from PENDING_FUNCTIONS to FUNCTION_NAMES`,
+      ).toBe(false)
+    }
+  })
+
+  it('refuses to deploy a pending function by name, and says why', () => {
+    expect(() => functionsToDeploy(['extract-description'])).toThrow(/not in this tree yet/)
+    expect(() => functionsToDeploy(['extract-description'])).toThrow(/#208/)
   })
 
   it('POSITIVE CONTROL: there is more than one, so the comparison has work to do', () => {
@@ -127,7 +153,13 @@ describe('the script deploys the functions the checks look for', () => {
 
 describe('which functions an invocation deploys', () => {
   it('deploys them all when no name is given — the safe action is the short one', () => {
+    // Exactly the deployable set: a pending name (#210) is never among them.
+    // That second assertion is a restatement of the first plus the
+    // disjointness test above, and it stood as a test of its own until a
+    // review read it as guarding the pending branch — which an empty argv
+    // never reaches (review-fanout, 2026-09-04).
     expect(functionsToDeploy([])).toEqual([...FUNCTION_NAMES])
+    for (const name of PENDING_FUNCTIONS) expect(functionsToDeploy([])).not.toContain(name)
   })
 
   it('ignores flags, so --dry-run does not read as a function name', () => {

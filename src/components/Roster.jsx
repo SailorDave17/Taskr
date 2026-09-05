@@ -8,6 +8,8 @@ import {
   normalizeCapacityMinutes,
 } from '../lib/capacity.js'
 import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
+import CaptureShell from './CaptureShell.jsx'
+import { CAPTURE_OUTCOMES, isFirstPerson } from '../lib/capture.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
 // change is what every other device shows on next load) and the "pick yourself"
@@ -43,11 +45,38 @@ import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from
  * `capacity.test.js` asserts there is exactly one implementation across all of
  * `src/`. The same call is what makes the chore screen's load figures follow
  * this week without any change there.
+ *
+ * #210 PUTS A SENTENCE IN FRONT OF THE NUMBER, AND CHANGES NOTHING BEHIND IT.
+ *
+ * The editor gains a description box (the shared `CaptureShell`) ABOVE the
+ * minutes field, and a proposal is a PREFILL of that field — never a write.
+ * The write is still this form's one submit, `onSet`, and the only thing
+ * that travels with it now is where the figure came from (`source`), so a
+ * proposed and a typed capacity reach `setCapacity` through the same call
+ * with one word different (AC 6, AC 9). Nothing is stored between the
+ * proposal and the save: cancel, leave, or reload, and the period's capacity
+ * is whatever it was (AC 3).
+ *
+ * `onPropose` is OPTIONAL, and that is the fallback proof made structural
+ * (AC 7): a roster rendered without it is exactly the #46 editor, and every
+ * #46 test renders it that way. The manual field is inside the shell as its
+ * children, so it is on screen before, during and after any description —
+ * a failure moves the box out of the way and focuses the field; it never
+ * reveals it.
+ *
+ * `takeProposal` is the one seam the calendar proposer (#97) reads: a figure,
+ * a source, and what it was derived from. Whichever proposer ships second
+ * arrives here rather than adding a second write path — owner decision at
+ * the filing gate, 2026-08-26.
  */
-function CapacityControl({ member, override, busy, onSet, onClear }) {
+function CapacityControl({ member, override, busy, onSet, onClear, onPropose }) {
   const [editing, setEditing] = useState(false)
   const [minutes, setMinutes] = useState('')
   const [complaint, setComplaint] = useState(null)
+  // #210 — where the figure in the field came from. 'manual' until a proposal
+  // is taken, and reset on every open like the minutes are. Travels with the
+  // write (AC 6) and is named on screen (AC 9).
+  const [source, setSource] = useState('manual')
 
   const effective = effectiveCapacity(member, override)
   const isOverridden = Boolean(override)
@@ -62,6 +91,7 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
    */
   function open() {
     setMinutes(String(effective))
+    setSource('manual')
     setComplaint(null)
     setEditing(true)
   }
@@ -69,6 +99,27 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
   function close() {
     setComplaint(null)
     setEditing(false)
+  }
+
+  /**
+   * Take a proposal into the field — #210 AC 1. A prefill and a source, and
+   * deliberately not a write: the member is looking at a number they have
+   * not yet agreed to, and a submit is where they agree. Editing it first
+   * keeps the source (AC 6): a figure the member corrected is still a figure
+   * the description produced, and allocate never sees the difference.
+   *
+   * Called the moment a proposal ARRIVES, not on a separate tap — design-bar
+   * verdict at #210's step 6 (owner, 2026-09-04): accepting was two taps,
+   * and the source line appearing between them moved Save 54px under the
+   * thumb. Now the figure lands in the field with its source named, the
+   * card's button is a second submit of this same form reading the live
+   * figure, and one tap accepts. The layout settles while the member is
+   * reading, not while they are pressing.
+   */
+  function takeProposal({ minutes: proposed, source: from }) {
+    setMinutes(String(proposed))
+    setSource(from)
+    setComplaint(null)
   }
 
   if (!editing) {
@@ -96,6 +147,24 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
     )
   }
 
+  // The #46 field, unchanged. Rendered inside the shell when there is a
+  // proposer and bare when there is not, so the manual road in is the same
+  // element either way.
+  const manualField = (
+    <label className="field">
+      <span className="field__label">Minutes this week</span>
+      <input
+        className="field__input"
+        type="number"
+        min={MIN_CAPACITY_MINUTES}
+        max={MAX_CAPACITY_MINUTES}
+        value={minutes}
+        onChange={(e) => setMinutes(e.target.value)}
+        aria-label={`Minutes this week for ${member.display_name}`}
+      />
+    </label>
+  )
+
   return (
     <form
       className="stack member__week-form"
@@ -112,21 +181,66 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
           return
         }
         setComplaint(null)
-        onSet(member.id, minutes).then(close, () => {})
+        onSet(member.id, minutes, source).then(close, () => {})
       }}
     >
-      <label className="field">
-        <span className="field__label">Minutes this week</span>
-        <input
-          className="field__input"
-          type="number"
-          min={MIN_CAPACITY_MINUTES}
-          max={MAX_CAPACITY_MINUTES}
-          value={minutes}
-          onChange={(e) => setMinutes(e.target.value)}
-          aria-label={`Minutes this week for ${member.display_name}`}
-        />
-      </label>
+      {onPropose ? (
+        <CaptureShell
+          label={`Describe this week for ${member.display_name}`}
+          placeholder="About three hours, mostly at the weekend"
+          describeLabel="Work out the minutes"
+          manualHint="Type the minutes instead."
+          busy={busy}
+          onDescribe={async (text) => {
+            const result = await onPropose(member, text)
+            if (result?.outcome === CAPTURE_OUTCOMES.PROPOSAL) {
+              takeProposal({ minutes: result.minutes, source: 'extraction' })
+            }
+            return result
+          }}
+          renderProposal={(proposal) => (
+            <>
+              <p className="capture__figure" data-testid={`proposal-${member.id}`}>
+                Proposed: {proposal.minutes} min
+                <span className="member__budget-human"> ({formatMinutes(proposal.minutes)})</span>
+              </p>
+              {/* What it was derived from (AC 1): the person the endpoint read
+                  the figure for. Shown only when that is a NAME — "me: 180
+                  min" under "Proposed: 180 min" told the member nothing twice
+                  (design-bar, 2026-09-04). The contract carries a number per
+                  person and no phrase, so this is the whole of the provenance
+                  a phone can show today; #208 is asked to carry the phrase. */}
+              {isFirstPerson(proposal.derivedFrom.who) ? null : (
+                <p className="capture__derived">
+                  Read as “{proposal.derivedFrom.who}: {proposal.derivedFrom.minutes} min” from
+                  what you wrote.
+                </p>
+              )}
+              {/* A SUBMIT of the enclosing form — the same onSubmit the Save
+                  below runs, so accepting is one tap and still one write path
+                  (AC 9). The label reads the FIELD, not the proposal: edit the
+                  figure first and the button says what it will save. */}
+              <button
+                className="button"
+                type="submit"
+                disabled={busy}
+                aria-label={`Save the proposed figure for ${member.display_name}`}
+              >
+                Save {minutes} min from your description
+              </button>
+            </>
+          )}
+        >
+          {manualField}
+        </CaptureShell>
+      ) : (
+        manualField
+      )}
+      {source === 'manual' ? null : (
+        <p className="member__week-source" data-testid={`week-source-${member.id}`}>
+          {sourceLabel(source)} Change the number if it is wrong, then save.
+        </p>
+      )}
       {complaint ? (
         <p className="error" role="alert">
           {complaint}
@@ -161,6 +275,19 @@ CapacityControl.propTypes = {
   busy: PropTypes.bool,
   onSet: PropTypes.func.isRequired,
   onClear: PropTypes.func.isRequired,
+  onPropose: PropTypes.func,
+}
+
+/**
+ * The source, named on screen — #210 AC 9. One sentence per proposer, so a
+ * member reads where the number in the field came from before they save it.
+ * `calendar` is #97's; it is here so that story adds a proposer and not a
+ * second confirm surface.
+ */
+function sourceLabel(source) {
+  if (source === 'extraction') return 'From your description.'
+  if (source === 'calendar') return 'From your calendar.'
+  return `From ${source}.`
 }
 
 /**
@@ -425,6 +552,7 @@ function MemberRow({
   onProvision,
   onSetCapacity,
   onClearCapacity,
+  onProposeCapacity,
   connection,
   onConnectCalendar,
   busyWeek,
@@ -568,6 +696,7 @@ function MemberRow({
           busy={busy}
           onSet={onSetCapacity}
           onClear={onClearCapacity}
+          onPropose={onProposeCapacity}
         />
         {/* #96 — directly under this week's minutes, which is the number it
             exists to inform. Own row only for the COMPLAINT (it is about a read
@@ -679,6 +808,7 @@ MemberRow.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  onProposeCapacity: PropTypes.func,
   connection: PropTypes.object,
   onConnectCalendar: PropTypes.func,
   busyWeek: PropTypes.object,
@@ -715,6 +845,7 @@ export default function Roster({
   periodStart = null,
   onSetCapacity,
   onClearCapacity,
+  onProposeCapacity,
   connections = [],
   onConnectCalendar,
   busyWeeks = [],
@@ -894,6 +1025,9 @@ export default function Roster({
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
+                // #210 — optional, and its absence is the manual floor: a
+                // roster with no proposer wired renders the #46 editor exactly.
+                onProposeCapacity={onProposeCapacity}
                 // #95 — resolved through `connectionFor` rather than by a local
                 // `find`, so the roster and any later consumer agree on what
                 // "connected" means by construction. The unique constraint in
@@ -1021,6 +1155,7 @@ Roster.propTypes = {
   periodStart: PropTypes.string,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  onProposeCapacity: PropTypes.func,
   connections: PropTypes.array,
   onConnectCalendar: PropTypes.func,
   busyWeeks: PropTypes.array,

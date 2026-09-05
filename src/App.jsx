@@ -48,6 +48,7 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import { extractCapacity } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -798,16 +799,43 @@ export default function App() {
   // everything fresh, computes with the real allocator and applies through the
   // one transactional RPC; `mutate()`'s refresh then shows the stored result,
   // so what this device shows is what the next device to load will see.
+  //
+  // #210 — `source` is the one thing a proposed figure adds to this call.
+  // 'manual' when typed, 'extraction' when the member took a description's
+  // proposal (edited or not), 'calendar' when #97 lands — and the SAME
+  // `setCapacity`, the same re-assignment, the same re-read for all of them.
+  // That is AC 9's one write path, and the reason the roster is handed one
+  // handler rather than one per proposer.
   const handleSetCapacity = useCallback(
-    (memberId, minutes) => {
+    (memberId, minutes, source = 'manual') => {
       if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
       return mutate(async () => {
-        const saved = await setCapacity({ memberId, periodStart, minutes, householdId: household?.id })
+        const saved = await setCapacity({
+          memberId,
+          periodStart,
+          minutes,
+          source,
+          householdId: household?.id,
+        })
         await reassignHousehold({ householdId: household?.id })
         return saved
       })
     },
     [mutate, periodStart, household],
+  )
+  // #210 — ask the extraction endpoint what a sentence means. Deliberately NOT
+  // routed through `mutate()`, and the difference is the whole of AC 1 and
+  // AC 3: nothing is written here. A proposal is a number on screen that the
+  // member has not agreed to, so there is no change to re-read and no `busy`
+  // to set over the rest of the roster — the shell carries its own pending
+  // state for the one row that asked. The write, if it comes, is
+  // `handleSetCapacity` above, with the source saying where the figure came
+  // from. The household is the one THIS SCREEN is showing (#159's rule), and
+  // the roster travels with the request so the attribution can tell "Robin
+  // has two hours" typed on somebody else's row from a figure for that row.
+  const handleProposeCapacity = useCallback(
+    (member, text) => extractCapacity({ householdId: household?.id, text, member, members }),
+    [household, members],
   )
   const handleClearCapacity = useCallback(
     (memberId) => {
@@ -1108,6 +1136,7 @@ export default function App() {
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}
           onClearCapacity={handleClearCapacity}
+          onProposeCapacity={handleProposeCapacity}
           connections={connections}
           onConnectCalendar={handleConnectCalendar}
           busyWeeks={busyWeeks}

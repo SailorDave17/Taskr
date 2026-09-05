@@ -58,6 +58,24 @@ export const FUNCTION_NAMES = Object.freeze([
 ])
 
 /**
+ * Functions the CLIENT already invokes that the tree does not carry yet — #210.
+ *
+ * The capacity capture flow calls `extract-description` (`src/lib/capture.js`)
+ * ahead of #208 writing the function, by owner decision at that story's
+ * pickup (2026-09-04). `LIVE_EDGE_FUNCTIONS` lists what the app invokes, so it
+ * carries the name and `check:live` reads one honest red until #209 deploys
+ * it. THIS list is what keeps that red from becoming a failed deploy: a bare
+ * `npm run deploy:function` deploys `FUNCTION_NAMES` and not these, and naming
+ * one on the command line is refused with a sentence that says why.
+ *
+ * SELF-EXPIRING. `deploy-function.test.js` refuses an entry here whose
+ * directory EXISTS, so the day #208 lands `supabase/functions/extract-description/`
+ * the suite reddens until the name moves up into `FUNCTION_NAMES` — the
+ * exemption cannot outlive the gap it was written for.
+ */
+export const PENDING_FUNCTIONS = Object.freeze(['extract-description'])
+
+/**
  * Which functions this invocation should deploy.
  *
  * REFUSES an unknown name rather than passing it to the CLI. A typo would
@@ -65,9 +83,20 @@ export const FUNCTION_NAMES = Object.freeze([
  * about a directory — sending somebody to look at the filesystem rather than at
  * what they typed.
  */
-export function functionsToDeploy(argv, known = FUNCTION_NAMES) {
+export function functionsToDeploy(argv, known = FUNCTION_NAMES, pending = PENDING_FUNCTIONS) {
   const named = argv.filter((arg) => !arg.startsWith('-'))
   if (named.length === 0) return [...known]
+
+  // #210 — a name the client calls and the tree does not carry. Refused with
+  // the reason rather than folded into "no such function", because the person
+  // typing it has just read that name in `check:live`'s red line.
+  const notYet = named.filter((name) => pending.includes(name))
+  if (notYet.length) {
+    throw new Error(
+      `${notYet.join(', ')}: named by the client but not in this tree yet — ` +
+        'the endpoint is #208 and its deploy is #209. Nothing to deploy.',
+    )
+  }
 
   const unknown = named.filter((name) => !known.includes(name))
   if (unknown.length) {

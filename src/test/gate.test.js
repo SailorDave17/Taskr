@@ -60,11 +60,47 @@ describe('the credential flow is reachable from the app, not just exported', () 
     // made at all, since `create_household` refuses an unauthenticated caller.
     expect(app).toMatch(/\bsignIn\b/)
     expect(app).toMatch(/\bsignUpOrganizer\b/)
+    // #304 — the third way in. Exported, unit-tested and reachable by nobody is
+    // exactly the shape this guard exists for, and an optional prop on the
+    // screen (kept optional so #154's tests render unchanged) is how it would
+    // happen: the button renders either way, and only App can wire it.
+    expect(app).toMatch(/\bsignInWithGoogle\b/)
   })
 
   it('hands them to onboarding, which is the only place a person can reach them', () => {
     expect(app).toMatch(/onSignIn=\{/)
     expect(app).toMatch(/onCreate=\{/)
+    expect(app).toMatch(/onSignInWithGoogle=\{/)
+  })
+
+  it('#304 AC 4: exchanges no code — the flow is implicit, so a `?code=` on the root is never a sign-in', () => {
+    // Owner decision 2026-09-04 (recorded on #304): the client stays on the
+    // implicit flow, because `flowType: 'pkce'` is client-wide and would put
+    // the confirmation email onto a same-browser `?code=` too. The
+    // consequence this guards is the half of AC 4 that has nothing left to
+    // reach: no code is ever handed to `exchangeCodeForSession`, because
+    // nothing here calls it. If somebody switches the flow, this reddens and
+    // the calendar's `?code=` discriminator has to be revisited in the same
+    // change — read the note on `readSignInReturn` first.
+    const household = readFileSync(resolve(process.cwd(), 'src/lib/household.js'), 'utf8')
+    const supabaseClient = readFileSync(resolve(process.cwd(), 'src/lib/supabase.js'), 'utf8')
+    for (const [name, source] of [
+      ['App.jsx', app],
+      ['household.js', household],
+      ['supabase.js', supabaseClient],
+    ]) {
+      // A CALL, with its paren — in either spelling. The first version matched
+      // `name(` only, and a mutation written as `?.exchangeCodeForSession?.(`
+      // reddened 0 against a predicted 1 (measured 2026-09-04): an optional call
+      // is still a call. Prose mentions of the name stay legal, because a guard
+      // that fires on its own explanation is the failure cairn already records.
+      expect(source, `${name} exchanges a code`).not.toMatch(/exchangeCodeForSession\s*(\?\.)?\s*\(/)
+    }
+    // The flow type is set in exactly one place — where the client is built —
+    // so that is the only file asked. household.js explains `flowType: 'pkce'`
+    // in a comment; asking it too would redden on the explanation.
+    expect(supabaseClient).toMatch(/createClient\(/)
+    expect(supabaseClient, 'supabase.js sets a flow type').not.toMatch(/flowType\s*:/)
   })
 
   it('and offers a way back out, which device auth never needed', () => {
@@ -458,6 +494,141 @@ describe('#47 criterion 10 — nothing on the split surface can overflow a 360px
 
   it('keeps the 44px touch target every other control on the phone uses', () => {
     expect(css).toMatch(/\.tab\s*\{[^}]*min-height:\s*44px/)
+  })
+})
+
+// #303 — the shell uses the whole screen above phone width.
+//
+// THIS IS THE WEAKER INSTRUMENT, and the criterion says so in as many words.
+// jsdom applies no stylesheet and computes no layout, so nothing in this file
+// can measure a width; what it can do is prove the RULES are present and that
+// the phone path is still unconditional. The width claims themselves were
+// measured in a real browser at 360/768/1280px and the figures are on the
+// issue — 39.4% of the viewport at 1280px before, 95% after, with the 360px
+// readings identical across 33 compared fields before and after.
+//
+// The same reasoning as the three describes above, and worth restating because
+// this criterion names viewports and so reads like something a render test
+// could answer: a component test for it would pass identically with every rule
+// below deleted.
+describe('#303 — the shell is not a phone-width column on a wide screen', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('POSITIVE CONTROL: the shell rule is in the stylesheet at all', () => {
+    // Without this every assertion below passes the moment `.shell` is renamed
+    // — the empty-pass shape this file keeps finding.
+    expect(css).toMatch(/\.shell\s*\{/)
+  })
+
+  it('no longer pins the shell to a phone-width 34rem', () => {
+    // The literal the story removed. Asserted as an absence ON THE SHELL RULE
+    // rather than anywhere in the file, so an unrelated 34rem elsewhere cannot
+    // redden it and a reinstated one here cannot hide.
+    const shellRule = css.match(/\.shell\s*\{[^}]*\}/)
+    expect(shellRule, 'no .shell rule found').not.toBeNull()
+    expect(shellRule[0]).not.toMatch(/max-width:\s*34rem/)
+  })
+
+  it('carries a readable ceiling instead, so the width is used but not unbounded', () => {
+    const shellRule = css.match(/\.shell\s*\{[^}]*\}/)
+    expect(shellRule[0]).toMatch(/max-width:\s*80rem/)
+    // `width: 100%` is what makes the shell fill the space below the ceiling.
+    // Without it the flex column would shrink to its content on a wide screen
+    // and the ceiling would never be the operative bound.
+    expect(shellRule[0]).toMatch(/width:\s*100%/)
+  })
+
+  it('has the wide breakpoint, and it is a min-width so the phone never enters it', () => {
+    // A `max-width` query here would mean the phone takes the NEW path and the
+    // wide screen the old one — the exact inversion, and one that no assertion
+    // about the breakpoint merely EXISTING could tell apart.
+    expect(css).toMatch(/@media\s*\(min-width:\s*48rem\)/)
+    expect(css).not.toMatch(/@media\s*\(max-width:\s*48rem\)/)
+  })
+
+  it('lays the multi-card surfaces out in columns above the breakpoint', () => {
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)
+    expect(wide, 'the 48rem block is not at the end of the file').not.toBeNull()
+    expect(wide[0]).toMatch(/display:\s*grid/)
+    expect(wide[0]).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(20rem,\s*1fr\)\)/)
+  })
+
+  it('ORDER: the wide block is the LAST rule for these surfaces, not merely present', () => {
+    // The defect this caught, MEASURED in a real browser before it was fixed:
+    // `.onboarding, .roster` and `.split` each set `display: flex` at the same
+    // specificity, and a media query adds a condition without raising
+    // specificity. With the block written beside `.shell` at the top of the
+    // file, `grid-template-columns` applied and `display: grid` was overridden
+    // — the computed display read `flex` while the grid property read back
+    // exactly as intended, and every card kept the same left offset at 1280px.
+    //
+    // So "the rule exists" is not the property that makes the layout work.
+    //
+    // TWO EARLIER VERSIONS OF THIS TEST PASSED THE MUTATION THAT REPRODUCES THE
+    // DEFECT, and both were caught by running it rather than by reading:
+    //   1. It filtered occurrences to those after the breakpoint and then
+    //      asserted they were all after the breakpoint — a tautology.
+    //   2. It compared each surface's last declaration against the POSITION of
+    //      the breakpoint. Moving the block to the top moves that position too,
+    //      so every phone declaration was trivially "after" it and the test
+    //      stayed green on the exact stylesheet whose cards did not lay out.
+    //
+    // What the browser actually resolves is whether the grid declaration comes
+    // after the flex one. So that is what this asserts, by position of the
+    // DECLARATIONS themselves, with the block's own extent used to tell an
+    // inside-the-block occurrence from an outside one.
+    const wideOpen = css.search(/@media\s*\(min-width:\s*48rem\)/)
+    expect(wideOpen).toBeGreaterThan(-1)
+    const wideEnd = css.length - css.slice(wideOpen).split('').reverse().join('').indexOf('}') - 1
+
+    for (const name of ['onboarding', 'roster', 'split']) {
+      const pattern = new RegExp('(^|[,}\\s])\\.' + name + '\\s*[,{]', 'g')
+      const at = [...css.matchAll(pattern)].map((m) => m.index)
+      // POSITIVE CONTROL on the scan: each surface is declared twice — once for
+      // the phone, once inside the wide block. A zero or a one here means the
+      // regex stopped matching and everything below would be vacuous.
+      expect(at.length, `expected two declarations of .${name}`).toBeGreaterThanOrEqual(2)
+
+      const inside = at.filter((i) => i > wideOpen && i < wideEnd)
+      const outside = at.filter((i) => i < wideOpen || i > wideEnd)
+      expect(inside.length, `.${name} is not declared inside the wide block`).toBeGreaterThanOrEqual(1)
+      expect(outside.length, `.${name} has no phone declaration`).toBeGreaterThanOrEqual(1)
+
+      // THE PROPERTY THAT MAKES IT WORK: the grid declaration is later in the
+      // file than every flex one, so it wins the cascade at equal specificity.
+      expect(
+        Math.max(...inside),
+        `.${name} is re-declared after the wide block, so flex wins over grid`,
+      ).toBeGreaterThan(Math.max(...outside))
+    }
+  })
+
+  it('keeps the readable measure on the things the grid cannot bound', () => {
+    // The tagline is a direct child of the shell, and the Chores surface is a
+    // bare `.card` — neither has a grid neighbour, so both ran the full 1216px
+    // at 1280px until these rules. MEASURED, and it is criterion 2's own bound
+    // (about 40rem) that they broke.
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)[0]
+    expect(wide).toMatch(/\.shell__tagline[\s\S]*?max-width:\s*40rem/)
+    expect(wide).toMatch(/\.card__body[\s\S]*?max-width:\s*40rem/)
+    expect(wide).toMatch(/\.shell\s*>\s*\.card\s*\{[^}]*max-width:\s*48rem/)
+    // Criterion 3 — the text inputs stop at the readable column. The bound is
+    // on `.field` so the label travels with its input.
+    expect(wide).toMatch(/\.field\s*\{[^}]*max-width:\s*30rem/)
+  })
+
+  it('the phone path is untouched: no rule below the breakpoint changed', () => {
+    // The story's whole risk, stated as an assertion rather than trusted. Every
+    // #303 rule lives inside the min-width block, so the stylesheet a 360px
+    // screen resolves is the one #80/#82/#83 measured.
+    //
+    // The 44px touch target and the tab wrap are asserted unconditionally 40
+    // lines above; this adds that the wide block does not reach in and move
+    // them, which those assertions cannot see because they scan the whole file.
+    const wide = css.match(/@media\s*\(min-width:\s*48rem\)\s*\{[\s\S]*\}\s*$/)[0]
+    expect(wide).not.toMatch(/min-height:\s*44px/)
+    expect(wide).not.toMatch(/font-size/)
+    expect(wide).not.toMatch(/\.tab\s*[,{]/)
   })
 })
 
@@ -1034,6 +1205,16 @@ describe('#19 — no real household name reaches version control', () => {
     Chores: 'a tab label — the chore surface',
     Who: 'a tab label — the roster surface',
     Done: 'a tab label — the completed-work surface (#302)',
+    // #291 — the two sign-out controls and the confirm's back-out, asserted by
+    // EXACT accessible name rather than /sign out/i. The exactness is the
+    // point and is why they are literals at all: two controls on the roster
+    // header now start with "Sign out", and a substring match would take
+    // either — a test that cannot tell apart the two scopes this story exists
+    // to separate. Declared rather than lower-cased for the tab labels'
+    // reason: a button label is capitalised by design.
+    'Sign out': 'a button label — the this-device-only sign-out control',
+    'Sign out everywhere': 'a button label — the every-session sign-out control',
+    'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to
@@ -1308,15 +1489,20 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
   })
 
   it('the onboarding step count is unchanged from before this story', () => {
-    // TWO cards and TWO forms — create a household, or sign in — which is what
-    // Onboarding carried before #37 and what it carries now. A capability step
-    // would be a third of each, and this is the number that says so.
+    // THREE cards and THREE forms since #154 — sign in, create your own
+    // account, name the household — of which a person is shown exactly one at
+    // a time. It was TWO and TWO from #37 to #154 (create a household, or sign
+    // in), and the rework that moved it is what this literal exists to make
+    // visible in a diff: #154 split the organizer's signup out of the household
+    // form, because the two could only ever succeed together on a project with
+    // email confirmation off. A capability step would be a FOURTH of each, and
+    // this is the number that says so.
     //
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(2)
-    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(2)
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(3)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(3)
   })
 
   it('no component offers a capability screen, by any of the words one would be called', () => {

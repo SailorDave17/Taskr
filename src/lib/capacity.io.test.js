@@ -147,7 +147,7 @@ describe('setCapacity', () => {
     results.member_capacity = { data: ROW, error: null }
     await setCapacity({ memberId: 'm1', periodStart: MONDAY, minutes: 120, householdId: HOUSEHOLD.id })
     const upsert = opsOn('member_capacity').find((c) => c.op === 'upsert')
-    // #43 and #58 can only judge extraction accuracy if the data says where a
+    // #207 and #214 can only judge extraction accuracy if the data says where a
     // number came from. A default of 'extraction' would silently inflate it.
     expect(upsert.row.source).toBe('manual')
   })

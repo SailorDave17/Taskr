@@ -345,7 +345,12 @@ at filing.
   someone presses is the negotiation moved rather than removed*. Reasoning: the change budget and the
   announcement both need a **before-state**, #6 already stores manual assignments, and the
   re-read-after-mutation pattern in `App.jsx` absorbs it. Costs a transactional RPC. This closes the
-  charter's "decide before #9" item.
+  charter's "decide before #9" item. *(Narrowed 2026-09-03 by #284, from #52's measurement: the
+  ruling is about work people already hold. Work NOBODY holds has no negotiation in it — no
+  before-state, nobody asked to give anything up — and at setup the capacity trigger can never fire,
+  because every capacity is set before any chore exists. So the split's needs-attention area now
+  carries one explicit "deal these out" action, which runs the same stored re-assignment and
+  nothing else, and exists only while that area does. There is still no re-balance button.)*
 - **The LLM extraction call runs in a Supabase Edge Function.** The secret sits next to the data, the
   auth context already exists, and one platform holds credentials. Rejected: a Vercel function (a
   second platform holding a provider secret) and any client-side key, which is the `VITE_` secret-key
@@ -760,6 +765,121 @@ now, so the record and its correction sit together.
 - **What survives from #35 unchanged**: AC 8 (completed work stays visible somewhere) and **AC 9**
   (no streak, rank, score or per-person total). Naming who holds one chore is a fact about that
   chore; a count per person is a scoreboard, and the Done surface's tests still refuse one.
+
+## Decision taken 2026-09-03 — sign-out is local by default, and "everywhere" is its own control
+
+**The scope was never chosen.** `src/lib/household.js` called `getSupabase().auth.signOut()` with
+no argument from #62 until #291. supabase-js defaults that to `scope: 'global'`
+(*verified in the installed 2.112.1: `async signOut(options = { scope: 'global' })`*), which revokes
+**every** session for the account on every device. So tidying up the kitchen tablet signed the same
+person out on their phone, and nothing in the repo disagreed with anything — there was no edit, no
+author and no moment at which anybody decided. This is cairn's `a-default-is-not-a-decision` shape:
+a wrong value implies a person, a default implies none.
+
+- **The rule.** The ordinary control is `scope: 'local'` — it ends the session on the device in front
+  of you and touches no other. A second control, `Sign out everywhere`, is `scope: 'global'`. The
+  scope is passed **explicitly at the call site in both directions**, so the library's default is
+  never what decides; `signOut()` with no argument means local *here*, by this app's choice, not by
+  supabase-js's.
+- **Why local is right for this app.** A session is a **person** and the devices are a **household's**
+  (#62). The Roster's own sign-out comment already said it: *"a family sharing one tablet needs to
+  hand it over without handing over an identity."* Global scope made the tablet's tidy-up reach into
+  a pocket two rooms away, which is the opposite of that.
+- **Why "everywhere" still exists, rather than being argued away.** Owner decision, 2026-09-03,
+  against the recommendation to record a no. There is one case local genuinely cannot serve — a lost
+  or stolen device — and it is defined by the person **not being able to reach the device**. The
+  alternative offered was to lean on the organizer's `resetMemberCredential`, and it was rejected as
+  a real answer: it makes a member's own security depend on somebody else being available, and the
+  organizer cannot reset **their own** credential that way at all. A route the person can take alone,
+  from any device they still hold, is the honest answer to the case.
+- **Why it is confirmed in place, and why it sits beside the ordinary control.** Two taps, matching
+  the Remove idiom on the member row. Not because it destroys data — it destroys none — but because
+  it is the only control in the app that ends a session **on a device the person is not holding**, so
+  the mistake worth guarding is a mis-tap on the wrong one of two adjacent buttons. It is beside the
+  ordinary control rather than behind a settings screen because somebody who needs it is not
+  browsing; they have just realised where their phone is not.
+- **Not on the onboarding screen, deliberately.** That screen's sign-out is the escape hatch out of
+  the half-finished-signup state (#88). Somebody stuck without a household is not reporting a theft,
+  and offering to revoke their other sessions there would answer a question nobody asked.
+- **The confirming state is three stacked lines on a phone, and that was looked at and accepted.**
+  *Measured 2026-09-03* in a real browser against the real `index.css` (jsdom has no layout engine):
+  at **360×800** the resting header is one wrapped line and a 123px card; while confirming, the three
+  buttons stack on **three** lines and the card is **227px**. At 414×896 the confirm is two lines and
+  175px. Nothing overflows horizontally at either width (`scrollWidth` == viewport). The screenshot
+  showed the sharper half of it: while confirming, the safe `Sign out` sits directly above the red
+  `Sign out on every device?`, so the two adjacent controls both begin with the same two words.
+  Three alternatives were priced and put to the owner — hide the ordinary control while confirming
+  (175px, kills the adjacency), shorten the confirm to `Confirm` (93px, one line, 123px card), or
+  move the control off the header entirely. The owner took **none of them**: ship the three-line
+  stack. The reasoning to preserve is that the state is transient and deliberately entered, and the
+  red button names its action **in full** — which is the property `Confirm` would have traded away,
+  and the same property the `Remove {display_name}?` idiom already spends a line on.
+- **What this does NOT do.** A revoked session is not a changed password. `global` ends the sessions
+  that exist; it does not stop whoever holds the device signing back in with a password they also
+  hold. Recovering from that needs a credential change, which this app still has no in-app route to
+  for an organizer — the charter says so above and it remains true. The two are complementary and
+  the second is not filed here.
+- **What must become true — this control is below the field's bar, deliberately and on the record.**
+  `design-bar` ran at #291's verification step, *2026-09-03*. Verdict: the tablet-handover moment
+  **lands**; the lost-device control is **correct and inert**. The field puts "sign out everywhere"
+  in **device management** — Google's *Manage all devices* names each session and offers per-device
+  revoke — never beside the everyday control. Ours revokes **blind**: somebody who lost a phone and
+  somebody who suspects a shared tablet want different actions and are offered one. *Measured* the
+  same day across six cases (short / typical / long household name × resting / confirming) at
+  360×800: hit targets all pass at ≥44px, nothing overflows, and in **every** case the safe
+  `Sign out` sits **8px above the red confirm, in the same column, sharing its first two words** —
+  in a state entered precisely because somebody is stressed. The confirm step exists to lower
+  mis-tap risk and this layout raises it. It is mis-tuned rather than impossible: hiding the
+  ordinary control while confirming was measured at 175px and removes the adjacency entirely.
+  Owner decision, 2026-09-03, having been shown the field bar and the 8px measurement: **ship it
+  and file the device list as its own story** rather than close the adjacency now or hold #291.
+  So what must become true is the device-management surface, and the version shipped here is the
+  stopgap — not the answer.
+- **How the recurrence is guarded.** The scope-asserting tests are the deliverable, not a
+  by-product. `household.test.js`'s fake now records the **options** (`{ op: 'signOut', options }`),
+  because the old one took no argument and a test asserting the call happened passed identically
+  under either scope — which is precisely how this shipped unnoticed for a month. `App.test.jsx`
+  walks from the tab to the tap and asserts what reaches the data layer, since a unit test cannot
+  answer whether the button passes anything at all (cairn: `exported-is-not-reachable`).
+
+## Decision taken 2026-09-04 — Google is a way in, on the implicit flow
+
+Owner decisions at the pickup and the design-bar gate of #304, which put **Continue with Google**
+on the sign-in screen through Supabase Auth's own Google provider — the same OAuth client the
+calendar connection (#95) uses, with Supabase's callback added to it and the provider enabled in the
+dashboard (`docs/deploy-runbook.md` §3b, *The same client, as a sign-in*; both steps are their own
+confirmation story under #257).
+
+- **Implicit, not PKCE — against the story's own AC 1, on the record.** The issue asked for PKCE. In
+  supabase-js the flow type is a **client-wide** setting, and the installed auth-js (2.112.1) sends a
+  code challenge on `signUp` too once it is set — so the organizer's confirmation email (#129) would
+  return a `?code=` that only exchanges in the browser that signed up. The owner chose to keep the
+  default so confirmation keeps working from any device; the session comes back in the URL fragment,
+  the client consumes it on boot, and **the app never exchanges a code**. `gate.test.js` holds that:
+  a `flowType:` in the client or an `exchangeCodeForSession(` call anywhere reddens, so switching
+  later is a visible decision that has to revisit the calendar's `?code=` discriminator in the same
+  change.
+- **The calendar's own `state` is the discriminator.** Google echoes it on every calendar return and
+  Supabase's returns never carry one, so a query with a state is the calendar's, a query without one
+  is a sign-in failure (GoTrue's stale-flow redirects land on Site URL as `?error=…&error_code=…`,
+  probed live that day), and a `?code=` with no state is nobody's. The alternative — a marker on the
+  sign-in's `redirectTo` — was rejected because Supabase validates redirect URLs **including the
+  query string**, so it would have needed the Redirect URLs allow-list widened for it.
+- **The bar, set at the design-bar gate — what must become true:** a housemate on a new phone taps
+  one button and is back in the household, and when Google says no the screen says **who can fix
+  it** rather than blaming a password nobody typed. *Measured* at 360×800 on the real component and
+  stylesheet, across resting / refused / stale flows: the resting screen fits in one viewport with
+  every control at 44px; before the fix the Google control was **192px wide under a 278px Sign in**
+  (the field renders a social sign-in at the primary's width) and a return notice of 122–170px pushed
+  it **3–47px below the fold** — the sentence *press Continue with Google again* pointed at a button
+  the person could not see. Verdict **lands, but not at every size**; owner decision: fix both. The
+  button is full width and the cold-arrival paragraph steps aside while a notice is showing, after
+  which every control sits within 800px in every case (refused: Google at 692–736).
+- **What this does NOT do, deliberately.** The consent screen names `<project ref>.supabase.co`, not
+  Taskr — a property of the redirect URI's domain that only Supabase's paid custom domain changes,
+  out of scope at $0. A member on a synthetic `<id>@taskr.invalid` address cannot use this route and
+  keeps their PIN. Linking a Google identity to an already-signed-in password account is a different
+  surface with a known library hazard and is not here.
 
 ## Open decisions (still owed)
 

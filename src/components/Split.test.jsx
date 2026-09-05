@@ -820,3 +820,59 @@ describe('#307 — work claimed by whoever completed it reaches the fairness fig
     expect(screen.queryByRole('region', { name: /needs attention/i })).toBeNull()
   })
 })
+
+describe('#284 — a route from work nobody has to a first fair split', () => {
+  // The #52 shape at the moment the driven setup run stalled: everybody has
+  // minutes, every chore is in, and not one is assigned. Two rows stand in for
+  // the thirteen; what matters is that the needs-attention area is up and the
+  // screen offered nothing else.
+  const nobodyHas = [chore('a', 60, null), chore('b', 45, null)]
+  const dealOut = () => screen.queryByRole('button', { name: /deal these out/i })
+  // Returns a promise, as the app's handler does — the component settles it.
+  const settle = () => vi.fn(() => Promise.resolve())
+
+  it('AC 1: offers one explicit action inside the needs-attention area, and it reaches the app', () => {
+    const onDealOut = settle()
+    setup({ chores: nobodyHas, onDealOut })
+    const area = screen.getByRole('region', { name: /needs attention/i })
+    fireEvent.click(within(area).getByRole('button', { name: /deal these out/i }))
+    expect(onDealOut).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3: the action is the whole route — nothing per chore stands on this screen', () => {
+    setup({ chores: nobodyHas, onDealOut: settle() })
+    // The fairness note's own button and this one; no dropdown, no per-row
+    // control. Hand assignment lives on the Chores tab and stays there.
+    expect(screen.getAllByRole('button')).toHaveLength(2)
+    expect(dealOut()).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).toBeNull()
+  })
+
+  it('POSITIVE CONTROL: with every chore held, the area is gone and the action with it', () => {
+    setup({ chores: [chore('a', 60, 'm1'), chore('b', 45, 'm2')], onDealOut: settle() })
+    expect(screen.queryByRole('region', { name: /needs attention/i })).toBeNull()
+    expect(dealOut()).toBeNull()
+  })
+
+  it('is disabled while a write is in flight, like every other control', () => {
+    setup({ chores: nobodyHas, onDealOut: settle(), busy: true })
+    expect(dealOut()).toBeDisabled()
+  })
+
+  it('is withheld when nobody has minutes this week — the allocator could place nothing', () => {
+    setup({ chores: nobodyHas, capacities: [], onDealOut: settle() })
+    expect(screen.getByTestId('unassigned-total')).toBeInTheDocument()
+    expect(dealOut()).toBeNull()
+  })
+
+  it('is offered when only ONE person has minutes — everything can still go to them', () => {
+    setup({ chores: nobodyHas, capacities: [capacities[0]], onDealOut: settle() })
+    expect(dealOut()).toBeInTheDocument()
+  })
+
+  it('is absent when the app hands it no action — a surface without a wiring is not a route', () => {
+    setup({ chores: nobodyHas })
+    expect(screen.getByTestId('unassigned-total')).toBeInTheDocument()
+    expect(dealOut()).toBeNull()
+  })
+})

@@ -202,20 +202,66 @@ persists anything.
    time**, so adding them changed nothing about the deployment already live. Set the variables
    *before* building the first code that reads them, or you get a runtime failure with values that
    look simply absent, no build error, and nothing to suggest the deployment is stale.
-5. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
+5. **Authentication → URL Configuration. Set `Site URL` to the production origin** — the deployed
+   app's own URL, e.g. `https://<the deployed app>`. **Do not leave it at the factory default**,
+   which is `http://localhost:3000`.
+
+   This step did not exist on this page until **#129**, and its absence is the root cause of a live
+   failure rather than a tidiness point. *Measured 2026-08-21*: the field was still
+   `http://localhost:3000`, untouched since the project was created on 2026-08-05, and an organizer
+   clicked a real confirmation email and landed on a dead page. A probe with a deliberately invalid
+   token reproduced it exactly:
+
+   ```
+   GET https://<project ref>.supabase.co/auth/v1/verify?token=deliberately-invalid-probe&type=signup
+
+   303 See Other
+   Location: http://localhost:3000#error=access_denied&error_code=otp_expired&…
+   ```
+
+   Nothing in this repo could have caught it. It is a dashboard field, and every check was green
+   for the sixteen days it was wrong — which is why it is a numbered step here and not a caution.
+
+   **Also set `Redirect URLs`** to the production origin and the local dev origin
+   (`http://localhost:5173`, Vite's default). **Preview origins are deliberately excluded** — #121
+   put Vercel previews behind Standard Protection, and adding `*.vercel.app` here would make a
+   deliberately walled-off surface a sanctioned auth redirect target. The same decision is recorded
+   at the call site in `src/lib/household.js` (`confirmationRedirectTo`); the two are one decision
+   seen twice, so change both or neither.
+
+   **The ordering hazard, which is the part that costs an hour if it is not known:** a confirmation
+   email's `redirect_to` is fixed **at send time**, baked into the link when the mail goes out.
+   Correcting `Site URL` afterwards does **not** repair links already in an inbox — those still
+   point where they pointed. The person has to request a fresh email. So set this **before** the
+   first signup, and after any correction assume every outstanding link is still broken.
+
+   Since **#129** the app also passes `emailRedirectTo` from the running origin at the call site, so
+   a signup driven from `npm run dev` comes back to the dev server rather than to production. That
+   makes the value checkable in code rather than only in a dashboard — but it does not replace this
+   step: the redirect must still be in `Redirect URLs` to be honoured, and anything the app does not
+   pass a value for still falls back to `Site URL`.
+6. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
 
 ## 3. The Edge Functions
 
-**Two of them since #95** — `provision-member` and `calendar-connect`. `npm run deploy:function`
-deploys both; `npm run deploy:function -- <name>` narrows it to one, and a name this repo does not
-have is refused by the script rather than handed to the CLI, which would fail with a message about a
-directory and send you to look at the filesystem instead of at what you typed.
+**Three of them since #96** — `provision-member`, `calendar-connect` and `calendar-busy`.
+`npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
+and a name this repo does not have is refused by the script rather than handed to the CLI, which would
+fail with a message about a directory and send you to look at the filesystem instead of at what you
+typed. *(This said "two since #95" until 2026-09-04, a day after the third arrived — the count lives
+in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
+disagree, the script is right.)*
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
 and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
 sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
-the Connect Google Calendar button on the capacity screen fails when it is pressed.
+the Connect Google Calendar button on the capacity screen fails when it is pressed. Until
+`calendar-busy` has, a connected member's roster row shows a sentence under this week's minutes —
+the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
+"Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
+and `npm run check:live` is what tells the two apart, since it probes the table and the function as
+separate rows.
 
 **A source change to an Edge Function needs a deploy of its own, and `npm run check:deployed`
 reports when one is owed.** Merging does not deploy a function, and neither does pasting a migration —
@@ -429,6 +475,62 @@ and callable by a browser* — it does not and cannot answer *are its Google sec
 preflight carries no body and invokes nothing. The first real connection is the proof, and it is
 [#100](https://github.com/SailorDave17/Taskr/issues/100)'s job rather than this page's.
 
+### The same client, as a sign-in — #304
+
+Since #304 the sign-in screen carries **Continue with Google**, which runs Supabase Auth's own
+Google provider through the app's Supabase client — no second OAuth client, no ID-token exchange,
+nothing new in the bundle. It needs two dashboard steps, both owner-only, and until they are done
+the control sends a person to Supabase, which answers *"Unsupported provider: provider is not
+enabled"* and returns them to the sign-in screen with that sentence. Both steps are tracked as their
+own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330), by
+the same convention as #150.
+
+1. **Add Supabase's callback to the OAuth client from step 3** — one more entry under **Authorized
+   redirect URIs**, exactly:
+   - `https://<project ref>.supabase.co/auth/v1/callback`
+
+   The Google-side redirect is Supabase's, not the app's: Google hands the grant to Supabase, and
+   Supabase sends the person back to the app. The app's own origins stay on the list for the
+   calendar, which still redirects to the app root directly.
+2. **Enable the provider**: Supabase dashboard → Authentication → Providers → Google → on, and
+   paste the **same** client ID and client secret from step 4 (the secret goes here as well as into
+   the function secrets — two homes for one value, both on the Supabase side and neither in git).
+   Leave *Skip nonce checks* off. Read it back with the unauthenticated probe, which is also the
+   check for "is this done yet":
+
+   ```
+   GET https://<project ref>.supabase.co/auth/v1/settings   (header: apikey: <anon key>)
+   → "external": { … "google": true … }
+   ```
+
+   *Measured 2026-09-04*: `false`.
+3. **Nothing to add to Redirect URLs.** The app passes the origin it is running on as
+   `redirectTo` (the same value as `emailRedirectTo`, §2 step 5), so the production origin and the
+   dev origin already on the list cover it; a preview origin falls back to Site URL, deliberately.
+
+**Three facts that each produce a confident wrong diagnosis when met cold:**
+
+- **The consent screen names `<project ref>.supabase.co`, not Taskr.** Google displays the root
+  domain of the redirect URI, and with a managed provider that is Supabase's. The App name from the
+  consent-screen branding appears nowhere on it. This is not a misconfiguration and there is
+  nothing on the Google side to fix; the only remedy is Supabase's paid Custom Domain, which is out
+  of scope for a project chartered at $0.
+- **Testing mode gates sign-in exactly as it gates the calendar.** Only the test users registered
+  in step 2 above get past Google; anyone else is refused at Google with *"The developer hasn't
+  given you access to this app"*. The sign-in screen says who can fix that — the organizer — when
+  the refusal reaches it as `access_denied`.
+- **The flow is implicit, not PKCE** — owner decision 2026-09-04, recorded on #304. The session
+  comes back in the URL **fragment** and the client consumes it on boot; the app never exchanges a
+  `?code=`. Switching the client to PKCE would switch the confirmation email (§2 step 5) to a
+  same-browser `?code=` as well, which is why it was not done. GoTrue's stale-flow redirects
+  (`bad_oauth_state`, five minutes from pressing the control) arrive at **Site URL** as a query
+  string with no `state`, which is how the app tells them from the calendar's return.
+
+**Who it helps.** A Google address equal to a member's confirmed sign-in address resolves to the
+same auth user — Supabase links identities on a matching verified email — so the roster is
+untouched. A member on a synthetic `<id>@taskr.invalid` address can never sign in this way, because
+no Google account carries that address; they keep their PIN.
+
 ## 4. Verifying AC 1 and AC 2
 
 Both **verified 2026-08-05** on the owner's Android phone.
@@ -533,6 +635,30 @@ access token authenticates as the ACCOUNT, not as a project. It has full authori
 project in the account and can create, pause and delete them — there is no row-level security in
 front of it and no policy that limits it. It is the only credential of that class this repo has ever
 needed.
+
+**These tokens expire, and the failure is silent — #324.** A personal access token does not last
+forever, and it can be revoked from the account page at any time. When it goes, it goes for all three
+commands at once — `check:deployed`, `migrate:live`, `probe:live-grants` — and every one of them
+answers `401`.
+
+**A `401` from any of the three means re-mint. It does not mean re-check the project.** That is the
+whole of it: the token is already known to be the right *kind* of credential, because a project API
+key and a legacy JWT are refused by name before anything is sent (see the near-miss list above). So
+`401` leaves expiry or revocation as the likely cause, and the project ref, the endpoint and the URL
+are the wrong things to go and look at. Mint a new token at
+<https://supabase.com/dashboard/account/tokens>, replace `SUPABASE_ACCESS_TOKEN` in `.env.local`, and
+run the command again. The commands now say this themselves rather than leaving a bare
+`[401] Unauthorized`.
+
+**What is dark while it is dead is the drift detection.** All three commands answer one question —
+*has production drifted from the repo?* — and section 3 records the case they exist for: #161 changed
+both Edge Functions and merged, production served a three-day-old build, and `npm run check:live`
+read 24 of 24 green throughout. Nothing in CI notices a dead token, correctly: CI holds no token and
+is not supposed to. So the only place this failure can appear is an owner's machine, running a
+command nobody runs unless they already suspect something — and **how long it had been dead is not
+recoverable**, which is the point. When #324 found it on 2026-09-03 nothing could say whether it had
+been hours or weeks, because a dead token leaves no trace anywhere until somebody runs one of the
+three commands.
 
 So: **it is never committed.** `.gitignore` keeps `.env.local` out of git, and `src/test/gate.test.js`
 scans every file in the repo — tracked and untracked — for a token-shaped literal and fails the

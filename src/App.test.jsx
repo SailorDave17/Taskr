@@ -19,6 +19,10 @@ const api = {
   currentUserId: vi.fn(),
   createHousehold: vi.fn(),
   signIn: vi.fn(),
+  // #304. Stubbed because the real one navigates the browser; readSignInReturn
+  // and describeSignInReturn stay REAL (importActual below) because they are
+  // pure and the sentence a person reads should be the one the app words.
+  signInWithGoogle: vi.fn(),
   signUpOrganizer: vi.fn(),
   signOut: vi.fn(),
   addMember: vi.fn(),
@@ -103,6 +107,12 @@ const exclusionsApi = {
 const calendarApi = {
   listCalendarConnections: vi.fn(),
   completeConnect: vi.fn(),
+  // #96 — the two impure ones. `busyWeekFor` and `busyComputedLabel` stay REAL
+  // (importActual below), for the standing reason: pure, own tests, and a stub
+  // could disagree with the matching rule the roster depends on — which is the
+  // rule AC 1's trigger is built out of.
+  listBusyWeeks: vi.fn(),
+  fetchBusyWeek: vi.fn(),
 }
 
 // Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
@@ -198,6 +208,8 @@ beforeEach(() => {
   Object.values(calendarApi).forEach((fn) => fn.mockReset())
   calendarApi.listCalendarConnections.mockResolvedValue([])
   calendarApi.completeConnect.mockResolvedValue({ ok: true })
+  calendarApi.listBusyWeeks.mockResolvedValue([])
+  calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -229,7 +241,10 @@ beforeEach(() => {
   api.listMembers.mockResolvedValue([])
   api.currentUserId.mockResolvedValue('person-a')
   api.signIn.mockResolvedValue({ user: { id: 'person-a' } })
-  api.signUpOrganizer.mockResolvedValue({ user: { id: 'person-a' } })
+  api.signUpOrganizer.mockResolvedValue({
+    session: { user: { id: 'person-a' } },
+    needsConfirmation: false,
+  })
   api.signOut.mockResolvedValue(undefined)
 })
 
@@ -268,16 +283,44 @@ describe('when the build has no backend', () => {
 })
 
 describe('when nobody is signed in', () => {
-  it('offers both ways in', async () => {
-    // The null session is load-bearing and was missing: this test sat inside
-    // "when nobody is signed in" while inheriting the default fixture, which HAS
-    // a session. It passed anyway until the sign-in pane started hiding itself
-    // for somebody already signed in — at which point the block's title and its
-    // fixture stopped agreeing out loud.
+  // #154 — the first screen a session-less person gets is a SIGN-IN screen.
+  // Until this story it was two cards of equal weight, "Start a household" on
+  // the left, and every returning housemate on a new phone was offered a
+  // household they already had. Starting one is now a link under the sign-in
+  // form, and the create-account half of it is its own submit.
+
+  const startLink = () => screen.getByRole('button', { name: /start a household/i })
+
+  /** Take the secondary route and fill the organizer's own credential. */
+  const fillAccountForm = () => {
+    fireEvent.click(startLink())
+    fireEvent.change(screen.getByLabelText(/your email/i), {
+      target: { value: 'alex@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/your password/i), {
+      target: { value: 'longenough' },
+    })
+  }
+  const submitAccount = () =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name: /create account/i })))
+  const nameTheHousehold = async () => {
+    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
+    )
+  }
+
+  it('asks for an email and a password first, and offers to start a household as a link', async () => {
+    // AC 1. The household form is NOT on this screen — a person with no
+    // session is not shown a household-name box, which is the defect this
+    // story is named for.
     api.currentSession.mockResolvedValue(null)
     await renderApp()
-    expect(await screen.findByRole('button', { name: /create household/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(startLink()).toHaveClass('button--link')
+    expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/household name/i)).not.toBeInTheDocument()
   })
 
   it('asks the server nothing at all — signed out is a state, not a failure', async () => {
@@ -286,96 +329,123 @@ describe('when nobody is signed in', () => {
     // an identity. Now there is no identity to mint, and the reads are skipped
     // rather than attempted-and-empty.
     //
-    // Skipped deliberately, not incidentally: the reads would SUCCEED against a
-    // signed-out caller — every policy simply returns nothing — so "signed out"
-    // and "your household disappeared" would render identically, and the second
-    // reading is both wrong and the more alarming one.
+    // Skipped deliberately, not incidentally: a signed-out read would be
+    // REFUSED since 0017 (#186), and before that it would have succeeded and
+    // returned nothing — so "signed out" and "your household disappeared"
+    // would render identically, and the second reading is both wrong and the
+    // more alarming one.
     api.currentSession.mockResolvedValue(null)
     await renderApp()
-    await screen.findByRole('button', { name: /create household/i })
+    await screen.findByRole('button', { name: /^sign in$/i })
 
     expect(api.currentSession).toHaveBeenCalled()
     expect(api.currentHousehold).not.toHaveBeenCalled()
     expect(api.listMembers).not.toHaveBeenCalled()
   })
 
-  it('creates the account before the household, because the order is unrecoverable', async () => {
-    // `create_household` refuses an unauthenticated caller and claims the
-    // organizer's member row in the same statement. Reversed, the household
-    // would exist with an unclaimed organizer — visible to nobody, and not
-    // fixable from the client.
+  it('creating an account creates no household in the same submit, and says the account needs confirming', async () => {
+    // AC 3 and AC 5. `mailer_autoconfirm: false` on the live project means the
+    // signup returns no session — the ORDINARY outcome, not a fault — and a
+    // household created in the same submit would be created by nobody, since
+    // `create_household` claims the organizer's row to `auth.uid()`.
     api.currentSession.mockResolvedValue(null)
+    api.signUpOrganizer.mockResolvedValue({ session: null, needsConfirmation: true })
     await renderApp()
-    await screen.findByRole('button', { name: /create household/i })
-
-    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
-    fireEvent.change(screen.getByLabelText(/your email/i), {
-      target: { value: 'alex@example.com' },
-    })
-    fireEvent.change(screen.getByLabelText(/your password/i), {
-      target: { value: 'longenough' },
-    })
-    await act(async () =>
-      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
-    )
+    await screen.findByRole('button', { name: /^sign in$/i })
+    fillAccountForm()
+    await submitAccount()
 
     expect(api.signUpOrganizer).toHaveBeenCalledWith({
       email: 'alex@example.com',
       password: 'longenough',
     })
-    expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
-    expect(api.signUpOrganizer.mock.invocationCallOrder[0]).toBeLessThan(
-      api.createHousehold.mock.invocationCallOrder[0],
-    )
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    expect(screen.getByTestId('confirmation-note')).toHaveTextContent(/account exists/i)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // And NO re-read as `anon`: there is no session to read with, 0017 would
+    // refuse it, and the refusal would have been reported over the top of a
+    // signup that succeeded. This is why the signup does not go through
+    // `mutate`.
+    expect(api.currentHousehold).not.toHaveBeenCalled()
+    // Back on the sign-in form, which is where the confirmed person goes next.
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
   })
 
-  it('does not reach create_household when the signup fails', async () => {
-    // The order assertion above kills the mutation its comment describes —
-    // swapping the two statements — and NOT a dropped `await`, because both
-    // calls still happen in the same lexical order without one. This is the
-    // assertion that reddens on a dropped await, and the review found it missing.
+  it('an account that arrives already signed in is offered the household half next, in its own submit', async () => {
+    // Confirmation OFF (a local stack, not the live project): `signUp` returns
+    // a session, so the app re-reads and finds a person with no household.
+    // The household is still a SEPARATE submit — AC 5 holds whichever way the
+    // signup came back.
+    api.currentSession.mockResolvedValue(null)
+    api.signUpOrganizer.mockResolvedValue({
+      session: { user: { id: 'person-a' } },
+      needsConfirmation: false,
+    })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    fillAccountForm()
+    await submitAccount()
+
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+
+    await nameTheHousehold()
+
+    expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
+    expect(api.signUpOrganizer).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refused signup shows its reason and creates nothing', async () => {
     api.currentSession.mockResolvedValue(null)
     api.signUpOrganizer.mockRejectedValue(new Error('User already registered'))
     await renderApp()
-    await screen.findByRole('button', { name: /create household/i })
-
-    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
-    fireEvent.change(screen.getByLabelText(/your email/i), {
-      target: { value: 'alex@example.com' },
-    })
-    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'longenough' } })
-    await act(async () =>
-      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
-    )
+    await screen.findByRole('button', { name: /^sign in$/i })
+    fillAccountForm()
+    await submitAccount()
 
     expect(api.createHousehold).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already registered/i)
   })
 
-  it('skips the signup when a session already exists — the half-finished state', async () => {
-    // Account made, household not: two durable steps with no transaction, and
-    // against a project without 0007 the second fails every time. Calling
-    // `signUp` again for an address that now exists throws and never reaches the
-    // RPC, which is what made this a dead end. The session is what decides.
+  it('signed in with no household is offered the household half, and never the signup again', async () => {
+    // AC 4 and AC 6. Account made, household not: two durable steps with no
+    // transaction, and since #154 the state every confirmed organizer passes
+    // through on the live project. The household form, the signed-in copy and
+    // Sign out — and no signup, because calling `signUp` again for an address
+    // that now exists is the dead end #62 found.
     api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
     api.currentHousehold.mockResolvedValue(null)
     api.currentUserId.mockResolvedValue('person-a')
     await renderApp()
     await screen.findByRole('button', { name: /create household/i })
+    expect(screen.getByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
-    await act(async () =>
-      void fireEvent.click(screen.getByRole('button', { name: /create household/i })),
-    )
+    await nameTheHousehold()
 
     expect(api.signUpOrganizer).not.toHaveBeenCalled()
     expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
   })
 
-  it('signs an existing member in through the data layer', async () => {
+  it('signs an existing member in and shows their household without asking anything further', async () => {
+    // AC 2. The sign-in is the whole of it: the re-read after it finds the one
+    // household and the person is looking at it — no second screen, nothing
+    // typed twice. The fake sign-in flips the fixtures the way a real one
+    // flips the server's answers.
     api.currentSession.mockResolvedValue(null)
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentHousehold.mockResolvedValue({
+        id: 'h1',
+        name: 'Placeholder Household',
+        timezone: 'America/New_York',
+      })
+      api.listMembers.mockResolvedValue([
+        { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+      ])
+      return { user: { id: 'person-a' } }
+    })
     await renderApp()
     await screen.findByRole('button', { name: /^sign in$/i })
 
@@ -384,6 +454,52 @@ describe('when nobody is signed in', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
 
     expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821' })
+    // The household's surfaces are up, and nothing onboarding-shaped remains.
+    expect(await screen.findByRole('navigation', { name: /household surfaces/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/household name/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('#304 — Continue with Google, from the sign-in screen', () => {
+  it('AC 1: the control is on the sign-in screen and starts the Google flow through the data layer', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+    // Not routed through the password path, and no re-read as `anon`: the page
+    // is leaving for Google, and a refresh here would be refused by 0017 and
+    // painted over a sign-in that is working.
+    expect(api.signIn).not.toHaveBeenCalled()
+    expect(api.currentHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a Google account matching nobody lands signed in with no household, and nothing is minted', async () => {
+    // What the app does with the session Supabase hands back for a Google
+    // address that is nobody's sign-in address: a fresh auth user, no roster
+    // row, no household. That is #154's signed-in-with-no-household state,
+    // and invitation redemption (#173/#191) is what later attaches it — not
+    // this screen, which offers to START one and creates nothing unasked.
+    api.currentSession.mockResolvedValue({
+      user: { id: 'google-person', app_metadata: { provider: 'google', providers: ['google'] } },
+    })
+    api.currentUserId.mockResolvedValue('google-person')
+    api.currentHousehold.mockResolvedValue(null)
+    api.listMembers.mockResolvedValue([])
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create household/i })).toBeInTheDocument()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    expect(api.addMember).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /continue with google/i })).not.toBeInTheDocument()
   })
 })
 
@@ -420,6 +536,35 @@ describe('when the signed-in person belongs to a household', () => {
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(inRoster().getByText('Placeholder One')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
+  })
+
+  // #291 — the SCOPE reaches the data layer, from the control a person presses.
+  //
+  // This is the reachability half, and it is the half that was missing. The
+  // library's `signOut()` defaults to `scope: 'global'`, which the unit test
+  // now catches; but a unit test calls the function directly and cannot answer
+  // "does the button on the roster pass anything at all?" — cairn's
+  // `exported-is-not-reachable`. So these walk from the tab to the tap.
+  it('signs out of this device only from the ordinary control', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  it('signs out everywhere only through the confirmed control', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' })),
+    )
+    expect(api.signOut).not.toHaveBeenCalled()
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: 'Sign out on every device?' })),
+    )
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: true })
   })
 
   // AC 3: the roster is read from the server on load. If it were cached
@@ -1243,7 +1388,7 @@ describe('capacity — this week, set by hand (#46)', () => {
 
   it('AC 6: the manual path depends on nothing but the data layer', () => {
     // The charter's fallback principle, as a check rather than a promise: manual
-    // entry must work on day one and the extraction bet (#57) is an accelerator
+    // entry must work on day one and the extraction bet (#210) is an accelerator
     // on top of it, never the only road in. If capacity.js ever grows a model
     // client, an HTTP call or a second credential, the floor has quietly become
     // the ceiling — and by then the story that would notice is the one that
@@ -1802,13 +1947,14 @@ describe('connecting a calendar (#95)', () => {
    * anything — and the query string has to be on the URL BEFORE App boots, which
    * cannot be arranged with the real one either.
    */
-  const atUrl = (search = '') => {
+  const atUrl = (search = '', hash = '') => {
     assign = vi.fn()
     replaceState = vi.fn()
     Object.defineProperty(globalThis, 'location', {
       configurable: true,
       writable: true,
-      value: { origin: 'https://taskr.example.test', pathname: '/', search, assign },
+      // `hash` since #304: the implicit flow's error channel is the fragment.
+      value: { origin: 'https://taskr.example.test', pathname: '/', search, hash, assign },
     })
     Object.defineProperty(globalThis, 'history', {
       configurable: true,
@@ -1947,6 +2093,91 @@ describe('connecting a calendar (#95)', () => {
     expect(screen.queryAllByRole('alert')).toEqual([])
     expect(replaceState).not.toHaveBeenCalled()
   })
+
+  describe('#304 AC 4 — the root is shared with the Google sign-in, and the calendar’s `state` tells them apart', () => {
+    // Every shape below lands on the same URL the calendar consent does.
+    // Google echoes the calendar's own `state` on every calendar return and
+    // Supabase's returns never carry one — so a query WITHOUT a state is not the
+    // calendar's, whatever else it carries, and is never sent to
+    // `calendar-connect`. The app exchanges no code at all under the implicit
+    // flow (gate.test.js asserts the word is absent), so the other half of the
+    // criterion — a calendar code never handed to the exchange — has nothing
+    // to reach.
+
+    it('a code with no state is nobody’s: not sent to calendar-connect, and nothing is said', async () => {
+      atUrl('?code=orphan-code')
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      expect(screen.queryAllByRole('alert')).toEqual([])
+    })
+
+    it('a Supabase sign-in error in the query (no state) is a sign-in failure, not a calendar one', async () => {
+      // GoTrue's bad-flow-state redirect, as probed live 2026-09-04. Before
+      // #304 this read as "Google could not complete that connection", which
+      // sent a person to the calendar to fix a sign-in.
+      api.currentSession.mockResolvedValue(null)
+      atUrl('?error=invalid_request&error_code=bad_oauth_state&error_description=OAuth+state+not+found+or+expired')
+      await renderApp()
+      await screen.findByRole('button', { name: /^sign in$/i })
+
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      const note = screen.getByTestId('sign-in-return')
+      expect(note).toHaveTextContent(/took too long or was already used/i)
+      expect(note).not.toHaveTextContent(/calendar|connection/i)
+      // Spent, and stripped so a reload does not announce it twice.
+      expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    })
+
+    it('AC 5: a Google refusal in the fragment names the organizer on the sign-in screen', async () => {
+      // The implicit flow's error channel. The consent screen is in Testing, so
+      // an account the organizer has not registered is refused by Google; the
+      // sentence says who can fix that and does not blame a password nobody
+      // typed. The SHAPE here is GoTrue's documented one, not a measured
+      // refusal — the provider is not enabled on the live project yet, so the
+      // live half of AC 5 is the confirmation story's.
+      api.currentSession.mockResolvedValue(null)
+      atUrl('', '#error=access_denied&error_description=The+user+denied+access')
+      await renderApp()
+      await screen.findByRole('button', { name: /^sign in$/i })
+
+      const note = screen.getByTestId('sign-in-return')
+      expect(note).toHaveTextContent(/has not been opened to your account/i)
+      expect(note).toHaveTextContent(/organizer/i)
+      expect(note).not.toHaveTextContent(/did not match/i)
+      expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    })
+
+    it('the calendar’s own return — a code WITH a state — still reaches calendar-connect and only it', async () => {
+      // The other side of the discriminator, so the three tests above cannot be
+      // satisfied by an App that ignores every query string.
+      atUrl('?code=the-code&state=the-state')
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+
+      expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+        code: 'the-code',
+        error: null,
+        state: 'the-state',
+      })
+      expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    })
+
+    it('a fresh attempt clears the notice about the last one', async () => {
+      api.currentSession.mockResolvedValue(null)
+      atUrl('', '#error=access_denied')
+      await renderApp()
+      await screen.findByTestId('sign-in-return')
+
+      await act(async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+      )
+      expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+      expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    })
+  })
 })
 
 describe('#53 — the boot-time catch-up pass', () => {
@@ -2068,5 +2299,478 @@ describe('#12 — adjusting how long a chore took', () => {
     expect(choresApi.recordActualMinutes.mock.invocationCallOrder[0]).toBeLessThan(
       choresApi.listChores.mock.invocationCallOrder[readsBefore],
     )
+  })
+})
+
+describe('#284 — dealing out the work nobody has, from the split', () => {
+  // The state #52's driven setup run stalled in: two people with minutes,
+  // every chore entered, nothing assigned, and the household on its FIRST
+  // screen. Two chores stand in for thirteen.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const nobodyHas = [
+    {
+      id: 'c1',
+      household_id: 'h1',
+      title: 'Placeholder Chore',
+      expected_minutes: 60,
+      due_on: '2026-08-10',
+      assigned_member_id: null,
+    },
+    {
+      id: 'c2',
+      household_id: 'h1',
+      title: 'Placeholder Other Chore',
+      expected_minutes: 45,
+      due_on: '2026-08-10',
+      assigned_member_id: null,
+    },
+  ]
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 200, claimed_by: 'person-a' },
+      { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 240 },
+    ])
+    choresApi.listChores.mockResolvedValue(nobodyHas)
+  })
+
+  const pressDealOut = async () => {
+    await act(async () =>
+      void fireEvent.click(await screen.findByRole('button', { name: /deal these out/i })),
+    )
+  }
+
+  it('AC 1: the action runs the stored re-assignment for the household on screen, then re-reads', async () => {
+    await renderApp()
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' })
+    // Re-read from the server after the run, never patched from the response:
+    // what the next device to load will see is what this one now shows.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore)
+    expect(reassignApi.reassignHousehold.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+  })
+
+  it('AC 3: one press on the first screen — no capacity write, no per-chore assignment, no tab', async () => {
+    // `renderApp()` with no surface: the split is where a joined household
+    // lands (the 2026-08-06 decision), so the route is reachable with no
+    // navigation at all. Nothing that a capacity edit or a Who dropdown would
+    // reach is touched — the side door #52 named stays shut.
+    await renderApp()
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(capacityApi.clearCapacity).not.toHaveBeenCalled()
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(choresApi.updateChore).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: it is the one run a capacity change makes — no planner of its own', async () => {
+    // The manual pin (#49 AC 4) is a property of `reassignHousehold`, so the
+    // claim at this level is that App reached THAT and built no second path:
+    // `planReassignment` is stubbed too and must stay untouched.
+    await renderApp()
+    await pressDealOut()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    expect(reassignApi.planReassignment).not.toHaveBeenCalled()
+  })
+
+  it('POSITIVE CONTROL: with every chore held, the split offers no such action', async () => {
+    choresApi.listChores.mockResolvedValue(
+      nobodyHas.map((c, i) => ({ ...c, assigned_member_id: i ? 'm2' : 'm1', assigned_source: 'manual' })),
+    )
+    await renderApp()
+    await screen.findByTestId('split-verdict')
+    expect(screen.queryByRole('button', { name: /deal these out/i })).toBeNull()
+  })
+
+  it('is disabled while the run is in flight — the tabs and this control alike', async () => {
+    let finish
+    reassignApi.reassignHousehold.mockImplementation(
+      () => new Promise((resolve) => (finish = resolve)),
+    )
+    await renderApp()
+    const button = await screen.findByRole('button', { name: /deal these out/i })
+    await act(async () => void fireEvent.click(button))
+    expect(button).toBeDisabled()
+    await act(async () => void finish({ applied: 2, assignments_version: 1 }))
+    expect(screen.getByRole('button', { name: /deal these out/i })).not.toBeDisabled()
+  })
+
+  it('a refused run reports itself on the split and leaves the control usable', async () => {
+    reassignApi.reassignHousehold.mockRejectedValue(
+      new Error('applying the re-assignment: the household moved'),
+    )
+    await renderApp()
+    await pressDealOut()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/the household moved/i)
+    expect(screen.getByRole('button', { name: /deal these out/i })).not.toBeDisabled()
+  })
+})
+
+// #96 — the calendar's suggested busy minutes, at the level only App can answer.
+//
+// Roster.test.jsx covers what the readout DRAWS. Everything here is about the
+// TRIGGER, which is the criterion with a boundary in it: AC 1 says the fetch
+// happens when there is no derived row and does NOT happen when there is, and
+// the two invocation-count assertions are what make that a fact rather than a
+// preference. #98's refresh story owns the other side of the same boundary, so
+// its counterpart tests will assert the mirror image — a row existing is
+// precisely where this story stops.
+describe('calendar-suggested busy minutes (#96)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = {
+    id: 'c1',
+    member_id: 'm1',
+    scope: 'freebusy',
+    connected_at: '2026-08-24T00:00:00Z',
+  }
+  /** A Monday. Every test that matters re-derives the week through the app's own
+   * `periodStartFor`; this is only the fixture's default key. */
+  const WEEK = '2026-09-07'
+  const busyRow = {
+    id: 'b1',
+    member_id: 'm1',
+    period_start: WEEK,
+    busy_minutes: 320,
+    event_count: 6,
+    computed_at: '2026-09-08T14:00:00Z',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  it('AC 1: fetches ONCE when a connected member has no row for this week', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    // The week is the app's OWN arithmetic: `periodStartFor` is real here (only
+    // the impure capacity functions are stubbed), so this asserts the household
+    // zone reached it rather than asserting a constant against itself.
+    const [call] = calendarApi.fetchBusyWeek.mock.calls
+    expect(call[0].householdId).toBe('h1')
+    expect(call[0].periodStart).toBe(
+      actualCapacity.periodStartFor(new Date(), household.timezone),
+    )
+  })
+
+  it('AC 1: does NOT fetch when a row for this week already exists', async () => {
+    // The disjoint half. Staleness — how OLD that row is — belongs entirely to
+    // #98, and this story has no clause about it to get wrong. A trigger that
+    // also fired on an old row would make the two stories' invocation counts
+    // impossible to tell apart, which is what the criterion's wording guards.
+    const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+    calendarApi.listBusyWeeks.mockResolvedValue([{ ...busyRow, period_start: week }])
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: does not fetch on a screen that shows no capacity', async () => {
+    // "When the capacity screen opens" is the whole clause. The app boots on the
+    // split, and spending a member's Google credential for a figure that is not
+    // on screen is exactly what the wording refuses.
+    await renderApp()
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: does not fetch for a member who has connected nothing', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: does not fetch on a HOUSEMATE connection', async () => {
+    // Owner decision, 2026-09-04: this device reads the signed-in member's own
+    // calendar. A trigger keyed on "somebody in this household is connected"
+    // would spend a housemate's credential on this person's app-open.
+    calendarApi.listCalendarConnections.mockResolvedValue([{ ...connection, member_id: 'm2' }])
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: stays at one call when the screen is left and re-opened', async () => {
+    // "Once for that week" outlives a tab switch. Each visit re-runs the effect
+    // and the guard is what makes the second one silent — a guard written after
+    // the await would let a re-render during the round trip start a second call.
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4: draws the figure the server hands back, after the fetch', async () => {
+    // Re-read rather than trusting the function's answer: what the next device
+    // to load will see is exactly what this one now shows.
+    // TWO empty reads, not one: `renderApp('Who')` refreshes at boot AND for
+    // the tab, so a single `mockResolvedValueOnce([])` let the tab-switch
+    // refresh hand back the row and this test passed without the effect's own
+    // re-read ever being observed (review-fanout, 2026-09-04, second pass). The
+    // third read is the effect's, and it is the only one that returns the row.
+    const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+    calendarApi.listBusyWeeks
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ ...busyRow, period_start: week }])
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+    expect(calendarApi.listBusyWeeks).toHaveBeenCalledTimes(3)
+  })
+
+  it('AC 5: a calendar that cannot be read costs the suggestion and nothing else', async () => {
+    calendarApi.fetchBusyWeek.mockRejectedValue(
+      new Error('That calendar connection is no longer valid. Connect it again.'),
+    )
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/no longer valid/),
+    )
+    // The app still works. This is the assertion that separates a handled
+    // failure from a swallowed one: the roster is on screen and the manual
+    // control is still there to use.
+    expect(
+      inRoster().getByRole('button', { name: /set this week for placeholder one/i }),
+    ).toBeEnabled()
+  })
+
+  it('AC 5: does not retry the same week after a failure', async () => {
+    // Weak on its own, and said so: the complaint render changes none of the
+    // effect's dependencies, so the effect neither re-runs nor cleans up and
+    // this is one call BY CONSTRUCTION. The witness that actually reaches the
+    // guard is the tab-switch test directly below (review-fanout, 2026-09-04,
+    // second pass: this test's first comment claimed the opposite).
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/))
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 5: still does not retry after leaving the screen and coming back', async () => {
+    // The one that reaches the guard: leaving Who changes `view`, coming back
+    // re-runs the effect, and only the key kept in `askedForBusy` stands
+    // between that and a second Edge Function call for a week Google already
+    // refused. *Measured by the refuter*: with the once-after-failure half of
+    // the guard deleted, this reads "called 2 times"; every other #96 test
+    // stayed green.
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/)
+  })
+
+  it('AC 5: a derived table that is not there yet does not take the app down', async () => {
+    // `0030` is unapplied on the live project until somebody pastes it, and an
+    // unguarded read of a missing table would fail the whole refresh — taking
+    // the roster, the chores and the manual capacity path with it. This is the
+    // largest instance of "the manual path is untouched".
+    calendarApi.listBusyWeeks.mockRejectedValue(
+      new Error('loading calendar busy minutes: relation does not exist'),
+    )
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(
+      inRoster().getByRole('button', { name: /set this week for placeholder one/i }),
+    ).toBeEnabled()
+  })
+
+  it('reads this week figures from the server on every refresh', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+    expect(calendarApi.listBusyWeeks).toHaveBeenCalledWith(week, ['m1', 'm2'])
+  })
+
+  it('asks for nothing at all when this device has joined no household', async () => {
+    api.currentHousehold.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('region', { name: /start a household/i })
+    expect(calendarApi.listBusyWeeks).not.toHaveBeenCalled()
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // review-fanout, 2026-09-04 — the four the first suite could not see
+  // -------------------------------------------------------------------------
+  //
+  // Every mock above returns the SAME reference on every call, so `useState`
+  // bails out of the re-render and no dependency identity ever moves. The real
+  // `refresh()` decodes fresh objects from the network every time, and the
+  // first trigger effect keyed on those objects: `goTo('who')` started a
+  // refresh in the same breath as the fetch, the refresh replaced `household`,
+  // `members`, `connections` and `busyWeeks`, the cleanup ran, `cancelled` went
+  // true, and the fetch's answer was dropped on both branches with the guard
+  // then refusing a retry. Green throughout. These return fresh copies, which
+  // is the one thing that lets the suite disagree with the mocks' author.
+  describe('with mocks that return fresh references, as the network does', () => {
+    const fresh = () => {
+      api.currentHousehold.mockImplementation(async () => ({ ...household }))
+      api.listMembers.mockImplementation(async () => [{ ...me }, { ...housemate }])
+      calendarApi.listCalendarConnections.mockImplementation(async () => [{ ...connection }])
+      calendarApi.listBusyWeeks.mockImplementation(async () => [])
+    }
+
+    it('AC 4: a fetch that finishes AFTER the refresh still puts the figure on screen', async () => {
+      fresh()
+      let finish
+      calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+      // The refresh goTo started has settled by now, with fresh identities
+      // throughout; the fetch is still in flight. This is the ordering the
+      // Edge Function's two Google round trips make the LIKELY one.
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+      const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+      calendarApi.listBusyWeeks.mockImplementation(async () => [{ ...busyRow, period_start: week }])
+      await act(async () => finish({ ok: true }))
+      await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    })
+
+    it('AC 5: a fetch that FAILS after the refresh still puts the sentence on screen', async () => {
+      fresh()
+      let fail
+      calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((_, reject) => (fail = reject)))
+      await renderApp('Who')
+      await screen.findByRole('region', { name: /who is in the household/i })
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+      await act(async () => fail(new Error('Could not reach Google. Try again in a moment.')))
+      await waitFor(() =>
+        expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/),
+      )
+      // And still once. The failure is recorded, not retried into a loop.
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    })
+
+    it('a refresh that changes nothing this trigger decides by does not re-ask', async () => {
+      // Held at one call by TWO guards at once — the value-keyed dependencies
+      // and the key in `askedForBusy` — so deleting either alone leaves this
+      // green. The dependencies are witnessed on their own by the two
+      // late-settling tests above (a fetch that outlives the refresh lands
+      // only if the refresh did not tear the effect down); this one is the
+      // end-to-end statement, not a proof of either guard.
+      fresh()
+      await renderApp('Who')
+      await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+      // Three more refreshes, each decoding fresh objects. Same ids, same
+      // connection, still no row — so the trigger has nothing new to say.
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+      }
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('AC 5: a figure that was on screen SURVIVES a later read failure, with the sentence under it', async () => {
+    // The state the criterion actually describes — the last derived figure,
+    // its date, and a notice — and the first version could not reach it: the
+    // fetch fires only when there is no row, and the refresh path threw the
+    // rows away on a failed read. Now the row stays and the sentence joins it.
+    const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+    calendarApi.listBusyWeeks
+      .mockResolvedValueOnce([{ ...busyRow, period_start: week }])
+      .mockRejectedValue(new Error('loading calendar busy minutes: permission denied'))
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+    expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/permission denied/)
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('a read complaint clears once the table reads again', async () => {
+    // Set by the refresh path and, until this, cleared by nothing a member who
+    // already has a figure could ever reach — so one transient failure left a
+    // contradiction under a perfectly good figure for the rest of the session.
+    // A CONNECTED member (the describe's default), because the read notice is
+    // shown only to one — see the test after this. Their fetch resolves so the
+    // only complaint standing is the read's.
+    calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
+    // Rejecting on EVERY read until told otherwise, because `renderApp('Who')`
+    // refreshes twice — once at boot and once for the tab — and a single
+    // rejection would be cleared by the second before anything could be seen.
+    calendarApi.listBusyWeeks.mockRejectedValue(
+      new Error('loading calendar busy minutes: permission denied'),
+    )
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toBeInTheDocument())
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+
+  it('shows the read notice only to a member who has connected a calendar', async () => {
+    // Owner decision, 2026-09-04: a failed read of the busy table means
+    // something only to somebody whose figure would have been there. Without
+    // this, every member reads a PostgREST sentence under their minutes for the
+    // whole window between the merge and `0030` being applied, on a row that
+    // has nothing to do with calendars.
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    calendarApi.listBusyWeeks.mockRejectedValue(
+      new Error('loading calendar busy minutes: relation does not exist'),
+    )
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
+    // POSITIVE CONTROL in the same test: connect them and the same failure is
+    // on screen — so the absence above is the gate, not a mock returning nothing.
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/does not exist/))
+  })
+
+  it('a fetch complaint clears only when a figure for this week actually arrives', async () => {
+    // Not when the table merely reads fine: a table that reads says nothing
+    // about whether Google answered. The two failures were one state variable
+    // once, and the read's success wiped the fetch's sentence (review-fanout,
+    // 2026-09-04).
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/Google/))
+    // A refresh whose read succeeds but brings no row: the sentence stands.
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/Google/)
+    // A refresh that brings the row — another device fetched it — clears it.
+    const week = actualCapacity.periodStartFor(new Date(), household.timezone)
+    calendarApi.listBusyWeeks.mockResolvedValue([{ ...busyRow, period_start: week }])
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
+    expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument()
   })
 })

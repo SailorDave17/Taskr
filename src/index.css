@@ -20,8 +20,36 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---------------------------------------------------------------------------
+   #303 — the shell uses the screen it is given.
+
+   Until this story `.shell` was `max-width: 34rem` at every size, so a 1280px
+   laptop drew a 544px column with 368px of empty ground each side (MEASURED at
+   the filing commit, and again in a real browser before this change: the shell
+   content spanned 39.4% of the viewport at 1280px and 65.6% at 768px).
+
+   THE PHONE IS NOT THE SUBJECT. At 360px the shell was already full width less
+   its padding, so every rule below is inside a `min-width` query and the phone
+   path is byte-for-byte the one #80/#82/#83 measured. That is the whole risk in
+   this story: a change aimed at wide screens is the kind that moves the phone
+   without anybody looking, which is why the 360px measurement is taken as a
+   negative control before and after rather than assumed.
+
+   Route (a) of the issue. Route (b) — scaling the root font with the viewport —
+   was rejected at filing: it breaks the 44px touch-target floor the phone
+   measurements depend on, and a bigger font is not more screen.
+
+   The ceiling is on the SHELL, and the readable measure is kept two ways: the
+   grid, for any card with a neighbour, and an explicit bound on the prose and
+   the form fields, for the things a grid cannot reach. From 48rem the
+   multi-card surfaces lay out in columns of at least 20rem, so the width is
+   spent on columns instead of on stretching a line of body text past what
+   anybody can read.
+   --------------------------------------------------------------------------- */
+
 .shell {
-  max-width: 34rem;
+  width: 100%;
+  max-width: 80rem;
   margin: 0 auto;
   padding: 2rem 1.25rem calc(2rem + env(safe-area-inset-bottom));
   display: flex;
@@ -282,6 +310,50 @@ body {
   font-weight: 500;
 }
 
+/* #154 — the secondary route on the sign-in screen. A link rather than a
+   button, deliberately: "Start a household" must not sit at equal weight with
+   Sign in, because the person opening the app on a new phone almost always
+   has one already. It is still a <button> (it changes state, it does not
+   navigate), styled to read as a link, and it keeps the 44px target every
+   other control here has — a small link is the wrong trade on a phone. */
+.button--link {
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.button--link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* #304 — between the password form and Continue with Google. A word, not a
+   rule: the two routes carry equal weight for the people they apply to, and
+   the divider only says the second is an alternative rather than a further
+   step. Dim ink, like every other aside on a card. */
+.divider {
+  margin: 0.75rem 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+/* #304 — a button outside a .stack is inline and shrinks to its label. The
+   Google control sits under a full-width Sign in, and design-bar measured it
+   at 192px against 278px at 360 wide: the field renders a social sign-in at
+   the primary's width, and a narrower one reads as an afterthought. */
+.button--block {
+  display: block;
+  width: 100%;
+}
+
 .button--danger {
   background: #7f2b2b;
   color: #ffeaea;
@@ -403,6 +475,46 @@ body {
   /* "usual" and "set for this week" are the same weight and colour on purpose.
      One is not better than the other, and styling the override as an exception
      would make saying "I have less time" feel like an admission. */
+  opacity: 0.75;
+}
+
+/* What the calendar says about this week — story #96.
+
+   Under the week's minutes, in the same quiet register as `.member__access` and
+   `.member__calendar` above: it is a SUGGESTION beside a number the person
+   owns, and drawing it as loudly as the figure it informs would invert that.
+   #97 turns it into a control; today it is text.
+
+   `display: block` and its own margin for `.member__calendar`'s reason — at
+   360px a name, a baseline, the week's figure and a Change button already fill
+   the row, and this drops beneath them rather than competing for the line. The
+   figure is tabular like `.member__week-figure` so the two numbers stack in
+   alignment down the roster. */
+.member__busy {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.member__busy-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.member__busy-read {
+  opacity: 0.75;
+}
+
+/* The read that did not happen — AC 5.
+
+   `display: block` so it sits under the figure it qualifies rather than running
+   on from it: the two say different things, and a sentence about a failure
+   appended to a number reads as though it describes that number. Not styled as
+   an error — nothing is broken, the manual path is untouched, and the figure
+   above is still true of the last time the calendar could be read. */
+.member__busy-complaint {
+  display: block;
+  margin-top: 0.125rem;
   opacity: 0.75;
 }
 
@@ -1047,4 +1159,132 @@ body {
 .split__attention-cost {
   color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* #284 — the one action in the needs-attention area, between the total and
+   the list, so on a phone with thirteen rows below it the answer sits beside
+   the problem rather than under it. Full-weight button, not --quiet: it is the
+   only thing on the split a fresh household needs to press. */
+.split__deal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin: 0.625rem 0 0.875rem;
+}
+
+.split__deal-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* ---------------------------------------------------------------------------
+   #303 — the wide-viewport rules, LAST IN THE FILE ON PURPOSE.
+
+   `.onboarding, .roster` (line ~134) and `.split` (line ~937) each set
+   `display: flex` at the same specificity as the rule below. A media query does
+   not raise specificity — it only adds a condition — so when this block sat at
+   the top of the file beside `.shell`, `grid-template-columns` applied and
+   `display: grid` was OVERRIDDEN by the later flex declarations. MEASURED in a
+   real browser: computed `display` was `flex` while `grid-template-columns` read
+   back exactly as authored, so the cards stayed in one column at 1280px and
+   every card had the same left offset.
+
+   That is a silent failure of exactly the shape this repo keeps recording: the
+   property that reads back correctly is not the property that decides the
+   layout, and nothing errors. Keeping the block here is what makes it work; a
+   future rule for these surfaces must go ABOVE it, not below.
+   --------------------------------------------------------------------------- */
+/* From 48rem (768px at the 16px root) the surfaces that hold more than one card
+   become a grid. `auto-fit` with a `minmax` floor is what makes this one rule
+   rather than a breakpoint per surface: the columns are as many as fit at
+   20rem — MEASURED: two columns at 768px, and at 1280px three on the Roster and
+   two on the Split, which has two cards to place. A surface with a single card
+   is unaffected, because one column is what fits it.
+
+   THE FLOOR IS ARITHMETIC, not taste. Two columns fit only when
+   `2 * floor + gap <= content width`. At 768px the content is 704px and the
+   gaps here are 1.25rem (`.roster`, `.onboarding`) and 1rem (`.split`), so a
+   22rem floor needs 724px and silently collapses to ONE column at exactly the
+   width the criteria name — MEASURED: `cardLefts` was a single offset at 768px
+   with 22rem. 20rem needs 660px and leaves 44px of headroom, so the layout does
+   not hinge on the gap staying where it is.
+
+   `align-items: start` so a short card does not stretch to the height of a tall
+   neighbour — a Roster card of two members beside one of eight would otherwise
+   grow a hollow box. */
+@media (min-width: 48rem) {
+  .shell {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .onboarding,
+  .roster,
+  .split {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    align-items: start;
+  }
+
+  /* The readable measure, and the half the grid cannot keep.
+
+     The grid bounds any card that has a NEIGHBOUR. Two things have none: the
+     tagline, which is a direct child of the shell and so outside every surface,
+     and the Chores surface, which returns a BARE `.card` as a direct child of
+     the shell — one card, therefore one column at any width. Both ran the full
+     1216px at 1280px before this rule — MEASURED, and it is the criterion's own
+     bound (about 40rem) that they broke, not a matter of taste: a 1216px line
+     of body text is roughly 190 characters.
+
+     Keyed on the child combinator rather than on a new class name. `.chores`
+     does not exist — `Chores.jsx` returns `<section className="card">` with no
+     wrapper — and inventing one here would mean a class in the stylesheet that
+     no component emits, which is the inverse of the guard `gate.test.js` runs.
+     `.shell > .card` names exactly the single-card case: a card inside
+     `.roster` or `.split` is a grandchild and keeps its grid column.
+
+     Bounded rather than centred: the surface is a list of rows whose controls
+     belong at the left edge under the heading, so it keeps its left alignment
+     and simply stops growing. */
+  .shell__tagline,
+  .shell__notice {
+    max-width: 40rem;
+  }
+
+  .shell > .card {
+    max-width: 48rem;
+  }
+
+  /* And the prose inside a card, which the card's own bound does not reach.
+     A 48rem card is the right size for its ROWS — a chore row is a title, a
+     figure and a run of buttons, and it uses the width — while a paragraph in
+     the same card would still run 726px at 1280px (MEASURED). The criterion
+     bounds body text specifically, so the bound goes on the text.
+
+     Scoped to the prose classes, deliberately not to `.card` itself: bounding
+     the card would narrow the rows too, and the rows are the reason the extra
+     width is worth having. */
+  .card__body,
+  .card__note {
+    max-width: 40rem;
+  }
+
+  /* Criterion 3's second half — the batch form's text inputs must not stretch
+     past the readable column. `.field` is a flex column with no width of its
+     own, so an input took the full width of whatever held it: 726px in the
+     Chores card at 1280px (MEASURED).
+
+     A text box wider than the text anybody types into it is not more usable,
+     and a 726px single-line input beside a 640px paragraph reads as a
+     mis-layout rather than as generosity. The bound is on `.field`, so the
+     label and its input move together and stay aligned.
+
+     `min-height: 44px` on the input is untouched — the touch target is a
+     HEIGHT, and nothing here changes it at any width. */
+  .field {
+    max-width: 30rem;
+  }
 }

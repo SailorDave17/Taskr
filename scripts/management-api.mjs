@@ -172,6 +172,59 @@ export function requireAccessToken(token) {
 }
 
 /**
+ * The fourth near-miss — the one no shape check above can reach — #324.
+ *
+ * `requireAccessToken` recognises three wrong credentials by their SHAPE, before
+ * anything is sent. An EXPIRED or REVOKED personal access token is the fourth
+ * case and is invisible to every one of them: it is the right kind of credential
+ * and still well-formed, so each test passes and the request goes out. What comes
+ * back is a bare `[401] Unauthorized`, which reads as a question about the
+ * endpoint or the project and sends somebody to re-check those — which is exactly
+ * what happened. *Measured 2026-09-03*: `check:deployed` and a direct
+ * `GET /v1/projects/<ref>/config/auth` returned 401 with one token, two different
+ * endpoints, and the token was simply dead.
+ *
+ * So this case can only be recognised AFTER a response, which is why it lives
+ * here and not in `requireAccessToken`. It is composed in one place rather than
+ * at each command's `refuse()` because both readers — `runQuery` and
+ * `listDeployedFunctions` in `check-deployed.mjs` — build this string
+ * identically, and all three commands surface whichever one they used. A copy per
+ * caller would be three paragraphs free to drift, and a fourth command added
+ * later would silently get none of them.
+ *
+ * Every other status is returned UNCHANGED, deliberately. Widening this to
+ * "anything that failed" would swallow the cases already handled: a 404 is the
+ * wrong project ref, a 400 is bad SQL, and `migrate:live` says in as many words
+ * that an apply-stage failure means the fault is in the file rather than in
+ * transit. A message about re-minting on top of those would send somebody to the
+ * token page over a typo in their own migration.
+ *
+ * 403 is left alone for the same reason the near-misses each name one specific
+ * mistake: nothing here has measured one, and a guess would read as a
+ * measurement.
+ */
+export function explainHttpFailure(status, detail) {
+  const base = `[${status}] ${detail}`
+  if (status !== 401) return base
+
+  return (
+    `${base}\n\n` +
+    'THE TOKEN WAS REJECTED, and it is probably EXPIRED OR REVOKED.\n\n' +
+    `${TOKEN_VAR} is well-formed and is the right KIND of credential — it is not a\n` +
+    'project API key or a legacy JWT, which are refused by name before anything is\n' +
+    'sent. So a 401 here is very unlikely to be the project ref or the endpoint,\n' +
+    'and re-checking those is the wrong next move.\n\n' +
+    `Mint a new personal access token at ${TOKEN_PAGE} and replace\n` +
+    `${TOKEN_VAR} in \`.env.local\`. It takes ten seconds, and the old one can be\n` +
+    'revoked on the same page.\n\n' +
+    'docs/deploy-runbook.md section 5 says what else goes dark while this one is\n' +
+    'dead: all three of check:deployed, migrate:live and probe:live-grants answer\n' +
+    'the same question — has production drifted from the repo? — and a dead token\n' +
+    'takes all three at once.'
+  )
+}
+
+/**
  * `https://abcdefgh.supabase.co` -> `abcdefgh`, refusing anything else.
  *
  * Re-exported rather than reimplemented so both scripts import one module. The
@@ -246,7 +299,7 @@ export async function runQuery({ ref, token, sql, fetchImpl = fetch, root = MANA
       ok: false,
       status: response.status,
       rows: null,
-      error: `[${response.status}] ${detail}`,
+      error: explainHttpFailure(response.status, detail),
     }
   }
 

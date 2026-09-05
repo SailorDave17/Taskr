@@ -114,6 +114,10 @@ create table if not exists public.member_capacity (
   -- How it was entered. 'extraction' is the plain-language path (#57); a client
   -- may set it, because it is provenance rather than privilege, and a later
   -- accuracy question is answerable only if the data says where it came from.
+  --
+  -- RE-POINTED 2026-09-04 (#273): #57 closed superseded 2026-08-27; the capacity
+  -- capture flow is now #210. The sentence above is left as written — an applied
+  -- migration is the record of what was decided on the day.
   source        text not null default 'manual',
 
   created_at    timestamptz not null default now(),

@@ -640,6 +640,59 @@ describe('when the signed-in person belongs to a household', () => {
 
     await waitFor(() => expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore))
   })
+
+  // -------------------------------------------------------------------------
+  // #163 — the household is NAMED in the shell, above the tabs, on every
+  // surface. The roster card already carried the name on the Who tab; the
+  // claim here is the shell's, so every query below is scoped to the shell's
+  // own element rather than to "the name appears somewhere", which the Who
+  // tab would satisfy with the shell element deleted.
+  // -------------------------------------------------------------------------
+
+  const shellName = () => screen.getByText(household.name, { selector: '.shell__household' })
+
+  it('names the household above the tabs on every surface (#163 AC 1, AC 7)', async () => {
+    await renderApp()
+    // The default surface first — the one with NO roster card, so this is the
+    // assertion that reddens when the shell element is removed and nothing
+    // else on the page happens to say the name.
+    const nav = screen.getByRole('navigation', { name: /household surfaces/i })
+    const above = () =>
+      Boolean(shellName().compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(above(), 'the name is not above the tab strip on the split').toBe(true)
+
+    for (const surface of ['Chores', 'Who', 'Done']) {
+      await act(async () => void fireEvent.click(screen.getByRole('button', { name: surface })))
+      expect(above(), `the name is not above the tab strip on ${surface}`).toBe(true)
+    }
+  })
+
+  it('reads as information, not as a control to pick another household (#163 AC 4)', async () => {
+    await renderApp()
+    const name = shellName()
+    expect(name.tagName).toBe('P')
+    expect(name.closest('button, a, [role="button"], [role="combobox"], select')).toBeNull()
+    expect(screen.queryByRole('button', { name: household.name })).not.toBeInTheDocument()
+  })
+
+  it('shows the edited name after the roster re-reads, with no reload (#163 AC 5)', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(shellName()).toBeInTheDocument()
+
+    // The organizer renamed it on another device; the next read returns the
+    // new row. The shell must follow the re-read that every write already
+    // triggers — the same refresh() path — rather than remembering the name
+    // it booted with.
+    const renamed = { ...household, name: 'Placeholder Household Renamed' }
+    api.currentHousehold.mockResolvedValue(renamed)
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /refresh/i })))
+
+    expect(
+      await screen.findByText(renamed.name, { selector: '.shell__household' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(household.name, { selector: '.shell__household' })).not.toBeInTheDocument()
+  })
 })
 
 describe('when the backend cannot be reached', () => {

@@ -1086,6 +1086,24 @@ export default function App() {
           a screen reader already reads it — and gate.test.js's stylesheet check
           only sees static `className` strings, so a conditional class here
           would be a class nothing checks. */}
+      {/* #163 — WHICH household the data on screen belongs to, named directly
+          above the surfaces it scopes and on every one of them. A paragraph,
+          not a button and not a heading: under one household the name is
+          information, and nothing here may suggest there is another to pick
+          (AC 4). The switcher (#253) attaches here later with no layout change.
+
+          The read site, for AC 2: `household.name` arrives through the single
+          currentHousehold() read in refresh(), which is `select('*')` on
+          `households`, and `name` is already in 0013:95's column grant
+          (`select (id, name, created_at, organizer_member_id, timezone)`), so
+          NO new grant ships with this story. The guard for a later column
+          being added and not granted — which would refuse that `select('*')`
+          outright rather than drop a field — is grants.pglite.test.js's
+          "grants select on EVERY column of households". */}
+      {status === 'joined' && household ? (
+        <p className="shell__household">{household.name}</p>
+      ) : null}
+
       {status === 'joined' && household ? (
         <nav className="tabs" aria-label="Household surfaces">
           {SURFACES.map(({ key, label }) => (

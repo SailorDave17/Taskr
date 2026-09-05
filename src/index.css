@@ -72,6 +72,23 @@ body {
   color: var(--ink-dim);
 }
 
+/* #163 — the household whose data is on screen, directly above the tab strip
+   it labels. Plain ink at body weight-and-a-half, no border, no chevron and no
+   hover state: it must read as a fact rather than a control, because under one
+   household there is nothing to switch to (AC 4). The negative bottom margin
+   eats most of the shell's 1.5rem column gap so the name sits with the tabs
+   rather than floating between the tagline and them. `overflow-wrap` for the
+   same reason the tabs carry it — a long household name at 360px wraps rather
+   than widening the page. */
+.shell__household {
+  margin: 0 0 -0.875rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
 .shell__status {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.07);

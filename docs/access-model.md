@@ -7,9 +7,10 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0029` are ALL applied to the live project; `0030` (#96) is in the repo and is
-  NOT, so the expected-red set holds TWO — see the `0030` entry below.** Up to `0029`, and at the
-  moment `0029` landed, that set was EMPTY —
+- Status: **`0001`–`0030` are ALL applied to the live project, and the expected-red set is EMPTY —
+  *measured 2026-09-04 at 36 of 36* in #100's session, after `0030` was applied and `calendar-busy`
+  deployed there (34 of 36 immediately before, exactly #96's two rows red; see the `0030` entry
+  below).** Up to `0029`, and at the moment `0029` landed, that set was EMPTY too —
   *measured 2026-09-02 at 32 of 32*, on both sides of `0029`'s apply in its own story's session
   (below), and at the same figure on both sides of `0028`'s earlier the same day, and on 2026-09-01
   after `0027` was applied in its.
@@ -288,10 +289,17 @@
     files and fails silently. The equivalent mistake here is a whole new grant statement, which is a
     thing a reader argues with.
   - **`0030`** (#96) — `calendar_busy`, the derived busy-minutes table the roster reads. **NOT
-    applied at merge**, and the second migration on this page to need a DEPLOY as well as a paste:
-    `calendar-busy` is an Edge Function, so `npm run deploy:function` is the other half. Two
-    actions, two expected reds, and `0011`'s entry below is the worked example of what to expect —
-    the paste clears only its own. The stored shape is the whole of this story's minimization
+    applied at merge, and applied in #100's session on 2026-09-04** with `npm run migrate:live`
+    (9 statements, md5 read back equal to the file's), the second migration on this page to need a
+    DEPLOY as well as a paste: `calendar-busy` is an Edge Function, so `npm run deploy:function`
+    was the other half, run in the same session (v1 of that function; `check:deployed` reads all
+    three current). Two actions, two expected reds, and `0011`'s entry below was the worked
+    example of what to expect — the paste cleared only its own, *measured*: `check:live` read 34
+    of 36 before, with `calendar_busy` answering `PGRST205` and `calendar-busy` 404, and 36 of 36
+    after. `npm run probe:live-grants` read 15 of 15 after the apply, `calendar_busy` carrying
+    `service_role=arwdDxtm` and no `authenticated` table-level grant, and a client select of the six
+    granted columns as the seeded account answered 200 while `select=household_id` and `select=*`
+    both answered `42501`. The stored shape is the whole of this story's minimization
     decision (owner, 2026-08-16): `member_id`, `period_start`, `busy_minutes`, `event_count`,
     `computed_at` and nothing a calendar could have put there, enforced as an absent column rather
     than as a rule in the function. `service_role` is the only writer, exactly as for `0011`'s two
@@ -355,11 +363,13 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set holds TWO, both from #96 and both unmeasured as yet**: the `calendar_busy`
-  table probe until `0030` is applied, and the `calendar-busy` Edge Function probe until it is
-  deployed. They are written down here at the moment they are created rather than at the moment
-  somebody notices, because this page has gone stale on exactly this seam three times and the
-  entry below says so. The denominator moves from 32 to 34 with them.
+- **The excused-red set is EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
+  `calendar_busy` table probe on `0030`'s apply, and the `calendar-busy` Edge Function probe on
+  its deploy, each on its own action and neither on the other's — *measured 2026-09-04 at 34 of
+  36 before and 36 of 36 after*, in #100's session. They were written down here at the moment they
+  were created rather than at the moment somebody noticed, because this page has gone stale on
+  exactly this seam three times and the entry below says so. The denominator #96 wrote for them
+  was 34; it read 36 because #268 landed the same day and its rows count too.
 - **Before #96, the excused-red set was EMPTY. *Measured 2026-09-02 at 32 of 32*, on both sides of `0028`'s
   apply in #306's own session — the denominator unmoved, because that file replaces a function
   body and this check probes a function only by name and argument set; the reading before the apply

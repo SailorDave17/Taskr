@@ -1158,6 +1158,9 @@ describe('#19 — no real household name reaches version control', () => {
     // #161 — the caller's ordinary member row in a household they do not organise.
     'Housemate',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
+    // #163 — the same household after the organizer edits its name, so the
+    // shell can be shown following the rename through a re-read.
+    'Placeholder Household Renamed',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',
     'Ours', 'Theirs', 'Mine now', 'H',

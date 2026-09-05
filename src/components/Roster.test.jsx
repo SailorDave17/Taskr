@@ -611,7 +611,9 @@ describe('this week’s capacity — #46', () => {
       { target: { value: '120' } },
     )
     await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
-    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120')
+    // The third argument arrived with #210: a typed figure is source 'manual',
+    // and it is the SAME call a proposed figure makes with one word different.
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120', 'manual')
   })
 
   it('seeds the editor from the CURRENT value every time it opens', async () => {
@@ -1187,5 +1189,209 @@ describe('#96 — calendar-suggested busy minutes', () => {
     setup({ household: zoned })
     expect(screen.queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+})
+
+// #210 — this week's capacity, described in plain language. The proposer is
+// a spy handed in as `onProposeCapacity`; what it answers is the capture
+// layer's outcome vocabulary, tested against recorded responses in
+// src/lib/capture.test.js. What is tested HERE is the confirm surface: a
+// proposal lands in the field and is not written, accepting it is one tap of
+// a submit that is the same write a typed figure makes, and the source
+// travels with it.
+describe('this week’s capacity, described in plain language — #210', () => {
+  const PROPOSAL = {
+    outcome: 'proposal',
+    minutes: 180,
+    derivedFrom: { who: 'me', minutes: 180 },
+  }
+  const name = roster[0].display_name
+
+  const openFor = () =>
+    clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+
+  const describeIt = async (text) => {
+    fireEvent.change(screen.getByLabelText(new RegExp(`describe this week for ${name}`, 'i')), {
+      target: { value: text },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the minutes/i }))
+  }
+
+  const minutesField = () =>
+    screen.getByLabelText(new RegExp(`minutes this week for ${name}`, 'i'))
+
+  const saveProposed = () =>
+    clickAndSettle(
+      screen.getByRole('button', { name: new RegExp(`save the proposed figure for ${name}`, 'i') }),
+    )
+
+  const save = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+  const withProposer = (outcome = PROPOSAL) => {
+    const onProposeCapacity = vi.fn().mockResolvedValue(outcome)
+    const handlers = setup({ onProposeCapacity })
+    return { ...handlers, onProposeCapacity }
+  }
+
+  it('AC 1: shows the proposed figure, lands it in the field with its source named, and writes nothing', async () => {
+    const { onSetCapacity, onProposeCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    expect(onProposeCapacity).toHaveBeenCalledWith(roster[0], 'I have three hours this week')
+    expect(screen.getByTestId('proposal-m1')).toHaveTextContent('Proposed: 180 min')
+    // Prefilled, not applied: the field holds the proposal, the source line
+    // says where it came from, and nothing has been written.
+    expect(minutesField()).toHaveValue(180)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: a figure read as the writer’s own carries no provenance line that repeats the headline', async () => {
+    // The named case is the describe below this one.
+    withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    expect(screen.getByTestId('capture-proposal')).not.toHaveTextContent(/read as/i)
+  })
+
+  it('AC 1 / AC 9: accepting is ONE tap, a submit that writes once with source extraction', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    const button = screen.getByRole('button', {
+      name: new RegExp(`save the proposed figure for ${name}`, 'i'),
+    })
+    expect(button).toHaveAttribute('type', 'submit')
+    expect(button).toHaveTextContent(/save 180 min from your description/i)
+
+    await saveProposed()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '180', 'extraction')
+  })
+
+  it('AC 9: the plain Save below the field is the same write, not a second one', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '180', 'extraction')
+  })
+
+  it('AC 9: names the source on screen once a proposal arrives, and not before', async () => {
+    withProposer()
+    await openFor()
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await describeIt('I have three hours this week')
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+  })
+
+  it('AC 6: editing the proposed figure before saving keeps source extraction, and the button says what it will save', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    fireEvent.change(minutesField(), { target: { value: '150' } })
+    expect(
+      screen.getByRole('button', { name: new RegExp(`save the proposed figure for ${name}`, 'i') }),
+    ).toHaveTextContent(/save 150 min/i)
+    await saveProposed()
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '150', 'extraction')
+  })
+
+  it('AC 3: cancelling after a proposal writes nothing, and the next open starts clean', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(onSetCapacity).not.toHaveBeenCalled()
+    expect(rowFor(name)).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+
+    await openFor()
+    expect(minutesField()).toHaveValue(roster[0].weekly_minutes)
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-proposal')).not.toBeInTheDocument()
+  })
+
+  it('AC 2: when extraction fails, the typed field is in the same flow, focused, and a typed save is manual', async () => {
+    const { onSetCapacity } = withProposer({
+      outcome: 'failed',
+      sentence: 'The extraction service could not answer: not deployed.',
+    })
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    const failure = screen.getByTestId('capture-failure')
+    expect(failure).toHaveTextContent(/could not answer/)
+    expect(failure).toHaveTextContent('Type the minutes instead.')
+    expect(minutesField()).toHaveFocus()
+    expect(minutesField(), 'a failure must not prefill anything').toHaveValue(roster[0].weekly_minutes)
+
+    fireEvent.change(minutesField(), { target: { value: '90' } })
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '90', 'manual')
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: a question shows the sentence and no number, prefills nothing, and the description stays', async () => {
+    const { onSetCapacity } = withProposer({
+      outcome: 'question',
+      sentence: 'One more detail is needed. The message gives no amount of time.',
+    })
+    await openFor()
+    await describeIt('busy this week')
+
+    expect(screen.getByTestId('capture-question')).toHaveTextContent(/one more detail/i)
+    expect(screen.queryByTestId('proposal-m1')).not.toBeInTheDocument()
+    expect(minutesField()).toHaveValue(roster[0].weekly_minutes)
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(new RegExp(`describe this week for ${name}`, 'i'))).toHaveValue(
+      'busy this week',
+    )
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  it('a rejected save after a proposal does not escape, and the editor stays open with the figure to retry', async () => {
+    const onSetCapacity = vi.fn().mockRejectedValue(new Error('refused'))
+    setup({ onSetCapacity, onProposeCapacity: vi.fn().mockResolvedValue(PROPOSAL) })
+    await openFor()
+    await describeIt('I have three hours this week')
+    await saveProposed()
+    expect(minutesField()).toBeInTheDocument()
+    expect(minutesField()).toHaveValue(180)
+  })
+
+  it('the manual floor (AC 7): with no proposer wired, the editor is exactly the #46 form', async () => {
+    setup()
+    await openFor()
+    expect(
+      screen.queryByLabelText(new RegExp(`describe this week for ${name}`, 'i')),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-shell')).not.toBeInTheDocument()
+    expect(minutesField()).toBeInTheDocument()
+  })
+})
+
+describe('the provenance line — #210, design-bar', () => {
+  it('is shown when the endpoint attributed the figure to a name', async () => {
+    const onProposeCapacity = vi.fn().mockResolvedValue({
+      outcome: 'proposal',
+      minutes: 285,
+      derivedFrom: { who: 'Placeholder One', minutes: 285 },
+    })
+    setup({ onProposeCapacity })
+    await clickAndSettle(
+      screen.getByRole('button', { name: /set this week for placeholder one/i }),
+    )
+    fireEvent.change(screen.getByLabelText(/describe this week for placeholder one/i), {
+      target: { value: 'Placeholder One has four and three-quarter hours' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the minutes/i }))
+    expect(screen.getByTestId('capture-proposal')).toHaveTextContent(
+      /read as “placeholder one: 285 min” from what you wrote/i,
+    )
   })
 })

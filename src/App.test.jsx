@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -61,6 +61,14 @@ const choresApi = {
 // their own tests, and a stub of them could disagree with the single
 // implementation capacity.test.js asserts exists. Same reasoning the household
 // mock gives for leaving findClaimedMember alone.
+// #210 — only the IMPURE capture function is stubbed. `proposeCapacity` and
+// the outcome vocabulary stay real (importActual below) for the standing
+// reason: pure, own tests, and a stub could disagree with the classification
+// the roster renders from.
+const captureApi = {
+  extractCapacity: vi.fn(),
+}
+
 const capacityApi = {
   listCapacity: vi.fn(),
   setCapacity: vi.fn(),
@@ -141,6 +149,11 @@ vi.mock('./lib/capacity.js', async () => {
   return { ...actual, ...capacityApi }
 })
 
+vi.mock('./lib/capture.js', async () => {
+  const actual = await vi.importActual('./lib/capture.js')
+  return { ...actual, ...captureApi }
+})
+
 vi.mock('./lib/exclusions.js', async () => {
   const actual = await vi.importActual('./lib/exclusions.js')
   return { ...actual, ...exclusionsApi }
@@ -204,6 +217,7 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
+  Object.values(captureApi).forEach((fn) => fn.mockReset())
   Object.values(exclusionsApi).forEach((fn) => fn.mockReset())
   Object.values(calendarApi).forEach((fn) => fn.mockReset())
   calendarApi.listCalendarConnections.mockResolvedValue([])
@@ -2772,5 +2786,170 @@ describe('calendar-suggested busy minutes (#96)', () => {
     await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
     expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
     expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument()
+  })
+})
+
+/
+// #210 — the capture flow, wired. What App owes is three things the roster
+// cannot prove on its own: that a description reaches lib/capture.js with the
+// household ON SCREEN and this member (and NOT the Supabase client); that it
+// is not a mutation — nothing re-reads and nothing is written until a submit;
+// and that the one submit carries the source through the same setCapacity a
+// typed figure uses, once, followed by the same re-assignment and re-read.
+describe('capacity — described in plain language (#210)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const PROPOSAL = { outcome: 'proposal', minutes: 180, derivedFrom: { who: 'me', minutes: 180 } }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    captureApi.extractCapacity.mockResolvedValue(PROPOSAL)
+  })
+
+  const openTheWeekEditor = async () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set this week for placeholder one/i })),
+    )
+
+  const describeWeek = async (text) => {
+    fireEvent.change(screen.getByLabelText(/describe this week for placeholder one/i), {
+      target: { value: text },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /work out the minutes/i })))
+  }
+
+  const saveProposed = () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /save the proposed figure for placeholder one/i })),
+    )
+
+  const save = () => act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+  const onTheRoster = async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+  }
+
+  it('asks through lib/capture.js with the household on screen and this member, and writes nothing', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+
+    expect(captureApi.extractCapacity).toHaveBeenCalledTimes(1)
+    expect(captureApi.extractCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        householdId: 'h1',
+        text: 'I have three hours this week',
+        member: expect.objectContaining({ id: 'm1' }),
+        members: [expect.objectContaining({ id: 'm1' })],
+      }),
+    )
+    expect(screen.getByTestId('proposal-m1')).toHaveTextContent('180 min')
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(180)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // Not a mutation: a proposal is not a change, so nothing re-reads after it.
+    expect(capacityApi.listCapacity.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('AC 9: one tap on the proposal writes capacity ONCE, with source extraction, then re-assigns and re-reads', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    const readPeriod = capacityApi.listCapacity.mock.calls[0][0]
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+
+    await saveProposed()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: readPeriod,
+      minutes: '180',
+      source: 'extraction',
+      householdId: 'h1',
+    })
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('a typed figure still goes through the same call, with source manual', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '120' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 'm1', minutes: '120', source: 'manual' }),
+    )
+  })
+
+  it('AC 3: leaving for another surface after a proposal writes nothing', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Split' })))
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a reload starts clean — nothing was kept on the device to apply later', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    // Nothing persisted: a proposal lives in component state and nowhere else.
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+
+    cleanup()
+    await onTheRoster()
+    await openTheWeekEditor()
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(300)
+    expect(screen.queryByTestId('capture-proposal')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: when the service cannot answer, the same flow saves a typed figure as manual', async () => {
+    captureApi.extractCapacity.mockResolvedValue({
+      outcome: 'failed',
+      sentence: 'The extraction service could not answer: Failed to send a request to the Edge Function',
+    })
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('capture-failure')).toHaveTextContent(/could not answer/)
+    expect(screen.queryByRole('alert'), 'a failed proposal is not an app error').not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '90' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ minutes: '90', source: 'manual' }),
+    )
+  })
+
+  it('the proposer never touches the Supabase client from App — it goes through lib/capture.js', async () => {
+    // getSupabase throws in this file's mock, so the flow completing to a
+    // proposal on screen is the assertion.
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('proposal-m1')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

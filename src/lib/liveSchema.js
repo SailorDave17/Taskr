@@ -403,6 +403,13 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // is separate from `LIVE_RPCS` — arriving with no migration that mentions it,
   // so `0030` reaching the project says nothing about whether this is there.
   'calendar-busy',
+  // #210. Invoked by the capacity capture flow (src/lib/capture.js) AHEAD of
+  // the function existing — owner decision at pickup, 2026-09-04 — so this
+  // reads NOT DEPLOYED until #208 writes it and #209 deploys it. That red is
+  // the honest state, and it is written down in docs/access-model.md's
+  // excused-red set. `scripts/deploy-function.mjs` lists it as PENDING so a
+  // bare deploy does not try to ship a directory that is not there.
+  'extract-description',
 ])
 
 /**

@@ -535,6 +535,85 @@ body {
   min-height: 44px;
 }
 
+/* #210 — the shared capture shell, inside the week form (and, with #213, the
+   chore form). A column, never a row: on a 360px phone the description box,
+   the proposal, the source line and the typed field stack and cost height
+   only, which is what AC 11 asks for — everything reachable by vertical scroll
+   with nothing setting the page width. `min-width: 0` on the column and
+   `box-sizing: border-box` on the textarea are the two rules that make
+   `width: 100%` mean the parent's width rather than the parent's width plus
+   padding; without the second, a full-width textarea overflows by its own
+   padding on every browser. */
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.capture__text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 5.5rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+/* A question, a pending line or a failure: the same quiet register as
+   `.member__busy-complaint`. Not styled as an error — nothing is broken, the
+   typed field is right there, and the sentence says so. */
+.capture__outcome {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.capture__proposal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+}
+
+.capture__figure {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.capture__derived {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.capture__failure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.capture__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+/* Where the figure in the field came from — AC 9. Under the field and above
+   Save, because it is a sentence about the number the member is about to
+   confirm, and reads in the same quiet register as the readouts above it. */
+.member__week-source {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
 .error {
   margin: 0;
   padding: 0.75rem 1rem;

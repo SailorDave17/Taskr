@@ -7,7 +7,8 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0030` are ALL applied to the live project, and the expected-red set holds ONE
+- Status: **`0001`–`0031` are ALL applied to the live project (`0031` on 2026-09-05 in #97's own
+  session, before the merge — see its entry below), and the expected-red set holds ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
   it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
   the name was listed and 36 of 37 immediately after*, in #210's own session (see the #210 bullet
@@ -24,6 +25,26 @@
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0031` on 2026-09-05 (#97, a confirmed calendar suggestion is a capacity source)**, applied
+  with `npm run migrate:live` in the story's own session, before the merge and the `release`
+  promotion — `0020`'s safe order — at md5 `76868d316606f673c8c116cdd91f8cf5` (4415 characters,
+  3 statements), read back identical. One constraint dropped and re-added to admit a third
+  `member_capacity.source` value (`calendar`, beside `manual` and `extraction`), and one
+  `comment on column`. **It issues no privilege statement** and touches no column, policy or
+  function: `source` is already in every column list `0005` grants, and the client has written it
+  since #210. So `check:live` is structurally blind to it in BOTH directions, `0029`'s shape
+  without the function bodies — *measured at **36 of 37** immediately before AND immediately
+  after the apply, the one red the `extract-description` row this bullet already carries* — and
+  `npm run probe:live-grants` has no row for it and needs none. What testifies is the read-only
+  catalog query `0029` used, over the Management API, taken on both sides in the same session:
+  **before**, `member_capacity_source_known` admitted `'manual'` and `'extraction'` only and the
+  column carried no comment; **after**, the constraint admits `'calendar'` too and the comment
+  names #97 — with `authenticated`'s INSERT and UPDATE on `source` reading `true` on both sides,
+  which is the no-privilege-statement claim measured rather than believed. A phone on a
+  pre-`0031` project that tapped *Use this* and saved would have been refused by the constraint,
+  loudly and by name, with the typed path untouched; that window did not open, because the apply
+  landed before the merge.
+
   **`0029` on 2026-09-02 (#307, completing an unassigned chore assigns it to the completer)**,
   applied with `npm run migrate:live` in the story's own session, before the merge and the `release`
   promotion — `0020`'s safe order — at md5 `4215ca88a9d3e70b3656b4beb6874454` (12456 characters,
@@ -318,6 +339,16 @@
     in `calendar.pglite.test.js` until #334 corrected both against measurements of their own
     (2026-09-05: `0011`'s revokes redden 3 of 23, its `service_role` grants 1 in
     `grants.pglite.test.js`).
+  - **`0031`** (#97) — `member_capacity_source_known` admits `calendar`, so a figure a member
+    took from their calendar's suggestion and confirmed unedited is stored with that word; an
+    edited one is `manual` (the mirror of #210's rule for `extraction`, and the issue's own). No
+    grant, no policy, no function — the row was already writable with a `source` since `0005`, and
+    the only thing a pre-`0031` project does differently is refuse the third word by name. The
+    pglite suite proves both directions (`calendarCapacity.pglite.test.js`: a database built
+    through `0030` refuses a calendar row naming the constraint, one built through `0031` accepts
+    it), which is what a widening test has to do — the accepted arm alone would be green against a
+    constraint that never bit. Applied 2026-09-05 in #97's own session; the readings are in the
+    Status bullet above, the one place this page records live state.
   - **`0011` also needed a DEPLOY, not only a paste**, and it was the only migration on this page
     that did until `0030`: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
     there. Two actions, two expected reds — and, as this page said it would, **the paste cleared

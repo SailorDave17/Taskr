@@ -337,7 +337,7 @@ describe('the derived busy figure, run against a real Postgres', () => {
       'refuses a client %s — the function owns the write',
       async (verb) => {
           // A client that could write here could claim any busy figure it liked
-        // for anybody in the household, and #97 will offer that figure as a
+        // for anybody in the household, and #97 offers that figure as a
         // capacity prefill. The credential it is derived from is one no client
         // can reach, so a client-written row would be a number nothing could be
         // checked against.

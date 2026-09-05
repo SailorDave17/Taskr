@@ -117,6 +117,7 @@ export const MIGRATIONS = [
   '0028_a_superseded_occurrence_is_missed.sql',
   '0029_completion_assigns_the_completer.sql',
   '0030_calendar_busy_minutes.sql',
+  '0031_calendar_capacity_source.sql',
 ]
 
 export function migrationSql(name) {

@@ -50,6 +50,46 @@ export const CAPACITY_COLUMNS =
 export const MIN_CAPACITY_MINUTES = 0
 export const MAX_CAPACITY_MINUTES = 10080
 
+/**
+ * Every word `member_capacity.source` may hold — the set
+ * `member_capacity_source_known` enforces since `0031`, in the order they
+ * arrived: typed (#46), proposed from a description (#210), confirmed from a
+ * calendar (#97). A test reads the constraint out of the migration and holds
+ * this list equal to it, so a fourth proposer has to arrive in both places.
+ */
+export const CAPACITY_SOURCES = Object.freeze(['manual', 'extraction', 'calendar'])
+
+/**
+ * What a member's calendar suggests their capacity is — #97's prefill.
+ *
+ * `max(0, baseline − busy_minutes)`: the week they usually have, less what the
+ * calendar says is already spoken for, floored at zero. Owner decision at the
+ * groom gate, 2026-08-16, taken knowing it is crude for a member whose nine-to-
+ * five is already priced into their baseline — it is a PREFILL the member sees
+ * and can overtype, so a wrong formula costs an edit, not trust. The working-
+ * window variant was rejected as needing a per-member setting nobody had asked
+ * for.
+ *
+ * `null` when there is nothing to suggest — no derived row for the week, or a
+ * figure that is not a number — so the control that offers it can offer
+ * nothing rather than offer zero. A confident zero is the harmful version:
+ * "no time this week" is a perfectly plausible answer nobody would question.
+ *
+ * Reads `weekly_minutes` here, in the one module allowed to (capacity.test.js's
+ * reader allowlist): the roster hands this a member row and a busy row and gets
+ * a number back, and never does the subtraction itself.
+ */
+export function calendarSuggestion(member, busyWeek) {
+  // `== null` BEFORE `Number()`: `Number(null)` is 0, so without this line a
+  // row with no figure would suggest the whole baseline as though the
+  // calendar had answered "empty week". Caught by the test for exactly that.
+  if (!busyWeek || busyWeek.busy_minutes == null) return null
+  const busy = Number(busyWeek.busy_minutes)
+  if (!Number.isFinite(busy)) return null
+  const baseline = Number(member?.weekly_minutes ?? 0)
+  return Math.max(MIN_CAPACITY_MINUTES, baseline - busy)
+}
+
 function unwrap({ data, error }, whatWeWereDoing) {
   if (error) {
     const err = new Error(`${whatWeWereDoing}: ${error.message}`)

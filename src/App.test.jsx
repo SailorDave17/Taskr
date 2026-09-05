@@ -3238,3 +3238,109 @@ describe('capacity — described in plain language (#210)', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
+
+describe('applying the calendar suggestion to the week (#97)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  // 120 usual, 45 busy: a prefill of 75. Read NOW for #98's reason — a fixed
+  // timestamp ages across the refresh bound and turns a row that EXISTS into
+  // a fetch on a diff that touched nothing.
+  const busyRow = () => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 45,
+    event_count: 3,
+    computed_at: new Date().toISOString(),
+  })
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    calendarApi.listBusyWeeks.mockResolvedValue([busyRow()])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+  const onTheRoster = async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+  }
+  const useIt = () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /use the calendar’s figure for placeholder one/i })),
+    )
+  const save = () => act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+  it('AC 1 / AC 2: the tap prefills 75 and writes nothing; Save writes ONCE with source calendar, re-assigns and re-reads', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await useIt()
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(75)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // A prefill is not a change: nothing re-reads after it.
+    expect(capacityApi.listCapacity.mock.calls.length).toBe(readsBefore)
+
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: week(),
+      minutes: '75',
+      source: 'calendar',
+      householdId: 'h1',
+    })
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 2: a figure edited before Save goes through the same call as manual', async () => {
+    await onTheRoster()
+    await useIt()
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '60' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 'm1', minutes: '60', source: 'manual' }),
+    )
+  })
+
+  it('AC 6: after the re-read the roster shows the week as set from the calendar', async () => {
+    await onTheRoster()
+    await useIt()
+    // What the server will hand back once the write lands — the re-read after
+    // `mutate()` is what puts the provenance on screen, not the tap.
+    capacityApi.listCapacity.mockResolvedValue([
+      { id: 'o1', member_id: 'm1', period_start: week(), minutes: 75, note: null, source: 'calendar' },
+    ])
+    await save()
+    await waitFor(() => expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 75 min'))
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent(/set from calendar/i)
+  })
+
+  it('the tap touches no calendar read — the figure is already on the device', async () => {
+    // Taking the suggestion is arithmetic on a row already read. It must not
+    // spend a Google call: #96 fetches when there is no row and #98 when the
+    // row is stale, and this is neither.
+    await onTheRoster()
+    const fetches = calendarApi.fetchBusyWeek.mock.calls.length
+    await useIt()
+    await save()
+    expect(calendarApi.fetchBusyWeek.mock.calls.length).toBe(fetches)
+  })
+})

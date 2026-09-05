@@ -500,15 +500,20 @@ body {
    Under the week's minutes, in the same quiet register as `.member__access` and
    `.member__calendar` above: it is a SUGGESTION beside a number the person
    owns, and drawing it as loudly as the figure it informs would invert that.
-   #97 turns it into a control; today it is text.
+   #97 put one control on it — "Use this" — so it is a wrapping row now, in
+   `.member__week`'s shape: the figure and its quiet button share a line where
+   they fit and stack where they do not.
 
-   `display: block` and its own margin for `.member__calendar`'s reason — at
-   360px a name, a baseline, the week's figure and a Change button already fill
-   the row, and this drops beneath them rather than competing for the line. The
-   figure is tabular like `.member__week-figure` so the two numbers stack in
-   alignment down the roster. */
+   Its own margin for `.member__calendar`'s reason — at 360px a name, a
+   baseline, the week's figure and a Change button already fill the row, and
+   this drops beneath them rather than competing for the line. The figure is
+   tabular like `.member__week-figure` so the two numbers stack in alignment
+   down the roster. */
 .member__busy {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
   margin-top: 0.25rem;
   font-size: 0.85rem;
   color: var(--ink-dim);
@@ -531,6 +536,9 @@ body {
    above is still true of the last time the calendar could be read. */
 .member__busy-complaint {
   display: block;
+  /* The whole row of the flex parent, so the sentence still sits UNDER the
+     figure (and its button) now that the parent wraps instead of stacking. */
+  flex-basis: 100%;
   margin-top: 0.125rem;
   opacity: 0.75;
 }

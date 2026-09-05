@@ -823,8 +823,10 @@ export default function App() {
   //
   // #210 — `source` is the one thing a proposed figure adds to this call.
   // 'manual' when typed, 'extraction' when the member took a description's
-  // proposal (edited or not), 'calendar' when #97 lands — and the SAME
-  // `setCapacity`, the same re-assignment, the same re-read for all of them.
+  // proposal (edited or not), 'calendar' when they took the calendar's figure
+  // UNEDITED (#97 — an edited one is manual; the roster decides which, this
+  // passes it on) — and the SAME `setCapacity`, the same re-assignment, the
+  // same re-read for all of them.
   // That is AC 9's one write path, and the reason the roster is handed one
   // handler rather than one per proposer.
   const handleSetCapacity = useCallback(

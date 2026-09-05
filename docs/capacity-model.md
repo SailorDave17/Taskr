@@ -2,7 +2,8 @@
 
 - Story: #44 — store capacity for a week, not just a standing baseline
 - Decided by: owner (SailorDave17), at pickup of #44, 2026-08-08
-- Migration: `supabase/migrations/0005_weekly_capacity.sql`
+- Migration: `supabase/migrations/0005_weekly_capacity.sql`; `0031_calendar_capacity_source.sql`
+  widens `source` (#97)
 - Module: [`src/lib/capacity.js`](../src/lib/capacity.js)
 
 ## Baseline and override, not a replacement
@@ -92,6 +93,31 @@ correct `claim_member` guard was bypassed by a direct `UPDATE`.
 A composite foreign key ties `(member_id, household_id)` to the members table, so an override cannot
 name a member of one household while claiming another — such a row would be visible to the wrong
 family while pointing at a member they cannot see.
+
+## Where a figure came from — `source`
+
+Every override row says how it was entered, so a later accuracy question is answerable from the
+data rather than from memory (#57 AC 5). `member_capacity_source_known` admits exactly three words,
+and `CAPACITY_SOURCES` in `capacity.js` is held equal to the constraint by a test:
+
+| `source` | What it means | Since |
+|---|---|---|
+| `manual` | A person typed the number. | #46 (0005) |
+| `extraction` | A person described their week in a sentence and accepted the figure proposed from it, edited or not — a corrected interpretation is still derived from the description (#210 AC 6). | #210 |
+| `calendar` | A person tapped *Use this* on the calendar's suggestion and saved it **unedited**. The suggestion is `max(0, baseline − busy_minutes)` (owner decision, 2026-08-16); a figure they changed first is no longer the calendar's and saves as `manual` (#97 AC 2). | #97 (0031) |
+
+Two rules that hold whatever the word:
+
+- **A proposal is a prefill, never a write.** Both proposers land a figure in the same field the
+  typed path uses, name where it came from beside it, and the one Save is where the person agrees
+  — a figure nobody saw is a figure nobody can defend when the split is challenged.
+- **The latest write wins, by the `(member_id, period_start)` upsert.** A typed figure replaces a
+  calendar one and a calendar one replaces a typed one; nothing is sticky. That is the charter's
+  manual floor made load-bearing: a person can always overtype what a machine suggested.
+
+`effectiveCapacity` never reads `source`. What put the row there is provenance for the roster to
+show (a calendar-sourced week reads *set from calendar*); whether the row applies is decided by its
+presence alone, as above.
 
 ### One thing 0005 deliberately did **not** narrow
 

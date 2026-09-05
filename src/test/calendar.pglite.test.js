@@ -13,31 +13,63 @@
 // design until it was; that check, not this file, is the authority on live state.
 //
 // ===========================================================================
-// #95 AC 2 SAYS THE HARNESS CANNOT PROVE GRANTS. IT CAN PROVE THE HALF THAT
-// MATTERS, AND THAT HALF IS UNUSUALLY STRONG HERE
+// WHICH OF THESE ASSERTIONS TESTIFY ABOUT `0011` — CORRECTED UNDER #334
 // ===========================================================================
 //
-// The criterion reads "the pglite harness structurally cannot prove grants, so
-// the live grant proof lives in the verification story". That is right about one
-// direction and wrong about the other, and the difference is worth stating
-// because the wrong half is the one this story turns on.
+// #95 AC 2 reads "the pglite harness structurally cannot prove grants, so the
+// live grant proof lives in the verification story". This header used to
+// answer that the harness OVERSTATES the platform — `alter default privileges
+// ... grant all` — so that every client refusal below could only pass because
+// `0011`'s revokes were there, and that proving `service_role` HAS its grants
+// was vacuous. Both halves expired with #91, which narrowed the stub to the
+// platform's real default: `truncate, references, trigger, maintain` and NO
+// DML (support/pgliteSupabase.js; grants.pglite.test.js's positive control
+// asserts exactly that set). An expired sentence rather than a wrong one — it
+// was true of the harness it was written against — but this file had no way
+// to notice, and a reader used it to decide what a green run meant.
 //
-// - Proving `service_role` HAS its grants is vacuous here. The stub's
-//   `alter default privileges ... grant all` hands every role everything on
-//   every new table, so the assertion passes with the grant deleted. That half
-//   genuinely does belong to a live check, and the source-level assertion below
-//   is the most this file can honestly say about it.
+// What each assertion below is worth, MEASURED rather than reasoned:
 //
-// - Proving `authenticated` and `anon` have NOTHING is the opposite: the stub's
-//   default is PERMISSIVE, so a table with no explicit `revoke` arrives with
-//   `all` granted to both. Every refusal asserted below therefore fails unless
-//   `0011`'s revokes are actually there. The harness overstating the platform,
-//   which is a weakness everywhere else, is what makes this file's central claim
-//   load-bearing.
+// - *2026-09-05, #334*: deleting both `revoke` lines from `0011` reddens
+//   **3 of 23** tests here — the two `holds NO privilege of any kind` cases
+//   (the default leaves `Dxtm` on the table, which is not `[]`) and `revokes
+//   before it grants`. Those three are what the revokes are load-bearing for.
+//   First measured 2026-09-04 during #96, same count, which is how this issue
+//   was found.
+// - Everything else — the member's refused read, `select *` failing, the
+//   column-grant comparison, the cross-household reads — is proven by the
+//   PLATFORM DEFAULT the harness models. Still worth asserting, since it is
+//   what a client must never be able to do and a later grant would redden it;
+//   but it does not testify about `0011`.
+// - Proving `service_role` HAS its grants is the half that got BETTER. With
+//   the default at `Dxtm`, an explicit grant is the only thing that can put
+//   DML on a table, so the assertion is real rather than vacuous — and it is
+//   made through the CATALOG, in grants.pglite.test.js's `and service_role
+//   reaches only what the Edge Functions need`. *Measured 2026-09-05, #334*:
+//   deleting `0011`'s two `service_role` grants reddens exactly that test —
+//   predicted 1, actual 1 — plus the two source-level tests at the bottom of
+//   this file, predicted 2, actual 2.
 //
-// So the token table's isolation is proven here, on every push, rather than
-// deferred. That is the claim #95 AC 2 is actually about — no grant to
-// `authenticated` or `anon` — and it is the one whose failure would be silent.
+//   Catalog rather than behaviour, and not laziness: `service_role` is created
+//   `nologin` here with no BYPASSRLS, so an insert under `set role
+//   service_role` would be refused by row-level security — true of the harness,
+//   false of production, and nothing to do with the grant.
+//
+// The source-level `service_role` block at the bottom is left as it was. A
+// scan of the migration text can say nothing about the LIVE project whatever
+// the harness default is — that is `npm run probe:live-grants` and #100 — and
+// its ordering test is what guards a re-paste. The catalog test above is the
+// local proof; that block is not, and does not claim to be.
+//
+// calendarBusy.pglite.test.js carries the same correction for `0030`, against
+// its own measurement (#96). Neither is a copy of the other — each cites a
+// mutation of its own migration — and the rule that decides which direction a
+// stub can prove is written once, in grants.pglite.test.js's header.
+//
+// So the token table's isolation is still proven here, on every push — by the
+// default the harness models, with the revokes as the house convention on
+// top — and that is the claim #95 AC 2 is actually about: no grant to
+// `authenticated` or `anon`, the failure that would be silent.
 //
 // Names are synthetic — see #19.
 
@@ -168,9 +200,10 @@ describe('connecting a calendar, run against a real Postgres', () => {
 
   describe('AC 2 — no client can read the refresh token', () => {
     it.each(['authenticated', 'anon'])('%s holds NO privilege of any kind on it', async (role) => {
-      // The load-bearing assertion of this file. The stub grants `all` on every
-      // new table to every role, so an empty result here is only possible
-      // because `0011` revokes — delete that line and this goes red.
+      // One of the three assertions the revokes are load-bearing for (header,
+      // #334). The stub's default leaves `Dxtm` on a new table, which is not
+      // `[]`, so an empty result here is only possible because `0011` revokes —
+      // delete that line and this goes red, measured 2026-09-05.
       expect(await grantsFor(role, 'calendar_tokens')).toEqual([])
       expect(await readableColumns(role, 'calendar_tokens')).toEqual([])
     })
@@ -432,17 +465,19 @@ describe('connecting a calendar, run against a real Postgres', () => {
 
     it('names both tables in an explicit grant to service_role', async () => {
       // A SOURCE assertion, and weaker than everything above — stated plainly
-      // rather than dressed up. Postgres cannot testify to it in this harness:
-      // the stub grants `all` to every role by default, so `service_role` has
-      // these privileges whether or not the migration says so, and the runtime
-      // check would pass with both lines deleted.
+      // rather than dressed up. It used to say Postgres could not testify to
+      // this in the harness because the stub granted `all` by default; since
+      // #91 it can and does, in grants.pglite.test.js's catalog read (header,
+      // #334). This scan stays because it asks a different question: that the
+      // grant is WRITTEN, in the file a human pastes, which no catalog built
+      // from that file can distinguish from the grant arriving some other way.
       //
-      // It still earns its place, because the platform disagrees with the stub
-      // in the direction that breaks the app. On a current Supabase project a
-      // new table gives every Data API role `Dxtm` and nothing else — no select,
-      // no insert — so an Edge Function holding the service_role key is refused
-      // 42501 on its own table. `service_role` bypasses row-level security; it
-      // does NOT bypass grants.
+      // It still earns its place, because the platform is the thing that breaks
+      // the app. On a current Supabase project a new table gives every Data API
+      // role `Dxtm` and nothing else — no select, no insert — so an Edge
+      // Function holding the service_role key is refused 42501 on its own
+      // table. `service_role` bypasses row-level security; it does NOT bypass
+      // grants.
       for (const table of ['calendar_connections', 'calendar_tokens']) {
         expect(sql).toMatch(new RegExp(`grant[^;]*on public\\.${table}[^;]*to service_role`))
       }

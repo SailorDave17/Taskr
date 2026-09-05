@@ -314,8 +314,10 @@
     default is `Dxtm` with no DML, so deleting `0030`'s `service_role` grant reddens
     `grants.pglite.test.js` — predicted 1, actual 1. What no local suite can say is whether the
     **live** project has had the migration applied at all, because the harness builds the schema
-    it certifies; that is what #100 owns. The superseded sentence still stands in `0011`'s comment
-    and in `calendar.pglite.test.js`, tracked by #334.
+    it certifies; that is what #100 owns. The superseded sentence stood in `0011`'s comment and
+    in `calendar.pglite.test.js` until #334 corrected both against measurements of their own
+    (2026-09-05: `0011`'s revokes redden 3 of 23, its `service_role` grants 1 in
+    `grants.pglite.test.js`).
   - **`0011` also needed a DEPLOY, not only a paste**, and it was the only migration on this page
     that did until `0030`: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
     there. Two actions, two expected reds — and, as this page said it would, **the paste cleared

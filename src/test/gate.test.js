@@ -1929,3 +1929,176 @@ describe('#243 — the CI triggers match the branch model', () => {
     expect([...push, ...pullRequest].filter((entry) => entry.startsWith('rebuild'))).toEqual([])
   })
 })
+
+// #98 AC 5 — "no cron, pg_cron, or scheduled trigger exists anywhere: client-
+// triggered only". The criterion is written against a diff; this is written
+// against the TREE, so every later diff is held to the same decision. The
+// decision itself is #53's, recorded in docs/hosting-decision.md: pg_cron IS on
+// the free plan and stops silently when a project pauses after a week idle,
+// which is the failure that produces no error — so every periodic read this
+// app does is triggered by somebody opening it, and bounded by a constant
+// (`BUSY_STALE_AFTER_HOURS`) rather than a schedule.
+//
+// "Scheduled trigger" here means a SCHEDULER: pg_cron and its `cron.` schema,
+// a `crons` block for Vercel, an Actions `schedule:` trigger. The migrations'
+// row-level `create trigger` statements are not schedules and are not scanned.
+//
+// Comments are stripped before the scan, and that is what lets a migration or
+// a docblock EXPLAIN the decision without being refused by it — `0012`'s header
+// and calendar.js's constant both name pg_cron as the thing they are not. The
+// stripping can only remove text, so the worst it can do is miss a scheduler
+// hidden inside a comment, where it would not be executed either.
+describe('#98 AC 5 — nothing in the tree schedules work; every periodic read is client-triggered', () => {
+  const ROOTS = ['src', 'supabase', 'scripts', '.github/workflows']
+  const FILES = ['package.json', 'vite.config.js', 'vercel.json']
+  const SCANNED = /\.(js|jsx|mjs|cjs|ts|tsx|sql|json|toml|ya?ml)$/
+
+  // Each scheduler shape with the text that proves it fires, and the files it
+  // applies to. `schedule:` and `cron:` are YAML-only on purpose: "schedule"
+  // is a domain word in this app (a repeat has one), and an Actions trigger is
+  // the only place those two spellings mean a scheduler.
+  const SCHEDULERS = [
+    { pattern: /pg_cron/i, sample: 'create extension if not exists pg_cron;', files: SCANNED, ext: 'sql' },
+    {
+      pattern: /\bcron\.(schedule|job|unschedule)\b/i,
+      sample: "select cron.schedule('busy', '0 */12 * * *', $$select 1$$);",
+      files: SCANNED,
+      ext: 'sql',
+    },
+    {
+      pattern: /create\s+extension[^;]*\bcron\b/i,
+      sample: 'create extension cron with schema extensions;',
+      files: /\.sql$/,
+      ext: 'sql',
+    },
+    {
+      pattern: /"crons"\s*:/,
+      sample: '{ "crons": [{ "path": "/api/busy", "schedule": "0 */12 * * *" }] }',
+      files: /\.json$/,
+      ext: 'json',
+    },
+    {
+      pattern: /^\s*schedule:\s*$/m,
+      sample: 'on:\n  schedule:\n    - cron: "0 */12 * * *"\n',
+      files: /\.ya?ml$/,
+      ext: 'yml',
+    },
+    { pattern: /^\s*-?\s*cron:\s/m, sample: '    - cron: "0 */12 * * *"', files: /\.ya?ml$/, ext: 'yml' },
+  ]
+
+  // This file names every pattern above, in prose and in the samples, and a
+  // guard whose subject is source text cannot tell the hazard from the text
+  // that detects it (cairn: a-guard-that-reads-source-must-survive-its-own-docs).
+  const SELF = 'src/test/gate.test.js'
+
+  function stripComments(path, text) {
+    if (/\.sql$/.test(path)) return text.replace(/--[^\n]*/g, '')
+    if (/\.(toml|ya?ml)$/.test(path)) return text.replace(/#[^\n]*/g, '')
+    if (/\.(js|jsx|mjs|cjs|ts|tsx)$/.test(path)) {
+      return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    }
+    return text
+  }
+
+  function filesUnder(dir) {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    return entries.flatMap((entry) => {
+      if (entry.name === 'node_modules' || entry.name === '.temp') return []
+      const full = resolve(dir, entry.name)
+      return entry.isDirectory() ? filesUnder(full) : [full]
+    })
+  }
+
+  function repoPath(file) {
+    return file.slice(process.cwd().length + 1).split('\\').join('/')
+  }
+
+  function corpus() {
+    const files = [
+      ...ROOTS.flatMap((root) => filesUnder(resolve(process.cwd(), root))),
+      ...FILES.map((file) => resolve(process.cwd(), file)),
+    ]
+    const entries = []
+    for (const file of files) {
+      const path = repoPath(file)
+      if (!SCANNED.test(path) || path === SELF) continue
+      let text
+      try {
+        text = readFileSync(file, 'utf8')
+      } catch {
+        continue
+      }
+      entries.push({ path, text })
+    }
+    return entries
+  }
+
+  // Shared by the clean-tree assertion and every control below, so the
+  // controls exercise the scan that guards and not a copy of it.
+  function schedulerOffenders(entries) {
+    const offenders = []
+    for (const { path, text } of entries) {
+      const code = stripComments(path, text)
+      for (const { pattern, files } of SCHEDULERS) {
+        if (files.test(path) && pattern.test(code)) offenders.push(`${path}: ${pattern}`)
+      }
+    }
+    return offenders
+  }
+
+  it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
+    const paths = corpus().map((entry) => entry.path)
+    expect(paths.length).toBeGreaterThan(50)
+    // One of each root, and the workflow, so a renamed directory cannot hollow
+    // the scan out silently.
+    expect(paths.some((p) => p.startsWith('src/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('supabase/migrations/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('supabase/functions/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('scripts/'))).toBe(true)
+    expect(paths).toContain('.github/workflows/ci.yml')
+    expect(paths).toContain('package.json')
+  })
+
+  it('POSITIVE CONTROL: every scheduler shape is refused when planted', () => {
+    // "Among the offenders", not "the only one": a realistic Actions sample
+    // carries both `schedule:` and `- cron:`, and refusing it twice is right.
+    for (const { pattern, sample, ext } of SCHEDULERS) {
+      const planted = [{ path: `planted/probe.${ext}`, text: `\n${sample}\n` }]
+      expect(schedulerOffenders(planted), `pattern ${pattern} never fires`).toContain(
+        `planted/probe.${ext}: ${pattern}`,
+      )
+    }
+  })
+
+  it('POSITIVE CONTROL: a comment may name the scheduler the code does not use', () => {
+    // 0012 says "not pg_cron" in its header, and the constant's docblock says
+    // it again. Neither is a scheduler; both must survive. The same text with
+    // the comment marker removed is refused, so the stripping is what decides.
+    const explained = [
+      { path: 'supabase/migrations/probe.sql', text: '-- pg_cron stops silently when paused\nselect 1;\n' },
+      { path: 'src/lib/probe.js', text: '/** not pg_cron — see #53 */\nexport const x = 1\n' },
+      { path: 'src/lib/probe2.js', text: '// cron.schedule is what we do NOT do\nexport const y = 1\n' },
+    ]
+    expect(schedulerOffenders(explained)).toEqual([])
+    const executed = [{ path: 'supabase/migrations/probe.sql', text: 'select pg_cron;\n' }]
+    expect(schedulerOffenders(executed)).toHaveLength(1)
+  })
+
+  it('the tree carries no scheduler — the calendar read is client-triggered and nothing else is scheduled', () => {
+    expect(schedulerOffenders(corpus())).toEqual([])
+  })
+
+  it('the refresh trigger is reachable from the app, not just exported', () => {
+    // The mirror of the reachability blocks above: `isBusyWeekStale` deciding
+    // in App.jsx is what makes "client-triggered" a fact about the running app
+    // rather than about a library nobody calls.
+    const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+    expect(app).toMatch(/isBusyWeekStale\(/)
+    expect(app).toMatch(/import \{[^}]*\bisBusyWeekStale\b[^}]*\} from '\.\/lib\/calendar\.js'/)
+  })
+})

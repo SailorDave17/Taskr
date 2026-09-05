@@ -881,6 +881,41 @@ confirmation story under #257).
   keeps their PIN. Linking a Google identity to an already-signed-in password account is a different
   surface with a known library hazard and is not here.
 
+## Decision taken 2026-09-05 — the busy figure's staleness bound is TWELVE hours
+
+Taken at the pickup of #98, which required the bound to be "a named constant, default 12 hours".
+This is that record, in the same shape as the catch-up bound's above.
+
+- **`BUSY_STALE_AFTER_HOURS = 12`.** When the app opens and the signed-in member's derived busy row
+  for this week is older than twelve hours, the client asks the `calendar-busy` Edge Function to
+  read the week again; a row younger than that is drawn as it is. The authority is the constant of
+  that name in `src/lib/calendar.js`; `isBusyWeekStale` beside it is the only comparison, strictly
+  older-than, with an unparsable timestamp read as stale rather than as current.
+- **Why twelve**: a member's free/busy is read on their behalf at most twice a day — a morning open
+  and an evening open each see what today has become, and a phone opened six times between them
+  spends nothing. Rejected: **one hour** (a Google read, and the function's two round trips, on
+  nearly every open — the cost #96 declined to pay even once at boot) and **twenty-four hours** (a
+  figure read Monday morning still says Monday morning on Tuesday morning, a whole day stale on
+  the day the week's capacity is being set). Wall-clock age, not calendar day: a figure read at
+  23:00 is not stale at 00:01.
+- **On app open, not on the capacity screen — and the two triggers stay disjoint.** #96 fires when
+  there is NO row and keys on the roster being on screen, because it declined to spend a
+  credential at boot for a figure nobody had asked to see. #98 fires when a row exists and is
+  stale, and keys on the app being open, because the member already has the figure, the week it
+  describes is the week the split reacts to, and #98's own third criterion — a refresh landing
+  while the capacity screen is open updates it in place — only means something if the refresh was
+  started somewhere else. Each trigger asks once a session per (member, week), under its own key.
+- **A failed refresh keeps the figure, its date, and says why.** The Edge Function's own sentence
+  is drawn beside the stale figure through the surface #96 AC 5 built — a polite status, not the
+  app's error strip, and the manual capacity path untouched underneath. Found in band: `refresh()`
+  had cleared that sentence whenever a row for the member existed, which was the same test as "a
+  read has arrived" while the only fetch was the no-row one; it now clears on a row younger than
+  the bound, so re-reading the same stale row leaves the sentence standing.
+- **Client-triggered only, held by a test.** #53 settled that the free plan's pg_cron stops silently
+  when a project pauses; `gate.test.js` now scans `src/`, `supabase/`, `scripts/`, the workflow and
+  the config files for pg_cron, the `cron.` schema, a Vercel `crons` block and an Actions
+  `schedule:` trigger, comments stripped, so the decision cannot be re-taken one story at a time.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

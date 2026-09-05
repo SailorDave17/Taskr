@@ -23,7 +23,20 @@ import { assertPublishableKey } from './src/lib/keyShape.js'
 // guard keyed on names covers exactly the mistakes already made. `VITE_` is
 // the property that makes a value reach the bundle, so `VITE_` is what the
 // guard keys on.
+//
+// One exclusion, and it is for values NOBODY pasted. With "System Environment
+// Variables" enabled, Vercel injects its own metadata under the framework's
+// public prefix — `VITE_VERCEL_ENV`, `VITE_VERCEL_GIT_COMMIT_SHA`, and
+// `VITE_VERCEL_GIT_COMMIT_MESSAGE`, which is free text quoting this repo's own
+// vocabulary. *Measured 2026-09-05* (PR #346): a commit message that said
+// "deleting its service_role grants" was classified as a Supabase secret and
+// the Preview build refused, while CI — which has no such variable — stayed
+// green. The guard exists for a human pasting the wrong key into a dashboard;
+// a value Vercel wrote is not that, and the classifier knows no Vercel secret
+// shape it could recognise there anyway. Reproduced locally with
+// `VITE_VERCEL_GIT_COMMIT_MESSAGE="$(git log -1 --format=%B)" npx vite build`.
 for (const [name, value] of Object.entries(process.env)) {
+  if (name.startsWith('VITE_VERCEL_')) continue
   if (name.startsWith('VITE_')) assertPublishableKey(value, `the production build (${name})`)
 }
 

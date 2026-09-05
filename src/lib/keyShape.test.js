@@ -169,6 +169,25 @@ describe('the build itself is wired to the guard', () => {
     expect(config).toMatch(/assertPublishableKey\(value/)
   })
 
+  it('skips the variables VERCEL injects, because a commit message is not a pasted key (#334, PR #346)', () => {
+    // With "System Environment Variables" on, Vercel exposes its metadata under
+    // the framework prefix, and VITE_VERCEL_GIT_COMMIT_MESSAGE carries the
+    // commit message verbatim. *Measured 2026-09-05*: a message that said
+    // "deleting its service_role grants" tripped the bare-substring rule and
+    // the Preview build refused, while CI (no such variable) stayed green. The
+    // skip is asserted as source text like its neighbours, and it must come
+    // BEFORE the VITE_ check — a `continue` after the assertion would be dead.
+    const skipAt = config.search(/startsWith\('VITE_VERCEL_'\)\) continue/)
+    const checkAt = config.search(/startsWith\('VITE_'\)\) assertPublishableKey/)
+    expect(skipAt, 'no VITE_VERCEL_ skip').toBeGreaterThan(-1)
+    expect(checkAt).toBeGreaterThan(skipAt)
+
+    // And the classifier itself still refuses the string: the exclusion is the
+    // mechanism, not a softening of the rule. A commit message as a value under
+    // any OTHER VITE_ name is still refused.
+    expect(isSecretKey('deleting its service_role grants reddens the catalog test')).toBe(true)
+  })
+
   it('names the variable in the refusal, so the message says which value to go and fix', () => {
     // The loop's caller string interpolates the variable name. Asserted because
     // a refusal reading only "the production build" leaves somebody grepping

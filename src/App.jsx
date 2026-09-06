@@ -964,10 +964,15 @@ export default function App() {
     (runId, name, note) => mutate(() => addItem(shoppingClient(), runId, name, note)),
     [mutate],
   )
-  // A plain delete under a policy that admits only an unbought item on an open
-  // run: if another phone bought it between this one's read and its tap, the
-  // delete affects zero rows and raises nothing, and the re-read that follows
-  // shows the item as bought. The policy decided, not the client.
+  // #368 — an RPC since `0034`, and no longer a delete this client may issue
+  // at all. It was a plain delete under a policy, which refused a bought item
+  // or a closed run by matching zero rows; what a policy cannot do is take the
+  // RUN's lock, so a remove racing a finish deleted the original out of the
+  // closed run's record. The function takes `for key share` on the run first,
+  // like every other writer since `0033`, and REFUSES BY NAME — so if another
+  // phone bought the item between this one's read and its tap, the person now
+  // reads "item already bought" on the strip instead of watching nothing
+  // happen. The database decided, as before; what changed is that it says so.
   const handleRemoveShoppingItem = useCallback(
     (itemId) => mutate(() => removeItem(shoppingClient(), itemId)),
     [mutate],

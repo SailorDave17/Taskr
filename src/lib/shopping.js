@@ -400,14 +400,29 @@ export async function finishRun(client, runId) {
 }
 
 /**
- * Remove an item. A plain delete, under a policy that admits only an unbought
- * item on an open run — so a delete of anything else affects zero rows and
- * raises nothing, which is how row-level security refuses. The caller reads
- * the list back rather than trusting this to have removed anything.
+ * Remove an unbought item from an open run — an RPC since #368, and no longer
+ * a delete this client is allowed to issue.
+ *
+ * It was `from('shopping_items').delete().eq('id', …)` under `0032`'s
+ * `shopping_items_delete_unbought_on_open_run` policy, which refused a bought
+ * item or a closed run by matching zero rows. What a policy cannot do is take
+ * a LOCK: a remove that arrived while a finish held the item as a carry source
+ * waited for the finish and then deleted the original under a predicate
+ * evaluated on its own older snapshot, so the closed run lost its record of an
+ * item while the copy survived on the next run with `carried_from_item_id`
+ * nulled. `0034` makes this the fourth `security definer` writer of
+ * `shopping_items`, taking the run row `for key share` first like the other
+ * three, and withdraws the client's DELETE grant and the policy in the same
+ * file.
+ *
+ * It REFUSES BY NAME rather than affecting nothing (owner decision at this
+ * story's gate): `run already closed` and `item already bought`, the family's
+ * own sentences, which App's `mutate()` puts on the error strip. The caller
+ * still re-reads on success, as it did before.
  */
 export async function removeItem(client, itemId) {
   if (!itemId) throw new Error('Which item?')
-  unwrap(await client.from('shopping_items').delete().eq('id', itemId), 'removing the item')
+  unwrap(await client.rpc('remove_shopping_item', { item: itemId }), 'removing the item')
 }
 
 /** Rename a list. The one direct write the client holds on `shopping_lists`. */

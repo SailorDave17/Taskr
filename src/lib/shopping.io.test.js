@@ -31,6 +31,7 @@ import {
   SHOPPING_RUN_COLUMNS,
   addItem,
   createList,
+  finishRun,
   normalizeName,
   purchaseItem,
   readShopping,
@@ -247,11 +248,40 @@ describe('the writers go through the RPCs, by name AND argument object', () => {
     ])
   })
 
+  it('finishRun calls finish_shopping_run with { run_id } — the RUN, never the list — and returns the new run', async () => {
+    // #354. The argument NAME is the contract, and the io test is where a
+    // misspelling is caught before the live probe: PostgREST resolves by the
+    // set of names, so `{ run: … }` here would resolve nothing on the project.
+    const next = { ...RUN, id: 'r2', opened_at: '2026-09-06T00:00:00Z' }
+    results.finish_shopping_run = { data: next, error: null }
+    const opened = await finishRun(client, 'r1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'finish_shopping_run', args: { run_id: 'r1' } }])
+    expect(Object.keys(rpcs()[0].args)).toEqual(['run_id'])
+    expect(opened).toEqual(next)
+    // No timestamp and no member is sent: closed_at, closed_by and the new
+    // run's opened_at are the database's, as every stamp since 0004.
+    expect(JSON.stringify(rpcs()[0].args)).not.toMatch(/closed|opened|member|_at/)
+  })
+
+  it('finishRun refuses a missing run before any request', async () => {
+    await expect(finishRun(client, null)).rejects.toThrow(/Which run/)
+    await expect(finishRun(client, '')).rejects.toThrow(/Which run/)
+    expect(calls).toEqual([])
+  })
+
+  it('finishRun reports a refusal with what we were doing, carrying the cause — the stale-screen case', async () => {
+    results.finish_shopping_run = { data: null, error: { message: 'run already closed', code: 'P0001' } }
+    const failure = await finishRun(client, 'r1').catch((e) => e)
+    expect(failure.message).toBe('finishing the run: run already closed')
+    expect(failure.cause.code).toBe('P0001')
+  })
+
   it('never issues an insert or an update to write a stamp — the RPC is the only writer', async () => {
     await createList(client, HOUSEHOLD, 'Placeholder List')
     await addItem(client, 'r1', 'Placeholder Item')
     await purchaseItem(client, 'i1')
     await unpurchaseItem(client, 'i1')
+    await finishRun(client, 'r1')
     expect(calls.filter((c) => c.op === 'insert' || c.op === 'update')).toEqual([])
   })
 

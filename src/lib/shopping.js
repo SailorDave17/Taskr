@@ -3,9 +3,10 @@
 // Same contract as chores.js and household.js: nothing in this file is a
 // security boundary. The rules that protect the data are the row-level policies
 // and the column grants in supabase/migrations/0032_shopping_lists_runs_items.sql,
-// and the four RPCs there are the only writers of a list, an item or a stamp.
-// What this file does is name the household it means, ask for the granted
-// columns by name, and turn a refusal into a sentence.
+// and the four RPCs there plus `finish_shopping_run` (0033, #354) are the only
+// writers of a list, a run, an item or a stamp. What this file does is name the
+// household it means, ask for the granted columns by name, and turn a refusal
+// into a sentence.
 //
 // The Shop tab (`src/components/Shopping.jsx`, #353) renders it; App's
 // `refresh()` calls `readShopping` on every re-read, and the three writes the
@@ -185,6 +186,25 @@ export async function unpurchaseItem(client, itemId) {
   return unwrap(
     await client.rpc('unpurchase_shopping_item', { item: itemId }),
     'marking it not bought',
+  )
+}
+
+/**
+ * Finish a run — #354. Closes the run this screen is showing and opens the
+ * list's next one with every unbought item carried forward, in one transaction
+ * on the server, and returns the NEW run row.
+ *
+ * The argument is the run and never the list, and that is the whole design:
+ * a second phone whose screen still shows the old run names THAT run, finds it
+ * closed, and is refused — it can never finish the fresh run a first phone just
+ * opened. The caller re-reads the list afterwards, as with every write here;
+ * #357 is the confirmed tap that calls this.
+ */
+export async function finishRun(client, runId) {
+  if (!runId) throw new Error('Which run? Finishing needs the run this screen shows.')
+  return unwrap(
+    await client.rpc('finish_shopping_run', { run_id: runId }),
+    'finishing the run',
   )
 }
 

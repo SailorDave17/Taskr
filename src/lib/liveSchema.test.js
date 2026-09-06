@@ -342,6 +342,8 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
       'add_shopping_item',
       'purchase_shopping_item',
       'unpurchase_shopping_item',
+      // #354 — the run's closer and the next run's opener, arriving with `0033`.
+      'finish_shopping_run',
     ]) {
       expect(LIVE_RPC_NAMES).toContain(fn)
     }

@@ -119,6 +119,7 @@ export const MIGRATIONS = [
   '0030_calendar_busy_minutes.sql',
   '0031_calendar_capacity_source.sql',
   '0032_shopping_lists_runs_items.sql',
+  '0033_finish_shopping_run.sql',
 ]
 
 export function migrationSql(name) {

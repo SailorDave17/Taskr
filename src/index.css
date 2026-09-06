@@ -1103,8 +1103,10 @@ body {
    it wraps rather than overflows: a long item name with no spaces breaks
    (`overflow-wrap: anywhere`, #83's rule) and the button drops to its own line
    at 360px if it must. The bought modifier dims the row the way a done chore
-   is dimmed, and is NOT struck through — #355 owns what a bought row says and
-   where it sits; until then it is a mark, not a state with its own layout.
+   is dimmed, and is NOT struck through: #355 sinks a bought row to the bottom
+   of the list, which is where it says it is bought — dimming is the mark, the
+   POSITION is the state, and a strike-through on top of both would be a third
+   way of saying one thing.
    --------------------------------------------------------------------------- */
 
 .shopping-list {
@@ -1134,6 +1136,72 @@ body {
 
 .shopping-item--bought {
   opacity: 0.6;
+}
+
+/* #355 — the whole unbought row is the tap target, and the row's padding is
+   given to THIS element rather than kept outside it: a 44px control with the
+   row's padding around it would leave a dead border a thumb lands on and
+   nothing happens. `text-align: left` and the transparent background undo the
+   button defaults so it reads as a row and behaves as a control. */
+.shopping-item__tick {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin: -0.625rem -0.875rem;
+  padding: 0.625rem 0.875rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shopping-item__tick:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The affordance. Measured on the prototype at 360x800: with nothing drawn on
+   the tap target, the only visible control on an unbought row was Remove, so
+   the row read as one whose action is to delete the thing you came for. An
+   empty ring says "not yet"; the tick that replaces it says "in the cart".
+   Sized on the text so it lines up with the item's name, not centred on the
+   whole row, which a two- or three-line row would push out of alignment. */
+.shopping-item__mark {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 1.25rem;
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+.shopping-item__mark--done {
+  color: var(--accent);
+}
+
+/* The quiet control keeps to the right on its own line under the tap target,
+   so the two are never adjacent under a thumb: Remove and bought are opposite
+   intentions, and #353's measurement (a 92px control beside a 12rem body
+   overran 360px and wrapped anyway) says they do not fit on one line. It also
+   loses its border here: on the prototype a bordered 92px control was the
+   loudest thing on the row, which is the wrong order — the row is the action
+   and this is the way out of a mistake. The 44px target stays. */
+.shopping-item__actions {
+  flex: 1 1 100%;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.shopping-item__actions .button--quiet {
+  border-color: transparent;
+  color: var(--ink-dim);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding-inline: 0.5rem;
 }
 
 /* Basis ZERO, not a rem figure. Measured 2026-09-05 on the prototype at
@@ -1170,6 +1238,16 @@ body {
 
 .shopping-add {
   margin-top: 0.875rem;
+}
+
+/* #355 — "3 left to buy" under the list's name. Quiet, because it is a fact
+   about the list and not an instruction, and it is the ONE number on this
+   surface: #35 AC 9 holds the shopping tab free of any figure about a PERSON,
+   which this is not. */
+.shopping-count {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
 }
 
 /* ---------------------------------------------------------------------------

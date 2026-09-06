@@ -187,11 +187,21 @@ vi.mock('./lib/household.js', async () => {
 // `addItem` with its run, name and note — because a fake that only records
 // the call cannot tell a scoped read from an unscoped one (cairn's
 // `a-fake-that-drops-an-argument-makes-two-behaviours-one`).
+//
+// #355 — `purchaseItem` and `unpurchaseItem` join them, and their fakes are
+// the story's whole instrument: the tick does NOT re-read, so what proves it
+// worked is the RETURN VALUE reaching the screen. A fake that only recorded
+// the call could not tell the one-round-trip route from the old full-refresh
+// one, nor a tick of the right item from a tick of the first item on screen.
+// `orderShoppingItems`, `replaceShoppingItem` and `purchasedLabel` stay REAL,
+// like the other pure helpers.
 const shoppingApi = {
   readShopping: vi.fn(),
   createList: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
+  purchaseItem: vi.fn(),
+  unpurchaseItem: vi.fn(),
   shoppingClient: vi.fn(),
 }
 /** The object App hands to every shopping call, so the tests can see it did. */
@@ -271,6 +281,8 @@ beforeEach(() => {
   shoppingApi.createList.mockResolvedValue(undefined)
   shoppingApi.addItem.mockResolvedValue(undefined)
   shoppingApi.removeItem.mockResolvedValue(undefined)
+  shoppingApi.purchaseItem.mockResolvedValue(undefined)
+  shoppingApi.unpurchaseItem.mockResolvedValue(undefined)
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
@@ -1624,6 +1636,170 @@ describe('#353 — the Shop tab, from App', () => {
     expect(text).not.toMatch(/streak|rank|score|points|leaderboard|best|winner|most/i)
     expect(text).not.toMatch(/\b\d+\s+(items?|added|by)\b/i)
     expect(shop()).not.toHaveTextContent(/m1|m2/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #355 — the tick, from App: which RPC, with which item, and what the screen
+// does with the answer.
+//
+// This is the story's own re-read decision made visible. Every other write on
+// this surface goes through `mutate()` and re-reads everything; the tick does
+// not, because #351 measured that route at 6.5 s on Slow 4G against a 1 s bar.
+// So the assertions here are in two halves: the happy path must NOT re-read
+// (one round trip, the RPC's own row) and the refusal path MUST (the one
+// moment this phone knows its picture is stale).
+// ---------------------------------------------------------------------------
+describe('#355 — the tick, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const eggs = { ...milk, id: 'i2', name: 'Eggs', added_at: '2026-09-05T02:00:00Z' }
+  /** What `purchase_shopping_item` returns: the same row, stamped. */
+  const milkBought = {
+    ...milk,
+    purchased_at: '2026-09-05T05:00:00Z',
+    purchased_by_member_id: 'm1',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue({ lists: [list], runs: [run], items: [milk, eggs] })
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const rowNames = () =>
+    Array.from(shop().querySelectorAll('.shopping-item__name')).map((node) => node.textContent)
+
+  it('AC 8 + AC 9: a tick sends purchaseItem with THAT item id, and the RPC’s own row is the re-read — one round trip, no readShopping', async () => {
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    shoppingApi.purchaseItem.mockResolvedValue(milkBought)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    const rosterReadsBefore = api.listMembers.mock.calls.length
+
+    await tab(/mark milk bought/i)
+
+    // The RPC, named, with the item — not the run, not the first row on screen.
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    // ONE round trip. The owner's decision at this story's pickup: a full
+    // refresh per tick measured 6.5 s at Slow 4G against a 1 s bar.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(api.listMembers.mock.calls.length).toBe(rosterReadsBefore)
+    // And the screen is what the RPC answered: the row sank below Eggs and
+    // carries the stamp the SERVER wrote (m1, 05:00 UTC → 1:00 AM in New York),
+    // neither of which this phone knew before the call.
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('bought by Placeholder · 1:00 AM')
+    expect(row).toHaveClass('shopping-item--bought')
+    expect(within(shop()).getByText('1 left to buy')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 8 + AC 4: untick sends unpurchaseItem with that item, and the cleared row it returns goes back into added order', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [run],
+      items: [milkBought, eggs],
+    })
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    shoppingApi.unpurchaseItem.mockResolvedValue(milk)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    const boughtRow = within(shop()).getByText('Milk').closest('li')
+    await act(async () =>
+      void fireEvent.click(within(boughtRow).getByRole('button', { name: /not bought after all/i })),
+    )
+
+    expect(shoppingApi.unpurchaseItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.unpurchaseItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    expect(shoppingApi.purchaseItem).not.toHaveBeenCalled()
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    // Milk was added before Eggs, so it goes back ABOVE it, and the stamp is
+    // gone because the row the server returned has no stamp on it.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    expect(within(shop()).getByText('Milk').closest('li')).not.toHaveTextContent(/bought by/)
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+  })
+
+  it('AC 8: another phone got there first — the refusal reaches the strip OUTSIDE the list, and the full re-read shows their stamp with the row in the bought half', async () => {
+    await renderApp('Shop')
+    shoppingApi.purchaseItem.mockRejectedValue(
+      new Error('marking it bought: item already bought'),
+    )
+    // What the full re-read returns: the OTHER phone's stamp (m2, Robin), which
+    // this phone could not have invented from its own tap.
+    const theirs = { ...milk, purchased_at: '2026-09-05T04:30:00Z', purchased_by_member_id: 'm2' }
+    shoppingApi.readShopping.mockResolvedValue({ lists: [list], runs: [run], items: [theirs, eggs] })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/mark milk bought/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('marking it bought: item already bought')
+    expect(alert.closest('ul, li')).toBeNull()
+    // The refusal is the one moment the picture is known to be stale, so THIS
+    // path re-reads everything — the opposite of the happy path above.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('bought by Robin · 12:30 AM')
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    // The refusal's own sentence is still what is on screen after the re-read.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('item already bought')
+  })
+
+  it('AC 7: a second tap while the first tick is in flight sends nothing', async () => {
+    await renderApp('Shop')
+    let finish
+    shoppingApi.purchaseItem.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+
+    await tab(/mark milk bought/i)
+    // In flight: every control on the surface is disabled, which is what makes
+    // the second tap impossible rather than merely unlikely.
+    expect(screen.getByRole('button', { name: /mark eggs bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /remove milk/i })).toBeDisabled()
+    await tab(/mark eggs bought/i)
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledTimes(1)
+
+    await act(async () => finish(milkBought))
+    expect(screen.getByRole('button', { name: /mark eggs bought/i })).not.toBeDisabled()
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
   })
 })
 

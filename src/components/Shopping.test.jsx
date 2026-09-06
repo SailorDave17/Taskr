@@ -61,6 +61,8 @@ function setup(overrides = {}) {
     onCreateList: vi.fn().mockResolvedValue(undefined),
     onAddItem: vi.fn().mockResolvedValue(undefined),
     onRemoveItem: vi.fn().mockResolvedValue(undefined),
+    onPurchaseItem: vi.fn().mockResolvedValue(undefined),
+    onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Shopping
@@ -68,12 +70,19 @@ function setup(overrides = {}) {
       runs={[run]}
       items={[milk, eggs]}
       members={members}
+      timezone="America/New_York"
       {...handlers}
       {...overrides}
     />,
   )
   return handlers
 }
+
+/** The rendered rows, top to bottom, as the names they show — #355. */
+const rowNames = () =>
+  Array.from(screen.getByRole('list').querySelectorAll('.shopping-item__name')).map(
+    (node) => node.textContent,
+  )
 
 const clickAndSettle = (element) => act(async () => void fireEvent.click(element))
 
@@ -261,6 +270,20 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
     expect(within(region).queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('the count line is about the LIST and never about a person', () => {
+    // Two items added by Robin and one by Placeholder, so a component that
+    // counted per person would have "2" and "1" to print beside a name.
+    setup({ items: [milk, { ...eggs, added_by_member_id: 'm2' }, boughtBread] })
+    const count = within(surface()).getByText(/left to buy/)
+    expect(count).toHaveTextContent('2 left to buy')
+    // The figure names the LIST's remainder and nobody: no name of a person
+    // appears on the line the number is on.
+    expect(count).not.toHaveTextContent(/Robin|Placeholder/)
+    expect(surface().textContent).not.toMatch(
+      /streak|rank|score|points|leaderboard|best|winner|most/i,
+    )
+  })
+
   it('draws every list the read returns, each under its own name, so none is hidden', () => {
     const hardware = { ...list, id: 'l2', name: 'Hardware' }
     const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
@@ -278,5 +301,192 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
     expect(within(other).queryByText('Milk')).not.toBeInTheDocument()
     // No create form: the household has lists.
     expect(screen.queryByRole('button', { name: /create list/i })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #355 — the tick, the order, and what a bought row says.
+//
+// The ORDERING RULE itself is shopping.test.js's (pure, exhaustive, and where
+// the mutation lands). What only this level can answer is that the rendered
+// DOM is in that order, that the row's primary control reaches the purchase
+// handler with THIS item, and that a bought row offers the way back.
+// ---------------------------------------------------------------------------
+
+/** Bought earlier than boughtBread, so the two have an order between them. */
+const boughtButter = {
+  ...milk,
+  id: 'i4',
+  name: 'Butter',
+  added_at: '2026-09-05T00:30:00Z',
+  purchased_at: '2026-09-05T03:30:00Z',
+  purchased_by_member_id: 'm2',
+}
+
+describe('#355 AC 5 — bought items sink, and the top of the screen is what is left to find', () => {
+  it('renders unbought first in added order and bought last in purchase order', () => {
+    // Handed in deliberately shuffled: the component may not lean on the order
+    // the read happened to use.
+    setup({ items: [boughtBread, eggs, boughtButter, milk] })
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Butter', 'Bread'])
+  })
+
+  it('SIX items of which THREE are bought — the AC’s own fixture, by row identity', () => {
+    const rice = { ...milk, id: 'i5', name: 'Rice', added_at: '2026-09-05T05:00:00Z' }
+    const boughtFlour = {
+      ...milk,
+      id: 'i6',
+      name: 'Flour',
+      added_at: '2026-09-05T06:00:00Z',
+      purchased_at: '2026-09-05T02:00:00Z',
+      purchased_by_member_id: 'm1',
+    }
+    setup({ items: [boughtBread, rice, boughtButter, milk, boughtFlour, eggs] })
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Rice', 'Flour', 'Butter', 'Bread'])
+    const rows = screen.getByRole('list').querySelectorAll('li')
+    expect(rows).toHaveLength(6)
+    // Three bought, and they are the LAST three — by identity, not by count.
+    for (const [index, row] of [...rows].entries()) {
+      expect(row.classList.contains('shopping-item--bought')).toBe(index >= 3)
+    }
+  })
+
+  it('the FIRST rendered row is an unbought one, asserted by identity and not by counting', () => {
+    setup({ items: [boughtBread, milk] })
+    const rows = screen.getByRole('list').querySelectorAll('li')
+    // Which row, not how many: a component that dropped every bought item
+    // would satisfy a count and fail this.
+    expect(rows[0].querySelector('.shopping-item__name').textContent).toBe('Milk')
+    expect(rows[0]).not.toHaveClass('shopping-item--bought')
+    expect(rows[1].querySelector('.shopping-item__name').textContent).toBe('Bread')
+    expect(rows[1]).toHaveClass('shopping-item--bought')
+    // Nothing was hidden to achieve the order.
+    expect(rows).toHaveLength(2)
+  })
+
+  it('the order is the DOM order, not the stylesheet’s — no row is reordered visually', () => {
+    setup({ items: [boughtBread, milk] })
+    for (const row of screen.getByRole('list').querySelectorAll('li')) {
+      expect(row.style.order).toBe('')
+    }
+  })
+})
+
+describe('#355 AC 3 — the tick', () => {
+  it('the row’s primary control is a button naming what a tap will do', () => {
+    setup({ items: [milk] })
+    const control = screen.getByRole('button', { name: /mark milk bought/i })
+    expect(control).toHaveClass('shopping-item__tick')
+    // The item's own text rides inside the control, so the tap target is the
+    // row rather than a checkbox beside it.
+    expect(control).toHaveTextContent('Milk')
+    expect(control).toHaveTextContent('added by Robin')
+  })
+
+  it('a tap sends purchaseItem for THAT item, and nothing else', async () => {
+    const { onPurchaseItem, onUnpurchaseItem, onRemoveItem } = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /mark eggs bought/i }))
+    expect(onPurchaseItem).toHaveBeenCalledTimes(1)
+    expect(onPurchaseItem).toHaveBeenCalledWith('i2')
+    expect(onUnpurchaseItem).not.toHaveBeenCalled()
+    expect(onRemoveItem).not.toHaveBeenCalled()
+  })
+
+  it('a bought row reads the buyer and the time from the row’s own stamp', () => {
+    setup({ items: [boughtBread] })
+    const row = screen.getByText('Bread').closest('li')
+    // m1 is "Placeholder One"; 04:00 UTC is midnight in New York.
+    expect(row).toHaveTextContent('bought by Placeholder · 12:00 AM')
+    expect(row).not.toHaveTextContent('Placeholder One')
+    expect(row).toHaveClass('shopping-item--bought')
+  })
+
+  it('the stamp is the row’s, not the phone’s: the same row in another zone reads another time', () => {
+    // Without this, a component that formatted `new Date()` would pass every
+    // assertion above on the day the test runs.
+    setup({ items: [boughtBread], timezone: 'UTC' })
+    expect(screen.getByText('Bread').closest('li')).toHaveTextContent(
+      'bought by Placeholder · 4:00 AM',
+    )
+  })
+
+  it('a buyer the roster no longer holds keeps the time and names nobody', () => {
+    setup({ items: [{ ...boughtBread, purchased_by_member_id: null }] })
+    const row = screen.getByText('Bread').closest('li')
+    expect(row).toHaveTextContent(/bought · 12:00 AM/)
+    expect(row).not.toHaveTextContent(/bought by/)
+  })
+
+  it('a bought row is not styled as an error or an alert — it is history, not a problem', () => {
+    setup({ items: [milk, boughtBread] })
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Bread').closest('li').querySelector('.error')).toBeNull()
+  })
+})
+
+describe('#355 AC 4 — not bought after all', () => {
+  it('a bought row offers the reversal with no dialog, and it reaches unpurchaseItem with that item', async () => {
+    const { onUnpurchaseItem, onPurchaseItem } = setup({ items: [milk, boughtBread] })
+    const row = screen.getByText('Bread').closest('li')
+    const back = within(row).getByRole('button', { name: /not bought after all/i })
+    await clickAndSettle(back)
+    // One tap, one call — no confirm step in between.
+    expect(onUnpurchaseItem).toHaveBeenCalledTimes(1)
+    expect(onUnpurchaseItem).toHaveBeenCalledWith('i3')
+    expect(onPurchaseItem).not.toHaveBeenCalled()
+  })
+
+  it('an unbought row offers Remove and no reversal; a bought row the reversal and no Remove or tick', () => {
+    setup({ items: [milk, boughtBread] })
+    const milkRow = screen.getByText('Milk').closest('li')
+    const breadRow = screen.getByText('Bread').closest('li')
+    expect(within(milkRow).getByRole('button', { name: /remove milk/i })).toBeInTheDocument()
+    expect(
+      within(milkRow).queryByRole('button', { name: /not bought after all/i }),
+    ).not.toBeInTheDocument()
+    expect(within(breadRow).queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    expect(
+      within(breadRow).queryByRole('button', { name: /mark .* bought/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('#355 AC 6 — how much is left', () => {
+  it('counts the unbought items, and says so under the list’s name', () => {
+    setup({ items: [milk, eggs, boughtBread] })
+    expect(within(surface()).getByText('2 left to buy')).toBeInTheDocument()
+  })
+
+  it('says "Nothing left to buy" when every item is bought, and the list still shows them', () => {
+    setup({ items: [boughtBread, boughtButter] })
+    expect(within(surface()).getByText('Nothing left to buy')).toBeInTheDocument()
+    expect(rowNames()).toEqual(['Butter', 'Bread'])
+  })
+
+  it('a run with no items at all keeps #353’s empty state and carries no count', () => {
+    setup({ items: [] })
+    expect(within(surface()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+    expect(within(surface()).queryByText(/left to buy/)).not.toBeInTheDocument()
+  })
+
+  it('the list’s region is still named by the list alone, so a tick does not rename it', () => {
+    setup({ items: [milk, boughtBread] })
+    expect(screen.getByRole('region', { name: 'Groceries' })).toBeInTheDocument()
+  })
+})
+
+describe('#355 AC 7 — a second tap while the first is in flight', () => {
+  it('disables the tick, the reversal, Remove and the add form while busy', () => {
+    setup({ items: [milk, boughtBread], busy: true })
+    expect(screen.getByRole('button', { name: /mark milk bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /not bought after all/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /remove milk/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /add item/i })).toBeDisabled()
+  })
+
+  it('a disabled tick sends nothing when tapped', async () => {
+    const { onPurchaseItem } = setup({ items: [milk], busy: true })
+    await clickAndSettle(screen.getByRole('button', { name: /mark milk bought/i }))
+    expect(onPurchaseItem).not.toHaveBeenCalled()
   })
 })

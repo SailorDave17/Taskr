@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
-import { firstNameOf, normalizeName } from '../lib/shopping.js'
+import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '../lib/shopping.js'
 
 // The Shop tab — story #353, the first surface of epic #349.
 //
@@ -14,11 +14,6 @@ import { firstNameOf, normalizeName } from '../lib/shopping.js'
 //
 // What this surface does NOT do, and why each absence is deliberate:
 //
-//   - It does not tick. Marking an item bought, and the ordering that sinks
-//     bought items below the rest, is #355 — the moment the epic protects, with
-//     its own re-read decision. An item bought by ANOTHER phone still has to be
-//     drawn here, because the re-read will return it; it renders as a quiet
-//     "bought" mark with no Remove control, and nothing more until #355.
 //   - It does not finish a run (#357), pick between lists (#358), show past
 //     runs (#359) or archive (#360). Every list the read returns is drawn, in
 //     the read's order, so nothing is hidden if a second one exists — but only
@@ -47,7 +42,30 @@ import { firstNameOf, normalizeName } from '../lib/shopping.js'
 // row's stamp is the database's, the roster is the read's, and a name held
 // locally would be right on the phone that added the item and wrong on every
 // other. A member the roster no longer holds (removed; the FK nulls the stamp)
-// simply has no "added by" line.
+// simply has no "added by" line. Who BOUGHT it (#355) is resolved exactly the
+// same way, from `purchased_by_member_id`, and its time comes from
+// `purchased_at` — the database clock, never this phone's.
+//
+// THE TICK, AND THE ORDER — story #355, the moment the epic protects.
+//
+// The whole row is the primary control: a full-width button at least 44px tall
+// whose label is the item itself, so the gesture in a supermarket aisle is a
+// tap anywhere on the thing you just put in the cart, one-handed, without
+// aiming. Remove keeps its own quiet control underneath, because removing an
+// item and buying it are opposite intentions and a person walking a store will
+// tap the big one.
+//
+// Bought items sink below every unbought one (`orderShoppingItems`), so the
+// next thing to look for is always at the top of the screen. That is what
+// makes this a shopping list rather than a to-do list with checkboxes, and the
+// component does not do the sorting itself: it is a pure function in
+// shopping.js with its own tests, and this file only draws what it returns.
+// The DOM order IS that order — no CSS reordering — so what a screen reader
+// hears and what an eye sees cannot come apart.
+//
+// A bought row is history with a way back: it reads "bought by Robin · 4:02 PM"
+// and offers "Not bought after all", the app's reversible-action idiom from
+// Chores and Done — no dialog, because the reversal of a mistap is a tap.
 
 /**
  * Trim an optional note and turn an empty one into null.
@@ -122,10 +140,45 @@ CreateListForm.propTypes = {
 }
 
 /** One item on the open run. */
-function ShoppingItem({ item, members, busy, onRemoveItem }) {
+function ShoppingItem({
+  item,
+  members,
+  timezone,
+  busy,
+  onRemoveItem,
+  onPurchaseItem,
+  onUnpurchaseItem,
+}) {
   const bought = Boolean(item.purchased_at)
   const adder = members.find((m) => m.id === item.added_by_member_id)
   const adderName = adder ? firstNameOf(adder.display_name) : null
+  const buyer = members.find((m) => m.id === item.purchased_by_member_id)
+  const stamp = bought ? purchasedLabel(item.purchased_at, buyer ? firstNameOf(buyer.display_name) : null, timezone) : null
+
+  // The row's text, drawn identically inside the tick button and outside it.
+  // One definition rather than two so the bought and unbought halves cannot
+  // drift into saying different things about the same row.
+  //
+  // The mark before it is the affordance, and it is the one thing the jsdom
+  // suite could not have told us we needed: measured on the prototype at
+  // 360×800, a row whose only visible control was Remove read as a row whose
+  // action WAS Remove — a full-width tap target with nothing drawn on it is
+  // invisible, and the loudest thing on the row was the destructive control.
+  // `aria-hidden`, because the button's own label already says what a tap
+  // does and a screen reader should not hear a shape read out.
+  const body = (
+    <span className="shopping-item__body">
+      <span className="shopping-item__name">{item.name}</span>
+      {item.note ? <span className="shopping-item__note">{item.note}</span> : null}
+      {adderName || stamp ? (
+        <span className="shopping-item__meta">
+          {adderName ? `added by ${adderName}` : null}
+          {adderName && stamp ? ' · ' : null}
+          {stamp}
+        </span>
+      ) : null}
+    </span>
+  )
 
   return (
     // The bought modifier is conditional, the way `chore--missed` is on the
@@ -133,38 +186,74 @@ function ShoppingItem({ item, members, busy, onRemoveItem }) {
     // class — so `.shopping-item--bought` has its rule in index.css by hand,
     // beside the static ones the check does read.
     <li className={bought ? 'shopping-item shopping-item--bought' : 'shopping-item'}>
-      <div className="shopping-item__body">
-        <span className="shopping-item__name">{item.name}</span>
-        {item.note ? <span className="shopping-item__note">{item.note}</span> : null}
-        {adderName || bought ? (
-          <span className="shopping-item__meta">
-            {adderName ? `added by ${adderName}` : null}
-            {adderName && bought ? ' · ' : null}
-            {bought ? 'bought' : null}
+      {bought ? (
+        <>
+          <span className="shopping-item__mark shopping-item__mark--done" aria-hidden="true">
+            ✓
           </span>
-        ) : null}
-      </div>
-      {/* A bought item is history and offers no Remove: the delete policy
-          would refuse it anyway (zero rows), and a control that is always
-          refused is worse than none. The window between another phone buying
-          the item and this one re-reading is real, and it is settled by the
-          policy rather than the client — see App.test.jsx. */}
-      {!bought ? (
+          {body}
+        </>
+      ) : (
+        // #355 — the whole row is the tap target. The accessible name says the
+        // ACTION, which the visible text cannot: what an eye reads as "Milk"
+        // has to be heard as something a tap will do.
         <button
-          className="button button--quiet"
+          className="shopping-item__tick"
           type="button"
-          aria-label={`Remove ${item.name}`}
+          aria-label={`Mark ${item.name} bought`}
           disabled={busy}
           onClick={() =>
-            onRemoveItem(item.id).then(
+            onPurchaseItem(item.id).then(
               () => {},
               () => {},
             )
           }
         >
-          Remove
+          <span className="shopping-item__mark" aria-hidden="true">
+            ○
+          </span>
+          {body}
         </button>
-      ) : null}
+      )}
+
+      <span className="shopping-item__actions">
+        {/* A bought item is history and offers no Remove: the delete policy
+            would refuse it anyway (zero rows), and a control that is always
+            refused is worse than none. The window between another phone buying
+            the item and this one re-reading is real, and it is settled by the
+            policy rather than the client — see App.test.jsx. What a bought row
+            offers instead is the way back. */}
+        {bought ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              onUnpurchaseItem(item.id).then(
+                () => {},
+                () => {},
+              )
+            }
+          >
+            Not bought after all
+          </button>
+        ) : (
+          <button
+            className="button button--quiet"
+            type="button"
+            aria-label={`Remove ${item.name}`}
+            disabled={busy}
+            onClick={() =>
+              onRemoveItem(item.id).then(
+                () => {},
+                () => {},
+              )
+            }
+          >
+            Remove
+          </button>
+        )}
+      </span>
     </li>
   )
 }
@@ -172,21 +261,50 @@ function ShoppingItem({ item, members, busy, onRemoveItem }) {
 ShoppingItem.propTypes = {
   item: PropTypes.object.isRequired,
   members: PropTypes.array.isRequired,
+  timezone: PropTypes.string,
   busy: PropTypes.bool,
   onRemoveItem: PropTypes.func.isRequired,
+  onPurchaseItem: PropTypes.func.isRequired,
+  onUnpurchaseItem: PropTypes.func.isRequired,
 }
 
 /** One list: its heading, the items on its open run, and the add form. */
-function ShoppingList({ list, run, items, members, busy, onAddItem, onRemoveItem }) {
+function ShoppingList({
+  list,
+  run,
+  items,
+  members,
+  timezone,
+  busy,
+  onAddItem,
+  onRemoveItem,
+  onPurchaseItem,
+  onUnpurchaseItem,
+}) {
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
   const [complaint, setComplaint] = useState(null)
 
+  // #355 — unbought first in added order, bought below in purchase order. The
+  // rendered order is this array's order, and the count under the heading is
+  // derived from the same rows, so the number and the list cannot disagree.
+  const ordered = orderShoppingItems(items)
+  const left = ordered.filter((item) => !item.purchased_at).length
+
   return (
     <section className="shopping-list" aria-labelledby={`shopping-list-${list.id}`}>
+      {/* The list's name is the heading and stays the heading: it is the
+          region's accessible name, and folding a changing count into it would
+          rename the region on every tick. The count is its own line under it. */}
       <h3 id={`shopping-list-${list.id}`} className="card__subheading">
         {list.name}
       </h3>
+
+      {run && ordered.length > 0 ? (
+        <p className="shopping-count">
+          {left > 0 ? `${left} left to buy` : 'Nothing left to buy'}
+        </p>
+      ) : null}
 
       {/* A list with no open run is a state nothing writes today —
           create_shopping_list opens the first run in the same transaction, and
@@ -197,15 +315,18 @@ function ShoppingList({ list, run, items, members, busy, onAddItem, onRemoveItem
 
       {run && items.length === 0 ? <p className="card__body">Nothing to buy yet.</p> : null}
 
-      {items.length > 0 ? (
+      {ordered.length > 0 ? (
         <ul className="shopping-items">
-          {items.map((item) => (
+          {ordered.map((item) => (
             <ShoppingItem
               key={item.id}
               item={item}
               members={members}
+              timezone={timezone}
               busy={busy}
               onRemoveItem={onRemoveItem}
+              onPurchaseItem={onPurchaseItem}
+              onUnpurchaseItem={onUnpurchaseItem}
             />
           ))}
         </ul>
@@ -281,9 +402,12 @@ ShoppingList.propTypes = {
   run: PropTypes.object,
   items: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
+  timezone: PropTypes.string,
   busy: PropTypes.bool,
   onAddItem: PropTypes.func.isRequired,
   onRemoveItem: PropTypes.func.isRequired,
+  onPurchaseItem: PropTypes.func.isRequired,
+  onUnpurchaseItem: PropTypes.func.isRequired,
 }
 
 export default function Shopping({
@@ -291,11 +415,14 @@ export default function Shopping({
   runs,
   items,
   members,
+  timezone,
   busy,
   error,
   onCreateList,
   onAddItem,
   onRemoveItem,
+  onPurchaseItem,
+  onUnpurchaseItem,
 }) {
   return (
     <section className="card" aria-labelledby="shop-heading">
@@ -316,9 +443,12 @@ export default function Shopping({
             run={run}
             items={run ? items.filter((item) => item.run_id === run.id) : []}
             members={members}
+            timezone={timezone}
             busy={busy}
             onAddItem={onAddItem}
             onRemoveItem={onRemoveItem}
+            onPurchaseItem={onPurchaseItem}
+            onUnpurchaseItem={onUnpurchaseItem}
           />
         )
       })}
@@ -341,9 +471,12 @@ Shopping.propTypes = {
   runs: PropTypes.array.isRequired,
   items: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
+  timezone: PropTypes.string,
   busy: PropTypes.bool,
   error: PropTypes.string,
   onCreateList: PropTypes.func.isRequired,
   onAddItem: PropTypes.func.isRequired,
   onRemoveItem: PropTypes.func.isRequired,
+  onPurchaseItem: PropTypes.func.isRequired,
+  onUnpurchaseItem: PropTypes.func.isRequired,
 }

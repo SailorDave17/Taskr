@@ -68,11 +68,13 @@ import {
   readConsentReturn,
   startConnect,
 } from './lib/calendar.js'
+import { addItem, createList, readShopping, removeItem, shoppingClient } from './lib/shopping.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
+import Shopping from './components/Shopping.jsx'
 import Split from './components/Split.jsx'
 
 // Story #5: the household roster, on family phones.
@@ -92,21 +94,29 @@ import Split from './components/Split.jsx'
 // deliberately, and no state in which somebody is signed in as nobody.
 
 /**
- * The four surfaces, in the order they are offered — #47 criterion 11, plus
- * #302's Done.
+ * The five surfaces, in the order they are offered — #47 criterion 11, plus
+ * #302's Done and #353's Shop.
  *
  * The split is FIRST and is the default view, per the charter's grooming
  * decision of 2026-08-06. `Who` rather than `Roster` because that is the
  * question a person is asking; the heading behind it still reads "Who is in the
- * household". `Done` is LAST: it is history, and the chore tab's own "N done
- * this week" line is the way most people will reach it.
+ * household". `Done` comes after the working tabs: it is history, and the chore
+ * tab's own "N done this week" line is the way most people will reach it.
+ * `Shop` is LAST because it is the one surface with no fairness arithmetic
+ * behind it (charter, 2026-09-05) — the four before it are one argument about
+ * minutes, and this one is a list. Five one-word labels fit a 360px row only
+ * at the tighter `.tab` padding #350 measured; index.css carries the numbers.
  */
 const SURFACES = [
   { key: 'split', label: 'Split' },
   { key: 'chores', label: 'Chores' },
   { key: 'who', label: 'Who' },
   { key: 'done', label: 'Done' },
+  { key: 'shop', label: 'Shop' },
 ]
+
+/** No lists, no runs, no items — what a household reads before its first list. */
+const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
 
 export default function App() {
   const [status, setStatus] = useState('loading')
@@ -128,6 +138,12 @@ export default function App() {
   // like the exclusions above, and the same one-representation rule: the chore
   // screen folds over the rows to decide what to offer and what to say.
   const [repeatExceptions, setRepeatExceptions] = useState([])
+  // #353 — the household's shopping lists, the open run of each, and the items
+  // on those runs. Server state read through the same refresh as everything
+  // else, held in the read's own shape rather than folded into a per-list tree
+  // here: the Shop tab does the folding where it draws, so there is one
+  // representation and no second copy to fall out of step with the first.
+  const [shopping, setShopping] = useState(EMPTY_SHOPPING)
   // #95 — who in this household has connected a Google Calendar. Server state
   // like everything else here, read through the same refresh. The rows carry no
   // credential: the refresh token is in `calendar_tokens`, which this client is
@@ -228,6 +244,14 @@ export default function App() {
     // mutate-then-refresh guarantee covers them without a second mechanism.
     const choreRows = found ? await listChores(found.id) : []
     setChores(choreRows)
+    // #353 — the shopping reads, scoped by the household just read, through
+    // the same path as everything else: arriving on Shop shows what another
+    // phone added in between for the same reason arriving on Who shows who
+    // joined. `readShopping` is three sequential reads (lists by household,
+    // open runs by list, items by run — never an embed filter), so every
+    // re-read grew by three round trips the day this landed; #351 priced what
+    // a round trip costs and #355 owns the shape of the tick.
+    setShopping(found ? await readShopping(shoppingClient(), found.id) : EMPTY_SHOPPING)
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -881,6 +905,30 @@ export default function App() {
     () => mutate(() => reassignHousehold({ householdId: household?.id })),
     [mutate, household],
   )
+  // #353 — the Shop tab's three writes, each through mutate() so the list this
+  // phone shows after the write is the list every other phone reads. The list
+  // is created in the household THIS SCREEN is showing (#159 AC 4's rule); an
+  // item names its run and a removal names its item, and the household is the
+  // database's to check. The client is handed in rather than reached for
+  // inside the module — shopping.js takes it as a parameter so its io test can
+  // hand in a fake — and `shoppingClient()` is the same `getSupabase()` every
+  // other data-layer module reads.
+  const handleCreateShoppingList = useCallback(
+    (name) => mutate(() => createList(shoppingClient(), household?.id, name)),
+    [mutate, household],
+  )
+  const handleAddShoppingItem = useCallback(
+    (runId, name, note) => mutate(() => addItem(shoppingClient(), runId, name, note)),
+    [mutate],
+  )
+  // A plain delete under a policy that admits only an unbought item on an open
+  // run: if another phone bought it between this one's read and its tap, the
+  // delete affects zero rows and raises nothing, and the re-read that follows
+  // shows the item as bought. The policy decided, not the client.
+  const handleRemoveShoppingItem = useCallback(
+    (itemId) => mutate(() => removeItem(shoppingClient(), itemId)),
+    [mutate],
+  )
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
   // same state object `isOrganizer` compares against below, so who-you-are and
@@ -1172,8 +1220,8 @@ export default function App() {
         />
       ) : null}
 
-      {/* #47 criterion 11 — the surfaces, and the only way between them (four
-          since #302; the chore tab's done line is a second way to one of them).
+      {/* #47 criterion 11 — the surfaces, and the only way between them (five
+          since #353; the chore tab's done line is a second way to one of them).
           A `nav` with buttons rather than links, because there is nothing to
           link TO: one document, no router, and an anchor with no href is worse
           for assistive tech than a button that says what it does.
@@ -1325,6 +1373,23 @@ export default function App() {
           onAllow={handleAllowMember}
           onSkip={handleSkipOccurrence}
           onRecordActual={handleRecordActual}
+        />
+      ) : null}
+
+      {/* #353 — the household's shopping list. The roster is what the surface
+          resolves "added by" against, and `error` is the same strip every
+          other surface renders for a refused write. */}
+      {status === 'joined' && household && view === 'shop' ? (
+        <Shopping
+          lists={shopping.lists}
+          runs={shopping.runs}
+          items={shopping.items}
+          members={members}
+          busy={busy}
+          error={error}
+          onCreateList={handleCreateShoppingList}
+          onAddItem={handleAddShoppingItem}
+          onRemoveItem={handleRemoveShoppingItem}
         />
       ) : null}
 

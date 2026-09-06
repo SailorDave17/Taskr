@@ -178,6 +178,31 @@ vi.mock('./lib/household.js', async () => {
   return { ...actual, ...api }
 })
 
+// #353 — only the IMPURE shopping functions are stubbed, plus the client
+// accessor, which would otherwise reach the supabase.js mock above and throw.
+// `normalizeName` and `firstNameOf` stay REAL (importActual below) for the
+// standing reason: pure, own tests, and the sentence a person reads when a
+// name is empty should be the one the data layer words. The fakes RECORD THE
+// ARGUMENTS — `readShopping` is asserted with the household it was handed and
+// `addItem` with its run, name and note — because a fake that only records
+// the call cannot tell a scoped read from an unscoped one (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`).
+const shoppingApi = {
+  readShopping: vi.fn(),
+  createList: vi.fn(),
+  addItem: vi.fn(),
+  removeItem: vi.fn(),
+  shoppingClient: vi.fn(),
+}
+/** The object App hands to every shopping call, so the tests can see it did. */
+const SHOPPING_CLIENT = { fake: 'shopping client' }
+const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
+
+vi.mock('./lib/shopping.js', async () => {
+  const actual = await vi.importActual('./lib/shopping.js')
+  return { ...actual, ...shoppingApi }
+})
+
 const { default: App } = await import('./App.jsx')
 
 // The REAL pure halves, for building #50's expected snapshot the same way
@@ -239,6 +264,13 @@ beforeEach(() => {
   announceApi.writeSplitSeen.mockResolvedValue(undefined)
   announceApi.dismissFairnessNote.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
+  // #353 — no list yet, which is the ordinary first open of the Shop tab.
+  Object.values(shoppingApi).forEach((fn) => fn.mockReset())
+  shoppingApi.shoppingClient.mockReturnValue(SHOPPING_CLIENT)
+  shoppingApi.readShopping.mockResolvedValue(EMPTY_SHOPPING)
+  shoppingApi.createList.mockResolvedValue(undefined)
+  shoppingApi.addItem.mockResolvedValue(undefined)
+  shoppingApi.removeItem.mockResolvedValue(undefined)
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
@@ -661,7 +693,7 @@ describe('when the signed-in person belongs to a household', () => {
       Boolean(shellName().compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING)
     expect(above(), 'the name is not above the tab strip on the split').toBe(true)
 
-    for (const surface of ['Chores', 'Who', 'Done']) {
+    for (const surface of ['Chores', 'Who', 'Done', 'Shop']) {
       await act(async () => void fireEvent.click(screen.getByRole('button', { name: surface })))
       expect(above(), `the name is not above the tab strip on ${surface}`).toBe(true)
     }
@@ -1250,7 +1282,7 @@ describe('moving between surfaces — #47 criterion 11', () => {
     expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
   })
 
-  it('marks the surface you are on, so the tabs are not four identical buttons', async () => {
+  it('marks the surface you are on, so the tabs are not five identical buttons', async () => {
     await renderApp()
     expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
@@ -1263,6 +1295,38 @@ describe('moving between surfaces — #47 criterion 11', () => {
     await tab('Done')
     expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
+
+    // #353 — and the fifth.
+    await tab('Shop')
+    expect(screen.getByRole('button', { name: 'Shop' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Done' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('#353 AC 2: arriving on Shop re-reads everything, and the shopping read names the household on screen AFTER the roster read', async () => {
+    await renderApp()
+    const before = {
+      members: api.listMembers.mock.calls.length,
+      chores: choresApi.listChores.mock.calls.length,
+      capacity: capacityApi.listCapacity.mock.calls.length,
+      shopping: shoppingApi.readShopping.mock.calls.length,
+    }
+
+    await tab('Shop')
+
+    expect(screen.getByRole('region', { name: 'Shop' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /the split/i })).not.toBeInTheDocument()
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(before.members)
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before.chores)
+    expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(before.capacity)
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(before.shopping)
+    // WHICH household — #159's rule — and the client App was handed. The
+    // three reads inside are shopping.io.test.js's; what only this level can
+    // see is that App named `found.id` and nothing else.
+    expect(shoppingApi.readShopping).toHaveBeenLastCalledWith(SHOPPING_CLIENT, household.id)
+    // After the roster read of the same refresh, the order the issue names.
+    const rosterOrder = api.listMembers.mock.invocationCallOrder.at(-1)
+    const shoppingOrder = shoppingApi.readShopping.mock.invocationCallOrder.at(-1)
+    expect(shoppingOrder).toBeGreaterThan(rosterOrder)
   })
 
   it('#302 AC 4: arriving on Done re-reads everything, as every other tab does', async () => {
@@ -1327,6 +1391,239 @@ describe('moving between surfaces — #47 criterion 11', () => {
     api.currentHousehold.mockResolvedValue(null)
     await renderApp()
     expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #353 — the Shop tab: the write path, the re-read, and WHICH household.
+//
+// What the surface DRAWS is Shopping.test.jsx's. These cover what only App can
+// answer: that the create, add and remove go through the data layer and are
+// followed by a re-read; that a refused write reaches the strip and patches
+// nothing; and that the household on screen is the one the read names.
+// ---------------------------------------------------------------------------
+describe('#353 — the Shop tab, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+  }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const emptyList = { lists: [list], runs: [run], items: [] }
+  const withMilk = { lists: [list], runs: [run], items: [milk] }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+
+  it('AC 3: with no list, opening the tab writes nothing; Create goes through createList in the household on screen, then re-reads', async () => {
+    await renderApp('Shop')
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Groceries')
+    expect(shoppingApi.createList).not.toHaveBeenCalled()
+
+    // The next read returns the list the tap made, with its empty open run.
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/create list/i)
+
+    expect(shoppingApi.createList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.createList).toHaveBeenCalledWith(SHOPPING_CLIENT, household.id, 'Groceries')
+    // Written, then re-read — the full refresh, not a patch from the answer.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.createList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(1)
+    // And the screen is what the re-read said: the list, empty, above its form.
+    expect(screen.queryByLabelText(/^list name$/i)).not.toBeInTheDocument()
+    const empty = within(shop()).getByText(/nothing to buy yet/i)
+    const form = screen.getByLabelText(/^item$/i).closest('form')
+    expect(empty.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('AC 4: adding an item goes through addItem with the run, the name and null for an omitted note, re-reads, clears the form, and names the adder from the roster', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    expect(shoppingApi.addItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.addItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r1', 'Milk', null)
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.addItem.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    // The item is on screen from the RE-READ (its adder is m2, which the form
+    // never knew), the form is clear, and the adder is the roster's word.
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('added by Robin')
+    expect(screen.getByLabelText(/^item$/i)).toHaveValue('')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: an empty item name is refused with a sentence before any call', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/add item/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/name is required/i)
+    expect(shoppingApi.addItem).not.toHaveBeenCalled()
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('AC 5: Remove goes through removeItem with the item, then re-reads, and the item is gone', async () => {
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    await renderApp('Shop')
+    expect(within(shop()).getByText('Milk')).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/remove milk/i)
+
+    expect(shoppingApi.removeItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.removeItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(within(shop()).queryByText('Milk')).not.toBeInTheDocument()
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('AC 5: bought on another phone between render and tap — the delete affects nothing, the re-read shows it bought, and no error is shown', async () => {
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    await renderApp('Shop')
+    expect(within(shop()).getByRole('button', { name: /remove milk/i })).toBeInTheDocument()
+
+    // The policy admits only an unbought item, so the delete resolves having
+    // touched zero rows — which is what a resolved `removeItem` IS here — and
+    // the re-read returns the row with the other phone's stamp on it.
+    shoppingApi.readShopping.mockResolvedValue({
+      ...withMilk,
+      items: [{ ...milk, purchased_at: '2026-09-05T02:00:00Z', purchased_by_member_id: 'm1' }],
+    })
+    await tab(/remove milk/i)
+
+    expect(shoppingApi.removeItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent(/bought/)
+    expect(within(row).queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 6: a refused add reaches the strip outside the list, and nothing local is patched', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    shoppingApi.addItem.mockRejectedValue(new Error('adding the item: run already closed'))
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('adding the item: run already closed')
+    expect(alert.closest('ul, li, form')).toBeNull()
+    // No re-read followed a failed write, the item is not on the list, and the
+    // form still holds what was typed — the two-arm handler patched nothing.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(within(shop()).queryByRole('listitem')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^item$/i)).toHaveValue('Milk')
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('AC 7: with the seeded person in two households, the Shop tab shows only the ACTIVE household’s lists and items', async () => {
+    // The #160 fixture shape: person-a holds a member row in both, and each
+    // household has its own list with its own item. The fake scopes by the
+    // household id it is handed — so an App that named the wrong household,
+    // or none, draws the wrong list or nothing.
+    const householdA = { id: 'household-a', name: 'Placeholder Household', timezone: 'America/New_York' }
+    const householdB = { id: 'household-b', name: 'Placeholder Other Household', timezone: 'America/New_York' }
+    const shopA = {
+      lists: [{ ...list, id: 'la', household_id: 'household-a', name: 'Groceries' }],
+      runs: [{ ...run, id: 'ra', list_id: 'la', household_id: 'household-a' }],
+      items: [{ ...milk, id: 'ia', run_id: 'ra', household_id: 'household-a', name: 'Milk' }],
+    }
+    const shopB = {
+      lists: [{ ...list, id: 'lb', household_id: 'household-b', name: 'Hardware' }],
+      runs: [{ ...run, id: 'rb', list_id: 'lb', household_id: 'household-b' }],
+      items: [{ ...milk, id: 'ib', run_id: 'rb', household_id: 'household-b', name: 'Bread' }],
+    }
+    api.listMembers.mockImplementation(async (id) =>
+      id === householdA.id
+        ? [{ id: 'm-a1', household_id: 'household-a', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }]
+        : id === householdB.id
+          ? [{ id: 'm-b1', household_id: 'household-b', display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' }]
+          : [],
+    )
+    shoppingApi.readShopping.mockImplementation(async (_client, id) =>
+      id === householdA.id ? shopA : id === householdB.id ? shopB : EMPTY_SHOPPING,
+    )
+
+    api.currentHousehold.mockResolvedValue(householdA)
+    await renderApp('Shop')
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    expect(within(shop()).getByText('Milk')).toBeInTheDocument()
+    expect(within(shop()).queryByText('Bread')).not.toBeInTheDocument()
+    expect(within(shop()).queryByText('Hardware')).not.toBeInTheDocument()
+
+    // The active household changes; the next re-read (arriving on the tab
+    // again) must draw B's list and nothing of A's.
+    api.currentHousehold.mockResolvedValue(householdB)
+    await tab('Shop')
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Hardware')
+    expect(within(shop()).getByText('Bread')).toBeInTheDocument()
+    expect(within(shop()).queryByText('Milk')).not.toBeInTheDocument()
+    expect(within(shop()).queryByText('Groceries')).not.toBeInTheDocument()
+    expect(shoppingApi.readShopping).toHaveBeenLastCalledWith(SHOPPING_CLIENT, householdB.id)
+  })
+
+  it('AC 8 (#35 AC 9): nothing on the surface counts, ranks or scores who added what', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      ...withMilk,
+      items: [milk, { ...milk, id: 'i2', name: 'Eggs' }, { ...milk, id: 'i3', name: 'Bread', added_by_member_id: 'm1' }],
+    })
+    await renderApp('Shop')
+    const text = shop().textContent
+    expect(text).not.toMatch(/streak|rank|score|points|leaderboard|best|winner|most/i)
+    expect(text).not.toMatch(/\b\d+\s+(items?|added|by)\b/i)
+    expect(shop()).not.toHaveTextContent(/m1|m2/)
   })
 })
 

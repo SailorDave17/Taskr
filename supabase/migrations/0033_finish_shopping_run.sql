@@ -3,9 +3,10 @@
 -- One transaction that closes a list's open run and opens the next one with
 -- every unbought item copied forward. The hardest function in epic #349, and
 -- kept out of `0032` on purpose so the schema could land at its own size
--- (`0032`'s header says so). Nothing renders this yet: #357 is the confirmed
--- tap that calls it, and #356 is the two-phone proof against the live project
--- that pglite cannot run.
+-- (`0032`'s header says so). Nothing rendered this when it landed; #357 is the
+-- confirmed tap that calls it, and the Shop tab has offered "Done shopping"
+-- since. #356 is the two-phone proof against the live project that pglite
+-- cannot run.
 --
 -- The file is `0033`, not the `0032` the story names: `0031` (#97) landed the
 -- day the epic was groomed, `0032` became the schema, and #352's comment told

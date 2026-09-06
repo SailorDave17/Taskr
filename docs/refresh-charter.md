@@ -963,9 +963,10 @@ no offline write path anywhere; every tick is a network round trip. #351 measure
 costs under the write-then-full-refresh discipline every other tab uses: **11 sequential round trips
 today, 6.5 s at the browser's Slow 4G preset against an owner-set bar of a median under 1 s** —
 and one round trip at the same preset is 0.585 s, so the bar is reachable only when the tick's
-re-read IS the write's response. The shape of that re-read is #355's, and the owner decides it at
-that story's pickup (decision 12); the charter records only that a departure from the mutate
-discipline of the 2026-08-25 tab decision is a charter change when it comes, not a story detail.
+re-read IS the write's response. The shape of that re-read was #355's, and the owner decided it at
+that story's pickup (decision 12): the tick's re-read is the write's own response, recorded in the
+paragraph below. A departure from the mutate discipline of the 2026-08-25 tab decision is a charter
+change rather than a story detail, which is why it is written here and not only in the story.
 
 **Coordination recorded, not owed.** #342 (Realtime over an enumerated table list, open) sits
 against decision 3 and is not a dependency; **if it ships, its publication list must add
@@ -984,9 +985,38 @@ smallest step that works, not merely one that does. Measured on the real `App` w
 That is decision 13's fallback taken in the order the owner set — tighter padding first, shorter
 labels not needed. #353 carries the padding change with the tab.
 
+**The tick is the first write in this app that does not re-read everything** (owner decision at
+#355's pickup, 2026-09-05): marking a shopping item bought sends `purchase_shopping_item` and puts
+the stamped row it returns straight into the list on screen — one round trip — instead of running
+the full `refresh()` every other write here runs, because #351 measured that route at **6.5 s on
+Slow 4G against the 1 s bar a person taps at**, one round trip at 0.585 s and two at 1.17 s. What it
+costs is stated rather than hidden: another phone's ticks appear on the next arrival on the tab,
+which is exactly what decision 3 (re-read on open, no Realtime) already says about every other row
+on this surface. A **refused** tick keeps the full re-read, because a refusal is the one moment the
+phone knows its picture is stale. The alternatives rejected were a `0034` making the RPCs return the
+whole run (the same round-trip cost, plus a migration and a return-type change on the two bodies
+`0033` had replaced the day before) and keeping the full refresh (six to eight times over the bar).
+No migration was needed for the route taken: `0032`'s RPCs already return the whole stamped row, and
+`0033` kept that return type when it re-ordered their locks. The
+write-then-full-refresh discipline stands everywhere else, and departing from it a second time is a
+decision to be taken again rather than a precedent set here.
+
+**The mis-tap protection on finishing a run is an inline confirm naming the consequence, and not an
+undo** (decision 8, built in #357 on 2026-09-06): "Done shopping" is replaced in place by *"Finish
+this run? 3 items not bought will carry over to the next list"* with **Finish** and **Keep
+shopping**, focus landing on **Keep shopping** so an accidental Enter costs a tap rather than a
+trip. The reason it is not an undo is that an undo here would be **the app's first** — every other
+reversible action in Taskr is a second tap on the thing itself ("Not bought after all", un-complete
+a chore), which works because nothing else has happened in between — and reversing a finish would
+need semantics for the items somebody has already added to the **new** run, a question the feature
+has no answer to and no reason to invent. The confirm is the same in-place idiom the roster uses for
+Remove and for signing every device out; `window.confirm` is used nowhere in this app. What it
+costs is stated rather than hidden: a confirmed mis-tap is not reversible, and the sentence naming
+what carries over is the whole of the protection.
+
 **The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
 otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same
-full re-read every tab does, until #355 says otherwise about the tick alone. Nothing here adds a
+full re-read every tab does; #355 changed the tick alone, as the paragraph above records. Nothing here adds a
 sentence about routing: #175 (react-router, sequenced last in #253) is coordinated on the epic, and
 whichever of #175 and #353 lands second re-reads the other's diff.
 

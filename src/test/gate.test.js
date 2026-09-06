@@ -1291,6 +1291,9 @@ describe('#19 — no real household name reaches version control', () => {
     // items beside three unbought ones and tell every row apart by name.
     Butter: 'a shopping item bought before the run is finished, in finish-shopping-run.pglite.test.js',
     Flour: 'a second bought item in finish-shopping-run.pglite.test.js',
+    // #355 — the sixth item name, needed because AC 5 names its own fixture:
+    // six items of which three are bought, every row told apart by name.
+    Rice: 'a shopping item name in the #355 six-item ordering fixture',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
     'Placeholder Item': 'a shopping item name in shopping.io.test.js',

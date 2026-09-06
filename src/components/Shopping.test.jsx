@@ -61,6 +61,9 @@ function setup(overrides = {}) {
     onCreateList: vi.fn().mockResolvedValue(undefined),
     onAddItem: vi.fn().mockResolvedValue(undefined),
     onRemoveItem: vi.fn().mockResolvedValue(undefined),
+    onPurchaseItem: vi.fn().mockResolvedValue(undefined),
+    onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
+    onFinishRun: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Shopping
@@ -68,12 +71,19 @@ function setup(overrides = {}) {
       runs={[run]}
       items={[milk, eggs]}
       members={members}
+      timezone="America/New_York"
       {...handlers}
       {...overrides}
     />,
   )
   return handlers
 }
+
+/** The rendered rows, top to bottom, as the names they show — #355. */
+const rowNames = () =>
+  Array.from(screen.getByRole('list').querySelectorAll('.shopping-item__name')).map(
+    (node) => node.textContent,
+  )
 
 const clickAndSettle = (element) => act(async () => void fireEvent.click(element))
 
@@ -261,6 +271,20 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
     expect(within(region).queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('the count line is about the LIST and never about a person', () => {
+    // Two items added by Robin and one by Placeholder, so a component that
+    // counted per person would have "2" and "1" to print beside a name.
+    setup({ items: [milk, { ...eggs, added_by_member_id: 'm2' }, boughtBread] })
+    const count = within(surface()).getByText(/left to buy/)
+    expect(count).toHaveTextContent('2 left to buy')
+    // The figure names the LIST's remainder and nobody: no name of a person
+    // appears on the line the number is on.
+    expect(count).not.toHaveTextContent(/Robin|Placeholder/)
+    expect(surface().textContent).not.toMatch(
+      /streak|rank|score|points|leaderboard|best|winner|most/i,
+    )
+  })
+
   it('draws every list the read returns, each under its own name, so none is hidden', () => {
     const hardware = { ...list, id: 'l2', name: 'Hardware' }
     const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
@@ -278,5 +302,412 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
     expect(within(other).queryByText('Milk')).not.toBeInTheDocument()
     // No create form: the household has lists.
     expect(screen.queryByRole('button', { name: /create list/i })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #355 — the tick, the order, and what a bought row says.
+//
+// The ORDERING RULE itself is shopping.test.js's (pure, exhaustive, and where
+// the mutation lands). What only this level can answer is that the rendered
+// DOM is in that order, that the row's primary control reaches the purchase
+// handler with THIS item, and that a bought row offers the way back.
+// ---------------------------------------------------------------------------
+
+/** Bought earlier than boughtBread, so the two have an order between them. */
+const boughtButter = {
+  ...milk,
+  id: 'i4',
+  name: 'Butter',
+  added_at: '2026-09-05T00:30:00Z',
+  purchased_at: '2026-09-05T03:30:00Z',
+  purchased_by_member_id: 'm2',
+}
+
+describe('#355 AC 5 — bought items sink, and the top of the screen is what is left to find', () => {
+  it('renders unbought first in added order and bought last in purchase order', () => {
+    // Handed in deliberately shuffled: the component may not lean on the order
+    // the read happened to use.
+    setup({ items: [boughtBread, eggs, boughtButter, milk] })
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Butter', 'Bread'])
+  })
+
+  it('SIX items of which THREE are bought — the AC’s own fixture, by row identity', () => {
+    const rice = { ...milk, id: 'i5', name: 'Rice', added_at: '2026-09-05T05:00:00Z' }
+    const boughtFlour = {
+      ...milk,
+      id: 'i6',
+      name: 'Flour',
+      added_at: '2026-09-05T06:00:00Z',
+      purchased_at: '2026-09-05T02:00:00Z',
+      purchased_by_member_id: 'm1',
+    }
+    setup({ items: [boughtBread, rice, boughtButter, milk, boughtFlour, eggs] })
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Rice', 'Flour', 'Butter', 'Bread'])
+    const rows = screen.getByRole('list').querySelectorAll('li')
+    expect(rows).toHaveLength(6)
+    // Three bought, and they are the LAST three — by identity, not by count.
+    for (const [index, row] of [...rows].entries()) {
+      expect(row.classList.contains('shopping-item--bought')).toBe(index >= 3)
+    }
+  })
+
+  it('the FIRST rendered row is an unbought one, asserted by identity and not by counting', () => {
+    setup({ items: [boughtBread, milk] })
+    const rows = screen.getByRole('list').querySelectorAll('li')
+    // Which row, not how many: a component that dropped every bought item
+    // would satisfy a count and fail this.
+    expect(rows[0].querySelector('.shopping-item__name').textContent).toBe('Milk')
+    expect(rows[0]).not.toHaveClass('shopping-item--bought')
+    expect(rows[1].querySelector('.shopping-item__name').textContent).toBe('Bread')
+    expect(rows[1]).toHaveClass('shopping-item--bought')
+    // Nothing was hidden to achieve the order.
+    expect(rows).toHaveLength(2)
+  })
+
+  it('the order is the DOM order, not the stylesheet’s — no row is reordered visually', () => {
+    setup({ items: [boughtBread, milk] })
+    for (const row of screen.getByRole('list').querySelectorAll('li')) {
+      expect(row.style.order).toBe('')
+    }
+  })
+})
+
+describe('#355 AC 3 — the tick', () => {
+  it('the row’s primary control is a button naming what a tap will do', () => {
+    setup({ items: [milk] })
+    const control = screen.getByRole('button', { name: /mark milk bought/i })
+    expect(control).toHaveClass('shopping-item__tick')
+    // The item's own text rides inside the control, so the tap target is the
+    // row rather than a checkbox beside it.
+    expect(control).toHaveTextContent('Milk')
+    expect(control).toHaveTextContent('added by Robin')
+  })
+
+  it('a tap sends purchaseItem for THAT item, and nothing else', async () => {
+    const { onPurchaseItem, onUnpurchaseItem, onRemoveItem } = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /mark eggs bought/i }))
+    expect(onPurchaseItem).toHaveBeenCalledTimes(1)
+    expect(onPurchaseItem).toHaveBeenCalledWith('i2')
+    expect(onUnpurchaseItem).not.toHaveBeenCalled()
+    expect(onRemoveItem).not.toHaveBeenCalled()
+  })
+
+  it('a bought row reads the buyer and the time from the row’s own stamp', () => {
+    setup({ items: [boughtBread] })
+    const row = screen.getByText('Bread').closest('li')
+    // m1 is "Placeholder One"; 04:00 UTC is midnight in New York.
+    expect(row).toHaveTextContent('bought by Placeholder · 12:00 AM')
+    expect(row).not.toHaveTextContent('Placeholder One')
+    expect(row).toHaveClass('shopping-item--bought')
+  })
+
+  it('the stamp is the row’s, not the phone’s: the same row in another zone reads another time', () => {
+    // Without this, a component that formatted `new Date()` would pass every
+    // assertion above on the day the test runs.
+    setup({ items: [boughtBread], timezone: 'UTC' })
+    expect(screen.getByText('Bread').closest('li')).toHaveTextContent(
+      'bought by Placeholder · 4:00 AM',
+    )
+  })
+
+  it('a buyer the roster no longer holds keeps the time and names nobody', () => {
+    setup({ items: [{ ...boughtBread, purchased_by_member_id: null }] })
+    const row = screen.getByText('Bread').closest('li')
+    expect(row).toHaveTextContent(/bought · 12:00 AM/)
+    expect(row).not.toHaveTextContent(/bought by/)
+  })
+
+  it('a bought row is not styled as an error or an alert — it is history, not a problem', () => {
+    setup({ items: [milk, boughtBread] })
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Bread').closest('li').querySelector('.error')).toBeNull()
+  })
+})
+
+describe('#355 AC 4 — not bought after all', () => {
+  it('a bought row offers the reversal with no dialog, and it reaches unpurchaseItem with that item', async () => {
+    const { onUnpurchaseItem, onPurchaseItem } = setup({ items: [milk, boughtBread] })
+    const row = screen.getByText('Bread').closest('li')
+    const back = within(row).getByRole('button', { name: /not bought after all/i })
+    await clickAndSettle(back)
+    // One tap, one call — no confirm step in between.
+    expect(onUnpurchaseItem).toHaveBeenCalledTimes(1)
+    expect(onUnpurchaseItem).toHaveBeenCalledWith('i3')
+    expect(onPurchaseItem).not.toHaveBeenCalled()
+  })
+
+  it('an unbought row offers Remove and no reversal; a bought row the reversal and no Remove or tick', () => {
+    setup({ items: [milk, boughtBread] })
+    const milkRow = screen.getByText('Milk').closest('li')
+    const breadRow = screen.getByText('Bread').closest('li')
+    expect(within(milkRow).getByRole('button', { name: /remove milk/i })).toBeInTheDocument()
+    expect(
+      within(milkRow).queryByRole('button', { name: /not bought after all/i }),
+    ).not.toBeInTheDocument()
+    expect(within(breadRow).queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    expect(
+      within(breadRow).queryByRole('button', { name: /mark .* bought/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('#355 AC 6 — how much is left', () => {
+  it('counts the unbought items, and says so under the list’s name', () => {
+    setup({ items: [milk, eggs, boughtBread] })
+    expect(within(surface()).getByText('2 left to buy')).toBeInTheDocument()
+  })
+
+  it('says "Nothing left to buy" when every item is bought, and the list still shows them', () => {
+    setup({ items: [boughtBread, boughtButter] })
+    expect(within(surface()).getByText('Nothing left to buy')).toBeInTheDocument()
+    expect(rowNames()).toEqual(['Butter', 'Bread'])
+  })
+
+  it('a run with no items at all keeps #353’s empty state and carries no count', () => {
+    setup({ items: [] })
+    expect(within(surface()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+    expect(within(surface()).queryByText(/left to buy/)).not.toBeInTheDocument()
+  })
+
+  it('the list’s region is still named by the list alone, so a tick does not rename it', () => {
+    setup({ items: [milk, boughtBread] })
+    expect(screen.getByRole('region', { name: 'Groceries' })).toBeInTheDocument()
+  })
+})
+
+describe('#355 AC 7 — a second tap while the first is in flight', () => {
+  it('disables the tick, the reversal, Remove and the add form while busy', () => {
+    setup({ items: [milk, boughtBread], busy: true })
+    expect(screen.getByRole('button', { name: /mark milk bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /not bought after all/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /remove milk/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /add item/i })).toBeDisabled()
+  })
+
+  it('a disabled tick sends nothing when tapped', async () => {
+    const { onPurchaseItem } = setup({ items: [milk], busy: true })
+    await clickAndSettle(screen.getByRole('button', { name: /mark milk bought/i }))
+    expect(onPurchaseItem).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #357 — finishing the run: the one irreversible control on this surface.
+//
+// What only this level can answer is the two-step shape — that the first tap
+// writes NOTHING and replaces the button with a sentence naming what carries
+// over, that the way out restores the button having written nothing either,
+// and that the confirming tap reaches the handler with the run THIS SCREEN is
+// showing. What happens after the write — the re-read, the new run, the
+// refusal path — is App.test.jsx's, because this component never sees it.
+// ---------------------------------------------------------------------------
+
+const doneShopping = () => screen.getByRole('button', { name: /done shopping/i })
+const openConfirm = async () => clickAndSettle(doneShopping())
+
+describe('#357 AC 1 — the first tap is a question, not a write', () => {
+  it('offers "Done shopping" between the list and the add form when the run has items', () => {
+    setup()
+    const control = doneShopping()
+    expect(control).toBeInTheDocument()
+    // Directly under the list it is about, and ABOVE the add form — the owner's
+    // call at this story's design pass, on a measurement: a bought row sinks,
+    // so the last row a shopper ticks is near the top, and with this under the
+    // two-field form a twelve-item trip meant 1,700px of scrolling back down.
+    const items = screen.getByRole('list')
+    const form = screen.getByLabelText(/^item$/i).closest('form')
+    expect(items.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(control.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('replaces the button with a confirm naming the consequence, and calls nothing', async () => {
+    const handlers = setup()
+    await openConfirm()
+
+    // Two unbought items, so two carry over. The number is the LIST's, and the
+    // sentence says what happens to them rather than asking "are you sure".
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 2 items not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /keep shopping/i })).toBeInTheDocument()
+    // REPLACES: the control that opened it is gone, so there is no second tap
+    // on the same spot that would mean something different.
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+    // Nothing has been written — not the finish, and not anything else.
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('counts only the UNBOUGHT items, which is what the RPC carries', async () => {
+    // Three items, one already in the cart. A component that counted rows
+    // would say three, and the sentence would promise to carry something the
+    // household has already bought.
+    setup({ items: [milk, eggs, boughtBread] })
+    await openConfirm()
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 2 items not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('says one ITEM, singular, when exactly one is left', async () => {
+    setup({ items: [milk, boughtBread] })
+    await openConfirm()
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 1 item not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing carries over when everything on the run is bought', async () => {
+    setup({ items: [boughtBread] })
+    await openConfirm()
+    expect(within(surface()).getByText('Finish this run? Nothing carries over.')).toBeInTheDocument()
+    // And the control is still offered: a run of bought items is a trip that
+    // is finished, which is exactly when a person taps this.
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+  })
+})
+
+describe('#357 AC 2 — keep shopping', () => {
+  it('restores the button and writes nothing', async () => {
+    const handlers = setup()
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /keep shopping/i }))
+
+    expect(doneShopping()).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^finish$/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/carry over to the next list/)).not.toBeInTheDocument()
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+    // The run is untouched: the same rows, in the same order.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+  })
+})
+
+describe('#357 AC 3 — the confirming tap', () => {
+  it('sends onFinishRun with the run on screen, once, and nothing else', async () => {
+    const handlers = setup()
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /^finish$/i }))
+
+    expect(handlers.onFinishRun).toHaveBeenCalledTimes(1)
+    // The RUN, never the list and never an item — `0033`'s whole design, and
+    // what stops a stale screen closing a run it has not seen.
+    expect(handlers.onFinishRun).toHaveBeenCalledWith('r1')
+    expect(handlers.onFinishRun).not.toHaveBeenCalledWith('l1')
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onFinishRun') expect(handler).not.toHaveBeenCalled()
+    }
+  })
+
+  it('a carried item says so, from carried_from_item_id and not from its stamps', () => {
+    // The mark is the COLUMN. A row whose `added_at` predates the run reads
+    // identically to one that does not, and only the copy carries this.
+    const carried = { ...milk, carried_from_item_id: 'i0' }
+    setup({ items: [carried, eggs] })
+    const carriedRow = screen.getByText('Milk').closest('li')
+    expect(carriedRow).toHaveTextContent('from last run')
+    // It rides beside the adder rather than replacing them: `0033` copies the
+    // original's `added_by_member_id`, so the row still knows who wanted it.
+    expect(carriedRow).toHaveTextContent('from last run · added by Robin')
+    // SYNTHETIC CONTROL: the neighbour is an ordinary item and says nothing.
+    // Without it, a component that printed the mark on every row would pass.
+    expect(screen.getByText('Eggs').closest('li')).not.toHaveTextContent(/from last run/)
+  })
+})
+
+describe('#357 AC 4 — an empty run offers no way to finish', () => {
+  it('draws no "Done shopping" when the run has no items', () => {
+    setup({ items: [] })
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+    // The empty state is unchanged — this is an absence, not a replacement.
+    expect(within(surface()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('draws none for a list with no open run either', () => {
+    setup({ runs: [], items: [] })
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+  })
+
+  it('is per LIST: the list with items offers it and the empty one does not', () => {
+    const hardware = { ...list, id: 'l2', name: 'Hardware' }
+    const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
+    setup({ lists: [list, hardware], runs: [run, hardwareRun], items: [milk] })
+    const groceries = screen.getByRole('region', { name: 'Groceries' })
+    const other = screen.getByRole('region', { name: 'Hardware' })
+    expect(within(groceries).getByRole('button', { name: /done shopping/i })).toBeInTheDocument()
+    expect(
+      within(other).queryByRole('button', { name: /done shopping/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('#357 AC 6 — the confirm on a keyboard', () => {
+  it('lands focus on "Keep shopping", so an accidental Enter does not finish', async () => {
+    const handlers = setup()
+    await openConfirm()
+    const keep = screen.getByRole('button', { name: /keep shopping/i })
+    expect(document.activeElement).toBe(keep)
+    // And the armed key really is the way out: pressing it here backs out.
+    await clickAndSettle(document.activeElement)
+    expect(handlers.onFinishRun).not.toHaveBeenCalled()
+    expect(doneShopping()).toBeInTheDocument()
+  })
+
+  it('both controls are real buttons, so tab reaches them and Enter activates them', async () => {
+    setup()
+    await openConfirm()
+    for (const control of [
+      screen.getByRole('button', { name: /^finish$/i }),
+      screen.getByRole('button', { name: /keep shopping/i }),
+    ]) {
+      expect(control.tagName).toBe('BUTTON')
+      expect(control).not.toBeDisabled()
+      // Nothing takes them out of the tab order or hides them from the
+      // accessibility tree — the two ways a visible control stops being one.
+      expect(control).not.toHaveAttribute('tabindex', '-1')
+      expect(control).not.toHaveAttribute('aria-hidden')
+    }
+  })
+
+  it('the confirming control is not styled as a destruction — nothing is destroyed', async () => {
+    // `button--danger` is Remove's and sign-out-everywhere's. A finish moves
+    // the unbought items forward and leaves the bought ones on the closed run,
+    // so the red would be saying something untrue.
+    setup()
+    await openConfirm()
+    expect(screen.getByRole('button', { name: /^finish$/i })).not.toHaveClass('button--danger')
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('#357 — a write in flight', () => {
+  it('disables both confirm controls while busy, and a tap sends nothing', async () => {
+    const { onFinishRun } = setup({ busy: true })
+    // The opening control is disabled too, so the confirm is unreachable while
+    // another write is in flight.
+    expect(doneShopping()).toBeDisabled()
+    await openConfirm()
+    expect(screen.queryByRole('button', { name: /^finish$/i })).not.toBeInTheDocument()
+    expect(onFinishRun).not.toHaveBeenCalled()
+  })
+
+  it('a finish that is still in flight leaves the confirm on screen', async () => {
+    let settle
+    const pending = new Promise((resolve) => {
+      settle = resolve
+    })
+    setup({ onFinishRun: vi.fn().mockReturnValue(pending) })
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /^finish$/i }))
+    // Nothing is patched from the answer, so until App re-reads there is still
+    // a run on screen and still a way to see what is happening.
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+    await act(async () => settle())
   })
 })

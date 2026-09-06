@@ -248,6 +248,36 @@ describe('the writers go through the RPCs, by name AND argument object', () => {
     ])
   })
 
+  it('#355: both return the STAMPED ROW, which is the whole re-read the tick performs', async () => {
+    // Under #355's one-round-trip decision the answer is not a receipt — it is
+    // the data the screen redraws from. A version of these that returned
+    // nothing would still pass the argument test above and leave the tab
+    // showing a row that never changed, so the pass-through is asserted here
+    // and the item id is NOT sent back as a stamp: the time and the buyer are
+    // the database's, like every stamp since 0004.
+    const stamped = { ...ITEM, purchased_at: '2026-09-05T05:00:00Z', purchased_by_member_id: 'm1' }
+    results.purchase_shopping_item = { data: stamped, error: null }
+    expect(await purchaseItem(client, 'i1')).toEqual(stamped)
+
+    results.unpurchase_shopping_item = { data: ITEM, error: null }
+    expect(await unpurchaseItem(client, 'i1')).toEqual(ITEM)
+
+    for (const call of rpcs()) {
+      expect(Object.keys(call.args)).toEqual(['item'])
+      expect(JSON.stringify(call.args)).not.toMatch(/purchased|member|_at/)
+    }
+  })
+
+  it('#355: a refused tick carries what we were doing and the cause, so App can show it and re-read', async () => {
+    results.purchase_shopping_item = {
+      data: null,
+      error: { message: 'item already bought', code: 'P0001' },
+    }
+    const failure = await purchaseItem(client, 'i1').catch((e) => e)
+    expect(failure.message).toBe('marking it bought: item already bought')
+    expect(failure.cause.code).toBe('P0001')
+  })
+
   it('finishRun calls finish_shopping_run with { run_id } — the RUN, never the list — and returns the new run', async () => {
     // #354. The argument NAME is the contract, and the io test is where a
     // misspelling is caught before the live probe: PostgREST resolves by the

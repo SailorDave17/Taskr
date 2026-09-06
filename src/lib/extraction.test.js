@@ -359,8 +359,9 @@ describe('AC 3 — the grader reports error, tolerance, attribution and refusals
   })
 
   it('names an answer it cannot parse rather than throwing on it', async () => {
-    // #56 AC 3 requires an unparseable provider response to map to a distinct
-    // stated failure. A grader that throws hands its caller no way to report one.
+    // #56 AC 3 — carried into #208 AC 5 — requires an unparseable provider
+    // response to map to a distinct stated failure. A grader that throws hands
+    // its caller no way to report one.
     for (const junk of [null, undefined, 42, 'three hours', { kind: 'capacity' }, { kind: 'chores' }]) {
       expect(gradeItem(answerable[0], junk).outcome).toBe(OUTCOMES.MALFORMED)
     }

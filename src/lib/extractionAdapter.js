@@ -48,12 +48,12 @@
 //
 // EVERY ATTEMPT HAS A NAMED OUTCOME (AC 2)
 //
-// #56 AC 3's requirement, carried forward: a provider error, a timeout and an
-// unparseable response each map to a DISTINCT named outcome rather than to one
-// generic failure. The outcome is the adapter's own tally — the grader never
-// sees it. What the grader sees is the contract: the extractor built by
-// `createExtractor` returns one of the three documented shapes for EVERY
-// attempt (AC 1), so a transport-level failure arrives at the grader as a
+// #56 AC 3's requirement, carried forward into #208 AC 5: a provider error, a
+// timeout and an unparseable response each map to a DISTINCT named outcome
+// rather than to one generic failure. The outcome is the adapter's own tally —
+// the grader never sees it. What the grader sees is the contract: the extractor
+// built by `createExtractor` returns one of the three documented shapes for
+// EVERY attempt (AC 1), so a transport-level failure arrives at the grader as a
 // refusal whose reason names the outcome. The grader then scores it as a
 // refusal-on-answerable — a miss — which is the honest reading: the denominator
 // is what was answerable, not what the transport managed to deliver. The

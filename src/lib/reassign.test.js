@@ -335,3 +335,68 @@ describe('planReassignment — the verdict travels (AC 7)', () => {
     expect(verdict.minutesMoved).toBe(result.minutesMoved)
   })
 })
+
+describe('#284 — a fresh household, everything entered and nothing assigned', () => {
+  // The #52 shape: two people at 200 and 240 min, thirteen chores totalling
+  // 375 min, two exclusions, and not one assignment — the exact state the
+  // driven setup run stalled in, where the split's "deal these out" now runs
+  // this planner. Nothing here is new logic; the point of the fixture is that
+  // the run a capacity change makes ALSO answers the from-nothing case.
+  const members = [
+    { id: 'm-alex', weekly_minutes: 200 },
+    { id: 'm-robin', weekly_minutes: 240 },
+  ]
+  const minutes = [60, 45, 45, 30, 30, 30, 30, 25, 20, 20, 15, 15, 10]
+  const chores = minutes.map((m, i) => row(`c${String(i + 1).padStart(2, '0')}`, m))
+  const exclusions = [
+    { chore_id: 'c01', member_id: 'm-robin' },
+    { chore_id: 'c02', member_id: 'm-alex' },
+  ]
+
+  const loadOf = (placements, memberId) =>
+    placements
+      .filter((p) => p.member_id === memberId)
+      .reduce((sum, p) => sum + chores.find((c) => c.id === p.chore_id).expected_minutes, 0)
+
+  it('places every chore on somebody, respecting both exclusions, with nothing left over', () => {
+    const { placements } = plan({ members, chores, exclusions })
+    const map = placementMap(placements)
+
+    expect(minutes.reduce((a, b) => a + b, 0)).toBe(375)
+    expect(placements).toHaveLength(13)
+    expect(placements.every((p) => p.member_id != null)).toBe(true)
+    expect(map.get('c01')).toBe('m-alex')
+    expect(map.get('c02')).toBe('m-robin')
+    expect(loadOf(placements, 'm-alex') + loadOf(placements, 'm-robin')).toBe(375)
+  })
+
+  it('lands level, in proportion to each person’s minutes — the first fair split', () => {
+    // Fair share is 375 of 440, 0.852: alex at ~170 and robin at ~205. The
+    // hand partition alex = 60+45+30+20+15 = 170 (0.850) / robin = 205 (0.854)
+    // exists, so level is reachable; the allocator's own answer is asserted
+    // by its verdict and by both loads sitting inside capacity.
+    const { placements, verdict } = plan({ members, chores, exclusions })
+
+    expect(verdict.contested).toBe(true)
+    expect(verdict.level).toBe(true)
+    expect(loadOf(placements, 'm-alex')).toBeLessThanOrEqual(200)
+    expect(loadOf(placements, 'm-robin')).toBeLessThanOrEqual(240)
+  })
+
+  it('leaves a chore placed by hand where it is, and counts it (AC 2)', () => {
+    // The same household, with one chore given to robin from the Who dropdown
+    // before the button is pressed. It is absent from the payload — the RPC
+    // refuses a payload naming a manual chore — and its 45 min sit on robin,
+    // so robin's dealt-out share comes out that much lighter.
+    const pinned = chores.map((c) =>
+      c.id === 'c03' ? row('c03', 45, { holder: 'm-robin', source: 'manual' }) : c,
+    )
+    const { placements } = plan({ members, chores: pinned, exclusions })
+    const free = plan({ members, chores, exclusions }).placements
+
+    expect(placements).toHaveLength(12)
+    expect(placementMap(placements).has('c03')).toBe(false)
+    expect(loadOf(placements, 'm-robin') + 45).toBeLessThanOrEqual(240)
+    expect(loadOf(placements, 'm-robin')).toBeLessThan(loadOf(free, 'm-robin'))
+  })
+})

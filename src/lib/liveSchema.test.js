@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -19,9 +19,11 @@ import {
   LIVE_SCHEMA,
   LIVE_TABLES,
   RPC_PROBE_VALUE,
+  RPC_PROBE_VALUES,
   describeRpcError,
   describeSchemaError,
   describeSignInError,
+  rpcArgNames,
   rpcProbeArgs,
 } from './liveSchema.js'
 
@@ -90,12 +92,13 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // SIX since #95 added `calendar_connections` — five after #37's
-    // `chore_exclusions`, four after #62 dropped `household_devices`. The number
-    // is a floor against a vacuous pass, not a target: it goes DOWN when a table
-    // legitimately leaves and UP when one arrives, and either edit should be
-    // visible in review rather than automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(6)
+    // SEVEN since #96 added `calendar_busy` — six after #95's
+    // `calendar_connections`, five after #37's `chore_exclusions`, four after
+    // #62 dropped `household_devices`. The number is a floor against a vacuous
+    // pass, not a target: it goes DOWN when a table legitimately leaves and UP
+    // when one arrives, and either edit should be visible in review rather than
+    // automatic.
+    expect(readTables.size).toBeGreaterThanOrEqual(7)
     expect(readTables).toContain('chores')
   })
 
@@ -115,12 +118,12 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the six tables the app still reads', () => {
+  it('covers the seven tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
-    // fifth — and to six with #95's `calendar_connections`. Every edit is
-    // stated, because a required-set that changes size silently is exactly how
-    // somebody quietly weakens a check.
+    // fifth — to six with #95's `calendar_connections`, and to seven with #96's
+    // `calendar_busy`. Every edit is stated, because a required-set that changes
+    // size silently is exactly how somebody quietly weakens a check.
     for (const table of [
       'households',
       'members',
@@ -128,6 +131,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'member_capacity',
       'chore_exclusions',
       'calendar_connections',
+      'calendar_busy',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
@@ -142,6 +146,16 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(LIVE_TABLES).not.toContain('calendar_tokens')
   })
 
+  it('#96 — the derived table is here and the credential still is not', () => {
+    // `0030` adds the THIRD calendar table, and the split it inherits is the
+    // whole minimization decision: the household reads derived minutes, nobody
+    // reads the refresh token. Asserted as a pair, because the failure worth
+    // catching is not a missing entry — it is a future migration granting the
+    // client something on `calendar_tokens` and this list quietly following.
+    expect(LIVE_TABLES).toContain('calendar_busy')
+    expect(LIVE_TABLES).not.toContain('calendar_tokens')
+  })
+
   it('takes its column lists from the data layer rather than restating them', () => {
     // The point of AC 3: these are the SAME strings the queries use, so adding a
     // column to a select cannot leave the check behind. Asserting identity here
@@ -152,6 +166,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.members).toBe(MEMBER_COLUMNS)
     expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
     expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
+    expect(byTable.calendar_busy).toBe(CALENDAR_BUSY_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -167,6 +182,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(household).toContain('.select(MEMBER_COLUMNS)')
     expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
     expect(calendar).toContain('.select(CALENDAR_CONNECTION_COLUMNS)')
+    expect(calendar).toContain('.select(CALENDAR_BUSY_COLUMNS)')
   })
 })
 
@@ -260,8 +276,11 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
     for (const [fn, args] of calledRpcs) {
       const entry = LIVE_RPCS.find((e) => e.fn === fn)
       if (!entry) wrong.push(`${fn}: called but absent from LIVE_RPCS`)
-      else if (sorted(entry.args).join() !== args.join())
-        wrong.push(`${fn}: called with (${args.join(', ')}), listed as (${entry.args.join(', ')})`)
+      else if (sorted(rpcArgNames(entry.args)).join() !== args.join())
+        wrong.push(
+          `${fn}: called with (${args.join(', ')}), listed as ` +
+            `(${rpcArgNames(entry.args).join(', ')})`,
+        )
     }
     expect(
       wrong,
@@ -314,14 +333,81 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
   })
 
   it('probes every argument the function takes, with a value that matches no row', () => {
-    expect(rpcProbeArgs(['chore_id', 'member_id'])).toEqual({
+    expect(rpcProbeArgs({ chore_id: 'uuid', member_id: 'uuid' })).toEqual({
       chore_id: RPC_PROBE_VALUE,
       member_id: RPC_PROBE_VALUE,
     })
     // A nil UUID rather than an empty string: it coerces to `uuid` AND to `text`,
-    // so one placeholder covers both argument types this app passes, and it is
-    // the value guaranteed to name nothing.
+    // so one placeholder covers both of those, and it is the value guaranteed to
+    // name nothing.
     expect(RPC_PROBE_VALUE).toMatch(/^0{8}-0{4}-0{4}-0{4}-0{12}$/)
+  })
+
+  // #268 — the type half. Everything above this point is about argument NAMES,
+  // because until this story the probe needed nothing else. A name-only list is
+  // what let two functions be probed with a value that could not coerce to their
+  // arguments, and Postgres answers a bad coercion BEFORE the privilege check, so
+  // both rows went green having proved strictly less than the rows beside them.
+  describe('#268 — every declared argument type has a placeholder to probe with', () => {
+    it('builds probe arguments for every entry in the list, throwing on none', () => {
+      // The guard that makes AC 4 real, and it is deliberately here rather than in
+      // `schema.integration.test.js`: that file needs live credentials and CI has
+      // none, so an unknown type declared there would surface on one machine and
+      // in no gate. This file runs on every push.
+      const broken = []
+      for (const { fn, args } of LIVE_RPCS) {
+        try {
+          const probe = rpcProbeArgs(args)
+          if (Object.keys(probe).join() !== rpcArgNames(args).join())
+            broken.push(`${fn}: probe arguments are not the declared arguments`)
+        } catch (error) {
+          broken.push(`${fn}: ${error.message}`)
+        }
+      }
+      expect(broken, broken.join('\n')).toEqual([])
+    })
+
+    it('refuses a type it has no placeholder for, rather than defaulting to one', () => {
+      // THE CONTROL for the test above, and the one that decides whether it is
+      // worth anything: without this, `rpcProbeArgs` could return the nil UUID for
+      // every type it has never heard of and the loop would stay green while the
+      // next non-uuid argument reproduced #268 exactly.
+      expect(() => rpcProbeArgs({ due_at: 'timestamptz' })).toThrow(/no probe placeholder/)
+      expect(() => rpcProbeArgs({ due_at: 'timestamptz' })).toThrow(/due_at/)
+    })
+
+    it('gives each type a value of that type, and never one that names a row', () => {
+      // The values themselves, pinned. `date` is the first date Postgres can
+      // represent and `bigint` is a version no household has been at, so a probe
+      // that somehow reached a lookup would still find nothing; `jsonb` is the
+      // JSON `null`, which is neither the array nor the object any caller passes.
+      expect(RPC_PROBE_VALUES).toEqual({
+        uuid: RPC_PROBE_VALUE,
+        text: RPC_PROBE_VALUE,
+        bigint: '0',
+        date: '0001-01-01',
+        jsonb: 'null',
+      })
+      // Every one is a STRING, because these travel as query parameters on a GET
+      // and Postgres coerces them from text. Passing a JS object for a `jsonb`
+      // argument is what a reader would reach for first, and it was measured
+      // failing against the live project with `22P02 invalid input syntax for
+      // type json` — the very error this story removes.
+      for (const value of Object.values(RPC_PROBE_VALUES)) expect(typeof value).toBe('string')
+    })
+
+    it('declares a type for every argument, so a name can never arrive alone', () => {
+      // The shape assertion. `args` used to be an array of names; an array would
+      // still iterate through `Object.entries` — yielding index keys — so a half
+      // -converted entry has to fail on something other than a crash.
+      for (const { fn, args } of LIVE_RPCS) {
+        expect(Array.isArray(args), `${fn}: args is a list of names, not name-to-type`).toBe(false)
+        for (const [name, type] of Object.entries(args)) {
+          expect(typeof type, `${fn}(${name}) declares no type`).toBe('string')
+          expect(Object.keys(RPC_PROBE_VALUES)).toContain(type)
+        }
+      }
+    })
   })
 })
 
@@ -381,10 +467,48 @@ describe('#85 — a probe failure names the function and what was asked of it', 
         message: 'no such chore, or not your household',
       }),
     ).toBeNull()
+  })
+
+  // #268. This pair used to be ONE test, and its second half asserted that
+  // `22P02` is PRESENT — which was true and insufficient, and is the shape
+  // `a-copy-test-defends-the-sentence` names: a green test standing guard over a
+  // claim that had stopped being the claim anyone needed. A coercion error does
+  // prove the function resolved. It also proves the probe stopped before the
+  // privilege check, so the row cannot say what the nine rows beside it say, and
+  // the two functions it happened to affect were green for eleven days.
+  it('REFUSES a coercion error, because a row answered that way proves less', () => {
+    const line = describeRpcError('apply_assignments', ['household_id', 'expected_version'], {
+      code: '22P02',
+      message: 'invalid input syntax for type bigint: "00000000-0000-0000-0000-000000000000"',
+    })
+    expect(line).toContain('ARGUMENT COERCION')
+    expect(line).toContain('never reached the privilege check')
+    // It names the repair, and the repair is in THIS repo — a class-22 answer is
+    // not a broken project, so a line that read like the others would send
+    // whoever ran `check:live` to the SQL editor for a fault that is in a list.
+    expect(line).toContain('LIVE_RPCS')
+    expect(line).toContain('RPC_PROBE_VALUES')
+    expect(line).toContain('apply_assignments')
+  })
+
+  it('refuses the OTHER coercion code too, which is how the second row hid', () => {
+    // `skip_repeat_occurrence(skip_date date)` answered `22007`, not `22P02`.
+    // Pinning one code would have caught one of the two functions, and the
+    // classifier keys on the class rather than on the member of it somebody
+    // happened to measure first.
+    expect(
+      describeRpcError('skip_repeat_occurrence', ['chore_id', 'skip_date'], {
+        code: '22007',
+        message: 'invalid input syntax for type date',
+      }),
+    ).toContain('ARGUMENT COERCION')
+    // And the class boundary holds in the other direction: `25006` and `P0001`
+    // start with 2 and P and must stay PRESENT, which the tests above assert.
+    // `42P02` is not class 22 and must not be swept in by a loose pattern.
     expect(
       describeRpcError('complete_chore', ['chore_id'], {
-        code: '22P02',
-        message: 'invalid input syntax for type uuid',
+        code: '42P02',
+        message: 'there is no parameter $1',
       }),
     ).toBeNull()
   })

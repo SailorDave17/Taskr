@@ -519,8 +519,9 @@ describe('AC 6 — Google fails, and no token row exists', () => {
   it('gives each failure its OWN sentence, so they do not collapse into one', async () => {
     // Four distinct causes with four distinct repairs: retry, wait, report a
     // bug, revoke and reconnect. A single generic message sends whoever is
-    // holding the phone to the wrong one — which is what #56 AC 3 asks for on
-    // the extraction endpoint, and the same argument applies here.
+    // holding the phone to the wrong one — which is what #208 AC 5 asks for on
+    // the extraction endpoint (#56 AC 3 as filed), and the same argument applies
+    // here.
     const messages = new Set()
     for (const build of [
       () => makeFetch(new Response('{"error":"invalid_grant"}', { status: 400 })),

@@ -453,7 +453,12 @@ export function publicProaclQuery() {
  * confirmed when BOTH halves hold: anon lost everything, and authenticated lost
  * nothing.
  *
- * All nine tables, not the two `0017` names. A revoke aimed at one table cannot
+ * Every table `LIVE_SCHEMA` names AND one it deliberately does not —
+ * `calendar_tokens`, which no client is granted and which `liveSchema.test.js`
+ * asserts is absent from that list — not the two `0017` names. *(This said
+ * "every table LIVE_SCHEMA names" for an afternoon on 2026-09-04, replacing a
+ * stale "all nine"; the count is a copy of the list below and the test at
+ * probe-live-grants.test.js already refuses both drifts.)* A revoke aimed at one table cannot
  * splash onto another, but this list costs nothing to widen and a control that
  * only watches the tables you changed cannot report a surprise.
  *
@@ -462,6 +467,16 @@ export function publicProaclQuery() {
  * client is granted nothing on either, and `0011` says so.
  */
 export const MEASURED_TABLE_ACLS = Object.freeze([
+  // #96, arriving with `0030`, which revokes wholesale and grants select by
+  // column — so the expected table-level reading is an absence, like
+  // `member_split_seen` and `chore_repeat_exceptions` below. UNMEASURED as yet:
+  // `0030` is not applied, so this row is red on purpose until it is, the same
+  // way the `calendar_busy` entry in `LIVE_SCHEMA` is. The client holds no write
+  // privilege of any kind here — the calendar-busy Edge Function is the single
+  // writer, as service_role — so a table-level letter appearing for
+  // `authenticated` would mean a later migration widened the write model, which
+  // is what this control exists to report.
+  Object.freeze({ table: 'calendar_busy', authenticated: null }),
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
@@ -740,8 +755,11 @@ async function main(env) {
         'recorded value. Before `0019` (#227) was pasted, EXACTLY THREE were\n' +
         'expected — `households` reading `ardDxtm` against no table-level grant,\n' +
         'and `chores` and `members` reading `dDxtm` against `d`. IT HAS BEEN\n' +
-        'PASTED (2026-08-27, #235), so a moved row now is a REAL FINDING and not\n' +
-        'the entry doing its job. No excused moved row is left.\n\n' +
+        'PASTED (2026-08-27, #235), so a moved row is a REAL FINDING — with ONE\n' +
+        'excused exception since #96: `calendar_busy` reading "the table is not\n' +
+        'there" is `0030` not yet applied, which is the entry doing its job, and\n' +
+        'it drains on `npm run migrate:live`. Any OTHER note on that row, and any\n' +
+        'moved row on any other table, is real.\n\n' +
         'What a moved row means now: a revoke hit `authenticated` when it was\n' +
         'aimed at `anon`, or took a privilege the app needs. `households` losing\n' +
         'its column SELECTs is the one that breaks the app for every signed-in\n' +

@@ -21,8 +21,9 @@ instrument that turns *accurate enough* into a number.
 
 It is built **before** any extractor exists, and that is the point rather than an accident of
 ordering. A corpus and a grader cost two days and can retire the bet; discovering the same thing
-after a capture flow exists costs the flow as well. #56 stands up the endpoint, #43 drives a live
-model through this same grader and records the verdict.
+after a capture flow exists costs the flow as well. #208 stands up the endpoint; #206 drove a live
+model through this same grader and #207 records the verdict. *(This line named #56 and #43, both
+closed superseded 2026-08-27 — #217 carries the full mapping.)*
 
 **Nothing in the app calls any of this.** It makes no network call, needs no API key and needs no
 provider account — asserted by a source-reading test, not by inspection.
@@ -237,12 +238,12 @@ would look identical to a working one until the day it mattered.
   cannot tell *found the right jobs* from *found some jobs*, and that distinction is the whole
   purpose of the attribution counts. The expected title is the verb phrase the description itself
   contains, so a strict match is a fair test rather than a trick.
-- **It does not throw on an answer it cannot parse.** #56 AC 3 requires an unparseable provider
-  response to map to a distinct stated failure; a grader that throws on first contact with a real
-  model gives its caller no way to report one. Junk, a wrong-kind answer, a duplicated entity and an
-  extractor that throws all land in one named `malformed` count.
+- **It does not throw on an answer it cannot parse.** #56 AC 3 — carried into #208 AC 5 — requires
+  an unparseable provider response to map to a distinct stated failure; a grader that throws on first
+  contact with a real model gives its caller no way to report one. Junk, a wrong-kind answer, a
+  duplicated entity and an extractor that throws all land in one named `malformed` count.
 - **It does not read anything outside the description.** The extractor is handed `{ kind, text }`
-  and nothing else — exactly what a real endpoint receives, so #56 implements this contract rather
+  and nothing else — exactly what a real endpoint receives, so #208 implements this contract rather
   than a convenient variant of it, and the grader cannot leak an expected answer into the thing it is
   grading. The positive control is built by *closing over* the corpus instead.
 

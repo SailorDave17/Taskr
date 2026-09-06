@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest'
 import {
   MANAGEMENT_API_ROOT,
   TOKEN_VAR,
+  TOKEN_PAGE,
   compareEcho,
   dollarTagAt,
   echoQuery,
+  explainHttpFailure,
   localBytes,
   localChars,
   localDigest,
@@ -295,6 +297,112 @@ describe(`${TOKEN_VAR} — refusing rather than falling back`, () => {
         throw new Error('ENOENT')
       }),
     ).toBe('')
+  })
+})
+
+describe('a 401 says the token is dead, and only a 401 says it — #324', () => {
+  // The three checks above recognise a wrong credential by its SHAPE and refuse
+  // before sending. An EXPIRED token passes every one of them — right kind, still
+  // well-formed — so it can only be recognised from the RESPONSE. These tests pin
+  // both directions of that, because the risk of the fix is not that the message
+  // fails to appear: it is that widening it swallows the failures already handled.
+  //
+  // `/expired|revoked/i` is the assertion rather than a longer quotation of the
+  // paragraph. A copy test asserts the sentence and defends it whether or not it
+  // is true (cairn `a-copy-test-defends-the-sentence`); what is load-bearing here
+  // is that the message names re-minting at all, and that it is absent elsewhere.
+
+  it('tells a 401 apart, naming expiry and the token page rather than leaving a bare status', () => {
+    const message = explainHttpFailure(401, 'Unauthorized')
+
+    expect(message).toMatch(/\[401\] Unauthorized/) // the raw status survives
+    expect(message).toMatch(/expired|revoked/i)
+    expect(message).toContain(TOKEN_PAGE)
+    expect(message).toContain(TOKEN_VAR)
+  })
+
+  it('says the project and the endpoint are the WRONG next move, which is the actual failure', () => {
+    // The bare `[401] Unauthorized` did not merely fail to help — it pointed the
+    // wrong way. A message that names expiry while leaving "check the project"
+    // equally plausible has not fixed that.
+    expect(explainHttpFailure(401, 'Unauthorized')).toMatch(/project ref|endpoint/i)
+  })
+
+  it.each([
+    [400, 'syntax error at or near "slect"', 'bad SQL in the migration file'],
+    [403, 'Forbidden', 'unmeasured here, so it must not inherit a guess'],
+    [404, 'Project not found', 'the wrong project ref'],
+    [409, 'Conflict', ''],
+    [500, 'Internal Server Error', 'the platform, not the credential'],
+    [503, 'Service Unavailable', ''],
+  ])('leaves %i alone, so widening cannot swallow it (%s)', (status, detail) => {
+    const message = explainHttpFailure(status, detail)
+
+    expect(message).toBe(`[${status}] ${detail}`)
+    expect(message).not.toMatch(/expired|revoked/i)
+    expect(message).not.toContain(TOKEN_PAGE)
+  })
+
+  it('reaches runQuery, so the command that reads the catalog gets it', async () => {
+    const result = await runQuery({
+      ref: 'r',
+      token: 't',
+      sql: 'select 1;',
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        text: async () => JSON.stringify({ message: 'Unauthorized' }),
+      }),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.rows).toBeNull()
+    expect(result.error).toMatch(/expired|revoked/i)
+  })
+
+  it('does not reach runQuery on any other failure', async () => {
+    const result = await runQuery({
+      ref: 'r',
+      token: 't',
+      sql: 'slect 1;',
+      fetchImpl: async () => ({
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({ message: 'syntax error' }),
+      }),
+    })
+
+    expect(result.error).toBe('[400] syntax error')
+    expect(result.error).not.toMatch(/expired|revoked/i)
+  })
+
+  it('does not fire on a transport failure, which has no status at all', async () => {
+    // The path where `status` is null. A truthiness test in place of `!== 401`
+    // would be right about this by accident; an equality test is right on purpose.
+    const result = await runQuery({
+      ref: 'r',
+      token: 't',
+      sql: 'select 1;',
+      fetchImpl: async () => {
+        throw new Error('getaddrinfo ENOTFOUND')
+      },
+    })
+
+    expect(result.error).toMatch(/never completed/)
+    expect(result.error).not.toMatch(/expired|revoked/i)
+  })
+
+  it('leaves the three shape refusals untouched, since they never reach a response', () => {
+    // The near-misses are refused BEFORE anything is sent, so each must still say
+    // what was probably pasted — not that a token expired. This is the widening
+    // AC 3 asks about, checked at the other end of the module.
+    for (const near of ['sb_publishable_abcdefghijklmnop', 'sb_secret_abcdefghijklmnop', 'eyJh.eyJr.sig']) {
+      expect(() => requireAccessToken(near)).toThrow(/PROJECT API KEY|legacy PROJECT key/)
+      expect(() => requireAccessToken(near)).not.toThrow(/expired|revoked/i)
+    }
+
+    expect(() => requireAccessToken('')).toThrow(/is not set/)
+    expect(() => requireAccessToken('')).not.toThrow(/expired|revoked/i)
   })
 })
 

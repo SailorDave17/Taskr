@@ -639,7 +639,7 @@ describe('weekly capacity, run against a real Postgres', () => {
   // is sent, and capacity.io.test.js proves that. This is the other half, and
   // the AC insists on it by name: the DATABASE must refuse the same values, so
   // a client that skips the normalizer — a future caller, the extraction path in
-  // #57, a curl — cannot file minutes the fairness arithmetic could not survive.
+  // #210, a curl — cannot file minutes the fairness arithmetic could not survive.
   // ---------------------------------------------------------------------------
 
   describe('#46 AC 3 — the database refuses what the normalizer refuses', () => {

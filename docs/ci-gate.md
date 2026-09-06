@@ -118,8 +118,138 @@ control that fires on the exact broken list. Nothing in the suite read this file
 `npm test` was green throughout — and #243's own AC 3 had named the risk in advance: *a trigger list
 is exactly the kind of claim that is satisfied by inspection and false in practice.*
 
-## Branch protection — AC 5, and the honest answer
+## Branch protection — the gate is enforcing
 
+**Current state, and the only paragraph in this section that describes the repository today.**
+Everything below it is the record of how it got here, kept because two of the three previous answers
+were wrong and the shape of the error is worth more than the outcome.
+
+*Measured 2026-09-03 (#289).* Ruleset **`Branches not to delete`** (id 21859879), enforcement
+`active`, **no bypass actors**, targeting `~DEFAULT_BRANCH`, `main`, `develop` and `release`. It now
+carries **four** rules:
+
+| Rule | Effect |
+|---|---|
+| `deletion` | those branches cannot be deleted, by anyone |
+| `non_fast_forward` | they cannot be force-pushed, by anyone |
+| `pull_request` | they cannot be pushed to directly — every change arrives as a pull request |
+| `required_status_checks` | a pull request cannot merge until **`Lint, test, build`** reports success |
+
+So **the gate is enforcing, not advisory.** A red run blocks the merge and a direct push is refused,
+on all three branches. The cost was stated and accepted at the filing gate: it stops the owner's own
+direct pushes to `develop` too, which is the point — a direct push bypasses the check entirely and
+leaves the gate advisory for exactly the person most able to skip it.
+
+`required_approving_review_count` is **0**, deliberately. GitHub does not allow you to approve your
+own pull request, so any number above zero would block every merge in a solo repository permanently —
+the same permanent-deadlock shape the ordering rule below exists to prevent, arriving from the review
+side instead of the status side.
+
+**Read it back from `rules/branches/<name>`, per branch, or you have not read it at all.** The proof
+that this is enforced rather than merely configured is in *Proving the gate enforces* below: a rule
+that is present and not acting looks identical to one that is working.
+
+### How it was applied, and why the order could not be reversed
+
+**A required check must name a context that actually fires on the branch it guards.** Requiring one
+that cannot fire blocks that branch's merges permanently — and the repair is then gated behind the
+rule that broke it. So the run was confirmed on each of the three branches **before** the rule was
+added:
+
+| Branch | Pull request | `pull_request` run | Result |
+|---|---|---|---|
+| `develop` | [#290](https://github.com/SailorDave17/Taskr/pull/290) | [33325929547](https://github.com/SailorDave17/Taskr/actions/runs/33325929547) | success |
+| `release` | [#315](https://github.com/SailorDave17/Taskr/pull/315) | [33648973418](https://github.com/SailorDave17/Taskr/actions/runs/33648973418) | success |
+| `main` | [#321](https://github.com/SailorDave17/Taskr/pull/321) | [33803273612](https://github.com/SailorDave17/Taskr/actions/runs/33803273612) | success |
+
+**`main` is the one worth understanding**, because it fired while its own copy of the workflow could
+not possibly have matched. *Measured 2026-09-03*: `main` is 37 commits behind `release` and still
+carries the pre-#243 trigger list — `pull_request: ['develop/**']`, a glob that matches neither
+`main` nor `develop`. The run fired anyway.
+
+**GitHub resolves a `pull_request` trigger from the head ref, not the base.** That is measurable in
+this repository's own history and was not taken on faith: PR #288 — the trigger fix itself — produced
+`pull_request` run 33324936480 at 17:19Z on 2026-08-30, while `develop`, its base, still carried the
+broken glob at commit `1b6bf5d`. The fix was in the head, and the head is what was read. The
+consequence for anyone reading this later: **a branch whose workflow file is stale is not thereby
+exempt from a required check**, so you cannot infer from a branch's own `ci.yml` whether a check will
+fire on a pull request into it.
+
+### Proving the gate enforces — the rule acting, not the rule listed
+
+A rule that is present and unenforced reads identically to one that is working, so both halves were
+observed rather than inferred.
+
+**A direct push to `develop` is refused.** *Measured 2026-09-03*, as a real push of a revertible
+docs-only commit — `--dry-run` cannot prove this, because it attempts no ref update and GitHub never
+evaluates a ruleset for one. A push that is *accepted* would be the finding rather than the proof.
+
+```
+$ git push --no-verify origin HEAD:refs/heads/develop
+remote: error: GH013: Repository rule violations found for refs/heads/develop.
+remote:
+remote: - Changes must be made through a pull request.
+remote:
+remote: - Required status check "Lint, test, build" is expected.
+remote:
+ ! [remote rejected] HEAD -> develop (push declined due to repository rule violations)
+```
+
+`origin/develop` was re-read afterwards and still stood at `663c9af` — nothing landed. Both new rules
+are named in the refusal, which is the ruleset acting rather than a rule list being recited back.
+
+**`--no-verify` is load-bearing in that command, and is not a way around anything.** This repository
+sets `core.hooksPath=githooks`, and `githooks/pre-push` refuses `develop` **locally**, before the push
+leaves the machine. Without the bypass the refusal would have come from the local hook and would have
+proven the wrong thing entirely — the subject here is the *server-side* rule, which is the half that
+holds against every client rather than one checkout. The two guards now agree, and that redundancy is
+worth keeping: the local one fails in a second, the remote one cannot be skipped.
+
+**Note that `githooks/pre-push`'s own docstring is now stale on this point.** It explains itself with
+*"GitHub gates both classic branch protection AND repository rulesets behind GitHub Pro for private
+repos"* and lists Taskr among the repos where "the server side cannot be made to hold the line at
+all". That was true on 2026-08-04 and stopped being true when the repo went public. The hook is still
+worth having for the reason its next paragraph gives — it fails in seconds instead of after a round
+trip — but it is no longer the only thing holding the line here.
+
+**A pull request whose required check has not reported success is blocked.** The before-and-after
+matters more than either reading alone, because a rule that is present and not enforced produces the
+*same* rule list as one that is working:
+
+| When | Pull request | `mergeStateStatus` |
+|---|---|---|
+| before the rules were added, 20:42Z | #321, checks pending | `UNSTABLE` — mergeable, nothing blocking |
+| after the rules were added, 21:26Z | #322, `Lint, test, build` **pending** | `BLOCKED` |
+
+`UNSTABLE` means *there is a failing or pending check and it does not stop you*; `BLOCKED` means the
+rule is refusing the merge.
+
+**Read `mergeStateStatus`, not `mergeable`.** In the very same reading that returned `BLOCKED`, PR
+#322 also returned `mergeable: MERGEABLE` — and that is not a contradiction. `mergeable` answers
+*do these branches merge cleanly*, a question about content; `mergeStateStatus` answers *are you
+allowed to merge them*, which is the question a rule changes. `gh pr view --json mergeable` therefore
+reports `MERGEABLE` on both sides of this change and is the wrong instrument. The full reading, taken
+2026-09-03T21:26:48Z:
+
+```
+$ gh pr view 322 --json mergeable,mergeStateStatus
+{"mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE"}
+
+$ gh pr checks 322
+Lint, test, build   pending
+```
+
+#322 was a throwaway opened for exactly this reading and closed immediately; it delivered nothing.
+The reason a *pending* check is a fair test of the rule is that the criterion is "has not reported
+success", and pending is one of the two ways that happens — the other being an outright failure,
+which the rule treats identically.
+
+---
+
+> **The three paragraphs below are history.** They are the 2026-08-04 record and its two corrections,
+> kept because the *shape* of each error recurs: both were produced by reading one endpoint and
+> concluding about the repository.
+>
 > **The premise below expired, and the first correction to it was WRONG.** Everything after this
 > block is kept as the 2026-08-04 record; read this first.
 >
@@ -143,21 +273,21 @@ is exactly the kind of claim that is satisfied by inspection and false in practi
 > `Branch not protected` is therefore a correct sentence and a misleading reading — **ask
 > `rules/branches/<name>`, never `branches/<name>/protection`, before concluding a branch is open.**
 >
-> **What is actually enforced, as of 2026-08-30.** Ruleset **`Branches not to delete`** (id 21859879),
-> enforcement `active`, **no bypass actors**, targeting `~DEFAULT_BRANCH`, `main`, `develop` and
-> `release`. It carries exactly two rules:
+> **What was enforced on 2026-08-30 — superseded 2026-09-03 by #289, see the top of this section.**
+> Ruleset **`Branches not to delete`** (id 21859879), enforcement `active`, **no bypass actors**,
+> targeting `~DEFAULT_BRANCH`, `main`, `develop` and `release`. It carried exactly two rules:
 >
 > | Rule | Effect |
 > |---|---|
 > | `deletion` | those branches cannot be deleted, by anyone |
 > | `non_fast_forward` | they cannot be force-pushed, by anyone |
 >
-> So **destruction is now prevented and a failing merge is not.** There is no `pull_request` rule, so
-> a direct push to `develop` still lands, and no `required_status_checks` rule, so a red run does not
-> block a merge. **For pass/fail the gate remains advisory**, exactly as the section below says — the
-> sentence is still true, for a narrower reason than when it was written.
+> So on that date **destruction was prevented and a failing merge was not.** There was no
+> `pull_request` rule, so a direct push to `develop` still landed, and no `required_status_checks`
+> rule, so a red run did not block a merge. **For pass/fail the gate remained advisory** — true when
+> written, and false since #289 added the other two rules.
 >
-> **Ratified 2026-08-30, not yet applied — tracked as #289:** require a pull request, and require the
+> **Ratified 2026-08-30, applied 2026-09-03 as #289:** require a pull request, and require the
 > **`Lint, test, build`** check (app `github-actions`), on `develop`, `release` and `main`. That makes
 > the gate enforcing rather than advisory, and it stops direct pushes to `develop` — accepted as the
 > cost.
@@ -167,11 +297,13 @@ is exactly the kind of claim that is satisfied by inspection and false in practi
 > `release` or `main` produces no `Lint, test, build` run at all, so requiring it first would leave
 > promotion pull requests waiting forever on a status nobody can produce — the same defect this file's
 > *What triggers a run* section documents, arriving from the enforcement side. **Merge the trigger fix,
-> confirm a real run on each target branch, then add the rules.** #289 carries that ordering as its
-> first criterion and names #243 as its dependency.
+> confirm a real run on each target branch, then add the rules.** #289 carried that ordering as its
+> first criterion and named #243 as its dependency; the run table at the top of this section is that
+> criterion discharged.
 
-**Branch protection is not configured, and it is not configurable on this repository.** *Measured
-2026-08-04:*
+**The 2026-08-04 record, false since the repo went public — kept for the shape of the mistake.**
+*As written then:* branch protection is not configured, and it is not configurable on this
+repository. *Measured 2026-08-04:*
 
 ```
 $ gh api repos/SailorDave17/Taskr/branches/rebuild%2Fv1/protection
@@ -187,8 +319,13 @@ So "add branch protection" reads as a configuration task and **is a purchasing d
 until the write is attempted. The newer rulesets API is gated the same way; it is not a route around
 the older one.
 
-**This gate is therefore advisory, and must never be recorded as "protected".** CI reports on pushes
-and pull requests, and nothing stops a direct push that fails it. The options, if that is not good
-enough later, are: make the repo public, buy GitHub Pro, or add a `githooks/pre-push` — and a
-pre-push hook stops the habit, not an adversary, since it lives in one checkout and `--no-verify`
-skips it silently.
+*As written then:* this gate is therefore advisory, and must never be recorded as "protected". CI
+reports on pushes and pull requests, and nothing stops a direct push that fails it. The options, if
+that is not good enough later, are: make the repo public, buy GitHub Pro, or add a
+`githooks/pre-push` — and a pre-push hook stops the habit, not an adversary, since it lives in one
+checkout and `--no-verify` skips it silently.
+
+**The first of those options is what happened.** The repo went public, which made rulesets reachable,
+and #289 spent that reachability. The paragraph above is now wrong in its conclusion and right in its
+reasoning — which is the reason it is kept rather than deleted: it correctly refused to record an
+unenforced gate as "protected", and the sentence only became false when somebody made it false.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { FUNCTION_NAMES } from './deploy-function.mjs'
+import { TOKEN_PAGE } from './management-api.mjs'
 import {
   deploymentVerdict,
   functionsToCheck,
@@ -65,6 +66,46 @@ describe('an absent answer never reads as a clean one', () => {
     expect(result.ok).toBe(false)
     expect(result.functions).toBeNull()
     expect(result.error).toContain('401')
+  })
+
+  it('a 401 says the token is probably dead — the failure this command actually had (#324)', async () => {
+    // This reader has its own non-2xx composer, separate from `runQuery`'s, and
+    // this is the command whose bare `[401] Unauthorized` was measured on
+    // 2026-09-03. A fix that annotated only `runQuery` would leave this one silent
+    // while every test about it still passed.
+    const result = await listDeployedFunctions({
+      ref: 'x',
+      token: 't',
+      fetchImpl: async () => ({ ok: false, status: 401, text: async () => '{"message":"Unauthorized"}' }),
+    })
+    expect(result.error).toMatch(/expired|revoked/i)
+    expect(result.error).toContain(TOKEN_PAGE)
+  })
+
+  it('does not say that on the failures it already handled', async () => {
+    for (const status of [404, 500]) {
+      const result = await listDeployedFunctions({
+        ref: 'x',
+        token: 't',
+        fetchImpl: async () => ({ ok: false, status, text: async () => '{"message":"nope"}' }),
+      })
+      expect(result.error).toBe(`[${status}] nope`)
+      expect(result.error).not.toMatch(/expired|revoked/i)
+    }
+  })
+
+  it('does not say that when the API answers 200 with the wrong shape', async () => {
+    // The one non-2xx-shaped failure in this reader: a 200 carrying something that
+    // is not a list. It must keep saying what it says — a credential message here
+    // would send somebody to the token page over a platform response change.
+    const result = await listDeployedFunctions({
+      ref: 'x',
+      token: 't',
+      fetchImpl: async () => ({ ok: true, status: 200, text: async () => '{"functions":[]}' }),
+    })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/other than a list of functions/)
+    expect(result.error).not.toMatch(/expired|revoked/i)
   })
 
   it('a request that never completes is a reported failure', async () => {

@@ -4,13 +4,13 @@
 // exists so that "accurate enough" is a number rather than an impression, and
 // so that the number is re-derivable by anyone rather than remembered by
 // whoever ran it. The charter names extraction accuracy as one of three things
-// that kill the AI bet; #43 is the story that takes the verdict, and this is
+// that kill the AI bet; #207 is the story that takes the verdict, and this is
 // the half of that measurement needing no account, key or deployment.
 //
 // WHAT AN EXTRACTOR IS
 //
 // A function taking `{ kind, text }` and answering. That is deliberately the
-// whole of it — it is exactly what a real endpoint receives, so #56 can
+// whole of it — it is exactly what a real endpoint receives, so #208 can
 // implement this contract rather than a convenient variant of it, and the
 // grader can never leak the expected answer into the thing it is grading.
 // `kind` is present because the app knows which flow it is in: a capacity
@@ -37,7 +37,7 @@
 //
 // WHY IT IS ASYNC
 //
-// #43 drives a live model through this grader. A grader that cannot await is a
+// #206 drove a live model through this grader. A grader that cannot await is a
 // grader that consumer has to reimplement, and a second implementation of the
 // score is the one thing this artefact exists to prevent. Items are graded
 // SEQUENTIALLY on purpose: a metered provider has a rate limit, and a run whose
@@ -82,9 +82,10 @@ export const OUTCOMES = Object.freeze({
  * two graders that could quietly disagree.
  *
  * Returns `null` rather than throwing for anything that is not a well-formed
- * answer of the expected kind. #56 AC 3 requires an unparseable provider
- * response to map to a distinct stated failure, and a grader that throws on
- * first contact with a real model gives its caller no way to report one.
+ * answer of the expected kind. #56 AC 3 — carried into #208 AC 5 — requires an
+ * unparseable provider response to map to a distinct stated failure, and a
+ * grader that throws on first contact with a real model gives its caller no way
+ * to report one.
  */
 export function entitiesOf(answer, expectedKind) {
   if (!answer || typeof answer !== 'object') return null

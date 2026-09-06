@@ -97,6 +97,18 @@ const fakeClient = {
     // unused: a stub for a call the app must never make again would let a
     // regression pass, and its absence turns one into a TypeError naming the
     // method.
+    // #304 — records the ARGUMENTS, for #291's reason: a fake that pushed only
+    // `{ op }` would pass identically whichever provider or redirect the call
+    // named. The real one navigates the browser; this one does not, which is
+    // what makes the redirect address assertable at all.
+    signInWithOAuth: (args) => {
+      calls.push({ op: 'signInWithOAuth', args })
+      return Promise.resolve(
+        authState.oauthError
+          ? { data: { provider: args.provider, url: null }, error: { message: authState.oauthError } }
+          : { data: { provider: args.provider, url: 'https://auth.example.test/authorize' }, error: null },
+      )
+    },
     signInWithPassword: (credentials) => {
       calls.push({ op: 'signInWithPassword', credentials })
       return Promise.resolve(
@@ -115,8 +127,12 @@ const fakeClient = {
         error: null,
       })
     },
-    signOut: () => {
-      calls.push({ op: 'signOut' })
+    // #291 — records the OPTIONS, not just the call. The old fake took no
+    // argument and pushed `{ op: 'signOut' }`, so a test asserting the call
+    // happened passed identically whichever scope the call was made with,
+    // which is exactly how a `global` default shipped unnoticed.
+    signOut: (options) => {
+      calls.push({ op: 'signOut', options })
       return Promise.resolve({ error: authState.signOutError ? { message: authState.signOutError } : null })
     },
   },
@@ -129,10 +145,12 @@ vi.mock('./supabase.js', () => ({
 
 const {
   addMember,
+  confirmationRedirectTo,
   currentHousehold,
   listHouseholds,
   createHousehold,
   currentSession,
+  describeSignInReturn,
   deviceTimezone,
   findClaimedMember,
   formatMinutes,
@@ -140,10 +158,12 @@ const {
   normalizeMemberEmail,
   normalizeMinutes,
   provisionMember,
+  readSignInReturn,
   removeMember,
   signInAddressFor,
   resetMemberCredential,
   signIn,
+  signInWithGoogle,
   signOut,
   signUpOrganizer,
   updateMember,
@@ -329,22 +349,29 @@ describe('signing in as a person', () => {
   })
 
   it('creates the organizer their own account, which is the one signup a client may do', async () => {
-    const session = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
-    expect(session.user.id).toBe('organizer-1')
-    expect(calls).toContainEqual({
-      op: 'signUp',
-      credentials: { email: 'alex@example.com', password: 'longenough' },
-    })
+    const result = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
+    expect(result.session.user.id).toBe('organizer-1')
+    expect(result.needsConfirmation).toBe(false)
+    // The address and password only. `options.emailRedirectTo` rides on the
+    // same object since #129 and has three tests of its own below; asserting
+    // the whole object here would make this test fail whenever that value
+    // changes, which is not what it is about.
+    const signUpCall = calls.find((c) => c.op === 'signUp')
+    expect(signUpCall.credentials.email).toBe('alex@example.com')
+    expect(signUpCall.credentials.password).toBe('longenough')
   })
 
-  it('says plainly when the account needs email confirmation, rather than returning a null session', async () => {
+  it('reports that the account needs email confirmation, as a result rather than a throw', async () => {
     // Supabase returns `{ session: null }` with NO error when confirmation is
-    // on. Passing that back would hand the caller a session-shaped null and the
-    // failure would surface three steps later as "not signed in".
+    // on — and it IS on, for the live project (`mailer_autoconfirm: false`,
+    // #154). Until #154 this threw, which made the ordinary outcome of a first
+    // signup against production an error. Passing a bare null back would be
+    // the other wrong answer: a session-shaped null the caller has to remember
+    // to check, surfacing three steps later as "not signed in". So the claim
+    // is spelled out on the result.
     authState.signUpNeedsConfirmation = true
-    await expect(
-      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
-    ).rejects.toThrow(/email confirmation/i)
+    const result = await signUpOrganizer({ email: 'alex@example.com', password: 'longenough' })
+    expect(result).toEqual({ session: null, needsConfirmation: true })
   })
 
   it('surfaces a signup refusal with its reason, unlike sign-in', async () => {
@@ -358,9 +385,244 @@ describe('signing in as a person', () => {
     ).rejects.toThrow(/already registered/i)
   })
 
-  it('signs out, which is the only way off a shared phone', async () => {
+  // #129 AC 2 — these three assert that the confirmation link's destination
+  // REACHES `auth.signUp()` and that it is DERIVED, and the second half is the
+  // one that needed designing rather than writing.
+  //
+  // jsdom's default origin is `http://localhost:3000` — byte-identical to the
+  // Supabase Site URL default that caused the defect this story repairs. So a
+  // test that merely asserted the literal `http://localhost:3000` arrived would
+  // pass just as well against `emailRedirectTo: 'http://localhost:3000'`
+  // hard-coded at the call site, which is precisely the implementation AC 2
+  // says must redden. The fixture cannot tell the two apart because the
+  // environment made them identical
+  // (cairn `a-fixture-copied-from-production-cannot-tell-them-apart`).
+  //
+  // What separates them is MOVING the origin and requiring the value to follow.
+  // Hence `withOrigin` below: any constant, including the true production URL
+  // and including jsdom's own default, fails at least one of these.
+  const withOrigin = async (origin, run) => {
+    const original = Object.getOwnPropertyDescriptor(window, 'location')
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, origin, href: `${origin}/`, toString: () => `${origin}/` },
+    })
+    try {
+      return await run()
+    } finally {
+      if (original) Object.defineProperty(window, 'location', original)
+    }
+  }
+
+  it('sends the confirmation link back to the origin the signup came from', async () => {
+    await withOrigin('https://taskr.example.test', () =>
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    )
+    expect(calls).toContainEqual({
+      op: 'signUp',
+      credentials: {
+        email: 'alex@example.com',
+        password: 'longenough',
+        options: { emailRedirectTo: 'https://taskr.example.test' },
+      },
+    })
+  })
+
+  it('follows the origin to a DIFFERENT one, so no constant can satisfy both', async () => {
+    // The pair is the assertion. One origin is satisfiable by a literal; two
+    // are satisfiable only by reading the origin. This is the mutation AC 2
+    // names, written as a test rather than left to a one-off run.
+    await withOrigin('http://localhost:5173', () =>
+      signUpOrganizer({ email: 'alex@example.com', password: 'longenough' }),
+    )
+    const signUpCall = calls.find((c) => c.op === 'signUp')
+    expect(signUpCall.credentials.options.emailRedirectTo).toBe('http://localhost:5173')
+  })
+
+  it('falls back to Site URL rather than inventing a default when there is no window', () => {
+    // `undefined` is the value that makes supabase-js defer to the project's
+    // Site URL. A string here — any string — would be the constant this story
+    // exists to remove, so the absence is asserted rather than assumed.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: undefined })
+    try {
+      expect(confirmationRedirectTo()).toBeUndefined()
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'window', original)
+    }
+  })
+
+  // #291 — these three assert the SCOPE the call is made with, and that is the
+  // whole point of them. supabase-js defaults `signOut()` to `scope: 'global'`,
+  // which revokes every session for the account on every device; the app called
+  // it with no argument for months and nothing here could see it, because the
+  // only assertion was that a sign-out happened. Asserting the option is what
+  // makes the two behaviours distinguishable to a test at all.
+  it('signs out of THIS device only, leaving other devices signed in', async () => {
     await signOut()
-    expect(calls).toContainEqual({ op: 'signOut' })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'local' } })
+  })
+
+  it('takes the same local scope when asked explicitly, not the library default', async () => {
+    await signOut({ everywhere: false })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'local' } })
+  })
+
+  it('signs out everywhere when asked, which is the lost-device answer', async () => {
+    await signOut({ everywhere: true })
+    expect(calls).toContainEqual({ op: 'signOut', options: { scope: 'global' } })
+  })
+
+  it('never reaches the library default, whichever way it is called', async () => {
+    // The defect was an ABSENT argument, so the thing worth asserting is that
+    // no call leaves the scope to be decided by somebody else.
+    await signOut()
+    await signOut({ everywhere: true })
+    await signOut({})
+    const scopes = calls.filter((c) => c.op === 'signOut').map((c) => c.options?.scope)
+    expect(scopes).toEqual(['local', 'global', 'local'])
+    expect(scopes).not.toContain(undefined)
+  })
+})
+
+describe('signing in with Google — #304', () => {
+  // The flow is Supabase's and the browser leaves the page, so what this layer
+  // owns is the CALL: which provider, where the person comes back to, and that
+  // it is the app's own client asking. Everything after the redirect is
+  // Supabase's and Google's, and is what the confirmation story verifies live.
+
+  it('asks the app’s own client for Google, coming back to the origin the person is on', async () => {
+    const realWindow = globalThis.window
+    globalThis.window = { location: { origin: 'https://taskr.example.test' } }
+    try {
+      await signInWithGoogle()
+    } finally {
+      globalThis.window = realWindow
+    }
+    expect(calls).toContainEqual({
+      op: 'signInWithOAuth',
+      args: { provider: 'google', options: { redirectTo: 'https://taskr.example.test' } },
+    })
+    // One call, through the ONE client. A second OAuth client or an ID-token
+    // flow would show up here as a different op or a second entry.
+    expect(calls.filter((c) => c.op === 'signInWithOAuth')).toHaveLength(1)
+    expect(calls.filter((c) => c.op === 'signInWithPassword')).toHaveLength(0)
+  })
+
+  it('falls back to Site URL when there is no window, like the confirmation email does', async () => {
+    const realWindow = globalThis.window
+    delete globalThis.window
+    try {
+      await signInWithGoogle()
+    } finally {
+      globalThis.window = realWindow
+    }
+    expect(calls).toContainEqual({
+      op: 'signInWithOAuth',
+      args: { provider: 'google', options: { redirectTo: undefined } },
+    })
+  })
+
+  it('names Google when the start is refused, since nothing about a password was wrong', async () => {
+    // The live project's answer until the provider is enabled: "Unsupported
+    // provider: provider is not enabled". Collapsing that into "did not match"
+    // would send somebody to reset a password they never typed.
+    authState.oauthError = 'Unsupported provider: provider is not enabled'
+    await expect(signInWithGoogle()).rejects.toThrow(/signing in with Google.*provider is not enabled/)
+  })
+
+  describe('the return, when a sign-in did not complete', () => {
+    const at = (search = '', hash = '') => ({ search, hash })
+
+    it('reads a provider refusal out of the fragment, which is where the implicit flow puts errors', () => {
+      expect(
+        readSignInReturn(at('', '#error=access_denied&error_code=provider_refused&error_description=the+user+denied+access')),
+      ).toEqual({
+        error: 'access_denied',
+        code: 'provider_refused',
+        description: 'the user denied access',
+        source: 'fragment',
+      })
+    })
+
+    it('reads GoTrue’s bad-flow-state redirect out of the query — it carries no state', () => {
+      // The shape probed live 2026-09-04: `GET /auth/v1/callback?state=probe` is
+      // a 303 to Site URL with exactly these three parameters and nothing else.
+      expect(
+        readSignInReturn(
+          at('?error=invalid_request&error_code=bad_oauth_state&error_description=OAuth+state+parameter+is+invalid'),
+        ),
+      ).toEqual({
+        error: 'invalid_request',
+        code: 'bad_oauth_state',
+        description: 'OAuth state parameter is invalid',
+        source: 'query',
+      })
+    })
+
+    it('leaves a query that carries a state alone — that is the calendar’s return', () => {
+      // AC 4, from this side. `?error=access_denied&state=…` is a member
+      // pressing Cancel on the CALENDAR consent, and readConsentReturn owns it.
+      expect(readSignInReturn(at('?error=access_denied&state=xyz'))).toBeNull()
+      expect(readSignInReturn(at('?code=abc&state=xyz'))).toBeNull()
+    })
+
+    it('is null for a code with no state — this app never exchanges one', () => {
+      // Under the implicit flow nothing this app starts comes back as `?code=`
+      // without a state. So the parameter is nobody’s: not read here, and not
+      // handed to the calendar either (calendar.test.js).
+      expect(readSignInReturn(at('?code=abc'))).toBeNull()
+    })
+
+    it.each([
+      [at(), 'an ordinary load'],
+      [at('?foo=1', '#bar=2'), 'unrelated parameters'],
+      [at('', '#access_token=t&refresh_token=r&expires_in=3600&token_type=bearer'), 'a SUCCESSFUL return'],
+      [{ search: undefined, hash: undefined }, 'a location with neither'],
+      [undefined, 'no location at all, when globalThis.location is absent'],
+    ])('is null for %o — %s', (location) => {
+      expect(readSignInReturn(location ?? {})).toBeNull()
+    })
+
+    it('names the organizer on a Google refusal, and does NOT say the password was wrong', () => {
+      // AC 5. The consent screen is in Testing, so an account the organizer has
+      // not registered is refused by Google — and the organizer is the one
+      // person who can change that. The collapsed credential sentence is the
+      // wrong answer here because no credential was involved.
+      const sentence = describeSignInReturn({ error: 'access_denied', code: null, description: null })
+      expect(sentence).toMatch(/has not been opened to your account/i)
+      expect(sentence).toMatch(/organizer/i)
+      expect(sentence).not.toMatch(/did not match/i)
+    })
+
+    it.each(['bad_oauth_state', 'bad_oauth_callback', 'flow_state_already_used'])(
+      'tells a stale flow (%s) to press the control again, keyed on the code and not the prose',
+      (code) => {
+        // Keyed on `error_code`: GoTrue rewords descriptions without versioning
+        // them, and `bad_oauth_state` alone has three. The description here is
+        // deliberately nonsense so a branch on it cannot be what passes.
+        const sentence = describeSignInReturn({ error: 'invalid_request', code, description: 'zzz' })
+        expect(sentence).toMatch(/Continue with Google again/)
+        expect(sentence).not.toMatch(/zzz/)
+      },
+    )
+
+    it('lets an expired confirmation link keep GoTrue’s own words — that is #129’s flow, not this one', () => {
+      const sentence = describeSignInReturn({
+        error: 'access_denied',
+        code: 'otp_expired',
+        description: 'Email link is invalid or has expired',
+      })
+      expect(sentence).toMatch(/Email link is invalid or has expired/)
+      expect(sentence).not.toMatch(/organizer/i)
+    })
+
+    it('quotes the description for anything else, and says so when there is none', () => {
+      expect(
+        describeSignInReturn({ error: 'server_error', code: 'unexpected_failure', description: 'something broke' }),
+      ).toMatch(/Sign-in did not complete: something broke/)
+      expect(describeSignInReturn({ error: null, code: null, description: null })).toMatch(/no reason was given/)
+    })
   })
 })
 

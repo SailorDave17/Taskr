@@ -45,6 +45,11 @@ import {
   newDevice,
   provisionMember,
 } from './support/pgliteSupabase.js'
+// #268 — the live probe's argument list, compared here against the schema these
+// migrations build. It is the only place that comparison can run: `check:live`
+// needs credentials CI does not have, so a wrong type declared there would be
+// known on one machine and in no gate.
+import { LIVE_RPCS, LIVE_RPC_NAMES, rpcProbeArgs } from '../lib/liveSchema.js'
 
 /**
  * The columns a client is allowed to read. Named once so a drift is one edit.
@@ -1120,6 +1125,187 @@ describe('#127 — membership is per household, not per database', () => {
     expect(names).toContain('members_household_email_key')
     expect(names).not.toContain('members_claimed_by_key')
     expect(names).not.toContain('members_email_key')
+    await db.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #268 — the live RPC probe's arguments, checked against the schema that
+// defines them and against the functions themselves.
+//
+// `check:live` cannot run here: it needs credentials and CI has none. So the two
+// things that would otherwise be known only on one machine are asserted against
+// the database the migrations build, which is the one environment where the
+// schema cannot be wrong.
+//
+//   - the TYPES `LIVE_RPCS` declares are the types `pg_proc` holds. A declared
+//     type that is absent, misspelled or simply wrong makes the probe send a
+//     value that cannot coerce, and Postgres answers a bad coercion BEFORE the
+//     privilege check — which is how `apply_assignments` and
+//     `skip_repeat_occurrence` were green for eleven days while proving strictly
+//     less than the rows beside them.
+//   - the VALUES it sends are refused by the functions' own guards, in a
+//     WRITABLE transaction. `check:live` leans on PostgREST serving GET
+//     read-only, and asserts that directly; this says the placeholders would be
+//     inert even if it did not.
+// ---------------------------------------------------------------------------
+describe('#268 — the live probe asks for the arguments these migrations define', () => {
+  const declared = (args) =>
+    Object.entries(args)
+      .map(([name, type]) => `${name} ${type}`)
+      .sort()
+      .join(', ')
+
+  const identityArgs = (row) =>
+    (row.args ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .sort()
+      .join(', ')
+
+  it('declares, for every probed function, the argument types pg_proc holds', async () => {
+    const db = await freshDatabase()
+    const { rows } = await db.query(
+      `select p.proname,
+              pg_get_function_identity_arguments(p.oid) as args
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = any($1)`,
+      [LIVE_RPC_NAMES.slice()],
+    )
+
+    // Sorted pairs rather than the catalog's own ordering: PostgREST resolves an
+    // overload by the SET of argument names, so the order a caller writes them in
+    // is not part of the contract and a list differing only in order would be
+    // correct. What must match is which name carries which type.
+    const actual = new Map(rows.map((row) => [row.proname, identityArgs(row)]))
+
+    const wrong = []
+    for (const { fn, args } of LIVE_RPCS) {
+      if (!actual.has(fn)) wrong.push(`${fn}: in LIVE_RPCS, absent from the migrated schema`)
+      else if (actual.get(fn) !== declared(args))
+        wrong.push(`${fn}: declared (${declared(args)}), schema has (${actual.get(fn)})`)
+    }
+    expect(
+      wrong,
+      `the live probe would send a value of the wrong type for these, and Postgres ` +
+        `answers that before the privilege check:\n${wrong.join('\n')}`,
+    ).toEqual([])
+    await db.close()
+  })
+
+  it('POSITIVE CONTROL: the same comparison catches a type that is wrong', async () => {
+    // Without this, the test above passes whether or not the comparison can see a
+    // difference — a `pg_get_function_identity_arguments` that returned null for
+    // everything, or a `declared` that dropped the type half, would both leave it
+    // green. The list below is the pre-#268 one, every argument a `uuid`, and it
+    // must be caught.
+    const db = await freshDatabase()
+    const { rows } = await db.query(
+      `select pg_get_function_identity_arguments(p.oid) as args
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'apply_assignments'`,
+    )
+    const schema = identityArgs(rows[0])
+    expect(schema).not.toBe(
+      declared({
+        household_id: 'uuid',
+        expected_version: 'uuid',
+        placements: 'uuid',
+        verdict: 'uuid',
+      }),
+    )
+    // And the real declaration, through the same comparison, does match — so this
+    // is a control and not merely one string differing from another.
+    expect(schema).toBe(declared(LIVE_RPCS.find((entry) => entry.fn === 'apply_assignments').args))
+    await db.close()
+  })
+
+  it('sends apply_assignments values its own first guard refuses, before any write', async () => {
+    // #268 AC 3. The probe reaches the function body now, so what stops it there
+    // has to be shown rather than assumed. `jsonb_typeof(placements)` is the
+    // first thing that function does after the auth check — before the membership
+    // lookup, before the `for update` on `households`, before any statement that
+    // could write — and the JSON `null` placeholder fails it.
+    const db = await freshDatabase()
+    const uid = await newDevice(db, 'organizer@example.com')
+    const made = await asDevice(db, uid, () =>
+      db.query('select * from public.create_household($1, $2, $3)', [
+        'Placeholder Household',
+        'Placeholder Organizer',
+        'UTC',
+      ]),
+    )
+    const created = made.rows[0]
+
+    const probe = rpcProbeArgs(LIVE_RPCS.find((entry) => entry.fn === 'apply_assignments').args)
+    const refused = await asDevice(db, uid, () =>
+      attempt(() =>
+        db.query('select public.apply_assignments($1, $2, $3, $4)', [
+          probe.household_id,
+          probe.expected_version,
+          probe.placements,
+          probe.verdict,
+        ]),
+      ),
+    )
+    expect(refused.error).toContain('placements must be an array')
+
+    // The sharper half, and the one that makes this evidence rather than a
+    // coincidence: handed the household this caller really belongs to and the
+    // version it really holds — everything the nil UUID was protecting — the
+    // jsonb placeholder ALONE still refuses the call. So the refusal does not
+    // depend on the household matching nothing, and the two walls are
+    // independent.
+    const armed = await asDevice(db, uid, () =>
+      attempt(() =>
+        db.query('select public.apply_assignments($1, $2, $3, $4)', [
+          created.id,
+          created.assignments_version,
+          probe.placements,
+          probe.verdict,
+        ]),
+      ),
+    )
+    expect(armed.error).toContain('placements must be an array')
+
+    // And nothing moved. The version is the household's own write counter, so it
+    // answers the question directly: any write to an allocator input would have
+    // bumped it through the trigger `0018` installs.
+    const after = await db.query(
+      'select assignments_version from public.households where id = $1',
+      [created.id],
+    )
+    expect(String(after.rows[0].assignments_version)).toBe(String(created.assignments_version))
+    await db.close()
+  })
+
+  it('sends skip_repeat_occurrence values its lookup cannot match, before any write', async () => {
+    // The second of the two rows #268 found, and the one whose coercion failure
+    // was `22007` rather than `22P02` — which is why the classifier keys on the
+    // SQLSTATE class rather than on the code somebody measured first. With a real
+    // `date` the call reaches the body, and the nil chore matches no row, so the
+    // lookup raises before the insert below it.
+    const db = await freshDatabase()
+    const uid = await newDevice(db, 'organizer@example.com')
+    await asDevice(db, uid, () =>
+      db.query('select * from public.create_household($1, $2, $3)', [
+        'Placeholder Household',
+        'Placeholder Organizer',
+        'UTC',
+      ]),
+    )
+
+    const probe = rpcProbeArgs(LIVE_RPCS.find((entry) => entry.fn === 'skip_repeat_occurrence').args)
+    const refused = await asDevice(db, uid, () =>
+      attempt(() =>
+        db.query('select public.skip_repeat_occurrence($1, $2)', [probe.chore_id, probe.skip_date]),
+      ),
+    )
+    expect(refused.error).toContain('No such chore in this household')
+
+    const { rows } = await db.query('select count(*)::int as n from public.chore_repeat_exceptions')
+    expect(rows[0].n).toBe(0)
     await db.close()
   })
 })

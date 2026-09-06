@@ -226,6 +226,18 @@ const CLIENT_OPERATIONS = [
     site: 'chores.js listRepeatExceptions()',
     sql: 'select id, chore_id, excluded_on, created_at from public.chore_repeat_exceptions limit 0',
   },
+  // #96 — the read is the ONLY client operation on the derived table, exactly
+  // as it is on `calendar_connections`: the figure is written by the
+  // calendar-busy Edge Function as service_role, from a credential no client
+  // can reach. calendarBusy.pglite.test.js asserts insert, update and delete
+  // are all REFUSED, which is this list's mirror image for a single-writer
+  // table.
+  {
+    table: 'calendar_busy',
+    op: 'select',
+    site: 'calendar.js listBusyWeeks()',
+    sql: 'select id, member_id, period_start, busy_minutes, event_count, computed_at from public.calendar_busy limit 0',
+  },
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {
@@ -434,8 +446,11 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   it('and service_role reaches only what the Edge Functions need', async () => {
     // Not an audit of every role, which would be a list nobody maintains. This
     // is the one role that bypasses row-level security, so a privilege it holds
-    // is a privilege with nothing else behind it. 0008 and 0011 are the only
-    // files that grant it anything; this asserts they still are.
+    // is a privilege with nothing else behind it. 0008, 0011 and — since #96 —
+    // 0030 are the only files that grant it anything; this asserts they still
+    // are. Every table on this list is one an Edge Function writes and no client
+    // can, which is why the list is short and why each addition to it is a
+    // decision rather than bookkeeping.
     const { rows } = await db.query(
       `select table_name, string_agg(distinct privilege_type, ',' order by privilege_type) as privs
         from information_schema.table_privileges
@@ -444,6 +459,7 @@ describe('#91 — the client privileges come from a migration, not from a defaul
         group by table_name order by table_name`,
     )
     expect(rows).toEqual([
+      { table_name: 'calendar_busy', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_connections', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_tokens', privs: 'DELETE,INSERT,SELECT,UPDATE' },
     ])

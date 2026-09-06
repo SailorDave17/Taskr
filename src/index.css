@@ -1019,10 +1019,10 @@ body {
 
 /* ---------------------------------------------------------------------------
    The surfaces, and the way between them — story #47, criterion 11. Four
-   since #302 added Done.
+   since #302 added Done; five since #353 added Shop.
 
    Buttons rather than links, so they inherit nothing from `.button`: a tab is
-   not an action, and giving it the accent would make four call-to-actions sit
+   not an action, and giving it the accent would make five call-to-actions sit
    above every screen.
 
    `flex-wrap` is load-bearing rather than defensive: a nav that overflows
@@ -1033,8 +1033,19 @@ body {
    275px against the 320px the shell leaves, so all four sit on one row with
    45px to spare — and at a 300px viewport (260px available) the same strip
    wraps to two rows with the page still 300px wide, which is the control
-   showing the rule can fire. A fifth surface, or a longer word than "Chores",
-   spends that 45px and then wraps rather than overflows.
+   showing the rule can fire.
+
+   THE FIFTH TAB SPENT THAT SLACK AND MORE, and the padding below is the
+   measured answer (#350, 2026-09-05, Chrome at 360×800 on the real App with a
+   fifth `SURFACES` entry): at the old `0 0.75rem` the five labels' natural
+   widths summed to 341px against the same 320px row, short by 21px, and Shop
+   dropped to a second 44px row — no label wrapped inside itself and nothing
+   overflowed; the strip simply grew from 44px to 103px tall. At `0 0.5rem`
+   (8px a side) the sum is 301px with 19px to spare, every tab one line and
+   still 44px tall, the narrowest 52.5px wide. The boundary value 0.625rem
+   misses by 0.8px, so 0.5rem is the smallest step that works. That is the
+   owner's pre-decided fallback taken in the order set — tighter padding
+   first, shorter labels not needed. Re-measured on this commit in #353's PR.
    --------------------------------------------------------------------------- */
 
 .tabs {
@@ -1049,7 +1060,7 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 44px;
-  padding: 0 0.75rem;
+  padding: 0 0.5rem;
   border: 1px solid transparent;
   border-radius: 0.5rem;
   background: transparent;
@@ -1078,6 +1089,87 @@ body {
 .tab:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Shop — story #353.
+
+   The same visual grammar as .chore and .member: an item is the third thing a
+   household edits, and a third card idiom would read as a third app. The item
+   NAME carries the weight here rather than a figure, because an item is not a
+   quantity of anything — the one surface with no minutes on it.
+
+   A row is name-and-note on the left and one quiet control on the right, and
+   it wraps rather than overflows: a long item name with no spaces breaks
+   (`overflow-wrap: anywhere`, #83's rule) and the button drops to its own line
+   at 360px if it must. The bought modifier dims the row the way a done chore
+   is dimmed, and is NOT struck through — #355 owns what a bought row says and
+   where it sits; until then it is a mark, not a state with its own layout.
+   --------------------------------------------------------------------------- */
+
+.shopping-list {
+  margin-top: 0.25rem;
+}
+
+.shopping-items {
+  list-style: none;
+  margin: 0 0 0.875rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shopping-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.shopping-item--bought {
+  opacity: 0.6;
+}
+
+/* Basis ZERO, not a rem figure. Measured 2026-09-05 on the prototype at
+   360px: a 12rem basis plus the 92px Remove control overran the row's 250px
+   of inner width, so the control wrapped under EVERY item and a plain row
+   stood 116px tall — twelve items ran to 2,190px, two and a half screens.
+   With the body taking what is left beside the control a plain row is 66px
+   and a long name breaks inside the body (`overflow-wrap: anywhere`) rather
+   than pushing the control down. */
+.shopping-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.shopping-item__name {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.shopping-item__note {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.shopping-item__meta {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+.shopping-add {
+  margin-top: 0.875rem;
 }
 
 /* ---------------------------------------------------------------------------

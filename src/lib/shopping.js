@@ -7,10 +7,13 @@
 // What this file does is name the household it means, ask for the granted
 // columns by name, and turn a refusal into a sentence.
 //
-// Nothing renders any of this yet. #353 builds the Shop tab on top of it; the
-// module lands first because `liveSchema.test.js` refuses a `LIVE_SCHEMA` or
+// The Shop tab (`src/components/Shopping.jsx`, #353) renders it; App's
+// `refresh()` calls `readShopping` on every re-read, and the three writes the
+// tab offers — create a list, add an item, remove an unbought one — go through
+// App's `mutate()` like every other write. The module landed one story ahead
+// of the tab (#352) because `liveSchema.test.js` refuses a `LIVE_SCHEMA` or
 // `LIVE_RPCS` entry with no call site in `src/`, so the tables, their RPCs and
-// the code that calls them have to arrive together.
+// the code that calls them had to arrive together.
 //
 // THE READ IS THREE PLAIN FILTERS AND NEVER AN EMBED FILTER. `readShopping`
 // asks for the household's lists by naming the household, then the open runs
@@ -68,6 +71,19 @@ export function normalizeName(value) {
   const trimmed = String(value ?? '').trim()
   if (!trimmed) throw new Error('A name is required.')
   return trimmed
+}
+
+/**
+ * The first word of a display name, or null for nothing — #353.
+ *
+ * An item row says "added by Robin", not "added by Robin Placeholder": the
+ * household knows its own members by first name, and a row is a line on a
+ * phone. Pure, and here rather than in the component so that #355's "bought
+ * by" reads the same word off the same roster row.
+ */
+export function firstNameOf(displayName) {
+  const first = String(displayName ?? '').trim().split(/\s+/)[0]
+  return first || null
 }
 
 /**

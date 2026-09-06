@@ -495,6 +495,16 @@ describe('#47 criterion 10 — nothing on the split surface can overflow a 360px
   it('keeps the 44px touch target every other control on the phone uses', () => {
     expect(css).toMatch(/\.tab\s*\{[^}]*min-height:\s*44px/)
   })
+
+  it('#353: five tabs fit a 360px row only at 8px of horizontal padding — the number #350 measured, pinned', () => {
+    // jsdom cannot see layout, so this pins the VALUE the browser measurement
+    // decided (#350, 2026-09-05, real App at 360×800): at 0.75rem the fifth
+    // tab dropped to a second row, at 0.625rem it missed by 0.8px, and at
+    // 0.5rem all five fit with 19px to spare. A rationale is a claim with no
+    // test; this is the test, and it reddens if the padding is widened back
+    // without the strip being measured again.
+    expect(css).toMatch(/\.tab\s*\{[^}]*padding:\s*0 0\.5rem/)
+  })
 })
 
 // #303 — the shell uses the whole screen above phone width.
@@ -1208,6 +1218,7 @@ describe('#19 — no real household name reaches version control', () => {
     Chores: 'a tab label — the chore surface',
     Who: 'a tab label — the roster surface',
     Done: 'a tab label — the completed-work surface (#302)',
+    Shop: 'a tab label — the shopping-list surface (#353), and its card heading',
     // #291 — the two sign-out controls and the confirm's back-out, asserted by
     // EXACT accessible name rather than /sign out/i. The exactness is the
     // point and is why they are literals at all: two controls on the roster
@@ -1270,11 +1281,11 @@ describe('#19 — no real household name reaches version control', () => {
     // the scan looks for, and declared rather than lower-cased for the tab
     // labels' reason: a list called "Groceries" is what a household types,
     // and the case-insensitive uniqueness test needs the capitalised form.
-    Groceries: 'a shopping list name in shopping.pglite.test.js — and the epic’s prefilled default',
-    Hardware: 'a second shopping list name in shopping.pglite.test.js',
-    Milk: 'a shopping item name in shopping.pglite.test.js',
-    Bread: 'a shopping item name in shopping.pglite.test.js — the other household’s',
-    Eggs: 'a shopping item name in shopping.pglite.test.js',
+    Groceries: 'a shopping list name in shopping.pglite.test.js — and the epic’s prefilled default, asserted by the #353 component and App tests',
+    Hardware: 'a second shopping list name in shopping.pglite.test.js and the #353 tests',
+    Milk: 'a shopping item name in shopping.pglite.test.js and the #353 tests',
+    Bread: 'a shopping item name in shopping.pglite.test.js and the #353 tests — the other household’s',
+    Eggs: 'a shopping item name in shopping.pglite.test.js and the #353 tests',
     Late: 'a shopping item refused because its run is closed, in shopping.pglite.test.js',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',

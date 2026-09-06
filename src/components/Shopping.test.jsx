@@ -63,6 +63,7 @@ function setup(overrides = {}) {
     onRemoveItem: vi.fn().mockResolvedValue(undefined),
     onPurchaseItem: vi.fn().mockResolvedValue(undefined),
     onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
+    onFinishRun: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Shopping
@@ -488,5 +489,225 @@ describe('#355 AC 7 — a second tap while the first is in flight', () => {
     const { onPurchaseItem } = setup({ items: [milk], busy: true })
     await clickAndSettle(screen.getByRole('button', { name: /mark milk bought/i }))
     expect(onPurchaseItem).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #357 — finishing the run: the one irreversible control on this surface.
+//
+// What only this level can answer is the two-step shape — that the first tap
+// writes NOTHING and replaces the button with a sentence naming what carries
+// over, that the way out restores the button having written nothing either,
+// and that the confirming tap reaches the handler with the run THIS SCREEN is
+// showing. What happens after the write — the re-read, the new run, the
+// refusal path — is App.test.jsx's, because this component never sees it.
+// ---------------------------------------------------------------------------
+
+const doneShopping = () => screen.getByRole('button', { name: /done shopping/i })
+const openConfirm = async () => clickAndSettle(doneShopping())
+
+describe('#357 AC 1 — the first tap is a question, not a write', () => {
+  it('offers "Done shopping" between the list and the add form when the run has items', () => {
+    setup()
+    const control = doneShopping()
+    expect(control).toBeInTheDocument()
+    // Directly under the list it is about, and ABOVE the add form — the owner's
+    // call at this story's design pass, on a measurement: a bought row sinks,
+    // so the last row a shopper ticks is near the top, and with this under the
+    // two-field form a twelve-item trip meant 1,700px of scrolling back down.
+    const items = screen.getByRole('list')
+    const form = screen.getByLabelText(/^item$/i).closest('form')
+    expect(items.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(control.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('replaces the button with a confirm naming the consequence, and calls nothing', async () => {
+    const handlers = setup()
+    await openConfirm()
+
+    // Two unbought items, so two carry over. The number is the LIST's, and the
+    // sentence says what happens to them rather than asking "are you sure".
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 2 items not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /keep shopping/i })).toBeInTheDocument()
+    // REPLACES: the control that opened it is gone, so there is no second tap
+    // on the same spot that would mean something different.
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+    // Nothing has been written — not the finish, and not anything else.
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('counts only the UNBOUGHT items, which is what the RPC carries', async () => {
+    // Three items, one already in the cart. A component that counted rows
+    // would say three, and the sentence would promise to carry something the
+    // household has already bought.
+    setup({ items: [milk, eggs, boughtBread] })
+    await openConfirm()
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 2 items not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('says one ITEM, singular, when exactly one is left', async () => {
+    setup({ items: [milk, boughtBread] })
+    await openConfirm()
+    expect(
+      within(surface()).getByText(
+        'Finish this run? 1 item not bought will carry over to the next list.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing carries over when everything on the run is bought', async () => {
+    setup({ items: [boughtBread] })
+    await openConfirm()
+    expect(within(surface()).getByText('Finish this run? Nothing carries over.')).toBeInTheDocument()
+    // And the control is still offered: a run of bought items is a trip that
+    // is finished, which is exactly when a person taps this.
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+  })
+})
+
+describe('#357 AC 2 — keep shopping', () => {
+  it('restores the button and writes nothing', async () => {
+    const handlers = setup()
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /keep shopping/i }))
+
+    expect(doneShopping()).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^finish$/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/carry over to the next list/)).not.toBeInTheDocument()
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+    // The run is untouched: the same rows, in the same order.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+  })
+})
+
+describe('#357 AC 3 — the confirming tap', () => {
+  it('sends onFinishRun with the run on screen, once, and nothing else', async () => {
+    const handlers = setup()
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /^finish$/i }))
+
+    expect(handlers.onFinishRun).toHaveBeenCalledTimes(1)
+    // The RUN, never the list and never an item — `0033`'s whole design, and
+    // what stops a stale screen closing a run it has not seen.
+    expect(handlers.onFinishRun).toHaveBeenCalledWith('r1')
+    expect(handlers.onFinishRun).not.toHaveBeenCalledWith('l1')
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onFinishRun') expect(handler).not.toHaveBeenCalled()
+    }
+  })
+
+  it('a carried item says so, from carried_from_item_id and not from its stamps', () => {
+    // The mark is the COLUMN. A row whose `added_at` predates the run reads
+    // identically to one that does not, and only the copy carries this.
+    const carried = { ...milk, carried_from_item_id: 'i0' }
+    setup({ items: [carried, eggs] })
+    const carriedRow = screen.getByText('Milk').closest('li')
+    expect(carriedRow).toHaveTextContent('from last run')
+    // It rides beside the adder rather than replacing them: `0033` copies the
+    // original's `added_by_member_id`, so the row still knows who wanted it.
+    expect(carriedRow).toHaveTextContent('from last run · added by Robin')
+    // SYNTHETIC CONTROL: the neighbour is an ordinary item and says nothing.
+    // Without it, a component that printed the mark on every row would pass.
+    expect(screen.getByText('Eggs').closest('li')).not.toHaveTextContent(/from last run/)
+  })
+})
+
+describe('#357 AC 4 — an empty run offers no way to finish', () => {
+  it('draws no "Done shopping" when the run has no items', () => {
+    setup({ items: [] })
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+    // The empty state is unchanged — this is an absence, not a replacement.
+    expect(within(surface()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('draws none for a list with no open run either', () => {
+    setup({ runs: [], items: [] })
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+  })
+
+  it('is per LIST: the list with items offers it and the empty one does not', () => {
+    const hardware = { ...list, id: 'l2', name: 'Hardware' }
+    const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
+    setup({ lists: [list, hardware], runs: [run, hardwareRun], items: [milk] })
+    const groceries = screen.getByRole('region', { name: 'Groceries' })
+    const other = screen.getByRole('region', { name: 'Hardware' })
+    expect(within(groceries).getByRole('button', { name: /done shopping/i })).toBeInTheDocument()
+    expect(
+      within(other).queryByRole('button', { name: /done shopping/i }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('#357 AC 6 — the confirm on a keyboard', () => {
+  it('lands focus on "Keep shopping", so an accidental Enter does not finish', async () => {
+    const handlers = setup()
+    await openConfirm()
+    const keep = screen.getByRole('button', { name: /keep shopping/i })
+    expect(document.activeElement).toBe(keep)
+    // And the armed key really is the way out: pressing it here backs out.
+    await clickAndSettle(document.activeElement)
+    expect(handlers.onFinishRun).not.toHaveBeenCalled()
+    expect(doneShopping()).toBeInTheDocument()
+  })
+
+  it('both controls are real buttons, so tab reaches them and Enter activates them', async () => {
+    setup()
+    await openConfirm()
+    for (const control of [
+      screen.getByRole('button', { name: /^finish$/i }),
+      screen.getByRole('button', { name: /keep shopping/i }),
+    ]) {
+      expect(control.tagName).toBe('BUTTON')
+      expect(control).not.toBeDisabled()
+      // Nothing takes them out of the tab order or hides them from the
+      // accessibility tree — the two ways a visible control stops being one.
+      expect(control).not.toHaveAttribute('tabindex', '-1')
+      expect(control).not.toHaveAttribute('aria-hidden')
+    }
+  })
+
+  it('the confirming control is not styled as a destruction — nothing is destroyed', async () => {
+    // `button--danger` is Remove's and sign-out-everywhere's. A finish moves
+    // the unbought items forward and leaves the bought ones on the closed run,
+    // so the red would be saying something untrue.
+    setup()
+    await openConfirm()
+    expect(screen.getByRole('button', { name: /^finish$/i })).not.toHaveClass('button--danger')
+    expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('#357 — a write in flight', () => {
+  it('disables both confirm controls while busy, and a tap sends nothing', async () => {
+    const { onFinishRun } = setup({ busy: true })
+    // The opening control is disabled too, so the confirm is unreachable while
+    // another write is in flight.
+    expect(doneShopping()).toBeDisabled()
+    await openConfirm()
+    expect(screen.queryByRole('button', { name: /^finish$/i })).not.toBeInTheDocument()
+    expect(onFinishRun).not.toHaveBeenCalled()
+  })
+
+  it('a finish that is still in flight leaves the confirm on screen', async () => {
+    let settle
+    const pending = new Promise((resolve) => {
+      settle = resolve
+    })
+    setup({ onFinishRun: vi.fn().mockReturnValue(pending) })
+    await openConfirm()
+    await clickAndSettle(screen.getByRole('button', { name: /^finish$/i }))
+    // Nothing is patched from the answer, so until App re-reads there is still
+    // a run on screen and still a way to see what is happening.
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
+    await act(async () => settle())
   })
 })

@@ -195,6 +195,10 @@ vi.mock('./lib/household.js', async () => {
 // one, nor a tick of the right item from a tick of the first item on screen.
 // `orderShoppingItems`, `replaceShoppingItem` and `purchasedLabel` stay REAL,
 // like the other pure helpers.
+//
+// #357 — `finishRun` joins them, and its fake carries the run id for the same
+// argument reason: the RPC takes the run THIS SCREEN is showing, and a fake
+// that only recorded the call could not tell that from one passing the list.
 const shoppingApi = {
   readShopping: vi.fn(),
   createList: vi.fn(),
@@ -202,6 +206,7 @@ const shoppingApi = {
   removeItem: vi.fn(),
   purchaseItem: vi.fn(),
   unpurchaseItem: vi.fn(),
+  finishRun: vi.fn(),
   shoppingClient: vi.fn(),
 }
 /** The object App hands to every shopping call, so the tests can see it did. */
@@ -283,6 +288,7 @@ beforeEach(() => {
   shoppingApi.removeItem.mockResolvedValue(undefined)
   shoppingApi.purchaseItem.mockResolvedValue(undefined)
   shoppingApi.unpurchaseItem.mockResolvedValue(undefined)
+  shoppingApi.finishRun.mockResolvedValue(undefined)
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
@@ -1800,6 +1806,234 @@ describe('#355 — the tick, from App', () => {
     await act(async () => finish(milkBought))
     expect(screen.getByRole('button', { name: /mark eggs bought/i })).not.toBeDisabled()
     expect(rowNames()).toEqual(['Eggs', 'Milk'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #357 — finishing the run, from App: which RPC with which argument, that it
+// goes through `mutate()` (unlike the tick above), and what the screen shows
+// after the re-read.
+//
+// The confirm itself is Shopping.test.jsx's. What only this level can answer is
+// that the write is followed by a FULL re-read and that the screen is then the
+// server's answer — a DIFFERENT run, carrying the items that were not bought —
+// rather than anything this phone patched. The refusal half is the mirror: the
+// one rejection `0033` is built to raise means another phone finished first, so
+// the picture is stale and this path re-reads too.
+// ---------------------------------------------------------------------------
+describe('#357 — finishing a run, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const eggs = { ...milk, id: 'i2', name: 'Eggs', added_at: '2026-09-05T02:00:00Z' }
+  /** Bought on this trip, so it stays on the run being closed. */
+  const boughtBread = {
+    ...milk,
+    id: 'i3',
+    name: 'Bread',
+    added_at: '2026-09-05T03:00:00Z',
+    purchased_at: '2026-09-05T04:00:00Z',
+    purchased_by_member_id: 'm1',
+  }
+
+  /** What `finish_shopping_run` returns and opens: the list's NEXT run. */
+  const nextRun = { ...run, id: 'r2', opened_at: '2026-09-05T06:00:00Z' }
+  /**
+   * What the re-read then finds on it — `0033`'s copies. New ids, the
+   * ORIGINAL's adder and `added_at` (which is why they are at the top), the
+   * purchase columns null, and `carried_from_item_id` pointing back.
+   */
+  const carriedMilk = { ...milk, id: 'i4', run_id: 'r2', carried_from_item_id: 'i1' }
+  const carriedEggs = { ...eggs, id: 'i5', run_id: 'r2', carried_from_item_id: 'i2' }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [run],
+      items: [milk, eggs, boughtBread],
+    })
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const rowNames = () =>
+    Array.from(shop().querySelectorAll('.shopping-item__name')).map((node) => node.textContent)
+
+  /** Open the confirm and take the confirming tap. */
+  const finishTheRun = async () => {
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+  }
+
+  it('AC 1: the first tap calls no RPC at all — the io fake records zero calls', async () => {
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/done shopping/i)
+
+    expect(shoppingApi.finishRun).not.toHaveBeenCalled()
+    // Not the read either: a question is not a round trip.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(within(shop()).getByText(/2 items not bought will carry over/)).toBeInTheDocument()
+  })
+
+  it('AC 3: the confirming tap sends finishRun with the run on screen, once, then re-reads — and the screen is the NEW run', async () => {
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Bread'])
+    shoppingApi.finishRun.mockResolvedValue(nextRun)
+    // The re-read the server's answer produces: the next run, holding only the
+    // two that were not bought.
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [nextRun],
+      items: [carriedMilk, carriedEggs],
+    })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+    // The RUN, and the client — never the list id, which is what a second
+    // phone resolving afresh would have closed.
+    expect(shoppingApi.finishRun).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r1')
+    // Through mutate(): written, THEN re-read. Unlike the tick, which does not.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.finishRun.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+
+    // The two unbought items carried, on top, unpurchased and marked; the
+    // bought one is gone with the run it was bought on. #359 is where that run
+    // becomes readable again — this tab does not fetch it.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    for (const name of ['Milk', 'Eggs']) {
+      const row = within(shop()).getByText(name).closest('li')
+      expect(row).toHaveTextContent('from last run')
+      expect(row).not.toHaveClass('shopping-item--bought')
+      expect(row).not.toHaveTextContent(/bought by/)
+    }
+    expect(within(shop()).queryByText('Bread')).not.toBeInTheDocument()
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // The confirm is gone with the run it was about, and the tab offers the
+    // next trip's control against the new run.
+    expect(screen.queryByText(/carry over to the next list/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /done shopping/i })).toBeInTheDocument()
+  })
+
+  it('AC 5: another phone finished first — the refusal reaches the strip OUTSIDE the list, and the re-read shows THEIR run', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(
+      new Error('finishing the run: run already closed'),
+    )
+    // What the re-read finds: the run the OTHER phone opened, with the items
+    // it carried — neither of which this phone could have invented.
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [nextRun],
+      items: [carriedMilk, carriedEggs],
+    })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('finishing the run: run already closed')
+    // Outside the list, like every other refused write on this surface.
+    expect(alert.closest('ul, li')).toBeNull()
+    // `mutate()` does not re-read after a failure; this path does, because a
+    // refusal here means the run on screen no longer exists.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    expect(within(shop()).getByText('Milk').closest('li')).toHaveTextContent('from last run')
+    // The refusal's own sentence is still what is on screen after the re-read.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('run already closed')
+  })
+
+  it('AC 5: any other rejection leaves the run open with its items intact, and patches nothing', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(new Error('finishing the run: not authenticated'))
+    // The server state did not move, so the re-read returns what was there.
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('not authenticated')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Same run, same three rows, same order, and the bought one still bought.
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Bread'])
+    expect(within(shop()).getByText('Bread').closest('li')).toHaveClass('shopping-item--bought')
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+    // Nothing was marked as carried: a client that patched a finish locally
+    // would have had to invent the copies.
+    expect(shop()).not.toHaveTextContent(/from last run/)
+  })
+
+  it('AC 5: a re-read that itself fails leaves the refusal on screen rather than replacing it', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(
+      new Error('finishing the run: run already closed'),
+    )
+    shoppingApi.readShopping.mockRejectedValue(new Error('loading shopping lists: network down'))
+
+    await finishTheRun()
+
+    // The refusal explains what happened; a complaint about a read the person
+    // did not ask for would replace the answer with a symptom.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('run already closed')
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument()
+  })
+
+  it('AC 1 + AC 7: every control on the surface is disabled while the finish is in flight', async () => {
+    await renderApp('Shop')
+    let settle
+    shoppingApi.finishRun.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve
+      }),
+    )
+
+    await finishTheRun()
+    expect(screen.getByRole('button', { name: /mark milk bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /keep shopping/i })).toBeDisabled()
+    // A second confirming tap while the first is in flight sends nothing.
+    await tab(/^finish$/i)
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+
+    await act(async () => settle(nextRun))
   })
 })
 

@@ -1001,6 +1001,19 @@ No migration was needed for the route taken: `0032`'s RPCs already return the wh
 write-then-full-refresh discipline stands everywhere else, and departing from it a second time is a
 decision to be taken again rather than a precedent set here.
 
+**The mis-tap protection on finishing a run is an inline confirm naming the consequence, and not an
+undo** (decision 8, built in #357 on 2026-09-06): "Done shopping" is replaced in place by *"Finish
+this run? 3 items not bought will carry over to the next list"* with **Finish** and **Keep
+shopping**, focus landing on **Keep shopping** so an accidental Enter costs a tap rather than a
+trip. The reason it is not an undo is that an undo here would be **the app's first** — every other
+reversible action in Taskr is a second tap on the thing itself ("Not bought after all", un-complete
+a chore), which works because nothing else has happened in between — and reversing a finish would
+need semantics for the items somebody has already added to the **new** run, a question the feature
+has no answer to and no reason to invent. The confirm is the same in-place idiom the roster uses for
+Remove and for signing every device out; `window.confirm` is used nowhere in this app. What it
+costs is stated rather than hidden: a confirmed mis-tap is not reversible, and the sentence naming
+what carries over is the whole of the protection.
+
 **The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
 otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same
 full re-read every tab does; #355 changed the tick alone, as the paragraph above records. Nothing here adds a

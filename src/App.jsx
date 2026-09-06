@@ -71,6 +71,7 @@ import {
 import {
   addItem,
   createList,
+  finishRun,
   purchaseItem,
   readShopping,
   removeItem,
@@ -916,7 +917,7 @@ export default function App() {
     () => mutate(() => reassignHousehold({ householdId: household?.id })),
     [mutate, household],
   )
-  // #353 — the Shop tab's three writes, each through mutate() so the list this
+  // #353 — the Shop tab's mutate() writes, each re-reading so the list this
   // phone shows after the write is the list every other phone reads. The list
   // is created in the household THIS SCREEN is showing (#159 AC 4's rule); an
   // item names its run and a removal names its item, and the household is the
@@ -939,6 +940,55 @@ export default function App() {
   const handleRemoveShoppingItem = useCallback(
     (itemId) => mutate(() => removeItem(shoppingClient(), itemId)),
     [mutate],
+  )
+
+  // #357 — the end of the trip. Through `mutate()` like the three above and
+  // deliberately NOT like the tick: a finish happens once a trip rather than
+  // once an aisle, so the round trips a full refresh costs are affordable
+  // here, and what the screen must show afterwards is not one row but a
+  // different RUN — the new one, with the carried items on it. The RPC returns
+  // that run and this ignores it: the items are what the screen draws, and
+  // they come from the read.
+  //
+  // The argument is the RUN THIS SCREEN IS SHOWING, never the list. That is
+  // `0033`'s whole design and the reason the second phone in a two-phone race
+  // is refused instead of closing the run the first one just opened.
+  //
+  // A REFUSAL RE-READS, the same shape as the tick's refusal path and for the
+  // same reason: `mutate()` leaves the screen alone when the write fails, and
+  // the one refusal this RPC is built to raise — `run already closed` — means
+  // another phone finished first, so the run on screen no longer exists and
+  // the picture is known to be stale. #356 measured which refusal actually
+  // arrives: 40 of 40 races took the RPC's own sentence and none the unique
+  // index, so there is one refusal path to think about here and not two. The
+  // re-read is unconditional anyway, because a client cannot tell the stale
+  // case from the rest by reading a message, and re-reading after a failure
+  // costs a refresh on a path that has already failed.
+  //
+  // The read's own error is swallowed for `tickItem`'s reason: the refusal
+  // above is the sentence that explains what happened, and a complaint about a
+  // read the person did not ask for would replace the answer with a symptom.
+  //
+  // One difference from `tickItem` worth stating rather than leaving to be
+  // found: `mutate()` clears `busy` in its own `finally`, which runs BEFORE
+  // this catch, so the controls are live during the recovery read where
+  // `tickItem` keeps them disabled. A second Finish in that window names the
+  // same run, is refused by `0033` for the same reason, and re-reads again —
+  // so the window costs a round trip and can produce no second close. It is
+  // left as it is because closing it means not using `mutate()`, and an
+  // untested copy of `mutate()` here would be the worse trade.
+  const handleFinishShoppingRun = useCallback(
+    (runId) =>
+      mutate(() => finishRun(shoppingClient(), runId)).catch(async (err) => {
+        try {
+          const found = await refresh()
+          setStatus(found ? 'joined' : 'onboarding')
+        } catch {
+          // Deliberately swallowed — see above.
+        }
+        throw err
+      }),
+    [mutate, refresh],
   )
 
   // #355 — the tick, and the ONE write on this screen that does not re-read
@@ -1467,6 +1517,7 @@ export default function App() {
           onRemoveItem={handleRemoveShoppingItem}
           onPurchaseItem={handlePurchaseShoppingItem}
           onUnpurchaseItem={handleUnpurchaseShoppingItem}
+          onFinishRun={handleFinishShoppingRun}
         />
       ) : null}
 

@@ -464,7 +464,10 @@ describe('a duplicate list name is translated, and only that', () => {
     await expect(addItem(client, 'r1', 'Placeholder Item')).rejects.toThrow(
       /^adding the item: duplicate key/,
     )
-    results.shopping_items = duplicate('duplicate key value violates unique constraint')
+    // #368 moved the remove off the table and onto `remove_shopping_item`, so
+    // the error now arrives from the RPC rather than from `shopping_items`.
+    // What is asserted is unchanged: an ITEM writer keeps its own wording.
+    results.remove_shopping_item = duplicate('duplicate key value violates unique constraint')
     await expect(removeItem(client, 'i1')).rejects.toThrow(/^removing the item: duplicate key/)
   })
 })

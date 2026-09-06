@@ -764,6 +764,48 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
       expect(refused.error).toMatch(/shopping_lists_household_name_key/)
     })
 
+    // #358 AC 5 — the CODE, which is what the client's sentence is keyed on.
+    //
+    // The two tests above prove the index refuses; neither can say what the
+    // client will be handed. `shopping.js` maps SQLSTATE 23505 — and never the
+    // message, which Postgres is free to reword — into "You already have a list
+    // called X", so if a future migration replaced the index with a trigger
+    // raising `P0001`, every one of those tests would still pass while the
+    // person read a sentence about a constraint. This is the assertion that
+    // fails instead.
+    it('#358 — both refusals carry SQLSTATE 23505, which is what the client maps on', async () => {
+      const codeOf = async (fn) => {
+        try {
+          await fn()
+          return null
+        } catch (error) {
+          return error.code
+        }
+      }
+
+      const onInsert = await codeOf(() =>
+        asDevice(db, person, () =>
+          db.query('select * from public.create_shopping_list($1, $2)', [hA.id, 'GROCERIES']),
+        ),
+      )
+      expect(onInsert).toBe('23505')
+
+      await rpc(person, 'select * from public.create_shopping_list($1, $2)', [hA.id, 'Hardware'])
+      const onUpdate = await codeOf(() =>
+        asDevice(db, person, () =>
+          db.query('update public.shopping_lists set name = $2 where id = $1', [listA.id, 'hardware']),
+        ),
+      )
+      expect(onUpdate).toBe('23505')
+
+      // And no row moved on either refusal: two lists, named as they were.
+      const { rows } = await db.query(
+        'select name from public.shopping_lists where household_id = $1 order by name',
+        [hA.id],
+      )
+      expect(rows.map((r) => r.name)).toEqual(['Groceries', 'Hardware'])
+    })
+
     it('a rename to a blank name is refused by the check constraint, so the RPC’s trim rule holds on the direct write too', async () => {
       const refused = await attempt(() =>
         asDevice(db, person, () =>

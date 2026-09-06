@@ -199,9 +199,15 @@ vi.mock('./lib/household.js', async () => {
 // #357 — `finishRun` joins them, and its fake carries the run id for the same
 // argument reason: the RPC takes the run THIS SCREEN is showing, and a fake
 // that only recorded the call could not tell that from one passing the list.
+//
+// #358 — `renameList` joins them, carrying the list id and the name, and
+// `createList`'s fake starts RETURNING the row it made: App reads the created
+// list's id to move the picker onto it, so a fake resolving `undefined` could
+// not tell "the new list is on screen" from "the first list by name is".
 const shoppingApi = {
   readShopping: vi.fn(),
   createList: vi.fn(),
+  renameList: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
   purchaseItem: vi.fn(),
@@ -284,6 +290,7 @@ beforeEach(() => {
   shoppingApi.shoppingClient.mockReturnValue(SHOPPING_CLIENT)
   shoppingApi.readShopping.mockResolvedValue(EMPTY_SHOPPING)
   shoppingApi.createList.mockResolvedValue(undefined)
+  shoppingApi.renameList.mockResolvedValue(undefined)
   shoppingApi.addItem.mockResolvedValue(undefined)
   shoppingApi.removeItem.mockResolvedValue(undefined)
   shoppingApi.purchaseItem.mockResolvedValue(undefined)
@@ -4049,5 +4056,321 @@ describe('applying the calendar suggestion to the week (#97)', () => {
     await useIt()
     await save()
     expect(calendarApi.fetchBusyWeek.mock.calls.length).toBe(fetches)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #358 — several named lists, from App.
+//
+// What the surface DRAWS is Shopping.test.jsx's, and which SQLSTATE the
+// database raises is shopping.pglite.test.js's. These cover what only App can
+// answer: that the two list writes go through the data layer with the right
+// arguments and are followed by a re-read, that a refused one reaches the strip
+// and patches nothing, and — the criterion no other level can reach — that the
+// chosen list survives a tab switch and falls back when it names nothing.
+// ---------------------------------------------------------------------------
+describe('#358 — several named lists, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const other = { id: 'h2', name: 'Placeholder Other Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const groceries = {
+    id: 'l1',
+    household_id: 'h1',
+    name: 'Groceries',
+    created_at: '2026-09-05T00:00:00Z',
+  }
+  const hardware = {
+    id: 'l2',
+    household_id: 'h1',
+    name: 'Hardware',
+    created_at: '2026-09-06T00:00:00Z',
+  }
+  const runOf = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: list.household_id,
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const runA = runOf(groceries, 'r1')
+  const runB = runOf(hardware, 'r2')
+  // Read order is `created_at`, so the read hands them over oldest-first and
+  // App is what sorts by name. Kept that way on purpose: a fixture already in
+  // name order could not tell the ordering from the read.
+  /**
+   * One item per list, so a test can ask WHICH LIST WAS DRAWN and not only
+   * which button is pressed. The picker's pressed state comes from the
+   * preference; the rows come from the list on screen, and the mutation that
+   * drew the wrong list moved the rows while leaving the button alone.
+   */
+  const item = (id, runId, name) => ({
+    id,
+    run_id: runId,
+    household_id: 'h1',
+    name,
+    note: null,
+    added_by_member_id: 'm1',
+    added_at: '2026-09-06T10:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  })
+  const twoLists = {
+    lists: [groceries, hardware],
+    runs: [runA, runB],
+    items: [item('i1', 'r1', 'Milk'), item('i2', 'r2', 'Bread')],
+  }
+  const oneList = { lists: [groceries], runs: [runA], items: [item('i1', 'r1', 'Milk')] }
+  /** The item names on screen, top to bottom — the list the tab actually drew. */
+  const rowsOnScreen = () =>
+    Array.from(document.querySelectorAll('.shopping-item__name')).map((n) => n.textContent)
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  const picker = () =>
+    Array.from(
+      screen.getByRole('group', { name: /which list/i }).querySelectorAll('button'),
+    ).map((b) => [b.querySelector('.shopping-picker__name').textContent, b.getAttribute('aria-pressed')])
+  /**
+   * The list on screen. With a picker up the heading stands down (the owner's
+   * call at the design pass), so the pressed button is what names it; with one
+   * list there is no picker and the heading is the name.
+   */
+  const heading = () => {
+    const group = screen.queryByRole('group', { name: /which list/i })
+    if (!group) return screen.getByRole('heading', { level: 3 }).textContent
+    return group
+      .querySelector('button[aria-pressed="true"]')
+      .querySelector('.shopping-picker__name').textContent
+  }
+  /** Tap a picker button by its list NAME — its accessible name carries the count too. */
+  const choose = (name) =>
+    act(async () =>
+      void fireEvent.click(
+        Array.from(
+          screen.getByRole('group', { name: /which list/i }).querySelectorAll('button'),
+        ).find((b) => b.querySelector('.shopping-picker__name').textContent === name),
+      ),
+    )
+
+  it('AC 1: orders the picker by NAME, whatever order the read returned', async () => {
+    // Both of the read's own orders point the other way: `created_at` ascending
+    // AND the id tie-break `orderShoppingLists` falls back on. The ids agreed
+    // with the names in the first draft, and a mutation deleting the name
+    // comparison outright still produced this expectation from the tie-break.
+    const early = { ...hardware, id: 'la', created_at: '2026-09-01T00:00:00Z' }
+    const late = { ...groceries, id: 'lb' }
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [early, late],
+      runs: [runOf(early, 'r1'), runOf(late, 'r2')],
+      items: [],
+    })
+    await renderApp('Shop')
+    expect(picker().map(([name]) => name)).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('AC 1: creates the list through the data layer, re-reads, and lands the picker on the NEW one', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+    await renderApp('Shop')
+    expect(heading()).toBe('Groceries')
+
+    // The write returns the row it made; the next read holds both lists.
+    shoppingApi.createList.mockResolvedValue(hardware)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/new list/i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Hardware' } })
+    await tab(/create list/i)
+
+    expect(shoppingApi.createList).toHaveBeenCalledWith(SHOPPING_CLIENT, household.id, 'Hardware')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // The write is before the read, which is what makes the id resolvable.
+    expect(shoppingApi.createList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    // Second by name, and it is the one on screen — a list somebody just named
+    // is the list they want to be looking at.
+    await waitFor(() => expect(heading()).toBe('Hardware'))
+    expect(picker()).toEqual([
+      ['Groceries', 'false'],
+      ['Hardware', 'true'],
+    ])
+  })
+
+  it('AC 4: renames through the data layer with the list id, then re-reads', async () => {
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    shoppingApi.readShopping.mockResolvedValue({
+      ...twoLists,
+      lists: [{ ...groceries, name: 'Bakery' }, hardware],
+    })
+
+    await tab(/^rename /i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Bakery' } })
+    await tab(/save name/i)
+
+    expect(shoppingApi.renameList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.renameList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l1', 'Bakery')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // The heading comes from the RE-READ, not from the field: the id did not
+    // move, so the same list is on screen under its new name.
+    await waitFor(() => expect(heading()).toBe('Bakery'))
+  })
+
+  it('AC 5: a refused rename puts the data layer’s sentence on the strip and changes nothing on screen', async () => {
+    // WHICH sentence is shopping.js's, keyed on SQLSTATE 23505 and proved in
+    // shopping.io.test.js; what only this level can say is that the refusal
+    // reaches the strip and that nothing on the screen moved with it.
+    shoppingApi.renameList.mockRejectedValue(
+      new Error('You already have a list called Hardware.'),
+    )
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/^rename /i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Hardware' } })
+    await tab(/save name/i)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('You already have a list called Hardware.'),
+    )
+    // No re-read: `mutate()` re-reads only what it wrote, and nothing was
+    // written. The editor is still open with the name that was refused.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Hardware')
+    expect(picker().map(([name]) => name)).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('AC 5: a refused create leaves the household on the list it had', async () => {
+    shoppingApi.createList.mockRejectedValue(new Error('You already have a list called Hardware.'))
+    await renderApp('Shop')
+
+    await tab(/new list/i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'HARDWARE' } })
+    await tab(/create list/i)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('You already have a list called Hardware.'),
+    )
+    expect(heading()).toBe('Groceries')
+    expect(picker()).toEqual([
+      ['Groceries', 'true'],
+      ['Hardware', 'false'],
+    ])
+  })
+
+  it('AC 3: finishing names the chosen list’s run, and the other list comes back untouched', async () => {
+    shoppingApi.finishRun.mockResolvedValue({ ...runB, id: 'r3' })
+    await renderApp('Shop')
+    await choose('Hardware')
+
+    // The re-read after the finish: Hardware on a NEW run with nothing on it,
+    // and Groceries exactly as it was — same run, same item.
+    const fresh = { ...runB, id: 'r3' }
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [groceries, hardware],
+      runs: [runA, fresh],
+      items: [item('i1', 'r1', 'Milk')],
+    })
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+
+    // The RUN, never the list — 0033's whole design, and what the fake records.
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.finishRun).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r2')
+
+    // And the other list is untouched by it: switch back and its row is there.
+    await waitFor(() => expect(heading()).toBe('Hardware'))
+    expect(rowsOnScreen()).toEqual([])
+    await choose('Groceries')
+    expect(rowsOnScreen()).toEqual(['Milk'])
+  })
+
+  it('AC 6: the chosen list survives a visit to another tab, in the same session', async () => {
+    await renderApp('Shop')
+    expect(heading()).toBe('Groceries')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // The component unmounts on the way out and mounts again on the way back —
+    // which is the whole reason the choice is not held inside it.
+    await tab('Chores')
+    expect(screen.queryByRole('region', { name: 'Shop' })).not.toBeInTheDocument()
+    await tab('Shop')
+    expect(heading()).toBe('Hardware')
+    expect(picker()).toEqual([
+      ['Groceries', 'false'],
+      ['Hardware', 'true'],
+    ])
+    // The BODY, not only the button: the rows on screen are the chosen list's.
+    expect(rowsOnScreen()).toEqual(['Bread'])
+  })
+
+  it('AC 6: nothing is written for a choice — not to the server, not to storage', async () => {
+    const wrote = []
+    const spy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation((...args) => void wrote.push(args))
+    try {
+      await renderApp('Shop')
+      const reads = shoppingApi.readShopping.mock.calls.length
+      await choose('Hardware')
+      expect(heading()).toBe('Hardware')
+      expect(shoppingApi.readShopping.mock.calls.length).toBe(reads)
+      expect(wrote).toEqual([])
+      for (const fn of [shoppingApi.createList, shoppingApi.renameList, shoppingApi.addItem]) {
+        expect(fn).not.toHaveBeenCalled()
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('AC 6: a list that is gone after a re-read falls back to the first by name', async () => {
+    await renderApp('Shop')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // Another phone removed the list this one was looking at. The next re-read
+    // — here the one an add drags behind it — no longer holds l2.
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    await waitFor(() => expect(heading()).toBe('Groceries'))
+    expect(screen.queryByRole('group', { name: /which list/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 6: the active household changing resets the choice to that household’s first list', async () => {
+    await renderApp('Shop')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // The household on screen changes under the choice. Its lists are other
+    // rows entirely, so the preference names nothing — one rule, three causes.
+    const bakery = { id: 'l9', household_id: 'h2', name: 'Bakery', created_at: '2026-09-06T00:00:00Z' }
+    api.currentHousehold.mockResolvedValue(other)
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [bakery],
+      runs: [runOf(bakery, 'r9')],
+      items: [],
+    })
+    await tab('Chores')
+    await tab('Shop')
+
+    await waitFor(() => expect(heading()).toBe('Bakery'))
   })
 })

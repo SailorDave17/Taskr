@@ -273,6 +273,7 @@ Other scripts:
 |---|---|
 | `npm run lint` | ESLint over the repo |
 | `npm test` | Vitest, single run. Fails on zero tests, deliberately |
+| `npm run test:summary <report.json>` | **Read back a `vitest run --reporter=json` report**: verdict, totals, then every failure with its message. Exists so the summary is a reviewable file rather than an inline `node -e "…"` one-liner rebuilt on each invocation — an inline interpreter cannot be allowlisted responsibly, since whatever follows `-e` runs with full privileges, while this is an exact-match command. **Its verdict is deliberately not `numFailedTests === 0`**: a suite that throws while collecting — a bad import, a config error, a `beforeAll` that cannot start — reports `success: false` with **zero** failed tests, because no test ever ran to fail, which is the shape that hid a dead `test:rls` for four days (see the `check:live` row below). So `success` and the failure count are both consulted, a suite that errored with nothing to attribute it to is printed on its own, and an **absent or truncated report exits 2** rather than rendering an empty summary — the run that never wrote a report and the run that found nothing wrong otherwise produce the same silence, and the second is the one a reader believes. Exit codes: 0 all passing, 1 the run did not succeed, 2 no usable report |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
 | `npm run icons` | Regenerate the PWA icons from `scripts/generate-icons.mjs` |

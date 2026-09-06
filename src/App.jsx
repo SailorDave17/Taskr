@@ -68,7 +68,16 @@ import {
   readConsentReturn,
   startConnect,
 } from './lib/calendar.js'
-import { addItem, createList, readShopping, removeItem, shoppingClient } from './lib/shopping.js'
+import {
+  addItem,
+  createList,
+  purchaseItem,
+  readShopping,
+  removeItem,
+  replaceShoppingItem,
+  shoppingClient,
+  unpurchaseItem,
+} from './lib/shopping.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
@@ -250,7 +259,9 @@ export default function App() {
     // joined. `readShopping` is three sequential reads (lists by household,
     // open runs by list, items by run — never an embed filter), so every
     // re-read grew by three round trips the day this landed; #351 priced what
-    // a round trip costs and #355 owns the shape of the tick.
+    // a round trip costs, and #355 took the TICK off this path entirely — see
+    // `tickItem` below, which is the one write here that does not come through
+    // `mutate()` and so never reaches this function.
     setShopping(found ? await readShopping(shoppingClient(), found.id) : EMPTY_SHOPPING)
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
@@ -930,6 +941,65 @@ export default function App() {
     [mutate],
   )
 
+  // #355 — the tick, and the ONE write on this screen that does not re-read
+  // everything. `mutate()` is write-then-full-refresh by design, and here that
+  // design is too expensive to keep: #351 measured a full refresh per tick at
+  // 6.5 s at Slow 4G against the 1 s bar a person taps at, because a refresh
+  // costs eleven round trips of which the shopping reads are three. One round
+  // trip measured 0.585 s. The owner took the one-round-trip route at this
+  // story's pickup (2026-09-05), and `0032`'s RPCs already return the whole
+  // stamped row, so no migration was needed to get it.
+  //
+  // What the departure costs, stated rather than hidden: another phone's ticks
+  // are not picked up by this one until the next arrival on the tab. That is
+  // exactly what the epic's decision 3 — re-read on open, no Realtime — already
+  // says about every other row on this surface, so the tick is now consistent
+  // with the tab rather than with `mutate()`.
+  //
+  // The refusal path IS the full re-read, and it is not a consolation prize: a
+  // refusal ("item already bought") is the one moment this phone knows its
+  // picture is stale, so the cheap path runs while the picture is good and the
+  // expensive one runs exactly when it is not. The refusal's own sentence stays
+  // on screen — `refresh()` never writes `error` — and a re-read that itself
+  // fails leaves that sentence standing rather than replacing it with a second
+  // complaint about a read the person did not ask for.
+  const tickItem = useCallback(
+    async (action) => {
+      setBusy(true)
+      setError(null)
+      try {
+        const row = await action()
+        setShopping((current) => ({
+          ...current,
+          items: replaceShoppingItem(current.items, row),
+        }))
+        return row
+      } catch (err) {
+        setError(err.message)
+        try {
+          const found = await refresh()
+          setStatus(found ? 'joined' : 'onboarding')
+        } catch {
+          // Deliberately swallowed. The refusal above is the sentence that
+          // explains what happened; a read error on top of it would replace
+          // the answer with a symptom.
+        }
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refresh],
+  )
+  const handlePurchaseShoppingItem = useCallback(
+    (itemId) => tickItem(() => purchaseItem(shoppingClient(), itemId)),
+    [tickItem],
+  )
+  const handleUnpurchaseShoppingItem = useCallback(
+    (itemId) => tickItem(() => unpurchaseItem(shoppingClient(), itemId)),
+    [tickItem],
+  )
+
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
   // same state object `isOrganizer` compares against below, so who-you-are and
   // what-you-organise cannot be answered about two different households. The
@@ -1378,18 +1448,25 @@ export default function App() {
 
       {/* #353 — the household's shopping list. The roster is what the surface
           resolves "added by" against, and `error` is the same strip every
-          other surface renders for a refused write. */}
+          other surface renders for a refused write.
+
+          #355 — the timezone is the household's, because a bought stamp is a
+          time of day a person reads ("bought by Robin · 4:02 PM") and every
+          other date on this app is spelled in the household's zone. */}
       {status === 'joined' && household && view === 'shop' ? (
         <Shopping
           lists={shopping.lists}
           runs={shopping.runs}
           items={shopping.items}
           members={members}
+          timezone={household.timezone}
           busy={busy}
           error={error}
           onCreateList={handleCreateShoppingList}
           onAddItem={handleAddShoppingItem}
           onRemoveItem={handleRemoveShoppingItem}
+          onPurchaseItem={handlePurchaseShoppingItem}
+          onUnpurchaseItem={handleUnpurchaseShoppingItem}
         />
       ) : null}
 

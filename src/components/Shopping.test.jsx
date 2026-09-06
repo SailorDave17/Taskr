@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import Shopping from './Shopping.jsx'
 
@@ -56,9 +56,15 @@ const boughtBread = {
   purchased_by_member_id: 'm1',
 }
 
+// #358 — the tab draws ONE list, the one `selectedListId` names, and App is
+// what resolves that id from the read. So every render here names it too; a
+// default of the single fixture list keeps the #353/#355/#357 arrangements
+// saying what they said, and the picker tests below override it.
 function setup(overrides = {}) {
   const handlers = {
+    onSelectList: vi.fn(),
     onCreateList: vi.fn().mockResolvedValue(undefined),
+    onRenameList: vi.fn().mockResolvedValue(undefined),
     onAddItem: vi.fn().mockResolvedValue(undefined),
     onRemoveItem: vi.fn().mockResolvedValue(undefined),
     onPurchaseItem: vi.fn().mockResolvedValue(undefined),
@@ -72,10 +78,14 @@ function setup(overrides = {}) {
       items={[milk, eggs]}
       members={members}
       timezone="America/New_York"
+      selectedListId="l1"
       {...handlers}
       {...overrides}
     />,
   )
+  // Handlers ONLY. Several tests below assert that a gesture wrote nothing by
+  // walking `Object.values(...)`, so anything else returned here would be
+  // asserted against as though it were a spy.
   return handlers
 }
 
@@ -285,7 +295,13 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
     )
   })
 
-  it('draws every list the read returns, each under its own name, so none is hidden', () => {
+  // #353 asserted that EVERY list the read returns is drawn, each under its own
+  // name — the honest shape while nothing could choose between them. #358
+  // reverses it deliberately: one list is on screen and the picker is how the
+  // others are reached. The claim underneath is the one that survives, and it
+  // is the one worth keeping — an item belongs to exactly one list and is
+  // never drawn under another.
+  it('draws only the chosen list, and never another list’s items under its name', () => {
     const hardware = { ...list, id: 'l2', name: 'Hardware' }
     const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
     const screws = { ...milk, id: 'i9', run_id: 'r2', name: 'Bread' }
@@ -293,15 +309,16 @@ describe('#353 AC 8 — no per-person count, rank or score of who added what; an
       lists: [list, hardware],
       runs: [run, hardwareRun],
       items: [milk, screws],
+      selectedListId: 'l2',
     })
-    const groceries = screen.getByRole('region', { name: 'Groceries' })
     const other = screen.getByRole('region', { name: 'Hardware' })
-    expect(within(groceries).getByText('Milk')).toBeInTheDocument()
-    expect(within(groceries).queryByText('Bread')).not.toBeInTheDocument()
     expect(within(other).getByText('Bread')).toBeInTheDocument()
     expect(within(other).queryByText('Milk')).not.toBeInTheDocument()
-    // No create form: the household has lists.
+    expect(screen.queryByRole('region', { name: 'Groceries' })).not.toBeInTheDocument()
+    // No create FORM: the household has lists, so what it is offered is the
+    // control that opens one.
     expect(screen.queryByRole('button', { name: /create list/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /new list/i })).toBeInTheDocument()
   })
 })
 
@@ -634,16 +651,24 @@ describe('#357 AC 4 — an empty run offers no way to finish', () => {
     expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
   })
 
-  it('is per LIST: the list with items offers it and the empty one does not', () => {
+  // Written against two lists drawn at once (#353's shape). #358 draws one, so
+  // the claim is now about the list ON SCREEN — and it is the sharper version
+  // of the same thing: the control follows the choice rather than sitting under
+  // whichever list happens to have items.
+  it('is per LIST: the chosen list decides, so the empty one on screen offers none', () => {
     const hardware = { ...list, id: 'l2', name: 'Hardware' }
     const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
-    setup({ lists: [list, hardware], runs: [run, hardwareRun], items: [milk] })
-    const groceries = screen.getByRole('region', { name: 'Groceries' })
-    const other = screen.getByRole('region', { name: 'Hardware' })
-    expect(within(groceries).getByRole('button', { name: /done shopping/i })).toBeInTheDocument()
+    const two = { lists: [list, hardware], runs: [run, hardwareRun], items: [milk] }
+    setup({ ...two, selectedListId: 'l1' })
     expect(
-      within(other).queryByRole('button', { name: /done shopping/i }),
-    ).not.toBeInTheDocument()
+      within(screen.getByRole('region', { name: 'Groceries' })).getByRole('button', {
+        name: /done shopping/i,
+      }),
+    ).toBeInTheDocument()
+    cleanup()
+    setup({ ...two, selectedListId: 'l2' })
+    expect(screen.getByRole('region', { name: 'Hardware' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
   })
 })
 
@@ -709,5 +734,239 @@ describe('#357 — a write in flight', () => {
     // a run on screen and still a way to see what is happening.
     expect(screen.getByRole('button', { name: /^finish$/i })).toBeInTheDocument()
     await act(async () => settle())
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #358 — several named lists, and the one on screen.
+//
+// What only this level can answer: which list's rows are drawn, that the add
+// form and the finish control aim at THAT list's run, that the picker says
+// which one is chosen in the attribute a screen reader reads, and that a
+// rename is an edit on the heading and not a form somewhere else. WHICH list is
+// chosen after a re-read, and whether the choice survives a tab switch, is
+// App's and lives in App.test.jsx — this component is handed the id.
+// ---------------------------------------------------------------------------
+
+/** Two lists, each with its own open run and its own items. */
+const hardware = { ...list, id: 'l2', name: 'Hardware', created_at: '2026-09-06T00:00:00Z' }
+const hardwareRun = { ...run, id: 'r2', list_id: 'l2' }
+const screws = {
+  ...milk,
+  id: 'i9',
+  run_id: 'r2',
+  name: 'Bread',
+  added_at: '2026-09-06T01:00:00Z',
+}
+/** Bought on the hardware run, so its count and its rows differ from l1's. */
+const boughtNails = {
+  ...screws,
+  id: 'i10',
+  name: 'Butter',
+  purchased_at: '2026-09-06T02:00:00Z',
+  purchased_by_member_id: 'm1',
+}
+
+/** App orders by name before it renders; these fixtures arrive in that order. */
+const twoLists = {
+  lists: [list, hardware],
+  runs: [run, hardwareRun],
+  items: [milk, eggs, screws, boughtNails],
+}
+
+const pickerButtons = () =>
+  Array.from(screen.getByRole('group', { name: /which list/i }).querySelectorAll('button'))
+
+describe('#358 AC 1 — a second list, and the picker that appears with it', () => {
+  it('offers "New list" to a household that already has one, and no picker', () => {
+    setup()
+    expect(screen.getByRole('button', { name: /new list/i })).toBeInTheDocument()
+    // One list is not a choice, so there is no control offering one.
+    expect(screen.queryByRole('group', { name: /which list/i })).not.toBeInTheDocument()
+  })
+
+  it('opens an EMPTY name field on the tap, and writes nothing until it is submitted', async () => {
+    const handlers = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /new list/i }))
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('')
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('refuses an empty name with a sentence BEFORE the call', async () => {
+    const { onCreateList } = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /new list/i }))
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: '   ' } })
+    await clickAndSettle(screen.getByRole('button', { name: /create list/i }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/name is required/i)
+    expect(onCreateList).not.toHaveBeenCalled()
+  })
+
+  it('creates the list with the trimmed name, once', async () => {
+    const { onCreateList } = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /new list/i }))
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: ' Hardware ' } })
+    await clickAndSettle(screen.getByRole('button', { name: /create list/i }))
+    expect(onCreateList).toHaveBeenCalledTimes(1)
+    expect(onCreateList).toHaveBeenCalledWith('Hardware')
+  })
+
+  it('backs out with Cancel, writing nothing and leaving the list on screen', async () => {
+    const handlers = setup()
+    await clickAndSettle(screen.getByRole('button', { name: /new list/i }))
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+    expect(screen.queryByLabelText(/^list name$/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /new list/i })).toBeInTheDocument()
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('draws one button per list in the order given, with its OWN count', () => {
+    setup({ ...twoLists, selectedListId: 'l1' })
+    expect(pickerButtons().map((b) => b.textContent)).toEqual([
+      'Groceries2 left to buy',
+      'Hardware1 left to buy',
+    ])
+  })
+
+  it('says which one is chosen with aria-pressed, and only that one', () => {
+    setup({ ...twoLists, selectedListId: 'l2' })
+    expect(pickerButtons().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true'])
+  })
+
+  it('draws the count ONCE: in the picker where there is one, under the heading where there is not', () => {
+    setup({ ...twoLists, selectedListId: 'l1' })
+    // The chosen list has two unbought items, and the sentence appears exactly
+    // once — inside its own picker button.
+    expect(screen.getAllByText('2 left to buy')).toHaveLength(1)
+    expect(document.querySelector('.shopping-count')).toBeNull()
+    cleanup()
+    setup()
+    expect(document.querySelector('.shopping-count')).toHaveTextContent('2 left to buy')
+  })
+})
+
+describe('#358 AC 2 — the chosen list is the list, and the form aims at its run', () => {
+  it('sends the id to onSelectList and writes nothing else', async () => {
+    const handlers = setup({ ...twoLists, selectedListId: 'l1' })
+    await clickAndSettle(pickerButtons()[1])
+    expect(handlers.onSelectList).toHaveBeenCalledTimes(1)
+    expect(handlers.onSelectList).toHaveBeenCalledWith('l2')
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onSelectList') expect(handler).not.toHaveBeenCalled()
+    }
+  })
+
+  it('renders that list’s rows and no other list’s', () => {
+    setup({ ...twoLists, selectedListId: 'l2' })
+    expect(rowNames()).toEqual(['Bread', 'Butter'])
+  })
+
+  it('aims the add form at the chosen list’s open run', async () => {
+    const { onAddItem } = setup({ ...twoLists, selectedListId: 'l2' })
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await clickAndSettle(screen.getByRole('button', { name: /add item/i }))
+    expect(onAddItem).toHaveBeenCalledWith('r2', 'Milk', null)
+  })
+})
+
+describe('#358 AC 3 — finishing names the chosen list’s run and no other', () => {
+  it('sends r2 when the second list is on screen', async () => {
+    const { onFinishRun } = setup({ ...twoLists, selectedListId: 'l2' })
+    await clickAndSettle(screen.getByRole('button', { name: /done shopping/i }))
+    await clickAndSettle(screen.getByRole('button', { name: /^finish$/i }))
+    expect(onFinishRun).toHaveBeenCalledTimes(1)
+    expect(onFinishRun).toHaveBeenCalledWith('r2')
+  })
+})
+
+describe('#358 AC 4 — renaming, on the heading', () => {
+  const openRename = async () => {
+    await clickAndSettle(screen.getByRole('button', { name: /^rename /i }))
+    return screen.getByLabelText(/^list name$/i)
+  }
+
+  it('names the list it would rename, so the control is unambiguous with the name absent', () => {
+    setup({ ...twoLists, selectedListId: 'l2' })
+    // Owner decision at the design pass: with a picker on screen the pressed
+    // button carries the name, so the heading stands down — and the control's
+    // accessible name is then the only thing that says WHICH list.
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rename Hardware' })).toBeInTheDocument()
+  })
+
+  it('draws the name at subject weight beside it when there is no picker', () => {
+    setup()
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    expect(screen.getByRole('heading', { level: 3 })).toHaveClass('shopping-heading__name')
+  })
+
+  it('offers a field holding the name the server has, and writes nothing on opening', async () => {
+    const handlers = setup()
+    expect(await openRename()).toHaveValue('Groceries')
+    // The heading is gone while the editor is open — the name is being edited,
+    // not shown twice.
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument()
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('saves the trimmed name against the list’s id, once', async () => {
+    const { onRenameList } = setup()
+    fireEvent.change(await openRename(), { target: { value: '  Hardware ' } })
+    await clickAndSettle(screen.getByRole('button', { name: /save name/i }))
+    expect(onRenameList).toHaveBeenCalledTimes(1)
+    expect(onRenameList).toHaveBeenCalledWith('l1', 'Hardware')
+  })
+
+  it('closes on a save that lands, so the heading comes back from the re-read', async () => {
+    setup()
+    fireEvent.change(await openRename(), { target: { value: 'Hardware' } })
+    await clickAndSettle(screen.getByRole('button', { name: /save name/i }))
+    expect(screen.queryByLabelText(/^list name$/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^rename /i })).toBeInTheDocument()
+  })
+
+  it('leaves the editor open with the text still in it when the write is refused', async () => {
+    const refused = vi.fn().mockRejectedValue(new Error('You already have a list called Hardware.'))
+    setup({ onRenameList: refused })
+    fireEvent.change(await openRename(), { target: { value: 'Hardware' } })
+    await clickAndSettle(screen.getByRole('button', { name: /save name/i }))
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Hardware')
+  })
+
+  it('writes nothing on Cancel, and puts the server’s name back', async () => {
+    const handlers = setup()
+    fireEvent.change(await openRename(), { target: { value: 'Hardware' } })
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled()
+    // And re-opening shows the server's name, not the abandoned edit.
+    expect(await openRename()).toHaveValue('Groceries')
+  })
+
+  it('refuses an empty name with a sentence BEFORE the call', async () => {
+    const { onRenameList } = setup()
+    fireEvent.change(await openRename(), { target: { value: '  ' } })
+    await clickAndSettle(screen.getByRole('button', { name: /save name/i }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/name is required/i)
+    expect(onRenameList).not.toHaveBeenCalled()
+  })
+
+  it('is unreachable while another write is in flight', () => {
+    setup({ busy: true })
+    expect(screen.getByRole('button', { name: /^rename /i })).toBeDisabled()
+  })
+})
+
+describe('#358 AC 8 — nothing on this tab deletes or archives a list', () => {
+  it('offers no such control, on several lists, with an editor open or a form open', async () => {
+    setup({ ...twoLists, selectedListId: 'l1' })
+    const forbidden = /delete|archive|remove list|close list/i
+    expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+    await clickAndSettle(screen.getByRole('button', { name: /^rename /i }))
+    expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+    await clickAndSettle(screen.getByRole('button', { name: /new list/i }))
+    expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+    // The only Remove on the surface is an item's, which #353 already holds.
+    expect(screen.getAllByRole('button', { name: /^remove /i }).length).toBeGreaterThan(0)
   })
 })

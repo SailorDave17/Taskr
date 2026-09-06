@@ -49,8 +49,27 @@ import { getSupabase } from './supabase.js'
  * for the reason chores.js gives: a module about shopping is not the home of a
  * generic utility, and the duplication is cheaper than the coupling.
  */
-function unwrap({ data, error }, whatWeWereDoing) {
+function unwrap({ data, error }, whatWeWereDoing, duplicateName = null) {
   if (error) {
+    // #358 — the ONE refusal on this surface a person can act on, translated.
+    //
+    // 23505 is `unique_violation`, and the only unique constraint a client can
+    // reach on `shopping_lists` is `shopping_lists_household_name_key`
+    // (`household_id, lower(name)` in 0032): a household cannot hold two lists
+    // whose names differ only in case. It arrives from BOTH writers — the
+    // `create_shopping_list` RPC's insert and `renameList`'s update — so the
+    // sentence is here rather than in either caller.
+    //
+    // KEYED ON THE CODE, NEVER ON THE MESSAGE. Postgres's own text is
+    // "duplicate key value violates unique constraint …", a sentence about an
+    // index where the person wants one about their household, and matching it
+    // would be matching a string the database is free to reword and that a
+    // translated server would not produce at all. `duplicateName` is what the
+    // caller ASKED for, so the sentence names the name they typed rather than
+    // the one already on the list.
+    if (duplicateName && error.code === '23505') {
+      throw new Error(`You already have a list called ${duplicateName}.`)
+    }
     const err = new Error(`${whatWeWereDoing}: ${error.message}`)
     err.cause = error
     throw err
@@ -149,6 +168,59 @@ export function orderShoppingItems(items) {
       ? stampOrder(a.purchased_at, b.purchased_at)
       : stampOrder(a?.added_at, b?.added_at)
   })
+}
+
+/**
+ * The household's lists in the order the picker draws them — #358.
+ *
+ * By NAME, not by `created_at`: the read orders lists oldest-first, which is a
+ * fact about when somebody set them up and nothing a shopper knows. A picker
+ * whose buttons move when a list is renamed, or whose order can only be learned
+ * by using it, is a row of controls a person has to read every time; by name it
+ * is a row they learn once.
+ *
+ * Case-insensitive, matching the unique index (`household_id, lower(name)` in
+ * 0032) — two lists in one household can never differ only in case, so this
+ * comparison can never be the thing that decides an order. The tie-break on id
+ * is there for totality anyway: a comparator that returns 0 for two different
+ * rows leaves them in the read's order, which is stable but is not an order
+ * this function chose.
+ *
+ * Pure and total, and it copies rather than sorting in place — App holds the
+ * read's own shape in state and the tab does the folding where it draws.
+ */
+export function orderShoppingLists(lists) {
+  return [...(lists ?? [])].sort((a, b) => {
+    const byName = String(a?.name ?? '').localeCompare(String(b?.name ?? ''), 'en', {
+      sensitivity: 'base',
+    })
+    if (byName !== 0) return byName
+    return String(a?.id ?? '') < String(b?.id ?? '') ? -1 : 1
+  })
+}
+
+/**
+ * Which list the Shop tab is showing, given what the person last chose — #358.
+ *
+ * The rule AC 6 asks for, in one place and pure, rather than as an effect that
+ * writes state after a read: a preference that still names a list on screen is
+ * honoured, and anything else falls back to the FIRST list by name. "Anything
+ * else" is three situations that a client cannot tell apart and does not need
+ * to — nothing chosen yet, the active household changed under the choice, or
+ * the list was renamed away or removed between one read and the next.
+ *
+ * Deriving it at render rather than syncing it in a `useEffect` is what makes
+ * the stale window impossible: an effect would draw one frame against a list id
+ * the current read does not hold, which on this surface is a frame with an add
+ * form aimed at a run that is not on screen.
+ *
+ * Takes the lists in the order they will be DRAWN, so "first by name" is the
+ * caller's ordering and not a second copy of it here.
+ */
+export function resolveSelectedListId(orderedLists, preferredId) {
+  const lists = orderedLists ?? []
+  if (preferredId && lists.some((list) => list?.id === preferredId)) return preferredId
+  return lists[0]?.id ?? null
 }
 
 /**
@@ -270,6 +342,7 @@ export async function createList(client, householdId, name) {
   return unwrap(
     await client.rpc('create_shopping_list', { household: householdId, name: listName }),
     'creating the list',
+    listName,
   )
 }
 
@@ -364,6 +437,7 @@ export async function renameList(client, listId, name) {
       .select(SHOPPING_LIST_COLUMNS)
       .single(),
     'renaming the list',
+    listName,
   )
 }
 

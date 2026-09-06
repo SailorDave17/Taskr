@@ -1285,6 +1285,132 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
+   Which list — story #358.
+
+   A row of toggle buttons above the list, drawn only when there is a second
+   one to choose. It borrows the tab strip's grammar deliberately — same
+   height, same rounded rectangle, same "the selected one is filled in and
+   bold" — because it is the same gesture one level down, and a second visual
+   idiom for choosing between things would read as a second app.
+
+   Two differences from `.tab`, and both are the reason it is not that class:
+   a picker button carries TWO lines (the name and its own count), and it wears
+   `aria-pressed` rather than `aria-current` — a toggle-button group, not
+   navigation. The styling hangs off the attribute a screen reader already
+   reads, for the reason `.tab[aria-current]` does: one state, one spelling.
+
+   It wraps rather than scrolls. A household with more lists than fit at 360px
+   gets a second 44px row, which is legible; a horizontally scrolling strip
+   hides its own contents and is the thing AC 7 measures against.
+   --------------------------------------------------------------------------- */
+
+.shopping-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.875rem;
+}
+
+.shopping-picker__list {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.125rem;
+  overflow-wrap: anywhere;
+}
+
+.shopping-picker__list:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.shopping-picker__list[aria-pressed='true'] {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+
+.shopping-picker__list:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.shopping-picker__name {
+  font-size: 1rem;
+}
+
+.shopping-picker__list[aria-pressed='true'] .shopping-picker__name {
+  font-weight: 600;
+}
+
+/* The same quiet register as `.shopping-count`, which is the same sentence:
+   with a picker on screen the count moves into it and the standalone line
+   stands down, so this number is drawn once however many lists there are. */
+.shopping-picker__count {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+/* The name and the way to change it, on one line — the heading keeps the room
+   and the control takes what it needs. `baseline` rather than `center` so a
+   wrapped two-line name still has its first line level with Rename. With a
+   picker on screen the name is absent and this row holds the control ALONE —
+   which is why the end is the anchor and the name pushes itself away from it,
+   rather than `space-between` doing the work: with one child, `space-between`
+   puts that child at the START, and the control landed on the left edge above
+   the first item where it read as part of that row. Measured on the prototype
+   at 360x800; the JSON said nothing, the screenshot said it. */
+.shopping-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+/* The list name as a SUBJECT, not a section label — owner decision at #358's
+   design pass, on a measurement: as `.card__subheading` it read 15px/600 in
+   `--ink-dim` beside a 16px/500 full-strength Rename in a 92x44 control, which
+   made the faintest text in the region the thing the region is about, with the
+   item names under it at 17px/600. These are `.member__name`'s values, and that
+   is the point — a member's name beside its quiet controls is the same
+   arrangement, and the app should answer it the same way. */
+.shopping-heading__name {
+  margin: 0;
+  margin-right: auto;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The editor that replaces it. The top margin is the heading's, so the list
+   does not jump up the screen when the editor opens. */
+.shopping-rename {
+  margin: 0.875rem 0;
+}
+
+/* Another list. Under everything, quiet, and separated by the same rule the
+   finish control uses: below this line is what you do to the TAB, above it is
+   what you do to the list. */
+.shopping-new {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------------------
    The split — story #47.
 
    The charter's design idea: each person's load as a share of THEIR OWN

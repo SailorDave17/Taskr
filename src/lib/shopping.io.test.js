@@ -398,3 +398,73 @@ describe('normalizeName', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// #358 AC 5 — a name the household already uses, on either writer.
+//
+// The unique index is `(household_id, lower(name))` in 0032, and BOTH writers
+// reach it: the `create_shopping_list` RPC's insert and `renameList`'s update.
+// What this file can prove is the translation and what it is keyed on; that
+// the index actually refuses the second name, in any case, is
+// shopping.pglite.test.js's.
+// ---------------------------------------------------------------------------
+
+/** What PostgREST hands back when the index refuses a write. */
+const duplicate = (message) => ({
+  data: null,
+  error: {
+    code: '23505',
+    message:
+      message ??
+      'duplicate key value violates unique constraint "shopping_lists_household_name_key"',
+  },
+})
+
+describe('a duplicate list name is translated, and only that', () => {
+  it('createList says the name that was typed, not the constraint that refused it', async () => {
+    results.create_shopping_list = duplicate()
+    await expect(createList(client, HOUSEHOLD, '  Placeholder List  ')).rejects.toThrow(
+      'You already have a list called Placeholder List.',
+    )
+  })
+
+  it('renameList says the same sentence, from the same code', async () => {
+    results.shopping_lists = duplicate()
+    await expect(renameList(client, 'l1', 'Placeholder List')).rejects.toThrow(
+      'You already have a list called Placeholder List.',
+    )
+  })
+
+  it('is keyed on the CODE: a 23505 whose message says nothing about duplicates still maps', async () => {
+    // Postgres is free to reword its own sentence and a translated server would
+    // not produce that one at all, so the message must not be what decides.
+    results.create_shopping_list = duplicate('something else entirely')
+    await expect(createList(client, HOUSEHOLD, 'Placeholder List')).rejects.toThrow(
+      'You already have a list called Placeholder List.',
+    )
+  })
+
+  it('is keyed on the code: a DIFFERENT code whose message mentions a duplicate key does not map', async () => {
+    // The other half of the pair, and the one that would pass if the check were
+    // a `/duplicate key/` test: this error is not the unique index, so the
+    // person must not be told their list already exists.
+    results.create_shopping_list = {
+      data: null,
+      error: { code: '42501', message: 'permission denied — not a duplicate key violation' },
+    }
+    await expect(createList(client, HOUSEHOLD, 'Placeholder List')).rejects.toThrow(
+      'creating the list: permission denied — not a duplicate key violation',
+    )
+  })
+
+  it('is confined to the two writers of a LIST: an item write keeps its own wording', async () => {
+    // `shopping_items` has unique constraints of its own reach, and nothing
+    // about them is a sentence about a list.
+    results.add_shopping_item = duplicate('duplicate key value violates unique constraint')
+    await expect(addItem(client, 'r1', 'Placeholder Item')).rejects.toThrow(
+      /^adding the item: duplicate key/,
+    )
+    results.shopping_items = duplicate('duplicate key value violates unique constraint')
+    await expect(removeItem(client, 'i1')).rejects.toThrow(/^removing the item: duplicate key/)
+  })
+})

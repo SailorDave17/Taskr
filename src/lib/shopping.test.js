@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   firstNameOf,
   orderShoppingItems,
+  orderShoppingLists,
   purchasedLabel,
   replaceShoppingItem,
+  resolveSelectedListId,
 } from './shopping.js'
 
 // The shopping data layer's PURE half — story #353 opens the file with the one
@@ -215,5 +217,96 @@ describe('purchasedLabel', () => {
     for (const bad of [null, undefined, '', 'whenever']) {
       expect(purchasedLabel(bad, 'Robin', 'UTC')).toBeNull()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #358 — the two rules the picker rests on, both pure and both here rather than
+// in the component: WHAT ORDER the lists are drawn in, and WHICH one is on
+// screen. The component is handed both answers, which is why it can be tested
+// by rendering a list and an id rather than by simulating a household change.
+// ---------------------------------------------------------------------------
+
+/** A list row, named by what the ordering is about. */
+const listRow = (id, name) => ({
+  id,
+  household_id: 'h1',
+  name,
+  created_at: '2026-09-05T00:00:00Z',
+})
+
+describe('orderShoppingLists', () => {
+  it('orders by name, whatever order the read returned them in', () => {
+    // The ids DISAGREE with the name order on purpose. They agreed in the first
+    // draft, and a mutation that deleted the name comparison outright still
+    // produced this expectation from the id tie-break alone — the test could
+    // not tell the ordering it is named after from the fallback under it.
+    const rows = [listRow('l1', 'Hardware'), listRow('l2', 'Bakery'), listRow('l3', 'Groceries')]
+    expect(idsOf(orderShoppingLists(rows))).toEqual(['l2', 'l3', 'l1'])
+  })
+
+  it('ignores case, the way the unique index that keeps the names apart does', () => {
+    // A lower-case name that sorts FIRST, which is the only pair that can tell
+    // a case-insensitive collation from a code-unit compare: 'B' is 66 and 'a'
+    // is 97, so a naive `<` puts Bakery first. The first draft used
+    // 'hardware'/'Groceries', where both answers agree.
+    const rows = [listRow('l1', 'apples'), listRow('l2', 'Bakery')]
+    expect(idsOf(orderShoppingLists(rows))).toEqual(['l1', 'l2'])
+    expect(idsOf(orderShoppingLists([listRow('l1', 'hardware'), listRow('l2', 'Groceries')]))).toEqual([
+      'l2',
+      'l1',
+    ])
+  })
+
+  it('is TOTAL: two rows that compare equal by name still order by id, every time', () => {
+    // The unique index makes this unreachable through the app, which is exactly
+    // why it is asserted — a comparator returning 0 here would leave the order
+    // to the read, and the read's order is not one this function chose.
+    const rows = [listRow('l2', 'Groceries'), listRow('l1', 'groceries')]
+    expect(idsOf(orderShoppingLists(rows))).toEqual(['l1', 'l2'])
+    expect(idsOf(orderShoppingLists([...rows].reverse()))).toEqual(['l1', 'l2'])
+  })
+
+  it('copies rather than sorting the read in place', () => {
+    const rows = [listRow('l2', 'Hardware'), listRow('l1', 'Groceries')]
+    orderShoppingLists(rows)
+    expect(idsOf(rows)).toEqual(['l2', 'l1'])
+  })
+
+  it('survives nothing to order and a row with no name', () => {
+    expect(orderShoppingLists(null)).toEqual([])
+    expect(orderShoppingLists([])).toEqual([])
+    expect(idsOf(orderShoppingLists([listRow('l1', undefined), listRow('l2', 'Groceries')]))).toEqual(
+      ['l1', 'l2'],
+    )
+  })
+})
+
+describe('resolveSelectedListId', () => {
+  const lists = [listRow('l1', 'Groceries'), listRow('l2', 'Hardware')]
+
+  it('honours a preference that names a list on screen', () => {
+    expect(resolveSelectedListId(lists, 'l2')).toBe('l2')
+  })
+
+  it('falls back to the FIRST of the order it is given, not to the read order', () => {
+    // The caller hands over ordered lists, so "first by name" is settled before
+    // this function sees them — and a caller that ordered differently gets its
+    // own first, which is what makes the two rules composable.
+    expect(resolveSelectedListId(lists, null)).toBe('l1')
+    expect(resolveSelectedListId([...lists].reverse(), null)).toBe('l2')
+  })
+
+  it('falls back for all three of AC 6’s cases, which it cannot tell apart', () => {
+    // Nothing chosen yet; a household change (a preference from the other
+    // household's lists); a list that is gone after a re-read.
+    for (const stale of [null, undefined, 'l9', '']) {
+      expect(resolveSelectedListId(lists, stale)).toBe('l1')
+    }
+  })
+
+  it('answers null when there is no list at all, rather than inventing one', () => {
+    expect(resolveSelectedListId([], 'l1')).toBeNull()
+    expect(resolveSelectedListId(null, 'l1')).toBeNull()
   })
 })

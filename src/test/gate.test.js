@@ -1294,6 +1294,11 @@ describe('#19 — no real household name reaches version control', () => {
     // #355 — the sixth item name, needed because AC 5 names its own fixture:
     // six items of which three are bought, every row told apart by name.
     Rice: 'a shopping item name in the #355 six-item ordering fixture',
+    // #358 — a THIRD list name, and it has to be a third: the ordering tests
+    // need a name that sorts before "Groceries", and the rename tests need a
+    // target that is not the name already on the fixture.
+    Bakery: 'a third shopping list name in the #358 picker, ordering and rename tests',
+    'Rename Hardware': 'the rename control’s accessible name in the #358 picker tests — the control names its list when the picker has taken the heading’s place',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
     'Placeholder Item': 'a shopping item name in shopping.io.test.js',

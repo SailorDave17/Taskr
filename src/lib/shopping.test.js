@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  finishedLabel,
   firstNameOf,
+  groupClosedRuns,
   orderShoppingItems,
   orderShoppingLists,
   purchasedLabel,
@@ -279,6 +281,239 @@ describe('orderShoppingLists', () => {
     expect(idsOf(orderShoppingLists([listRow('l1', undefined), listRow('l2', 'Groceries')]))).toEqual(
       ['l1', 'l2'],
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 3 — the history's arithmetic: which run belongs to which list, what
+// order they read in, how many items each trip bought and carried, and whose
+// name goes on a stamp. All of it pure, so the component that draws it can be
+// tested by handing it the answer.
+// ---------------------------------------------------------------------------
+
+const members = [
+  { id: 'm1', display_name: 'Placeholder One' },
+  { id: 'm2', display_name: 'Robin' },
+]
+
+/** A closed run, named by where it should end up rather than after anything. */
+const closedRun = (id, listId, closedAt, closedBy = 'm2') => ({
+  id,
+  list_id: listId,
+  household_id: 'h1',
+  opened_at: '2026-09-01T00:00:00Z',
+  closed_at: closedAt,
+  closed_by_member_id: closedBy,
+})
+
+/** An item on one of those runs — bought by somebody, or carried forward. */
+const runItem = (id, runId, { boughtBy = null, at = null, note = null } = {}) => ({
+  id,
+  run_id: runId,
+  household_id: 'h1',
+  name: `item ${id}`,
+  note,
+  added_by_member_id: 'm1',
+  added_at: '2026-09-01T01:00:00Z',
+  purchased_at: at,
+  purchased_by_member_id: boughtBy,
+  carried_from_item_id: null,
+})
+
+describe('groupClosedRuns', () => {
+  it('orders a list’s runs newest first, with the ids DISAGREEING with that order', () => {
+    // The ids are deliberately ascending while the stamps descend, and the
+    // tie-break under the comparator is on id — so a mutation that deletes the
+    // stamp comparison cannot produce this expectation from the fallback alone.
+    // That is the shape cairn's `a-fixture-cannot-tell-a-sort-from-its-tie-break`
+    // records, and #358's own ordering test carries the same warning.
+    const runs = [
+      closedRun('r-a', 'l1', '2026-09-03T18:00:00Z'),
+      closedRun('r-b', 'l1', '2026-09-05T18:00:00Z'),
+      closedRun('r-c', 'l1', '2026-09-04T18:00:00Z'),
+    ]
+    const [group] = groupClosedRuns(runs, [], members)
+    expect(group.runs.map((run) => run.id)).toEqual(['r-b', 'r-c', 'r-a'])
+  })
+
+  it('reads the same instant spelled two ways as the same instant', () => {
+    // PostgREST spells a timestamptz with an offset, and a lexical compare would
+    // order the two spellings on punctuation. Only the ordering can tell.
+    const runs = [
+      closedRun('r-a', 'l1', '2026-09-05T18:00:00+00:00'),
+      closedRun('r-b', 'l1', '2026-09-05T19:00:00Z'),
+    ]
+    expect(groupClosedRuns(runs, [], members)[0].runs.map((r) => r.id)).toEqual(['r-b', 'r-a'])
+  })
+
+  it('is TOTAL: two runs closed at the same instant still order by id, either way round', () => {
+    // The app cannot produce this — one open run per list, closed one at a time —
+    // which is exactly why it is asserted: a comparator returning 0 here would
+    // leave the order to the read, and the read's order is not one this function
+    // chose.
+    const runs = [
+      closedRun('r-b', 'l1', '2026-09-05T18:00:00Z'),
+      closedRun('r-a', 'l1', '2026-09-05T18:00:00Z'),
+    ]
+    expect(groupClosedRuns(runs, [], members)[0].runs.map((r) => r.id)).toEqual(['r-a', 'r-b'])
+    expect(groupClosedRuns([...runs].reverse(), [], members)[0].runs.map((r) => r.id)).toEqual([
+      'r-a',
+      'r-b',
+    ])
+  })
+
+  it('groups by list, and each list’s runs are ordered within its own group', () => {
+    const runs = [
+      closedRun('r-old-1', 'l1', '2026-09-02T18:00:00Z'),
+      closedRun('r-old-2', 'l2', '2026-09-01T18:00:00Z'),
+      closedRun('r-new-1', 'l1', '2026-09-05T18:00:00Z'),
+      closedRun('r-new-2', 'l2', '2026-09-04T18:00:00Z'),
+    ]
+    const groups = groupClosedRuns(runs, [], members)
+    const idsFor = (listId) =>
+      groups.find((group) => group.listId === listId).runs.map((run) => run.id)
+    expect(groups).toHaveLength(2)
+    expect(idsFor('l1')).toEqual(['r-new-1', 'r-old-1'])
+    expect(idsFor('l2')).toEqual(['r-new-2', 'r-old-2'])
+  })
+
+  it('counts what the trip bought and what went forward, and gives each run only its OWN items', () => {
+    const runs = [closedRun('r1', 'l1', '2026-09-05T18:00:00Z'), closedRun('r2', 'l1', '2026-09-03T18:00:00Z')]
+    const items = [
+      runItem('i1', 'r1', { boughtBy: 'm2', at: '2026-09-05T17:00:00Z' }),
+      runItem('i2', 'r1', { boughtBy: 'm1', at: '2026-09-05T17:30:00Z' }),
+      runItem('i3', 'r1'),
+      // Another run's item, which must not be counted on r1 — the whole reason
+      // the grouping is a function rather than a filter at the call site.
+      runItem('i4', 'r2', { boughtBy: 'm2', at: '2026-09-03T17:00:00Z' }),
+    ]
+    const [{ runs: [first, second] }] = groupClosedRuns(runs, items, members)
+    expect([first.id, first.bought, first.carried]).toEqual(['r1', 2, 1])
+    expect([second.id, second.bought, second.carried]).toEqual(['r2', 1, 0])
+    expect(first.items.map((item) => item.id)).toEqual(['i1', 'i2', 'i3'])
+  })
+
+  it('a run with nothing bought and nothing carried reads zero and zero, not an absence', () => {
+    // An empty run can be finished — #357 only withholds the control while the
+    // list is empty on screen, and another phone can have emptied it since. The
+    // heading has to say something rather than leaving two blanks.
+    const [{ runs: [only] }] = groupClosedRuns(
+      [closedRun('r1', 'l1', '2026-09-05T18:00:00Z')],
+      [],
+      members,
+    )
+    expect([only.bought, only.carried, only.items]).toEqual([0, 0, []])
+  })
+
+  it('keeps a run’s items in the order it was handed them — the read’s added order', () => {
+    // A closed run is the record of what the household put on the list, in the
+    // order it put it there. #355's sink-the-bought-rows ordering is about
+    // somebody standing in a shop, and nobody is standing in a shop here.
+    const items = [
+      runItem('added-first', 'r1'),
+      runItem('added-second', 'r1', { boughtBy: 'm2', at: '2026-09-05T17:00:00Z' }),
+      runItem('added-third', 'r1'),
+    ]
+    const [{ runs: [run] }] = groupClosedRuns(
+      [closedRun('r1', 'l1', '2026-09-05T18:00:00Z')],
+      items,
+      members,
+    )
+    expect(run.items.map((item) => item.id)).toEqual(['added-first', 'added-second', 'added-third'])
+  })
+
+  it('resolves the closer to a FIRST name, off the roster and never off the row', () => {
+    const [{ runs: [run] }] = groupClosedRuns(
+      [closedRun('r1', 'l1', '2026-09-05T18:00:00Z', 'm1')],
+      [],
+      members,
+    )
+    expect(run.closedByName).toBe('Placeholder')
+  })
+
+  it('a closer the roster no longer holds reads "a former member" — both ways it can happen', () => {
+    // `0032`'s attribution keys are `on delete set null`, so a removed member
+    // leaves the stamp with a null id; a roster this device has not re-read can
+    // also simply not hold an id the row names. Both are the same sentence.
+    const nulled = closedRun('r1', 'l1', '2026-09-05T18:00:00Z', null)
+    const unknown = closedRun('r2', 'l1', '2026-09-04T18:00:00Z', 'm9')
+    const [{ runs }] = groupClosedRuns([nulled, unknown], [], members)
+    expect(runs.map((run) => run.closedByName)).toEqual(['a former member', 'a former member'])
+  })
+
+  it('resolves an item’s buyer to a first name, and to NULL where they have left', () => {
+    // Null rather than 'a former member', deliberately: `purchasedLabel` already
+    // has #355's wording for a buyer who is gone ("bought · 4:02 PM"), and the
+    // run's heading is the only sentence that would dangle without a subject.
+    const items = [
+      runItem('i1', 'r1', { boughtBy: 'm2', at: '2026-09-05T17:00:00Z' }),
+      runItem('i2', 'r1', { boughtBy: null, at: '2026-09-05T17:30:00Z' }),
+      runItem('i3', 'r1', { boughtBy: 'm9', at: '2026-09-05T17:45:00Z' }),
+    ]
+    const [{ runs: [run] }] = groupClosedRuns(
+      [closedRun('r1', 'l1', '2026-09-05T18:00:00Z')],
+      items,
+      members,
+    )
+    expect(run.items.map((item) => item.boughtByName)).toEqual(['Robin', null, null])
+    // And the row it hands the component still carries the columns the read
+    // returned, so a caller reads `purchased_at` from the row rather than from a
+    // second copy of it.
+    expect(run.items[0].purchased_at).toBe('2026-09-05T17:00:00Z')
+  })
+
+  it('drops an OPEN run rather than drawing one as history', () => {
+    // The predicate is `closed_at`, the same one everywhere in this feature. A
+    // caller that handed over `shopping.runs` by mistake gets nothing, not the
+    // list they are looking at rendered as a finished trip.
+    const open = { ...closedRun('r-open', 'l1', null), closed_at: null }
+    const groups = groupClosedRuns([open, closedRun('r1', 'l1', '2026-09-05T18:00:00Z')], [], members)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].runs.map((run) => run.id)).toEqual(['r1'])
+  })
+
+  it('does not mutate what it was handed, and survives being handed nothing', () => {
+    const runs = [
+      closedRun('r-a', 'l1', '2026-09-03T18:00:00Z'),
+      closedRun('r-b', 'l1', '2026-09-05T18:00:00Z'),
+    ]
+    groupClosedRuns(runs, [], members)
+    expect(runs.map((run) => run.id)).toEqual(['r-a', 'r-b'])
+    expect(groupClosedRuns(null, null, null)).toEqual([])
+    expect(groupClosedRuns([], [], [])).toEqual([])
+    // A roster row with no id cannot resolve anybody and must not throw.
+    expect(
+      groupClosedRuns([closedRun('r1', 'l1', '2026-09-05T18:00:00Z')], [], [{ display_name: 'Robin' }])[0]
+        .runs[0].closedByName,
+    ).toBe('a former member')
+  })
+})
+
+describe('finishedLabel', () => {
+  it('reads "Finished <date> by <first name>", the year always spelled', () => {
+    expect(finishedLabel('2026-09-05T22:02:00Z', 'Robin', 'America/New_York')).toBe(
+      'Finished Sep 5, 2026 by Robin',
+    )
+  })
+
+  it('the SAME stamp is a different DAY in a different zone — the date is the household’s', () => {
+    // 02:00 UTC on the 6th is 10:00 PM on the 5th in New York, which is the only
+    // kind of pair that can tell a zone-aware format from one that took UTC.
+    const justAfterMidnightUtc = '2026-09-06T02:00:00Z'
+    expect(finishedLabel(justAfterMidnightUtc, 'Robin', 'America/New_York')).toBe(
+      'Finished Sep 5, 2026 by Robin',
+    )
+    expect(finishedLabel(justAfterMidnightUtc, 'Robin', 'UTC')).toBe('Finished Sep 6, 2026 by Robin')
+  })
+
+  it('leaves the name out rather than inventing one — the phrase for that is groupClosedRuns’s', () => {
+    expect(finishedLabel('2026-09-05T22:02:00Z', null, 'UTC')).toBe('Finished Sep 5, 2026')
+  })
+
+  it('an unreadable or missing stamp still names the trip rather than printing an Invalid Date', () => {
+    for (const bad of [null, undefined, '', 'whenever']) {
+      expect(finishedLabel(bad, 'Robin', 'UTC')).toBe('Finished by Robin')
+    }
   })
 })
 

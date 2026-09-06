@@ -930,7 +930,8 @@ per household, each with its own run (decision 5, taken *against* the one-list r
 An item carries its name, an optional note, who added it, and who bought it and when, stamped by
 the database clock (decision 4). Any member adds, ticks, un-ticks, removes an unbought item and
 finishes a run — no organizer gate anywhere in the feature (decision 2). Finished runs are kept and
-viewable behind a disclosure inside the Shop tab (decision 6). Any member archives a list; nothing
+viewable behind a disclosure inside the Shop tab (decision 6; built in #359 on 2026-09-06, and
+the paragraph below records what that surface decided). Any member archives a list; nothing
 is ever deleted (decision 10). The tab label is **Shop** (decision 13).
 
 **Why it belongs in Taskr despite the fairness charter.** The problem statement at the head of this
@@ -1042,6 +1043,30 @@ was a fork:
 A duplicate name is the one refusal on this surface a person can act on, and it is mapped from
 **SQLSTATE 23505** on the error object rather than from the message text — Postgres's own sentence
 is about an index, and it is free to reword it.
+
+**What the household already bought** (decision 6, built in #359 on 2026-09-06). Every finished run
+is kept — `0033` closes a run and deletes nothing — and the Shop tab is the only screen that reads
+one, behind a "Past runs" disclosure at the foot of the list. Three decisions inside it were forks:
+
+- **It is read when it is opened, and never on arrival.** Everything else on this surface is
+  re-read on every tab press because what it returns is bounded by the week a household is having;
+  closed runs grow by one per trip forever, so paying for them on every arrival would make the tab
+  slower every week whether or not anybody ever looks. It is the one deliberate departure from
+  decision 3's re-read-on-open, and it is asserted in a test so it stays a decision rather than
+  becoming a drift. What it costs is stated where it bites: a run another phone finished after the
+  disclosure was opened is not there until it is opened again.
+- **Each run is its own disclosure and only the newest opens** — `Done.jsx`'s idiom, taken on the
+  same kind of measurement. *Measured at 360x800 on the real components with eight closed runs of
+  fifteen items*: **3.35 screens** with the newest open against **10.47** with all eight open.
+- **A row is a record, not a working row struck through** (the #302 verdict and #308's direction):
+  one compact line carrying the name, its note, and either who bought it and when or the fact that
+  it went forward. No tick, no Remove, and no figure about a person anywhere — #35 AC 9 binds this
+  region as it binds Done.
+
+The design pass added a disclosure marker this app had not needed before. `display: flex` on a
+`<summary>` suppresses the browser's own triangle, so both levels read as plain labels with nothing
+saying they open; the owner's call was to draw one here and leave the Done tab's week disclosures
+as they are, which is the one place the two surfaces now differ.
 
 **The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
 otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same

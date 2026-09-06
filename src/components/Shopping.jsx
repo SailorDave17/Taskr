@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
-import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '../lib/shopping.js'
+import {
+  finishedLabel,
+  firstNameOf,
+  groupClosedRuns,
+  normalizeName,
+  orderShoppingItems,
+  purchasedLabel,
+} from '../lib/shopping.js'
 
 // The Shop tab — story #353, the first surface of epic #349.
 //
@@ -14,13 +21,12 @@ import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '
 //
 // What this surface does NOT do, and why each absence is deliberate:
 //
-//   - It does not show past runs (#359) or archive a list (#360). There is no
-//     delete control and no archive control anywhere on this tab, and that is
-//     #358 AC 8 rather than an oversight: a list is the container everything
-//     else on the surface lives in, so ending one needs its own column, its
-//     own RPCs and a decision about what happens to its runs — which is #360.
-//     Renaming is here because the grant is (0032's `update (name)`), and a
-//     rename destroys nothing.
+//   - It does not archive a list (#360). There is no delete control and no
+//     archive control anywhere on this tab, and that is #358 AC 8 rather than an
+//     oversight: a list is the container everything else on the surface lives
+//     in, so ending one needs its own column, its own RPCs and a decision about
+//     what happens to its runs — which is #360. Renaming is here because the
+//     grant is (0032's `update (name)`), and a rename destroys nothing.
 //   - It does not rank, count or score who added what. #35 AC 9 binds this
 //     surface as it binds Done: an item says who added it, and no figure
 //     anywhere says how many anyone added. Shopping.test.jsx fails on one.
@@ -145,6 +151,39 @@ import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '
 // one member known not to have added it), which is also why a carried item
 // sorts to the top of the next run's unbought half without this file doing
 // anything: its `added_at` predates the run it is on.
+//
+// WHAT THE HOUSEHOLD ALREADY BOUGHT — story #359, and the epic's decision 6.
+//
+// "Did anyone get coffee last week?" is answerable here rather than by asking
+// somebody: every finished run is kept (`0033` closes a run, it deletes
+// nothing) and this is the only screen that reads one. It is a disclosure at
+// the foot of the list rather than a sixth tab — the strip #350 measured is
+// full at five, and the Done tab is organised by capacity weeks, where a
+// shopping trip would sit among chores.
+//
+// Three properties of it are decisions rather than mechanics:
+//
+//   - IT IS READ WHEN IT IS OPENED, not on arrival. Everything else on this
+//     surface is re-read on every tab press because what it returns is bounded;
+//     history grows by one run per trip forever. The read is `readClosedRuns`
+//     and the trigger is the disclosure's own `onToggle`, so a household that
+//     never looks back never pays for it. App.test.jsx asserts both halves —
+//     that arriving on Shop does not read it, and that opening does.
+//   - EACH RUN IS ITSELF A DISCLOSURE, and only the newest opens. That is
+//     `Done.jsx`'s `open={index === 0}` idiom, taken at the owner's design-bar
+//     decision of 2026-09-01 on a measurement rather than a description: eight
+//     runs of fifteen items rendered open is a scroll nobody asked for, and a
+//     closed run's heading already answers "when, and how big".
+//   - IT COUNTS ITEMS AND NEVER PEOPLE. "3 bought, 1 carried over" is a fact
+//     about a trip; #35 AC 9 binds this surface as it binds Done, so there is
+//     no per-person total, no rank and nothing about who bought the most.
+//     Shopping.test.jsx fails on one.
+//
+// A row here is deliberately NOT the working row struck through — the #302
+// design-bar verdict, and #308's direction for the Done tab: it is one compact
+// line carrying the name, its note, and either who bought it and when or the
+// fact that it went forward to the next run. No tick and no Remove: a closed
+// run is a record, and `0034`/`0033` would refuse a write to one anyway.
 
 /**
  * Trim an optional note and turn an empty one into null.
@@ -660,12 +699,145 @@ FinishRun.propTypes = {
   onFinishRun: PropTypes.func.isRequired,
 }
 
+/**
+ * One item on a closed run — one line, and nothing to press — #359 AC 2.
+ *
+ * Not `ShoppingItem` with its controls disabled, and not the working row struck
+ * through: those were both considered and both say "this is a list you could
+ * act on, and cannot". What a person reads back is a record, so the row is the
+ * three facts it holds — the name, the note somebody left, and what became of
+ * it. `purchasedLabel` is #355's own sentence, reused rather than reworded, so
+ * a bought item reads the same words on the shelf and in the history.
+ */
+function PastItem({ item, timezone }) {
+  const stamp = item.purchased_at
+    ? purchasedLabel(item.purchased_at, item.boughtByName, timezone)
+    : null
+
+  return (
+    <li className="shopping-past__item">
+      <span className="shopping-past__item-name">{item.name}</span>
+      {item.note ? <span className="shopping-past__item-note">{item.note}</span> : null}
+      <span className="shopping-past__item-fate">
+        {/* Two states and no third: an item on a CLOSED run was either bought
+            on it or carried into the next one, because `0033` copies every
+            unbought item forward as it closes. "carried over" is the same word
+            the finish confirm used before the tap, deliberately — the sentence
+            a person agreed to is the sentence they read afterwards. A stamp
+            that will not parse falls back to it rather than printing an
+            Invalid Date, which is also the only way `purchasedLabel` can
+            answer null here. */}
+        {stamp ?? 'carried over'}
+      </span>
+    </li>
+  )
+}
+
+PastItem.propTypes = {
+  item: PropTypes.object.isRequired,
+  timezone: PropTypes.string,
+}
+
+/**
+ * Every finished run of the list on screen, behind one disclosure — #359.
+ *
+ * The read happens on OPEN and it happens HERE, in the `onToggle` of the outer
+ * `details`, rather than in an effect keyed on an open flag: the browser's own
+ * disclosure is the state, so there is nothing to synchronise and nothing that
+ * can draw a frame disagreeing with what the person did. Closing it reads
+ * nothing, and opening it again reads again — a person asking twice is a person
+ * who wants the current answer.
+ *
+ * `past` is App's, not this component's, for the reason `selectedListId` is:
+ * this component unmounts on a tab switch, and the read that fills it is a
+ * network call. It arrives as `{ loading, loaded, runs, items }` and the three
+ * states a person can see are distinct on purpose — *reading it now*, *there is
+ * nothing to show* and *nothing yet asked for* look identical from a bare array
+ * and read very differently on a screen.
+ *
+ * Filtered to THIS list by `groupClosedRuns`'s grouping rather than trusted: the
+ * read names one list, but a switch between two lists while a read is in flight
+ * would otherwise draw the other list's trips under this one's name.
+ */
+function PastRuns({ list, past, members, timezone, onOpenPastRuns }) {
+  const group = groupClosedRuns(past.runs, past.items, members).find(
+    (entry) => entry.listId === list.id,
+  )
+  const runs = group?.runs ?? []
+
+  return (
+    <details
+      className="shopping-past"
+      onToggle={(e) => {
+        // THE TARGET CHECK IS LOAD-BEARING, and it is the one thing in this
+        // file that jsdom could not have told us. `toggle` does not bubble, so
+        // React attaches it at the root and SIMULATES bubbling — which means a
+        // RUN's own disclosure opening arrives here as though this element had
+        // been toggled. Without this line, the newest run mounting with
+        // `open={index === 0}` fired a toggle, which re-read, which unmounted
+        // and remounted the runs, which fired another: *measured in Chrome at
+        // 360x800*, one tap on Past runs produced **55 toggle events in 1.5 s**
+        // — an unbounded read loop against the network — and the screen sat on
+        // "Reading the finished runs…" forever. The jsdom suite showed exactly
+        // one call, and was right about every other thing it asserted.
+        if (e.target !== e.currentTarget) return
+        if (!e.currentTarget.open) return
+        onOpenPastRuns(list.id).then(
+          () => {},
+          () => {},
+        )
+      }}
+    >
+      <summary className="shopping-past__summary">Past runs</summary>
+
+      {past.loading ? <p className="card__body">Reading the finished runs…</p> : null}
+
+      {past.loaded && runs.length === 0 ? (
+        <p className="card__body">No finished runs yet</p>
+      ) : null}
+
+      {runs.map((run, index) => (
+        // `Done.jsx`'s idiom: the newest opens and every earlier one sits behind
+        // its heading. React rewrites `open` only when the prop changes, and it
+        // changes only when a different run becomes newest, so a person's own
+        // toggling of an older run survives a re-read.
+        <details className="shopping-past__run" key={run.id} open={index === 0}>
+          <summary className="shopping-past__run-summary">
+            <h4 className="card__subheading">
+              {finishedLabel(run.closedAt, run.closedByName, timezone)}
+            </h4>
+            {/* Items, never people (#35 AC 9). The two numbers are what a
+                closed heading has to answer for the run to be worth opening. */}
+            <span className="shopping-past__count">
+              {run.bought} bought, {run.carried} carried over
+            </span>
+          </summary>
+          <ul className="shopping-past__items">
+            {run.items.map((item) => (
+              <PastItem key={item.id} item={item} timezone={timezone} />
+            ))}
+          </ul>
+        </details>
+      ))}
+    </details>
+  )
+}
+
+PastRuns.propTypes = {
+  list: PropTypes.object.isRequired,
+  past: PropTypes.object.isRequired,
+  members: PropTypes.array.isRequired,
+  timezone: PropTypes.string,
+  onOpenPastRuns: PropTypes.func.isRequired,
+}
+
 /** One list: its heading, the items on its open run, and the add form. */
 function ShoppingList({
   list,
   run,
   items,
   members,
+  past,
   timezone,
   busy,
   soleList,
@@ -675,6 +847,7 @@ function ShoppingList({
   onUnpurchaseItem,
   onRenameList,
   onFinishRun,
+  onOpenPastRuns,
 }) {
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
@@ -818,6 +991,31 @@ function ShoppingList({
           </button>
         </form>
       ) : null}
+
+      {/* #359 — the record, at the foot of the list and below the add form.
+          This is the LEAST urgent thing on the tab and it is placed as such:
+          #357 moved the finish control above the form because a shopper needs
+          it under their thumb, and by exactly that argument looking something
+          up afterwards is not a thing anybody does mid-aisle.
+
+          Keyed on the OPEN run, which is what closes it after a finish: the run
+          that just closed is now part of the history above it, and a disclosure
+          left open would be showing the answer from before the trip ended.
+          Re-opening re-reads and picks it up.
+
+          The key is PREFIXED, and that is not decoration: `FinishRun` above is
+          keyed on the same run id and they are siblings, so a bare `run.id`
+          here made two children of one parent share a key — React warned and
+          rendered the finish control THREE times, which App.test.jsx caught by
+          finding three "Done shopping" buttons on one list. */}
+      <PastRuns
+        key={`past-${run?.id ?? 'no-run'}`}
+        list={list}
+        past={past}
+        members={members}
+        timezone={timezone}
+        onOpenPastRuns={onOpenPastRuns}
+      />
     </section>
   )
 }
@@ -827,6 +1025,7 @@ ShoppingList.propTypes = {
   run: PropTypes.object,
   items: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
+  past: PropTypes.object.isRequired,
   timezone: PropTypes.string,
   busy: PropTypes.bool,
   soleList: PropTypes.bool,
@@ -836,6 +1035,7 @@ ShoppingList.propTypes = {
   onUnpurchaseItem: PropTypes.func.isRequired,
   onRenameList: PropTypes.func.isRequired,
   onFinishRun: PropTypes.func.isRequired,
+  onOpenPastRuns: PropTypes.func.isRequired,
 }
 
 export default function Shopping({
@@ -843,6 +1043,7 @@ export default function Shopping({
   runs,
   items,
   members,
+  past,
   timezone,
   busy,
   error,
@@ -855,6 +1056,7 @@ export default function Shopping({
   onPurchaseItem,
   onUnpurchaseItem,
   onFinishRun,
+  onOpenPastRuns,
 }) {
   // #358 — the "New list" form is open or it is not, and that is the only
   // state this component holds about several lists. WHICH list is on screen is
@@ -905,6 +1107,7 @@ export default function Shopping({
           run={run}
           items={run ? items.filter((item) => item.run_id === run.id) : []}
           members={members}
+          past={past}
           timezone={timezone}
           busy={busy}
           soleList={lists.length === 1}
@@ -914,6 +1117,7 @@ export default function Shopping({
           onUnpurchaseItem={onUnpurchaseItem}
           onRenameList={onRenameList}
           onFinishRun={onFinishRun}
+          onOpenPastRuns={onOpenPastRuns}
         />
       ) : null}
 
@@ -969,6 +1173,10 @@ Shopping.propTypes = {
   runs: PropTypes.array.isRequired,
   items: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
+  // #359 — the finished runs, or the fact that nobody has asked for them yet.
+  // App's, because the read happens on a disclosure and this component unmounts
+  // whenever another tab is chosen.
+  past: PropTypes.object.isRequired,
   timezone: PropTypes.string,
   busy: PropTypes.bool,
   error: PropTypes.string,
@@ -981,4 +1189,5 @@ Shopping.propTypes = {
   onPurchaseItem: PropTypes.func.isRequired,
   onUnpurchaseItem: PropTypes.func.isRequired,
   onFinishRun: PropTypes.func.isRequired,
+  onOpenPastRuns: PropTypes.func.isRequired,
 }

@@ -204,8 +204,14 @@ vi.mock('./lib/household.js', async () => {
 // `createList`'s fake starts RETURNING the row it made: App reads the created
 // list's id to move the picker onto it, so a fake resolving `undefined` could
 // not tell "the new list is on screen" from "the first list by name is".
+// #359 — `readClosedRuns` joins them, and its fake carries the LIST IDS for the
+// argument reason above: the history read is the one read on this surface that
+// `refresh()` does not perform, and a fake that only recorded the call could not
+// tell "asked for the list on screen" from "asked for the household's history"
+// — nor tell either from a read that fired on arrival, which is the criterion.
 const shoppingApi = {
   readShopping: vi.fn(),
+  readClosedRuns: vi.fn(),
   createList: vi.fn(),
   renameList: vi.fn(),
   addItem: vi.fn(),
@@ -289,6 +295,9 @@ beforeEach(() => {
   Object.values(shoppingApi).forEach((fn) => fn.mockReset())
   shoppingApi.shoppingClient.mockReturnValue(SHOPPING_CLIENT)
   shoppingApi.readShopping.mockResolvedValue(EMPTY_SHOPPING)
+  // #359 — no finished run, which is the ordinary state of a new list. Tests
+  // about the history override this.
+  shoppingApi.readClosedRuns.mockResolvedValue({ runs: [], items: [] })
   shoppingApi.createList.mockResolvedValue(undefined)
   shoppingApi.renameList.mockResolvedValue(undefined)
   shoppingApi.addItem.mockResolvedValue(undefined)
@@ -4372,5 +4381,181 @@ describe('#358 — several named lists, from App', () => {
     await tab('Shop')
 
     await waitFor(() => expect(heading()).toBe('Bakery'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 4 — the history read, and the discipline it deliberately departs from.
+//
+// Every other read on this surface runs on arrival; this one runs when the Past
+// runs disclosure is opened, because history is unbounded. Only App can answer
+// either half — what the disclosure DRAWS is Shopping.test.jsx's, and which
+// filters the read sends is shopping.io.test.js's.
+// ---------------------------------------------------------------------------
+describe('#359 — past runs, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const groceries = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const hardware = { id: 'l2', household_id: 'h1', name: 'Hardware', created_at: '2026-09-06T00:00:00Z' }
+  const openRun = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: 'h1',
+    opened_at: '2026-09-06T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const item = (id, runId, name, purchased = null) => ({
+    id,
+    run_id: runId,
+    household_id: 'h1',
+    name,
+    note: null,
+    added_by_member_id: 'm1',
+    added_at: '2026-09-06T10:00:00Z',
+    purchased_at: purchased,
+    purchased_by_member_id: purchased ? 'm2' : null,
+    carried_from_item_id: null,
+  })
+  const oneList = {
+    lists: [groceries],
+    runs: [openRun(groceries, 'r-open')],
+    items: [item('i1', 'r-open', 'Milk')],
+  }
+  const twoLists = {
+    lists: [groceries, hardware],
+    runs: [openRun(groceries, 'r-open'), openRun(hardware, 'r-open-2')],
+    items: [item('i1', 'r-open', 'Milk'), item('i2', 'r-open-2', 'Bread')],
+  }
+  /** One finished trip on the Groceries list: one bought, one carried forward. */
+  const finished = {
+    runs: [
+      {
+        id: 'r-closed',
+        list_id: 'l1',
+        household_id: 'h1',
+        opened_at: '2026-09-04T00:00:00Z',
+        closed_at: '2026-09-05T22:00:00Z',
+        closed_by_member_id: 'm2',
+      },
+    ],
+    items: [item('p1', 'r-closed', 'Eggs', '2026-09-05T21:02:00Z'), item('p2', 'r-closed', 'Butter')],
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  /**
+   * Open the disclosure with a real tap, then let the platform's own `toggle`
+   * arrive — jsdom queues it as a task, so a microtask-only flush reads zero
+   * toggles and the read looks as though it never fired. The measurement behind
+   * that sentence is in Shopping.test.jsx's own helper.
+   */
+  const openPast = async () => {
+    fireEvent.click(screen.getByText('Past runs'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  const history = () => screen.getByText('Past runs').closest('details')
+
+  it('does NOT read the history on arrival, on a re-arrival, or on a write — only on the disclosure', async () => {
+    await renderApp('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(0)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // A second arrival, which is a full re-read of everything else.
+    await tab('Chores')
+    await tab('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // And a write, which drags a re-read behind it through mutate().
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Bread' } })
+    await tab(/add item/i)
+    expect(shoppingApi.addItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+  })
+
+  it('reads it when the disclosure opens, naming the list on screen and its client', async () => {
+    shoppingApi.readClosedRuns.mockResolvedValue(finished)
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await openPast()
+
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    // The LIST, as an array of one — the read filters `.in('list_id', …)`, and
+    // the household's other lists are not what somebody just asked about.
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledWith(SHOPPING_CLIENT, ['l1'])
+    // It is a read: nothing goes through mutate(), so nothing else is re-read.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+
+    // And what came back is on the screen, with the roster resolved and the
+    // household's zone applied — 21:02 UTC is 5:02 PM in New York.
+    expect(within(history()).getByRole('heading', { level: 4 })).toHaveTextContent(
+      'Finished Sep 5, 2026 by Robin',
+    )
+    expect(within(history()).getByText('Eggs').closest('li')).toHaveTextContent(
+      'bought by Robin · 5:02 PM',
+    )
+    expect(within(history()).getByText('Butter').closest('li')).toHaveTextContent('carried over')
+  })
+
+  it('reads the list the picker is on, not the household’s first', async () => {
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    await renderApp('Shop')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Hardware/ })))
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenLastCalledWith(SHOPPING_CLIENT, ['l2'])
+  })
+
+  it('a refused history read reports itself on the strip and shows no rows', async () => {
+    shoppingApi.readClosedRuns.mockRejectedValue(
+      new Error('loading finished runs: permission denied'),
+    )
+    await renderApp('Shop')
+    await openPast()
+
+    expect(
+      within(screen.getByRole('region', { name: 'Shop' })).getByRole('alert'),
+    ).toHaveTextContent(/loading finished runs: permission denied/)
+    // Not "reading…" forever, and not the last answer either: a failure clears
+    // the rows rather than leaving somebody looking at a history nothing here
+    // can vouch for.
+    expect(screen.queryByText(/reading the finished runs/i)).not.toBeInTheDocument()
+    expect(within(history()).queryByRole('heading', { level: 4 })).not.toBeInTheDocument()
+  })
+
+  it('finishing a run closes the disclosure, so nobody reads a history from before the trip ended', async () => {
+    await renderApp('Shop')
+    await openPast()
+    expect(history()).toHaveAttribute('open')
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+
+    // One list draws ONE finish control. This is the assertion that caught the
+    // duplicate React key — `PastRuns` and `FinishRun` are siblings, and while
+    // both were keyed on the run id React rendered three of them.
+    expect(document.querySelectorAll('.shopping-finish')).toHaveLength(1)
+
+    // The trip ends: the RPC returns the new run and the re-read shows it.
+    const nextRun = openRun(groceries, 'r-next')
+    shoppingApi.finishRun.mockResolvedValue(nextRun)
+    shoppingApi.readShopping.mockResolvedValue({ lists: [groceries], runs: [nextRun], items: [] })
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+
+    // Keyed on the open run, so a new run remounts it closed — and the run that
+    // just closed is now part of the history, which the next open re-reads.
+    await waitFor(() => expect(history()).not.toHaveAttribute('open'))
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(2)
   })
 })

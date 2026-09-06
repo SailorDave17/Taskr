@@ -34,6 +34,7 @@ import {
   finishRun,
   normalizeName,
   purchaseItem,
+  readClosedRuns,
   readShopping,
   removeItem,
   renameList,
@@ -65,6 +66,13 @@ function makeQuery(table) {
     },
     is(column, value) {
       calls.push({ op: 'is', table, column, value })
+      return q
+    },
+    // #359 — the negation of `.is`, and the reason the fake carries all three
+    // arguments: `not('closed_at', 'is', null)` and `is('closed_at', null)` are
+    // one character apart at the call site and are opposite reads.
+    not(column, operator, value) {
+      calls.push({ op: 'not', table, column, operator, value })
       return q
     },
     update(patch) {
@@ -210,6 +218,120 @@ describe('readShopping — lists by household, open runs by list, items by run',
     const failure = await readShopping(client, HOUSEHOLD).catch((e) => e)
     expect(failure.message).toBe('loading shopping runs: permission denied')
     expect(failure.cause).toEqual({ message: 'permission denied', code: '42501' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 4 — the history read: the same two tables, the same two column
+// constants, and the OTHER half of the one predicate. No new table, no new
+// grant, no migration; what this file can prove is that it asks for exactly
+// that, which is the claim "no new grant" rests on.
+// ---------------------------------------------------------------------------
+
+const CLOSED_RUN = {
+  ...RUN,
+  id: 'r0',
+  closed_at: '2026-09-05T18:00:00Z',
+  closed_by_member_id: 'm1',
+}
+
+describe('readClosedRuns — closed runs by list, then their items by run', () => {
+  beforeEach(() => {
+    results.shopping_runs = { data: [CLOSED_RUN], error: null }
+    results.shopping_items = { data: [ITEM], error: null }
+  })
+
+  it('selects both tables with the SAME imported constants the open read uses, never a wildcard', () => {
+    // The claim in the story is that history needs no new grant. It holds only
+    // because these are the same column lists `LIVE_SCHEMA` already carries — a
+    // read that named one more column would need one.
+    return readClosedRuns(client, ['l1']).then(() => {
+      expect(opsOn('shopping_runs').find((c) => c.op === 'select').cols).toBe(SHOPPING_RUN_COLUMNS)
+      expect(opsOn('shopping_items').find((c) => c.op === 'select').cols).toBe(SHOPPING_ITEM_COLUMNS)
+      for (const c of calls.filter((c) => c.op === 'select')) {
+        expect(c.cols).not.toContain('*')
+        expect(c.cols).not.toMatch(/\(/)
+      }
+    })
+  })
+
+  it('asks for the runs that are CLOSED — `.not(closed_at, is, null)` — and names the lists', async () => {
+    await readClosedRuns(client, ['l1', 'l2'])
+    const runOps = opsOn('shopping_runs')
+    expect(runOps).toContainEqual(
+      expect.objectContaining({ op: 'in', column: 'list_id', values: ['l1', 'l2'] }),
+    )
+    expect(runOps).toContainEqual(
+      expect.objectContaining({ op: 'not', column: 'closed_at', operator: 'is', value: null }),
+    )
+    // And it is NOT the open read's predicate. The two differ by one call and
+    // return disjoint sets, so asserting the absence is asserting the direction.
+    expect(runOps.some((c) => c.op === 'is')).toBe(false)
+  })
+
+  it('reads the items by the run ids the first read returned, in added order', async () => {
+    await readClosedRuns(client, ['l1'])
+    expect(opsOn('shopping_items')).toContainEqual(
+      expect.objectContaining({ op: 'in', column: 'run_id', values: ['r0'] }),
+    )
+    expect(opsOn('shopping_items').filter((c) => c.op === 'order').map((c) => c.column)).toEqual([
+      'added_at',
+      'id',
+    ])
+  })
+
+  it('leaves the ORDER of the runs to groupClosedRuns rather than asking the database twice', async () => {
+    // The rule is one pure function with its own tests (`closed_at` descending,
+    // total on id). A second copy of it in the query would be a second thing to
+    // keep in step, and the read's order is not what the screen renders.
+    await readClosedRuns(client, ['l1'])
+    expect(opsOn('shopping_runs').filter((c) => c.op === 'order')).toEqual([])
+  })
+
+  it('issues the reads in order, and returns the two sets under their names', async () => {
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [CLOSED_RUN], items: [ITEM] })
+    expect(calls.filter((c) => c.op === 'select').map((c) => c.table)).toEqual([
+      'shopping_runs',
+      'shopping_items',
+    ])
+  })
+
+  it('with no closed run, issues ONE read and returns two empty arrays — no `.in([])`', async () => {
+    results.shopping_runs = { data: [], error: null }
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [], items: [] })
+    expect(calls.filter((c) => c.op === 'select').map((c) => c.table)).toEqual(['shopping_runs'])
+  })
+
+  it('treats a null data as empty rather than crashing on `.map`', async () => {
+    results.shopping_runs = { data: null, error: null }
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [], items: [] })
+  })
+
+  it('refuses before any request when it is named no list — including an array of nothing', async () => {
+    // `.in('list_id', [])` is a query that can only ever return nothing, and
+    // sending one would spend a round trip to be told so.
+    for (const bad of [undefined, null, [], [null], ['']]) {
+      await expect(readClosedRuns(client, bad)).rejects.toThrow(/Which list/)
+    }
+    expect(calls).toEqual([])
+  })
+
+  it('throws with what we were doing when either read fails, carrying the cause', async () => {
+    results.shopping_runs = { data: null, error: { message: 'permission denied', code: '42501' } }
+    const refused = await readClosedRuns(client, ['l1']).catch((e) => e)
+    expect(refused.message).toBe('loading finished runs: permission denied')
+    expect(refused.cause.code).toBe('42501')
+
+    results.shopping_runs = { data: [CLOSED_RUN], error: null }
+    results.shopping_items = { data: null, error: { message: 'permission denied', code: '42501' } }
+    await expect(readClosedRuns(client, ['l1'])).rejects.toThrow(
+      'loading finished run items: permission denied',
+    )
+  })
+
+  it('issues no DML at all — history is a read, and this client may not write a closed run', async () => {
+    await readClosedRuns(client, ['l1'])
+    expect(calls.filter((c) => ['insert', 'update', 'delete', 'rpc'].includes(c.op))).toEqual([])
   })
 })
 

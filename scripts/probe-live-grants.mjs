@@ -236,6 +236,34 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'r',
     source: '0027 (#305) — `r` only; `a` and `w` withheld, the whole point',
   }),
+  // `0032` (#352): the three shopping tables, one row each on the column the
+  // whole read model rests on. `household_id` is granted for SELECT on all
+  // three — the `0014` route, so the Shop tab can name the household it reads
+  // rather than filter through an embed — and `r` alone is the content: no
+  // client role may insert a row (creation is `create_shopping_list`'s, which
+  // opens the first run in the same transaction) and a list does not move
+  // house, so `a` and `w` are withheld everywhere. `check:live` sees the
+  // select half (each table answers `PGRST205` until the apply); the ABSENCE
+  // of `a` and `w` is this probe's alone. RED until `0032` is applied, the
+  // deliberate red this table's own docblock describes.
+  Object.freeze({
+    table: 'shopping_lists',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; no client insert, and a list does not move house',
+  }),
+  Object.freeze({
+    table: 'shopping_runs',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; runs are opened by the RPCs and closed by #354’s',
+  }),
+  Object.freeze({
+    table: 'shopping_items',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; items arrive through add_shopping_item',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -509,6 +537,18 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // way once the columns are granted).
   Object.freeze({ table: 'member_split_seen', authenticated: null }),
   Object.freeze({ table: 'members', authenticated: 'd' }),
+  // #352, arriving with `0032`. Two absences and one letter, and each is the
+  // write model stated at table level: `shopping_lists` is read and renamed by
+  // column and never inserted (no table-level grant at all); `shopping_runs`
+  // is read by column and written by nothing but the RPCs (none); and
+  // `shopping_items` carries the one whole-row privilege the client holds —
+  // DELETE, under the unbought-on-an-open-run policy — so `d`. A letter
+  // appearing on the first two, or a second letter on the third, means a later
+  // migration widened the write model, which is what this control reports.
+  // UNMEASURED until `0032` is applied; red on purpose until then.
+  Object.freeze({ table: 'shopping_items', authenticated: 'd' }),
+  Object.freeze({ table: 'shopping_lists', authenticated: null }),
+  Object.freeze({ table: 'shopping_runs', authenticated: null }),
 ])
 
 /**

@@ -5,6 +5,11 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import {
+  SHOPPING_ITEM_COLUMNS,
+  SHOPPING_LIST_COLUMNS,
+  SHOPPING_RUN_COLUMNS,
+} from './shopping.js'
 
 /**
  * What the client asks the live project for — story #78.
@@ -85,6 +90,18 @@ export const LIVE_SCHEMA = Object.freeze([
   // the derived figures are readable by the household, the refresh token is not,
   // and that split is the whole of the minimization decision.
   Object.freeze({ table: 'calendar_busy', columns: CALENDAR_BUSY_COLUMNS }),
+  // #352, arriving with `0032` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file. Three tables in one file and all three are here, because the client
+  // reads all three: lists by household, the OPEN run of each list, and the
+  // items on those runs — three plain filters, never an embed filter, which
+  // is why `household_id` is in every one of these column lists (the `0014`
+  // route). What the client does NOT hold — any insert, any stamp column's
+  // update — is `0032`'s and grants.pglite.test.js's to say; this list is what
+  // it reads.
+  Object.freeze({ table: 'shopping_lists', columns: SHOPPING_LIST_COLUMNS }),
+  Object.freeze({ table: 'shopping_runs', columns: SHOPPING_RUN_COLUMNS }),
+  Object.freeze({ table: 'shopping_items', columns: SHOPPING_ITEM_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -211,6 +228,34 @@ export const LIVE_RPCS = Object.freeze([
     fn: 'skip_repeat_occurrence',
     args: Object.freeze({ chore_id: 'uuid', skip_date: 'date' }),
   }),
+  // #352, arriving with `0032` — red on purpose until that file is applied,
+  // the same deliberate window every migration-borne entry here has had. The
+  // four writers of a list, an item or a stamp; the client holds no insert
+  // grant on any shopping table, so these are the only way a row arrives.
+  // Argument names are the epic's, and PostgREST resolves by their SET: a
+  // `text` placeholder is the nil UUID, which `create_shopping_list` refuses
+  // at its household check (`P0001`) and `add_shopping_item` at its run check,
+  // both before any write — PRESENT, and nothing touched.
+  Object.freeze({
+    fn: 'create_shopping_list',
+    args: Object.freeze({ household: 'uuid', name: 'text' }),
+  }),
+  Object.freeze({
+    fn: 'add_shopping_item',
+    args: Object.freeze({ run: 'uuid', name: 'text', note: 'text' }),
+  }),
+  Object.freeze({ fn: 'purchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  Object.freeze({ fn: 'unpurchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  // #354, arriving with `0033` — red on purpose until that file is applied,
+  // the same deliberate window as the four above. The argument is the RUN and
+  // not the list, and the name is the contract: with `list_id` a stale second
+  // phone would finish the FRESH run and carry every item twice. The body's
+  // first act after the auth check is a row lock (`select … for update`), so
+  // the read-only GET refuses it at executor start with `25006` — the shape
+  // `complete_chore` and `purchase_shopping_item` answer, NOT the `P0001` the
+  // two lock-free writers above answer — which classifies as PRESENT with
+  // nothing touched. Predicted from the body, not measured, until the apply.
+  Object.freeze({ fn: 'finish_shopping_run', args: Object.freeze({ run_id: 'uuid' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */
@@ -403,6 +448,13 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // is separate from `LIVE_RPCS` — arriving with no migration that mentions it,
   // so `0030` reaching the project says nothing about whether this is there.
   'calendar-busy',
+  // #210. Invoked by the capacity capture flow (src/lib/capture.js) AHEAD of
+  // the function existing — owner decision at pickup, 2026-09-04 — so this
+  // reads NOT DEPLOYED until #208 writes it and #209 deploys it. That red is
+  // the honest state, and it is written down in docs/access-model.md's
+  // excused-red set. `scripts/deploy-function.mjs` lists it as PENDING so a
+  // bare deploy does not try to ship a directory that is not there.
+  'extract-description',
 ])
 
 /**

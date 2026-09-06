@@ -60,6 +60,8 @@ vi.mock('./supabase.js', () => ({
 }))
 
 const {
+  BUSY_STALE_AFTER_HOURS,
+  BUSY_STALE_AFTER_MS,
   CALENDAR_BUSY_COLUMNS,
   CALENDAR_CONNECTION_COLUMNS,
   CONSENT_HOUSEHOLD_KEY,
@@ -70,6 +72,7 @@ const {
   connectionFor,
   consentUrl,
   hasCalendarConfig,
+  isBusyWeekStale,
   isRealEmailMember,
   busyComputedLabel,
   busyWeekFor,
@@ -674,6 +677,55 @@ describe('fetchBusyWeek', () => {
     await expect(fetchBusyWeek({ householdId: 'h1', periodStart: WEEK })).rejects.toThrow(
       /Failed to send a request/,
     )
+  })
+})
+
+// #98 AC 1 — the staleness bound, and the predicate that applies it. App.test.jsx
+// proves WHEN the app asks; this proves what "older than the bound" means, with
+// the clock injected so the boundary itself can be pinned rather than sampled.
+describe('isBusyWeekStale', () => {
+  const NOW = Date.parse('2026-09-08T18:00:00Z')
+  const rowReadAt = (msAgo) => ({ computed_at: new Date(NOW - msAgo).toISOString() })
+
+  it('names twelve hours, in hours and in the milliseconds the comparison uses', () => {
+    // The constant is the criterion's "default 12 hours". Both spellings are
+    // exported so a reader and the comparison cannot disagree about the unit.
+    expect(BUSY_STALE_AFTER_HOURS).toBe(12)
+    expect(BUSY_STALE_AFTER_MS).toBe(12 * 60 * 60 * 1000)
+  })
+
+  it('is stale strictly BEYOND the bound, and fresh at it', () => {
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS + 1), NOW)).toBe(true)
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS), NOW)).toBe(false)
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS - 1), NOW)).toBe(false)
+  })
+
+  it('is fresh for a figure read moments ago, and stale for one read yesterday', () => {
+    expect(isBusyWeekStale(rowReadAt(60 * 1000), NOW)).toBe(false)
+    expect(isBusyWeekStale(rowReadAt(24 * 60 * 60 * 1000), NOW)).toBe(true)
+  })
+
+  it('measures wall-clock age, so midnight does not make a figure stale', () => {
+    // 23:00 to 00:01 is one hour and one minute, whatever the date did.
+    const justBeforeMidnight = { computed_at: '2026-09-08T03:00:00Z' } // 23:00 New York
+    const justAfter = Date.parse('2026-09-08T04:01:00Z') // 00:01 New York
+    expect(isBusyWeekStale(justBeforeMidnight, justAfter)).toBe(false)
+  })
+
+  it('reads a figure of unknown age as stale, never as current', () => {
+    expect(isBusyWeekStale({ computed_at: 'whenever' }, NOW)).toBe(true)
+    expect(isBusyWeekStale({ computed_at: null }, NOW)).toBe(true)
+    expect(isBusyWeekStale({}, NOW)).toBe(true)
+  })
+
+  it('is not stale when there is no row — that is #96’s trigger, not this one', () => {
+    expect(isBusyWeekStale(null, NOW)).toBe(false)
+    expect(isBusyWeekStale(undefined, NOW)).toBe(false)
+  })
+
+  it('defaults the clock to now, so a caller need not pass one', () => {
+    expect(isBusyWeekStale({ computed_at: new Date().toISOString() })).toBe(false)
+    expect(isBusyWeekStale({ computed_at: '2020-01-01T00:00:00Z' })).toBe(true)
   })
 })
 

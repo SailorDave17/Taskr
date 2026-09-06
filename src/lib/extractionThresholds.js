@@ -11,6 +11,9 @@
 // call — the same wall `src/lib/extraction.js` states for itself, for the same
 // reason: nothing in the app calls any of this, and an instrument that can
 // reach the network is an instrument whose figures can be blamed on the network.
+// (The app does READ one value from here — `CLIENT_WAIT_MS`, derived from the
+// latency kill number, which #210's capture flow waits for — and reading a
+// constant is not a call.)
 //
 // WHAT AN AXIS IS
 //
@@ -91,6 +94,35 @@ function fromGraded(read) {
 const countOf = (value, outOf) => `${value} of ${outOf}`
 
 /**
+ * The deployed-path latency kill number, in milliseconds — the ONE place it is
+ * written. Exported on its own because #210's capture flow WAITS this long for
+ * a proposal (its AC 2): the number the bet is judged on and the number a
+ * member waits for are one constant, so neither can drift from the other. The
+ * latency axis below reads it rather than restating it.
+ */
+export const DEPLOYED_LATENCY_BUDGET_MS = 3000
+
+/**
+ * How long a PHONE waits for one proposal before offering the typed field —
+ * #210's per-request abort. DERIVED from the kill number, deliberately not
+ * equal to it (review-fanout escalation, owner decision 2026-09-04): the kill
+ * number is a p95 CEILING the bet is judged against, under which one answer in
+ * twenty is expected to be slower even when the bet passes — and the diff that
+ * first bound the two together carried a recorded, correct refusal at 3060 ms
+ * provider-only. Read the ceiling as an abort and a correct slow-tail answer
+ * reaches the member as a timeout. One constant governing two subjects is
+ * `a-ceiling-that-holds-is-not-a-fit`; this is the second constant.
+ *
+ * Twice the ceiling: the p95 plus one more p95-sized tail, so the abort sits
+ * where an answer has stopped being slow and started being absent. Still one
+ * named constant read by one caller (`src/lib/capture.js`), which is what
+ * #210 AC 2 asks for; a first version of this file had the flow read the kill
+ * number itself. #205's phone measurement is what can move this — it records
+ * the deployed round trip this margin is a guess about.
+ */
+export const CLIENT_WAIT_MS = DEPLOYED_LATENCY_BUDGET_MS * 2
+
+/**
  * The five ratified kill numbers, as seven axes.
  *
  * `thresholds` is keyed by scope: an axis absent from a scope has no row there
@@ -148,7 +180,7 @@ export const KILL_CONDITIONS = Object.freeze([
     label: 'p95, deployed path',
     direction: 'atMost',
     severity: SEVERITY.KILLS,
-    thresholds: Object.freeze({ all: 3000 }),
+    thresholds: Object.freeze({ all: DEPLOYED_LATENCY_BUDGET_MS }),
     render: (value) => `${value} ms`,
     renderThreshold: (threshold) => `<= ${threshold} ms`,
     // The kill number is specified ON THE DEPLOYED PATH, which is transport and

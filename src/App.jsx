@@ -48,6 +48,7 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
+import { extractCapacity } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -61,16 +62,19 @@ import {
   completeConnect,
   connectionFor,
   fetchBusyWeek,
+  isBusyWeekStale,
   listBusyWeeks,
   listCalendarConnections,
   readConsentReturn,
   startConnect,
 } from './lib/calendar.js'
+import { addItem, createList, readShopping, removeItem, shoppingClient } from './lib/shopping.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
+import Shopping from './components/Shopping.jsx'
 import Split from './components/Split.jsx'
 
 // Story #5: the household roster, on family phones.
@@ -90,21 +94,29 @@ import Split from './components/Split.jsx'
 // deliberately, and no state in which somebody is signed in as nobody.
 
 /**
- * The four surfaces, in the order they are offered — #47 criterion 11, plus
- * #302's Done.
+ * The five surfaces, in the order they are offered — #47 criterion 11, plus
+ * #302's Done and #353's Shop.
  *
  * The split is FIRST and is the default view, per the charter's grooming
  * decision of 2026-08-06. `Who` rather than `Roster` because that is the
  * question a person is asking; the heading behind it still reads "Who is in the
- * household". `Done` is LAST: it is history, and the chore tab's own "N done
- * this week" line is the way most people will reach it.
+ * household". `Done` comes after the working tabs: it is history, and the chore
+ * tab's own "N done this week" line is the way most people will reach it.
+ * `Shop` is LAST because it is the one surface with no fairness arithmetic
+ * behind it (charter, 2026-09-05) — the four before it are one argument about
+ * minutes, and this one is a list. Five one-word labels fit a 360px row only
+ * at the tighter `.tab` padding #350 measured; index.css carries the numbers.
  */
 const SURFACES = [
   { key: 'split', label: 'Split' },
   { key: 'chores', label: 'Chores' },
   { key: 'who', label: 'Who' },
   { key: 'done', label: 'Done' },
+  { key: 'shop', label: 'Shop' },
 ]
+
+/** No lists, no runs, no items — what a household reads before its first list. */
+const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
 
 export default function App() {
   const [status, setStatus] = useState('loading')
@@ -126,6 +138,12 @@ export default function App() {
   // like the exclusions above, and the same one-representation rule: the chore
   // screen folds over the rows to decide what to offer and what to say.
   const [repeatExceptions, setRepeatExceptions] = useState([])
+  // #353 — the household's shopping lists, the open run of each, and the items
+  // on those runs. Server state read through the same refresh as everything
+  // else, held in the read's own shape rather than folded into a per-list tree
+  // here: the Shop tab does the folding where it draws, so there is one
+  // representation and no second copy to fall out of step with the first.
+  const [shopping, setShopping] = useState(EMPTY_SHOPPING)
   // #95 — who in this household has connected a Google Calendar. Server state
   // like everything else here, read through the same refresh. The rows carry no
   // credential: the refresh token is in `calendar_tokens`, which this client is
@@ -159,6 +177,14 @@ export default function App() {
   // is not asked again until the app is reloaded, which is the one moment a
   // person has done something that might have fixed it.
   const askedForBusy = useRef(new Set())
+  // #98 AC 1 — which (member, week) pairs this session has already REFRESHED.
+  // A second set rather than a second use of the first, because the two
+  // triggers are disjoint by rule (no row → #96, a stale row → #98) and a
+  // shared key would let one story's guard silence the other's: a week #96
+  // fetched at boot and #98 found stale after twelve hours open is two
+  // legitimate calls, not one. Same discipline as `askedForBusy` otherwise —
+  // set before the call, kept for the session whatever the answer.
+  const refreshedBusy = useRef(new Set())
   const [userId, setUserId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -218,6 +244,14 @@ export default function App() {
     // mutate-then-refresh guarantee covers them without a second mechanism.
     const choreRows = found ? await listChores(found.id) : []
     setChores(choreRows)
+    // #353 — the shopping reads, scoped by the household just read, through
+    // the same path as everything else: arriving on Shop shows what another
+    // phone added in between for the same reason arriving on Who shows who
+    // joined. `readShopping` is three sequential reads (lists by household,
+    // open runs by list, items by run — never an embed filter), so every
+    // re-read grew by three round trips the day this landed; #351 priced what
+    // a round trip costs and #355 owns the shape of the tick.
+    setShopping(found ? await readShopping(shoppingClient(), found.id) : EMPTY_SHOPPING)
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -294,9 +328,21 @@ export default function App() {
     // on the screen, and not before, whatever the table says. Resolved against
     // the roster just read and the uid just fetched, not the render's `me`,
     // which is the previous refresh's answer.
+    //
+    // A FRESH figure, since #98 — not merely a figure. #96 wrote "a row
+    // exists" here, and that was the same test as "a read has arrived" while
+    // the only fetch was the no-row one: a complaint could never be standing
+    // beside a row. #98's refresh fires precisely when a row exists and is
+    // stale, so under the old test the very next refresh() — the tab press
+    // that shows the roster — read the same stale row back and wiped the
+    // sentence that said why it was still stale (measured: both #98 AC 4
+    // tests found no complaint on screen). A row younger than the bound is
+    // one somebody's read produced after the failure, and that is what makes
+    // the sentence false; the same stale row read again makes it truer.
     if (busyRows && period) {
       const mine = findClaimedMember(roster, uid, found.id)
-      if (mine && busyWeekFor(busyRows, mine.id, period)) setBusyFetchComplaint(null)
+      const arrived = mine ? busyWeekFor(busyRows, mine.id, period) : null
+      if (arrived && !isBusyWeekStale(arrived)) setBusyFetchComplaint(null)
     }
 
     // #50 — is this member owed a statement about a re-balance they have not
@@ -798,16 +844,45 @@ export default function App() {
   // everything fresh, computes with the real allocator and applies through the
   // one transactional RPC; `mutate()`'s refresh then shows the stored result,
   // so what this device shows is what the next device to load will see.
+  //
+  // #210 — `source` is the one thing a proposed figure adds to this call.
+  // 'manual' when typed, 'extraction' when the member took a description's
+  // proposal (edited or not), 'calendar' when they took the calendar's figure
+  // UNEDITED (#97 — an edited one is manual; the roster decides which, this
+  // passes it on) — and the SAME `setCapacity`, the same re-assignment, the
+  // same re-read for all of them.
+  // That is AC 9's one write path, and the reason the roster is handed one
+  // handler rather than one per proposer.
   const handleSetCapacity = useCallback(
-    (memberId, minutes) => {
+    (memberId, minutes, source = 'manual') => {
       if (!periodStart) return Promise.reject(new Error('No week to set capacity for yet.'))
       return mutate(async () => {
-        const saved = await setCapacity({ memberId, periodStart, minutes, householdId: household?.id })
+        const saved = await setCapacity({
+          memberId,
+          periodStart,
+          minutes,
+          source,
+          householdId: household?.id,
+        })
         await reassignHousehold({ householdId: household?.id })
         return saved
       })
     },
     [mutate, periodStart, household],
+  )
+  // #210 — ask the extraction endpoint what a sentence means. Deliberately NOT
+  // routed through `mutate()`, and the difference is the whole of AC 1 and
+  // AC 3: nothing is written here. A proposal is a number on screen that the
+  // member has not agreed to, so there is no change to re-read and no `busy`
+  // to set over the rest of the roster — the shell carries its own pending
+  // state for the one row that asked. The write, if it comes, is
+  // `handleSetCapacity` above, with the source saying where the figure came
+  // from. The household is the one THIS SCREEN is showing (#159's rule), and
+  // the roster travels with the request so the attribution can tell "Robin
+  // has two hours" typed on somebody else's row from a figure for that row.
+  const handleProposeCapacity = useCallback(
+    (member, text) => extractCapacity({ householdId: household?.id, text, member, members }),
+    [household, members],
   )
   const handleClearCapacity = useCallback(
     (memberId) => {
@@ -829,6 +904,30 @@ export default function App() {
   const handleDealOut = useCallback(
     () => mutate(() => reassignHousehold({ householdId: household?.id })),
     [mutate, household],
+  )
+  // #353 — the Shop tab's three writes, each through mutate() so the list this
+  // phone shows after the write is the list every other phone reads. The list
+  // is created in the household THIS SCREEN is showing (#159 AC 4's rule); an
+  // item names its run and a removal names its item, and the household is the
+  // database's to check. The client is handed in rather than reached for
+  // inside the module — shopping.js takes it as a parameter so its io test can
+  // hand in a fake — and `shoppingClient()` is the same `getSupabase()` every
+  // other data-layer module reads.
+  const handleCreateShoppingList = useCallback(
+    (name) => mutate(() => createList(shoppingClient(), household?.id, name)),
+    [mutate, household],
+  )
+  const handleAddShoppingItem = useCallback(
+    (runId, name, note) => mutate(() => addItem(shoppingClient(), runId, name, note)),
+    [mutate],
+  )
+  // A plain delete under a policy that admits only an unbought item on an open
+  // run: if another phone bought it between this one's read and its tap, the
+  // delete affects zero rows and raises nothing, and the re-read that follows
+  // shows the item as bought. The policy decided, not the client.
+  const handleRemoveShoppingItem = useCallback(
+    (itemId) => mutate(() => removeItem(shoppingClient(), itemId)),
+    [mutate],
   )
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
@@ -875,13 +974,67 @@ export default function App() {
   const householdId = household?.id
   const myMemberId = me?.id
   const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
-  const hasBusyRow = Boolean(
-    myMemberId && periodStart && busyWeekFor(busyWeeks, myMemberId, periodStart),
-  )
+  const myBusyWeek =
+    myMemberId && periodStart ? busyWeekFor(busyWeeks, myMemberId, periodStart) : null
+  const hasBusyRow = Boolean(myBusyWeek)
+  // #98 — the one VALUE the refresh trigger decides by. A string off the row,
+  // not the row: `refresh()` hands back a fresh object every time with the same
+  // timestamp in it, and keying on the object would re-run the effect on every
+  // mutation for the same reason the first version of the trigger below broke.
+  const myBusyComputedAt = myBusyWeek?.computed_at ?? null
   // A stable array while its members are the same ids, so the re-read below can
   // name the household without the effect re-running on every refresh.
   const memberIdsKey = members.map((m) => m.id).join(',')
   const memberIds = useMemo(() => (memberIdsKey ? memberIdsKey.split(',') : []), [memberIdsKey])
+
+  // What happens AFTER either trigger decides to ask — one function, because
+  // #96's first read and #98's refresh differ only in WHEN, and two copies of
+  // the what-happens-next is exactly the drift a shared seam exists to stop.
+  //
+  // NO CANCELLATION, and neither caller has a cleanup — the second review-fanout
+  // pass on #96 reversed both. A `cancelled` flag dropped the answer whenever a
+  // concurrent `refresh()` tore the effect down mid-flight; and releasing the
+  // guard key on teardown let a tab switch inside the round trip start a SECOND
+  // Edge Function call for the same week — two token exchanges and two Google
+  // reads — while the test named "once for that week" stayed green.
+  //
+  // So a settled answer LANDS whenever it settles: `setBusyWeeks` re-reads by
+  // the week the call was about, and `refresh()` will overwrite either state on
+  // the next load if the household on screen has moved on. React 18 tolerates
+  // a state write after unmount, and App never unmounts. The member gets the
+  // figure on the visit it arrived, once.
+  const readMyBusyWeek = useCallback(async ({ householdId, periodStart, memberIds }) => {
+    try {
+      await fetchBusyWeek({ householdId, periodStart })
+    } catch (err) {
+      // #96 AC 5 and #98 AC 4, the same sentence: nothing is cleared. The last
+      // derived figure — if there is one — stays on screen with its date, and
+      // the function's own sentence goes beside it. Not `setError`: that strip
+      // is for the app being broken, and a calendar Google would not answer is
+      // a fact about the calendar, with the manual path untouched underneath.
+      setBusyFetchComplaint(err.message)
+      return
+    }
+    setBusyFetchComplaint(null)
+    // Re-read rather than trusting the response body, for the reason every
+    // write on this screen re-reads: what the next device to load will see is
+    // exactly what this one now shows. The function's own answer would be a
+    // second representation of the row it just wrote. This re-read is also the
+    // whole of #98 AC 3 — the roster draws `busyWeeks`, so a figure that lands
+    // while the capacity screen is open is on it at the next render, and there
+    // is no reload to ask for because there is no cache to invalidate.
+    //
+    // In its OWN try, because a failure here is a failure of the TABLE, not of
+    // Google, and the two complaints are cleared by different things — a read
+    // failure filed under the fetch's complaint would outlive the next
+    // successful read, which is what one version of this did.
+    try {
+      setBusyWeeks(await listBusyWeeks(periodStart, memberIds))
+      setBusyReadComplaint(null)
+    } catch (err) {
+      setBusyReadComplaint(err.message)
+    }
+  }, [])
 
   useEffect(() => {
     if (status !== 'joined' || view !== 'who') return
@@ -892,48 +1045,68 @@ export default function App() {
     if (askedForBusy.current.has(key)) return
     askedForBusy.current.add(key)
 
-    // NO CLEANUP, and NO CANCELLATION — the second review-fanout pass reversed
-    // both. The first version released the key when the effect was torn down
-    // mid-flight, so that a genuine change could ask again; but `view` is a
-    // dependency, so leaving Who and coming back inside the round trip tore it
-    // down too, released the key, and started a SECOND Edge Function call for
-    // the same week — two token exchanges and two Google reads — while the test
-    // named "once for that week" stayed green. And the `cancelled` flag that
-    // dropped the first answer was the original bug one layer down.
-    //
-    // So the key is kept for the session whatever happens, and a settled answer
-    // LANDS whenever it settles: the key already identifies the (member, week)
-    // it is about, `setBusyWeeks` re-reads by that week, and `refresh()` will
-    // overwrite either state on the next load if the household on screen has
-    // moved on. React 18 tolerates a state write after unmount, and App never
-    // unmounts. The member gets the figure on the visit it arrived, once.
-    ;(async () => {
-      try {
-        await fetchBusyWeek({ householdId, periodStart })
-      } catch (err) {
-        // AC 5. Nothing is cleared: the last derived figure — if there is one —
-        // stays on screen with its date, and this sentence goes beside it.
-        setBusyFetchComplaint(err.message)
-        return
-      }
-      setBusyFetchComplaint(null)
-      // Re-read rather than trusting the response body, for the reason every
-      // write on this screen re-reads: what the next device to load will see
-      // is exactly what this one now shows. The function's own answer would
-      // be a second representation of the row it just wrote.
-      //
-      // In its OWN try, because a failure here is a failure of the TABLE, not
-      // of Google, and the two complaints are cleared by different things — a
-      // read failure filed under the fetch's complaint would outlive the next
-      // successful read, which is what one version of this did.
-      try {
-        setBusyWeeks(await listBusyWeeks(periodStart, memberIds))
-        setBusyReadComplaint(null)
-      } catch (err) {
-        setBusyReadComplaint(err.message)
-      }
-    })()
-  }, [status, view, householdId, periodStart, myMemberId, isConnected, hasBusyRow, memberIds])
+    readMyBusyWeek({ householdId, periodStart, memberIds })
+  }, [
+    status,
+    view,
+    householdId,
+    periodStart,
+    myMemberId,
+    isConnected,
+    hasBusyRow,
+    memberIds,
+    readMyBusyWeek,
+  ])
+
+  // #98 AC 1 — THE OTHER trigger, and the mirror of the one above.
+  //
+  // "A connected member whose derived row is older than the staleness bound,
+  // when the app opens." Where #96 fires on NO row, this fires on a row that
+  // exists and is stale — `hasBusyRow` is in both guards with opposite signs,
+  // which is what keeps the two invocation-count suites disjoint by
+  // construction rather than by care. How old is `isBusyWeekStale`'s question
+  // and nobody else's; the constant is `BUSY_STALE_AFTER_HOURS` in calendar.js.
+  //
+  // "When the app opens" and NOT "when the capacity screen opens" — this reads
+  // `status` and not `view`, deliberately, and the difference from #96 is the
+  // difference between the two criteria. #96 declined to spend a credential at
+  // boot for a figure nobody had asked to see; here the member has a figure
+  // already, the week it describes is the week the split reacts to, and the
+  // criterion after this one asks that a refresh landing while the capacity
+  // screen is open update it in place — a sentence that only means something
+  // if the refresh was started somewhere else. So the split is where it
+  // starts. What it can cost is bounded by the constant and by the key below.
+  //
+  // The dependencies are values, for the reason the effect above learnt the
+  // hard way: `myBusyComputedAt` is the timestamp as a string, so a refresh
+  // that hands back the same row in a new object leaves this alone, and a
+  // refresh that hands back a NEWER row re-runs it into the early return.
+  // Age is judged at the moment the effect runs, against the real clock: on a
+  // phone that is the app open, and on a device left open past the bound it
+  // is the first thing that re-renders — a completed chore, a tab — which is
+  // the same person asking the same question a little later.
+  useEffect(() => {
+    if (status !== 'joined') return
+    if (!householdId || !periodStart || !myMemberId) return
+    if (!isConnected || !hasBusyRow) return
+    if (!isBusyWeekStale({ computed_at: myBusyComputedAt })) return
+
+    const key = `${myMemberId}:${periodStart}`
+    if (refreshedBusy.current.has(key)) return
+    refreshedBusy.current.add(key)
+
+    readMyBusyWeek({ householdId, periodStart, memberIds })
+  }, [
+    status,
+    householdId,
+    periodStart,
+    myMemberId,
+    isConnected,
+    hasBusyRow,
+    myBusyComputedAt,
+    memberIds,
+    readMyBusyWeek,
+  ])
 
   // #36 — capacity for the load figures, resolved through THE single definition
   // in capacity.js rather than by reading `members.weekly_minutes` here. #44 AC 7
@@ -1047,8 +1220,8 @@ export default function App() {
         />
       ) : null}
 
-      {/* #47 criterion 11 — the surfaces, and the only way between them (four
-          since #302; the chore tab's done line is a second way to one of them).
+      {/* #47 criterion 11 — the surfaces, and the only way between them (five
+          since #353; the chore tab's done line is a second way to one of them).
           A `nav` with buttons rather than links, because there is nothing to
           link TO: one document, no router, and an anchor with no href is worse
           for assistive tech than a button that says what it does.
@@ -1058,6 +1231,24 @@ export default function App() {
           a screen reader already reads it — and gate.test.js's stylesheet check
           only sees static `className` strings, so a conditional class here
           would be a class nothing checks. */}
+      {/* #163 — WHICH household the data on screen belongs to, named directly
+          above the surfaces it scopes and on every one of them. A paragraph,
+          not a button and not a heading: under one household the name is
+          information, and nothing here may suggest there is another to pick
+          (AC 4). The switcher (#253) attaches here later with no layout change.
+
+          The read site, for AC 2: `household.name` arrives through the single
+          currentHousehold() read in refresh(), which is `select('*')` on
+          `households`, and `name` is already in 0013:95's column grant
+          (`select (id, name, created_at, organizer_member_id, timezone)`), so
+          NO new grant ships with this story. The guard for a later column
+          being added and not granted — which would refuse that `select('*')`
+          outright rather than drop a field — is grants.pglite.test.js's
+          "grants select on EVERY column of households". */}
+      {status === 'joined' && household ? (
+        <p className="shell__household">{household.name}</p>
+      ) : null}
+
       {status === 'joined' && household ? (
         <nav className="tabs" aria-label="Household surfaces">
           {SURFACES.map(({ key, label }) => (
@@ -1108,6 +1299,7 @@ export default function App() {
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}
           onClearCapacity={handleClearCapacity}
+          onProposeCapacity={handleProposeCapacity}
           connections={connections}
           onConnectCalendar={handleConnectCalendar}
           busyWeeks={busyWeeks}
@@ -1181,6 +1373,23 @@ export default function App() {
           onAllow={handleAllowMember}
           onSkip={handleSkipOccurrence}
           onRecordActual={handleRecordActual}
+        />
+      ) : null}
+
+      {/* #353 — the household's shopping list. The roster is what the surface
+          resolves "added by" against, and `error` is the same strip every
+          other surface renders for a refused write. */}
+      {status === 'joined' && household && view === 'shop' ? (
+        <Shopping
+          lists={shopping.lists}
+          runs={shopping.runs}
+          items={shopping.items}
+          members={members}
+          busy={busy}
+          error={error}
+          onCreateList={handleCreateShoppingList}
+          onAddItem={handleAddShoppingItem}
+          onRemoveItem={handleRemoveShoppingItem}
         />
       ) : null}
 

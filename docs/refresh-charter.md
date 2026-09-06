@@ -881,6 +881,131 @@ confirmation story under #257).
   keeps their PIN. Linking a Google identity to an already-signed-in password account is a different
   surface with a known library hazard and is not here.
 
+## Decision taken 2026-09-05 — the busy figure's staleness bound is TWELVE hours
+
+Taken at the pickup of #98, which required the bound to be "a named constant, default 12 hours".
+This is that record, in the same shape as the catch-up bound's above.
+
+- **`BUSY_STALE_AFTER_HOURS = 12`.** When the app opens and the signed-in member's derived busy row
+  for this week is older than twelve hours, the client asks the `calendar-busy` Edge Function to
+  read the week again; a row younger than that is drawn as it is. The authority is the constant of
+  that name in `src/lib/calendar.js`; `isBusyWeekStale` beside it is the only comparison, strictly
+  older-than, with an unparsable timestamp read as stale rather than as current.
+- **Why twelve**: a member's free/busy is read on their behalf at most twice a day — a morning open
+  and an evening open each see what today has become, and a phone opened six times between them
+  spends nothing. Rejected: **one hour** (a Google read, and the function's two round trips, on
+  nearly every open — the cost #96 declined to pay even once at boot) and **twenty-four hours** (a
+  figure read Monday morning still says Monday morning on Tuesday morning, a whole day stale on
+  the day the week's capacity is being set). Wall-clock age, not calendar day: a figure read at
+  23:00 is not stale at 00:01.
+- **On app open, not on the capacity screen — and the two triggers stay disjoint.** #96 fires when
+  there is NO row and keys on the roster being on screen, because it declined to spend a
+  credential at boot for a figure nobody had asked to see. #98 fires when a row exists and is
+  stale, and keys on the app being open, because the member already has the figure, the week it
+  describes is the week the split reacts to, and #98's own third criterion — a refresh landing
+  while the capacity screen is open updates it in place — only means something if the refresh was
+  started somewhere else. Each trigger asks once a session per (member, week), under its own key.
+- **A failed refresh keeps the figure, its date, and says why.** The Edge Function's own sentence
+  is drawn beside the stale figure through the surface #96 AC 5 built — a polite status, not the
+  app's error strip, and the manual capacity path untouched underneath. Found in band: `refresh()`
+  had cleared that sentence whenever a row for the member existed, which was the same test as "a
+  read has arrived" while the only fetch was the no-row one; it now clears on a row younger than
+  the bound, so re-reading the same stale row leaves the sentence standing.
+- **Client-triggered only, held by a test.** #53 settled that the free plan's pg_cron stops silently
+  when a project pauses; `gate.test.js` now scans `src/`, `supabase/`, `scripts/`, the workflow and
+  the config files for pg_cron, the `cron.` schema, a Vercel `crons` block and an Actions
+  `schedule:` trigger, comments stripped, so the decision cannot be re-taken one story at a time.
+
+## Decision taken 2026-09-05 — the shopping list is a standalone household utility, on a fifth tab
+
+Owner decisions taken at the clarifying gate before grooming and at the grooming gate after it
+(epic #349, thirteen decisions, recorded there with their numbering). This is the charter-level
+record: what was admitted, why it belongs here at all, what was rejected, and what the admission
+costs.
+
+**What was admitted.** A shared shopping list: everyone in the household adds to it, whoever goes
+shopping has the whole list on one phone, items bought in the store drop below the rest, one
+confirmed tap closes the run and the next list already holds what was missed. Several named lists
+per household, each with its own run (decision 5, taken *against* the one-list recommendation).
+An item carries its name, an optional note, who added it, and who bought it and when, stamped by
+the database clock (decision 4). Any member adds, ticks, un-ticks, removes an unbought item and
+finishes a run — no organizer gate anywhere in the feature (decision 2). Finished runs are kept and
+viewable behind a disclosure inside the Shop tab (decision 6). Any member archives a list; nothing
+is ever deleted (decision 10). The tab label is **Shop** (decision 13).
+
+**Why it belongs in Taskr despite the fairness charter.** The problem statement at the head of this
+file is about dividing chores fairly by time, and a shopping run completes no chore and counts no
+minutes — it is the first surface with *no fairness arithmetic behind it*. It is admitted anyway,
+as a **standalone household utility** (decision 1), because everything under it is already here and
+already protected: the same roster and per-member sign-in (`0007`), the same one-household scoping
+under multi-household membership (`0014`), the same database-clock stamp discipline (`0004`/`0029`),
+the same tab shell and re-read-on-open (decision 3: no Realtime, no polling). The household this app
+is built for has no shared place to say "we are out of milk", and a second app for that would carry
+a second roster. A chore tie-in — the trip counting toward the shopper's load — is recorded on the
+epic as a **future idea only**, and no story couples the two.
+
+**Rejected alternatives.**
+
+- **One list per household** (the recommendation). Simpler picker, simpler rollover, one open run to
+  reason about. Rejected by the owner because the household shops at more than one kind of store and
+  a hardware list mixed into groceries is the failure the feature exists to remove. The schema is
+  multi-list from `0032`; the picker and rename arrive in #358.
+- **Household-learned aisle locations** for the stretch (the recommendation: remember where each
+  item was found last time). Rejected in favour of **retailer APIs** (decision 7, Kroger, Walmart
+  and Target named), groomed behind a spike (#362) because API availability is unverified — and the
+  spike carries the kill condition that reopens the learned-locations route if the APIs do not
+  expose per-store aisle data.
+- **An undo on finish.** The mis-tap protection is an inline confirm naming the consequence
+  (decision 8), not an undo.
+
+**The in-store moment is online-only, and that is a known limit rather than a defect.** The app has
+no offline write path anywhere; every tick is a network round trip. #351 measured what one tick
+costs under the write-then-full-refresh discipline every other tab uses: **11 sequential round trips
+today, 6.5 s at the browser's Slow 4G preset against an owner-set bar of a median under 1 s** —
+and one round trip at the same preset is 0.585 s, so the bar is reachable only when the tick's
+re-read IS the write's response. The shape of that re-read is #355's, and the owner decides it at
+that story's pickup (decision 12); the charter records only that a departure from the mutate
+discipline of the 2026-08-25 tab decision is a charter change when it comes, not a story detail.
+
+**Coordination recorded, not owed.** #342 (Realtime over an enumerated table list, open) sits
+against decision 3 and is not a dependency; **if it ships, its publication list must add
+`shopping_lists`, `shopping_runs` and `shopping_items`**, and the recommendation on the epic is that
+it derive that list from `LIVE_SCHEMA` rather than hand-write it.
+
+**The strip measurement, by number (#350, 2026-09-05, at `13a4477`).** Five tabs do **not** fit a
+360 px viewport on one row as shipped: the four existing tabs sum to 279 px of natural width in a
+320 px content row, the fifth adds 61.9 px plus a 6 px gap and overshoots by **21 px**, and *Shop*
+drops to a second 44 px row, taking the strip from 44 px to 102.8 px tall. They **do** fit once
+`.tab`'s horizontal padding drops from 0.75 rem to 0.5 rem (12 px to 8 px per side): Σ natural
+301 px, **+19 px of slack**, every tab one line, nothing truncated, narrowest rendered tab 52.5 px
+on the 44 px hit-target floor. The boundary value 0.625 rem misses by 0.8 px, so 0.5 rem is the
+smallest step that works, not merely one that does. Measured on the real `App` with a fifth
+`SURFACES` entry, real `index.css`, Chrome at 360×800; one width, one browser, system-ui as Segoe UI.
+That is decision 13's fallback taken in the order the owner set — tighter padding first, shorter
+labels not needed. #353 carries the padding change with the tab.
+
+**The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
+otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same
+full re-read every tab does, until #355 says otherwise about the tick alone. Nothing here adds a
+sentence about routing: #175 (react-router, sequenced last in #253) is coordinated on the epic, and
+whichever of #175 and #353 lands second re-reads the other's diff.
+
+**What `0032` (#352) put underneath it**, so the reasoning is here and not only in the migration's
+header: three tables under the one-household predicate every table since `0007` uses; every column
+readable by name including `household_id` (the `0014` route — the Shop tab names the household it
+reads, three plain filters, never an embed filter); **no client insert grant on any of the three**,
+because a list is created together with its first open run and a direct insert would produce a
+runless list; no client write on any stamp column; one open run per list as a partial unique index
+rather than a convention; list names unique per household case-insensitively; attribution foreign
+keys `set null` so a removed member's items and closes stand with the who blanked, structural ones
+`cascade`. One correction taken in band, and it was a recurrence rather than a finding: a composite
+foreign key's `on delete set null` nulls *every* column in the key, `household_id` included, so the
+attribution FKs name the column to null (Postgres 15+) — the form `0006`, `0012` and `0018` already
+use and `0006`'s comment already explains. The draft copied `0030`'s cascading shape instead and the
+pglite suite refused the member delete on the first run. The whole-stamp check constraints are
+one-directional for the same reason — a closer implies a close, never the converse — or removing a
+member would fail on every run they ever closed.
+
 ## Open decisions (still owed)
 
 - **How far the noticing dimension goes** — modelled as a first-class thing, or only surfaced.

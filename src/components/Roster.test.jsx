@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import Roster from './Roster.jsx'
@@ -611,7 +611,9 @@ describe('this week’s capacity — #46', () => {
       { target: { value: '120' } },
     )
     await clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
-    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120')
+    // The third argument arrived with #210: a typed figure is source 'manual',
+    // and it is the SAME call a proposed figure makes with one word different.
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '120', 'manual')
   })
 
   it('seeds the editor from the CURRENT value every time it opens', async () => {
@@ -1040,7 +1042,9 @@ describe('#95 AC 5 — a connected member sees so on reload', () => {
 // ===========================================================================
 //
 // A READOUT, and every assertion below is really about that: it renders a
-// figure, it never offers to apply it, and it writes nothing. Applying is #97.
+// figure and it writes nothing. Since #97 it carries the one tap that applies
+// the figure as a PREFILL; the write is still the editor's Save, and that
+// story's describe below is where the tap is exercised.
 describe('#96 — calendar-suggested busy minutes', () => {
   const zoned = { ...household, timezone: 'America/New_York' }
   const busyRow = {
@@ -1066,21 +1070,25 @@ describe('#96 — calendar-suggested busy minutes', () => {
     expect(within(row).getByTestId('week-m1')).toBeInTheDocument()
   })
 
-  it('AC 4 — offers no way to apply it, because that is #97', () => {
-    // The thinnest proof that nothing is written to `member_capacity`: there is
-    // no control here to write with. A test asserting "the handler was not
-    // called" would pass just as well against a button nobody pressed.
+  it('AC 4 — the readout writes nothing: its one control (#97) prefills, and only Save writes', async () => {
+    // Until #97 this asserted there was NO control here at all, which was the
+    // thinnest proof that nothing is written to `member_capacity`. There is one
+    // now, and the property survives in a sharper form: tapping it opens the
+    // editor with a figure in the field and calls no handler. The write is the
+    // editor's Save, exercised in the #97 describe below.
     const handlers = setup({ household: zoned, busyWeeks: [busyRow] })
     const row = rowFor('Placeholder One')
-    expect(within(row).queryByRole('button', { name: /calendar/i })).not.toBeInTheDocument()
+    await clickAndSettle(within(row).getByRole('button', { name: /use the calendar’s figure/i }))
+    expect(within(row).getByLabelText(/minutes this week for placeholder one/i)).toBeInTheDocument()
     expect(handlers.onSetCapacity).not.toHaveBeenCalled()
     expect(handlers.onClearCapacity).not.toHaveBeenCalled()
   })
 
-  it('says WHEN it was read, because this story fetches a week once', () => {
-    // Staleness is #98's story, so a figure read on Monday is still on screen on
-    // Friday. A number shown without its age would be claiming a freshness it
-    // does not have.
+  it('says WHEN it was read, because a figure can outlive the day it describes', () => {
+    // #96 fetched a week once; #98 refreshes a figure older than twelve hours
+    // on app open, and a phone left open or a Google that keeps refusing still
+    // draws the last read. Either way a number shown without its age would be
+    // claiming a freshness it does not have.
     setup({ household: zoned, busyWeeks: [busyRow] })
     // 'Aug 11', not 'Aug 12': the household's zone, not UTC, decides which day
     // the read happened on. This is the assertion that fails when the roster
@@ -1187,5 +1195,506 @@ describe('#96 — calendar-suggested busy minutes', () => {
     setup({ household: zoned })
     expect(screen.queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+})
+
+// #97 — the calendar's suggestion, taken into the week's capacity. The busy
+// row is what #96 draws; what is tested here is the tap that turns it into a
+// prefill, the two words a save can carry, and the mark a confirmed week
+// shows. The arithmetic itself is capacity.calendar.test.js.
+describe('applying the calendar suggestion — #97', () => {
+  const zoned = { ...household, timezone: 'America/New_York' }
+  const name = roster[0].display_name
+  // 120 usual, 45 busy: a prefill of 75, chosen so the field can be told apart
+  // from the baseline, from the busy figure and from zero at a glance.
+  const busyRow = {
+    id: 'busy-1',
+    member_id: 'm1',
+    period_start: PERIOD,
+    busy_minutes: 45,
+    event_count: 3,
+    computed_at: '2026-08-12T01:00:00Z',
+  }
+  const useIt = (who = name) =>
+    clickAndSettle(
+      screen.getByRole('button', { name: new RegExp(`use the calendar’s figure for ${who}`, 'i') }),
+    )
+  const minutesField = (who = name) =>
+    screen.getByLabelText(new RegExp(`minutes this week for ${who}`, 'i'))
+  const save = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+  // `me` is the first row, so the source line's "your" is exercised on the
+  // row where it is true; the housemate case below is the row where it is not.
+  const withBusy = (extra = {}) =>
+    setup({ household: zoned, me: roster[0], busyWeeks: [busyRow], ...extra })
+  const openFor = (who = name) =>
+    clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${who}`, 'i') }))
+  const calendarRow = (minutes, source = 'calendar') => ({
+    id: 'o1',
+    member_id: 'm1',
+    period_start: PERIOD,
+    minutes,
+    note: null,
+    source,
+  })
+
+  it('names WHOSE calendar on a housemate’s row, and "your" only on the member’s own', async () => {
+    // review-fanout, 2026-09-05: the tap is offered on every row, so "From
+    // your calendar" on Placeholder Two's row attributed Two's free/busy to
+    // the person holding the phone.
+    withBusy({ busyWeeks: [busyRow, { ...busyRow, id: 'busy-2', member_id: 'm2' }] })
+    await useIt('Placeholder Two')
+    expect(screen.getByTestId('week-source-m2')).toHaveTextContent(/from placeholder two’s calendar/i)
+    expect(screen.getByTestId('week-source-m2')).not.toHaveTextContent(/your/i)
+  })
+
+  it('tapping Use this over a standing description proposal clears the proposal card', async () => {
+    // review-fanout, 2026-09-05 (correctness + edge-paths): the shell owns its
+    // result and exposes no reset, so without a remount the extraction card,
+    // its "from your description" submit and "From your calendar" sat on one
+    // screen at the confirm tap — two provenance claims for one field.
+    const { onSetCapacity } = withBusy({
+      onProposeCapacity: vi.fn().mockResolvedValue({
+        outcome: 'proposal',
+        minutes: 180,
+        derivedFrom: { who: 'me', minutes: 180 },
+      }),
+    })
+    await openFor()
+    fireEvent.change(screen.getByLabelText(new RegExp(`describe this week for ${name}`, 'i')), {
+      target: { value: 'I have three hours this week' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the minutes/i }))
+    expect(screen.getByTestId('proposal-m1')).toHaveTextContent('180')
+    await useIt()
+    expect(screen.queryByTestId('proposal-m1')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: new RegExp(`save the proposed figure for ${name}`, 'i') }),
+    ).not.toBeInTheDocument()
+    expect(minutesField()).toHaveValue(75)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '75', 'calendar')
+  })
+
+  it('an EMPTIED field is not the calendar’s figure, even when the calendar suggested zero', async () => {
+    // review-fanout, 2026-09-05: Number('') is 0, and 0 is a legal suggestion,
+    // so clearing the field over a zero prefill kept the calendar line on over
+    // nothing. The save is refused by the normalizer either way; this is the
+    // sentence above the field.
+    const { onSetCapacity } = withBusy({ busyWeeks: [{ ...busyRow, busy_minutes: 320 }] })
+    await useIt()
+    expect(minutesField()).toHaveValue(0)
+    expect(screen.getByTestId('week-source-m1')).toBeInTheDocument()
+    fireEvent.change(minutesField(), { target: { value: '' } })
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await save()
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  describe('the tap scrolls the field it filled into view (design-bar, 2026-09-05)', () => {
+    // Measured on the prototype at 360×800: from a closed editor the tap put the
+    // description shell between the button and the field, landing the field at
+    // y=892 and Save at y=1005. jsdom has no layout and no scrollIntoView, so the
+    // request is what can be asserted here; the prototype is where it was seen.
+    const original = Element.prototype.scrollIntoView
+    beforeEach(() => {
+      Element.prototype.scrollIntoView = vi.fn()
+    })
+    afterEach(() => {
+      Element.prototype.scrollIntoView = original
+    })
+
+    it('requests a scroll to the minutes field once per tap', async () => {
+      withBusy()
+      await useIt()
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(Element.prototype.scrollIntoView.mock.instances[0]).toBe(minutesField())
+    })
+
+    it('and a plain "This week" open requests none — the field is where the tap was', async () => {
+      withBusy()
+      await openFor()
+      expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+    })
+
+    it('POSITIVE CONTROL: the control survives a browser with no scrollIntoView at all', async () => {
+      Element.prototype.scrollIntoView = undefined
+      withBusy()
+      await useIt()
+      expect(minutesField()).toHaveValue(75)
+    })
+  })
+
+  describe('the editor opens on what the row says (owner, at the review escalation, 2026-09-05)', () => {
+    it('re-opening a calendar week shows its source, and an unedited Save keeps it', async () => {
+      // Before this, open() seeded 'manual' whatever the row carried, so a
+      // member who looked and pressed Save turned a calendar week into a typed
+      // one — provenance lost by a tap that changed nothing.
+      const { onSetCapacity } = withBusy({ overrides: [calendarRow(75)] })
+      await openFor()
+      expect(minutesField()).toHaveValue(75)
+      expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+      await save()
+      expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '75', 'calendar')
+    })
+
+    it('and editing it first applies the calendar rule — it saves as manual', async () => {
+      const { onSetCapacity } = withBusy({ overrides: [calendarRow(75)] })
+      await openFor()
+      fireEvent.change(minutesField(), { target: { value: '60' } })
+      expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+      await save()
+      expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '60', 'manual')
+    })
+
+    it('a description week re-opens as one and keeps its word edited or not (#210 AC 6)', async () => {
+      const { onSetCapacity } = withBusy({ overrides: [calendarRow(180, 'extraction')] })
+      await openFor()
+      expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+      fireEvent.change(minutesField(), { target: { value: '150' } })
+      await save()
+      expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '150', 'extraction')
+    })
+
+    it('REGRESSION: a typed week and a week with no row still open as manual with no source line', async () => {
+      withBusy({ overrides: [calendarRow(60, 'manual')] })
+      await openFor()
+      expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+      await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+      await openFor('Placeholder Two')
+      expect(screen.queryByTestId('week-source-m2')).not.toBeInTheDocument()
+    })
+  })
+
+  it('AC 1: one tap opens the editor with max(0, baseline − busy) in the field, named as the calendar’s, and writes nothing', async () => {
+    const { onSetCapacity } = withBusy()
+    expect(screen.queryByLabelText(/minutes this week/i)).not.toBeInTheDocument()
+    await useIt()
+    expect(minutesField()).toHaveValue(75)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: floors at zero when the calendar says the week is spoken for', async () => {
+    withBusy({ busyWeeks: [{ ...busyRow, busy_minutes: 320 }] })
+    await useIt()
+    expect(minutesField()).toHaveValue(0)
+  })
+
+  it('AC 1: the tap is offered wherever the figure is shown — a housemate’s row too (owner, 2026-09-05)', async () => {
+    // Same reach as the editor it feeds, which has never gated who may set:
+    // the household reads the figure since #96, and this editor lets anybody
+    // type any number. The confirm tap is what makes the figure defensible.
+    withBusy({ busyWeeks: [{ ...busyRow, member_id: 'm2' }] })
+    await useIt('Placeholder Two')
+    // 45 usual − 45 busy.
+    expect(minutesField('Placeholder Two')).toHaveValue(0)
+    expect(screen.getByTestId('week-source-m2')).toHaveTextContent(/placeholder two’s calendar/i)
+  })
+
+  it('offers no tap without a figure, and none for a foreign week', () => {
+    setup({ household: zoned, busyWeeks: [{ ...busyRow, period_start: '2026-08-03' }] })
+    expect(screen.queryByRole('button', { name: /use the calendar’s figure/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 2: saving the prefilled figure unedited writes it with source calendar', async () => {
+    const { onSetCapacity } = withBusy()
+    await useIt()
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '75', 'calendar')
+  })
+
+  it('AC 2: editing the figure first saves it as manual, and the calendar line goes quiet as soon as it is edited', async () => {
+    // The mirror of #210 AC 6, on purpose: a calendar figure is arithmetic the
+    // member can see, so a changed one is no longer the calendar's. The source
+    // line follows the field rather than the tap.
+    const { onSetCapacity } = withBusy()
+    await useIt()
+    fireEvent.change(minutesField(), { target: { value: '60' } })
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '60', 'manual')
+  })
+
+  it('AC 2: restoring the exact figure after an edit is a confirm again', async () => {
+    const { onSetCapacity } = withBusy()
+    await useIt()
+    fireEvent.change(minutesField(), { target: { value: '60' } })
+    fireEvent.change(minutesField(), { target: { value: '75' } })
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '75', 'calendar')
+  })
+
+  it('the tap works from an editor that is already open, replacing what was typed', async () => {
+    withBusy()
+    await clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+    fireEvent.change(minutesField(), { target: { value: '99' } })
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await useIt()
+    expect(minutesField()).toHaveValue(75)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+  })
+
+  it('cancelling after the tap writes nothing, and the next open starts clean', async () => {
+    const { onSetCapacity } = withBusy()
+    await useIt()
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+    expect(onSetCapacity).not.toHaveBeenCalled()
+    expect(rowFor(name)).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+    await clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+    expect(minutesField()).toHaveValue(roster[0].weekly_minutes)
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+  })
+
+  it('a rejected save keeps the editor open with the figure to retry', async () => {
+    const onSetCapacity = vi.fn().mockRejectedValue(new Error('refused'))
+    withBusy({ onSetCapacity })
+    await useIt()
+    await save()
+    expect(minutesField()).toHaveValue(75)
+  })
+
+  it('is disabled while the roster is busy, like every other control on the row', () => {
+    withBusy({ busy: true })
+    expect(screen.getByRole('button', { name: /use the calendar’s figure/i })).toBeDisabled()
+  })
+
+  it('AC 6: a calendar-sourced week says so where the figure is read', () => {
+    withBusy({
+      overrides: [{ id: 'o1', member_id: 'm1', period_start: PERIOD, minutes: 75, source: 'calendar' }],
+    })
+    const figure = within(rowFor(name)).getByTestId('week-m1')
+    expect(figure).toHaveTextContent('This week: 75 min')
+    expect(figure).toHaveTextContent(/set from calendar/i)
+    expect(figure).not.toHaveTextContent(/set for this week/i)
+  })
+
+  it('AC 6 — REGRESSION: a typed week still reads "set for this week", and no row still reads "usual"', () => {
+    withBusy({
+      overrides: [{ id: 'o1', member_id: 'm1', period_start: PERIOD, minutes: 60, source: 'manual' }],
+    })
+    expect(within(rowFor(name)).getByTestId('week-m1')).toHaveTextContent(/set for this week/i)
+    expect(within(rowFor(name)).getByTestId('week-m1')).not.toHaveTextContent(/from calendar/i)
+    expect(within(rowFor('Placeholder Two')).getByTestId('week-m2')).toHaveTextContent(/usual/i)
+  })
+
+  it('AC 6: the mark survives with no busy row on screen — provenance is the override’s, not the readout’s', () => {
+    // The derived row can be gone (a housemate opened the app on another
+    // week, the read failed, the connection was revoked) while the confirmed
+    // capacity stands. What the week was set FROM is a fact about the
+    // capacity row, and it is read from there.
+    setup({
+      household: zoned,
+      overrides: [{ id: 'o1', member_id: 'm1', period_start: PERIOD, minutes: 75, source: 'calendar' }],
+    })
+    expect(within(rowFor(name)).getByTestId('week-m1')).toHaveTextContent(/set from calendar/i)
+    expect(screen.queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+  })
+})
+
+// #210 — this week's capacity, described in plain language. The proposer is
+// a spy handed in as `onProposeCapacity`; what it answers is the capture
+// layer's outcome vocabulary, tested against recorded responses in
+// src/lib/capture.test.js. What is tested HERE is the confirm surface: a
+// proposal lands in the field and is not written, accepting it is one tap of
+// a submit that is the same write a typed figure makes, and the source
+// travels with it.
+describe('this week’s capacity, described in plain language — #210', () => {
+  const PROPOSAL = {
+    outcome: 'proposal',
+    minutes: 180,
+    derivedFrom: { who: 'me', minutes: 180 },
+  }
+  const name = roster[0].display_name
+
+  const openFor = () =>
+    clickAndSettle(screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }))
+
+  const describeIt = async (text) => {
+    fireEvent.change(screen.getByLabelText(new RegExp(`describe this week for ${name}`, 'i')), {
+      target: { value: text },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the minutes/i }))
+  }
+
+  const minutesField = () =>
+    screen.getByLabelText(new RegExp(`minutes this week for ${name}`, 'i'))
+
+  const saveProposed = () =>
+    clickAndSettle(
+      screen.getByRole('button', { name: new RegExp(`save the proposed figure for ${name}`, 'i') }),
+    )
+
+  const save = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+
+  const withProposer = (outcome = PROPOSAL) => {
+    const onProposeCapacity = vi.fn().mockResolvedValue(outcome)
+    const handlers = setup({ onProposeCapacity })
+    return { ...handlers, onProposeCapacity }
+  }
+
+  it('AC 1: shows the proposed figure, lands it in the field with its source named, and writes nothing', async () => {
+    const { onSetCapacity, onProposeCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    expect(onProposeCapacity).toHaveBeenCalledWith(roster[0], 'I have three hours this week')
+    expect(screen.getByTestId('proposal-m1')).toHaveTextContent('Proposed: 180 min')
+    // Prefilled, not applied: the field holds the proposal, the source line
+    // says where it came from, and nothing has been written.
+    expect(minutesField()).toHaveValue(180)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: a figure read as the writer’s own carries no provenance line that repeats the headline', async () => {
+    // The named case is the describe below this one.
+    withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    expect(screen.getByTestId('capture-proposal')).not.toHaveTextContent(/read as/i)
+  })
+
+  it('AC 1 / AC 9: accepting is ONE tap, a submit that writes once with source extraction', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    const button = screen.getByRole('button', {
+      name: new RegExp(`save the proposed figure for ${name}`, 'i'),
+    })
+    expect(button).toHaveAttribute('type', 'submit')
+    expect(button).toHaveTextContent(/save 180 min from your description/i)
+
+    await saveProposed()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '180', 'extraction')
+  })
+
+  it('AC 9: the plain Save below the field is the same write, not a second one', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '180', 'extraction')
+  })
+
+  it('AC 9: names the source on screen once a proposal arrives, and not before', async () => {
+    withProposer()
+    await openFor()
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await describeIt('I have three hours this week')
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+  })
+
+  it('AC 6: editing the proposed figure before saving keeps source extraction, and the button says what it will save', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    fireEvent.change(minutesField(), { target: { value: '150' } })
+    expect(
+      screen.getByRole('button', { name: new RegExp(`save the proposed figure for ${name}`, 'i') }),
+    ).toHaveTextContent(/save 150 min/i)
+    await saveProposed()
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '150', 'extraction')
+  })
+
+  it('AC 3: cancelling after a proposal writes nothing, and the next open starts clean', async () => {
+    const { onSetCapacity } = withProposer()
+    await openFor()
+    await describeIt('I have three hours this week')
+    await clickAndSettle(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(onSetCapacity).not.toHaveBeenCalled()
+    expect(rowFor(name)).toHaveTextContent(`This week: ${roster[0].weekly_minutes} min`)
+
+    await openFor()
+    expect(minutesField()).toHaveValue(roster[0].weekly_minutes)
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-proposal')).not.toBeInTheDocument()
+  })
+
+  it('AC 2: when extraction fails, the typed field is in the same flow, focused, and a typed save is manual', async () => {
+    const { onSetCapacity } = withProposer({
+      outcome: 'failed',
+      sentence: 'The extraction service could not answer: not deployed.',
+    })
+    await openFor()
+    await describeIt('I have three hours this week')
+
+    const failure = screen.getByTestId('capture-failure')
+    expect(failure).toHaveTextContent(/could not answer/)
+    expect(failure).toHaveTextContent('Type the minutes instead.')
+    expect(minutesField()).toHaveFocus()
+    expect(minutesField(), 'a failure must not prefill anything').toHaveValue(roster[0].weekly_minutes)
+
+    fireEvent.change(minutesField(), { target: { value: '90' } })
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledTimes(1)
+    expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '90', 'manual')
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: a question shows the sentence and no number, prefills nothing, and the description stays', async () => {
+    const { onSetCapacity } = withProposer({
+      outcome: 'question',
+      sentence: 'One more detail is needed. The message gives no amount of time.',
+    })
+    await openFor()
+    await describeIt('busy this week')
+
+    expect(screen.getByTestId('capture-question')).toHaveTextContent(/one more detail/i)
+    expect(screen.queryByTestId('proposal-m1')).not.toBeInTheDocument()
+    expect(minutesField()).toHaveValue(roster[0].weekly_minutes)
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(new RegExp(`describe this week for ${name}`, 'i'))).toHaveValue(
+      'busy this week',
+    )
+    expect(onSetCapacity).not.toHaveBeenCalled()
+  })
+
+  it('a rejected save after a proposal does not escape, and the editor stays open with the figure to retry', async () => {
+    const onSetCapacity = vi.fn().mockRejectedValue(new Error('refused'))
+    setup({ onSetCapacity, onProposeCapacity: vi.fn().mockResolvedValue(PROPOSAL) })
+    await openFor()
+    await describeIt('I have three hours this week')
+    await saveProposed()
+    expect(minutesField()).toBeInTheDocument()
+    expect(minutesField()).toHaveValue(180)
+  })
+
+  it('the manual floor (AC 7): with no proposer wired, the editor is exactly the #46 form', async () => {
+    setup()
+    await openFor()
+    expect(
+      screen.queryByLabelText(new RegExp(`describe this week for ${name}`, 'i')),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-shell')).not.toBeInTheDocument()
+    expect(minutesField()).toBeInTheDocument()
+  })
+})
+
+describe('the provenance line — #210, design-bar', () => {
+  it('is shown when the endpoint attributed the figure to a name', async () => {
+    const onProposeCapacity = vi.fn().mockResolvedValue({
+      outcome: 'proposal',
+      minutes: 285,
+      derivedFrom: { who: 'Placeholder One', minutes: 285 },
+    })
+    setup({ onProposeCapacity })
+    await clickAndSettle(
+      screen.getByRole('button', { name: /set this week for placeholder one/i }),
+    )
+    fireEvent.change(screen.getByLabelText(/describe this week for placeholder one/i), {
+      target: { value: 'Placeholder One has four and three-quarter hours' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the minutes/i }))
+    expect(screen.getByTestId('capture-proposal')).toHaveTextContent(
+      /read as “placeholder one: 285 min” from what you wrote/i,
+    )
   })
 })

@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { formatMinutes, signInAddressFor } from '../lib/household.js'
 import {
   MAX_CAPACITY_MINUTES,
   MIN_CAPACITY_MINUTES,
+  calendarSuggestion,
   effectiveCapacity,
   normalizeCapacityMinutes,
 } from '../lib/capacity.js'
 import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
+import CaptureShell from './CaptureShell.jsx'
+import { CAPTURE_OUTCOMES, isFirstPerson } from '../lib/capture.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
 // change is what every other device shows on next load) and the "pick yourself"
@@ -43,14 +46,127 @@ import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from
  * `capacity.test.js` asserts there is exactly one implementation across all of
  * `src/`. The same call is what makes the chore screen's load figures follow
  * this week without any change there.
+ *
+ * #210 PUTS A SENTENCE IN FRONT OF THE NUMBER, AND CHANGES NOTHING BEHIND IT.
+ *
+ * The editor gains a description box (the shared `CaptureShell`) ABOVE the
+ * minutes field, and a proposal is a PREFILL of that field — never a write.
+ * The write is still this form's one submit, `onSet`, and the only thing
+ * that travels with it now is where the figure came from (`source`), so a
+ * proposed and a typed capacity reach `setCapacity` through the same call
+ * with one word different (AC 6, AC 9). Nothing is stored between the
+ * proposal and the save: cancel, leave, or reload, and the period's capacity
+ * is whatever it was (AC 3).
+ *
+ * `onPropose` is OPTIONAL, and that is the fallback proof made structural
+ * (AC 7): a roster rendered without it is exactly the #46 editor, and every
+ * #46 test renders it that way. The manual field is inside the shell as its
+ * children, so it is on screen before, during and after any description —
+ * a failure moves the box out of the way and focuses the field; it never
+ * reveals it.
+ *
+ * `takeProposal` is the one seam the calendar proposer (#97) reads: a figure,
+ * a source, and what it was derived from. Whichever proposer ships second
+ * arrives here rather than adding a second write path — owner decision at
+ * the filing gate, 2026-08-26.
+ *
+ * #97 IS THAT SECOND PROPOSER, AND IT ARRIVED HERE. The calendar readout
+ * (`BusyReadout`, #96) now renders INSIDE this control rather than beside
+ * it, because its one control — "Use this" — has to open this editor with the
+ * field prefilled, and the editor's open/closed state lives here. The tap is
+ * `takeProposal` with `max(0, baseline − busy)` (`calendarSuggestion`, the
+ * owner's formula) and source `calendar`: a prefill the member reviews, never
+ * a write. Save is where they agree, exactly as for a description.
+ *
+ * Two rules differ from #210's on purpose, and both are the issue's own:
+ *
+ * - **Editing a calendar figure makes it manual** (#97 AC 2), where editing
+ *   a description's figure keeps `extraction` (#210 AC 6). A calendar figure
+ *   is arithmetic on a number the member can see, so a changed figure is no
+ *   longer the calendar's; a description's figure is an interpretation of
+ *   what they wrote, so a corrected one is still derived from it. The source
+ *   line follows the same rule: it names the calendar while the field holds
+ *   the calendar's figure and goes quiet once it does not.
+ * - **Anybody who can see the figure can take it** (owner decision at pickup,
+ *   2026-09-05), where connecting a calendar is own-row only (#95). The
+ *   suggestion is household-readable since #96 for the reason a housemate's
+ *   weekly minutes always were, and this editor has never had a who-may-set
+ *   gate — a housemate can already type any number here. The confirm tap and
+ *   the provenance mark are what make the figure defensible, whoever tapped.
+ *   The source line names WHOSE calendar for that reason: "your" on the
+ *   member's own row, their name on a housemate's (review-fanout, 2026-09-05).
+ *
+ * THE EDITOR OPENS ON WHAT THE ROW SAYS (owner decision at the review
+ * escalation, 2026-09-05). Until then `open()` seeded `source = 'manual'`
+ * whatever the stored row carried, so re-opening a calendar week and pressing
+ * Save unedited rewrote its provenance to `manual` — a typed figure recorded
+ * for a number nobody typed, which is exactly what #57 AC 5's accuracy
+ * question would later read. Now `open()` seeds the source AND the proposed
+ * figure from the override, so an unedited re-save keeps the word and an edit
+ * applies each proposer's own rule: a calendar figure edited becomes manual,
+ * a description's stays extraction. The source line therefore reads on every
+ * open of such a week, which is the honest state — the number in the field
+ * IS the calendar's until the member changes it.
  */
-function CapacityControl({ member, override, busy, onSet, onClear }) {
+function CapacityControl({
+  member,
+  override,
+  isMe,
+  busy,
+  onSet,
+  onClear,
+  onPropose,
+  busyWeek,
+  busyComplaint,
+  timeZone,
+}) {
   const [editing, setEditing] = useState(false)
   const [minutes, setMinutes] = useState('')
   const [complaint, setComplaint] = useState(null)
+  // #210 — where the figure in the field came from. 'manual' until a proposal
+  // is taken; since #97, seeded from the stored row on open (see the
+  // docblock). Travels with the write (AC 6) and is named on screen (AC 9).
+  const [source, setSource] = useState('manual')
+  // #97 — the figure a proposal put in the field, so an edit can be told from
+  // a confirm. Only the calendar rule reads it; see the docblock.
+  const [proposed, setProposed] = useState(null)
+  // #97 — remount the description shell when the calendar's figure is taken,
+  // so a proposal card the member described a moment ago does not stand
+  // beside the calendar's source line claiming the same field (review-fanout,
+  // 2026-09-05: two provenance sentences on one screen at the confirm tap).
+  // The shell owns its result and exposes no reset; a key bump is the seam.
+  const [shellKey, setShellKey] = useState(0)
+  // #97 — the tap can open the editor from closed, and on a 360×800 phone the
+  // description shell then sits between the tap and the field it filled:
+  // measured on the prototype, the field landed at y=892 and Save at y=1005
+  // in an 800px viewport (design-bar, 2026-09-05). So the field is scrolled
+  // into view once it exists, rather than the member being left looking at
+  // the button they just pressed.
+  const fieldRef = useRef(null)
+  const [scrollRequest, setScrollRequest] = useState(0)
 
   const effective = effectiveCapacity(member, override)
   const isOverridden = Boolean(override)
+  const suggestion = calendarSuggestion(member, busyWeek)
+
+  // The source the SAVE carries, which for a calendar figure depends on
+  // whether the field still holds what the calendar put there (#97 AC 2).
+  // Compared as numbers, so "75" and "075" are the same confirm — but an
+  // EMPTY field is never the calendar's figure: `Number('')` is 0, which is a
+  // legal suggestion, and without the first clause clearing the field over a
+  // zero prefill kept "From your calendar" on over nothing (review-fanout,
+  // 2026-09-05). Any other non-number is refused by the normalizer first.
+  const sourceToSave =
+    source === 'calendar' && (String(minutes).trim() === '' || Number(minutes) !== proposed)
+      ? 'manual'
+      : source
+
+  useEffect(() => {
+    if (scrollRequest === 0) return
+    // Guarded: jsdom has no scrollIntoView, and a test that renders this
+    // control must not need one to exist.
+    fieldRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }, [scrollRequest])
 
   /**
    * Seed from the CURRENT effective value every time the editor opens, not from
@@ -62,6 +178,16 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
    */
   function open() {
     setMinutes(String(effective))
+    // Seeded from the row, not reset to manual — see the docblock. A row with
+    // no override, or a typed one, opens as manual with nothing proposed.
+    const stored = override?.source
+    if (stored && stored !== 'manual') {
+      setSource(stored)
+      setProposed(Number(override.minutes))
+    } else {
+      setSource('manual')
+      setProposed(null)
+    }
     setComplaint(null)
     setEditing(true)
   }
@@ -71,30 +197,113 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
     setEditing(false)
   }
 
+  /**
+   * Take a proposal into the field — #210 AC 1. A prefill and a source, and
+   * deliberately not a write: the member is looking at a number they have
+   * not yet agreed to, and a submit is where they agree. Editing it first
+   * keeps the source (AC 6): a figure the member corrected is still a figure
+   * the description produced, and allocate never sees the difference.
+   *
+   * Called the moment a proposal ARRIVES, not on a separate tap — design-bar
+   * verdict at #210's step 6 (owner, 2026-09-04): accepting was two taps,
+   * and the source line appearing between them moved Save 54px under the
+   * thumb. Now the figure lands in the field with its source named, the
+   * card's button is a second submit of this same form reading the live
+   * figure, and one tap accepts. The layout settles while the member is
+   * reading, not while they are pressing.
+   */
+  function takeProposal({ minutes: figure, source: from }) {
+    setMinutes(String(figure))
+    setProposed(figure)
+    setSource(from)
+    setComplaint(null)
+  }
+
+  /**
+   * "Use this" on the calendar readout — #97 AC 1. The same seam a description
+   * arrives through, with one difference: it can be tapped while the editor is
+   * CLOSED, so it opens it. From a closed editor the field and its source line
+   * arrive together, so nothing moves after the tap; from an open one the
+   * source line appears under the field, which is the layout #210 measured
+   * and accepted for a description's arrival.
+   */
+  function takeCalendarFigure() {
+    if (suggestion == null) return
+    takeProposal({ minutes: suggestion, source: 'calendar' })
+    setShellKey((k) => k + 1)
+    setEditing(true)
+    setScrollRequest((n) => n + 1)
+  }
+
+  // Rendered in BOTH states, at the same place under this week's figure, so
+  // the suggestion is readable while the member is deciding whether to take
+  // it and while they are reviewing what taking it produced.
+  const readout = (
+    <BusyReadout
+      member={member}
+      busyWeek={busyWeek}
+      complaint={busyComplaint}
+      timeZone={timeZone}
+      onUse={suggestion == null ? null : takeCalendarFigure}
+      busy={busy}
+    />
+  )
+
   if (!editing) {
     return (
-      <div className="member__week">
-        <span className="member__week-figure" data-testid={`week-${member.id}`}>
-          This week: {effective} min
-          <span className="member__budget-human"> ({formatMinutes(effective)})</span>
-          {isOverridden ? (
-            <span className="member__week-mark"> · set for this week</span>
-          ) : (
-            <span className="member__week-mark"> · usual</span>
-          )}
-        </span>
-        <button
-          className="button button--quiet"
-          type="button"
-          onClick={open}
-          disabled={busy}
-          aria-label={`Set this week for ${member.display_name}`}
-        >
-          This week
-        </button>
-      </div>
+      <>
+        <div className="member__week">
+          <span className="member__week-figure" data-testid={`week-${member.id}`}>
+            This week: {effective} min
+            <span className="member__budget-human"> ({formatMinutes(effective)})</span>
+            {/* #97 AC 6 — a calendar-sourced week says so where the figure is
+                read, not only in the editor that produced it: a figure nobody
+                saw is a figure nobody can defend, and a housemate reading the
+                roster saw no confirmation tap. The same quiet register as the
+                other two marks, for `.member__week-mark`'s reason. */}
+            {isOverridden ? (
+              override.source === 'calendar' ? (
+                <span className="member__week-mark"> · set from calendar</span>
+              ) : (
+                <span className="member__week-mark"> · set for this week</span>
+              )
+            ) : (
+              <span className="member__week-mark"> · usual</span>
+            )}
+          </span>
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={open}
+            disabled={busy}
+            aria-label={`Set this week for ${member.display_name}`}
+          >
+            This week
+          </button>
+        </div>
+        {readout}
+      </>
     )
   }
+
+  // The #46 field, unchanged. Rendered inside the shell when there is a
+  // proposer and bare when there is not, so the manual road in is the same
+  // element either way.
+  const manualField = (
+    <label className="field">
+      <span className="field__label">Minutes this week</span>
+      <input
+        ref={fieldRef}
+        className="field__input"
+        type="number"
+        min={MIN_CAPACITY_MINUTES}
+        max={MAX_CAPACITY_MINUTES}
+        value={minutes}
+        onChange={(e) => setMinutes(e.target.value)}
+        aria-label={`Minutes this week for ${member.display_name}`}
+      />
+    </label>
+  )
 
   return (
     <form
@@ -112,21 +321,68 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
           return
         }
         setComplaint(null)
-        onSet(member.id, minutes).then(close, () => {})
+        onSet(member.id, minutes, sourceToSave).then(close, () => {})
       }}
     >
-      <label className="field">
-        <span className="field__label">Minutes this week</span>
-        <input
-          className="field__input"
-          type="number"
-          min={MIN_CAPACITY_MINUTES}
-          max={MAX_CAPACITY_MINUTES}
-          value={minutes}
-          onChange={(e) => setMinutes(e.target.value)}
-          aria-label={`Minutes this week for ${member.display_name}`}
-        />
-      </label>
+      {readout}
+      {onPropose ? (
+        <CaptureShell
+          key={shellKey}
+          label={`Describe this week for ${member.display_name}`}
+          placeholder="About three hours, mostly at the weekend"
+          describeLabel="Work out the minutes"
+          manualHint="Type the minutes instead."
+          busy={busy}
+          onDescribe={async (text) => {
+            const result = await onPropose(member, text)
+            if (result?.outcome === CAPTURE_OUTCOMES.PROPOSAL) {
+              takeProposal({ minutes: result.minutes, source: 'extraction' })
+            }
+            return result
+          }}
+          renderProposal={(proposal) => (
+            <>
+              <p className="capture__figure" data-testid={`proposal-${member.id}`}>
+                Proposed: {proposal.minutes} min
+                <span className="member__budget-human"> ({formatMinutes(proposal.minutes)})</span>
+              </p>
+              {/* What it was derived from (AC 1): the person the endpoint read
+                  the figure for. Shown only when that is a NAME — "me: 180
+                  min" under "Proposed: 180 min" told the member nothing twice
+                  (design-bar, 2026-09-04). The contract carries a number per
+                  person and no phrase, so this is the whole of the provenance
+                  a phone can show today; #208 is asked to carry the phrase. */}
+              {isFirstPerson(proposal.derivedFrom.who) ? null : (
+                <p className="capture__derived">
+                  Read as “{proposal.derivedFrom.who}: {proposal.derivedFrom.minutes} min” from
+                  what you wrote.
+                </p>
+              )}
+              {/* A SUBMIT of the enclosing form — the same onSubmit the Save
+                  below runs, so accepting is one tap and still one write path
+                  (AC 9). The label reads the FIELD, not the proposal: edit the
+                  figure first and the button says what it will save. */}
+              <button
+                className="button"
+                type="submit"
+                disabled={busy}
+                aria-label={`Save the proposed figure for ${member.display_name}`}
+              >
+                Save {minutes} min from your description
+              </button>
+            </>
+          )}
+        >
+          {manualField}
+        </CaptureShell>
+      ) : (
+        manualField
+      )}
+      {sourceToSave === 'manual' ? null : (
+        <p className="member__week-source" data-testid={`week-source-${member.id}`}>
+          {sourceLabel(sourceToSave, member, isMe)} Change the number if it is wrong, then save.
+        </p>
+      )}
       {complaint ? (
         <p className="error" role="alert">
           {complaint}
@@ -158,24 +414,54 @@ function CapacityControl({ member, override, busy, onSet, onClear }) {
 CapacityControl.propTypes = {
   member: PropTypes.object.isRequired,
   override: PropTypes.object,
+  isMe: PropTypes.bool,
   busy: PropTypes.bool,
   onSet: PropTypes.func.isRequired,
   onClear: PropTypes.func.isRequired,
+  onPropose: PropTypes.func,
+  busyWeek: PropTypes.object,
+  busyComplaint: PropTypes.string,
+  timeZone: PropTypes.string,
+}
+
+/**
+ * The source, named on screen — #210 AC 9. One sentence per proposer, so a
+ * member reads where the number in the field came from before they save it.
+ * `calendar` is #97's; it is here so that story adds a proposer and not a
+ * second confirm surface.
+ */
+function sourceLabel(source, member, isMe) {
+  if (source === 'extraction') return 'From your description.'
+  // Whose calendar: the tap is offered on every row (#97), and "your" on a
+  // housemate's row would attribute their free/busy to the person holding the
+  // phone. The description line keeps "your" because it is #210's and the
+  // same question there is that story's to answer.
+  if (source === 'calendar') {
+    return isMe ? 'From your calendar.' : `From ${member.display_name}’s calendar.`
+  }
+  return `From ${source}.`
 }
 
 /**
  * What the calendar says about this week, beside the number it informs — #96.
  *
- * A READOUT AND NOTHING ELSE. It has no control, writes nothing, and sits next
- * to the manual input rather than inside it: AC 4 says nothing is written to
- * `member_capacity`, and the thinnest way to be sure of that is a component with
- * no handler to call. Applying the suggestion is #97's story and arrives here as
- * a prefill on the editor above.
+ * A READOUT WITH ONE CONTROL, AND THE CONTROL WRITES NOTHING. #96 shipped this
+ * with no handler at all, which was the thinnest proof its AC 4 asked for —
+ * nothing is written to `member_capacity` — and #97 adds "Use this", which
+ * PREFILLS the capacity editor above and still writes nothing: the write is
+ * that editor's Save, the same one a typed figure uses. `onUse` is null when
+ * there is nothing to offer (no row, or a figure that is not a number), and
+ * the button goes with it rather than offering a zero. The figure it will
+ * prefill is `calendarSuggestion`'s arithmetic on the member's baseline; the
+ * button says "Use this" rather than the number because the number is what
+ * the field shows the moment it is tapped, with its source named beside it.
  *
- * The date is always shown, not only when something went wrong. This story
- * fetches a week ONCE — staleness is #98's — so a figure read on Monday is still
- * on screen on Friday, and a number presented without its age would be claiming
- * a freshness it does not have.
+ * The date is always shown, not only when something went wrong. #96 fetched a
+ * week ONCE, so a figure read on Monday was still on screen on Friday; since
+ * #98 an app open refreshes a figure older than twelve hours, which narrows the
+ * gap and does not close it — a phone left open all week, or a Google that
+ * keeps refusing, keeps drawing the last read. A number presented without its
+ * age would be claiming a freshness it does not have, in either story.
  *
  * AC 5 is the second branch: when Google could not be read, the last figure
  * stays exactly where it was with its date, and the sentence goes underneath.
@@ -201,7 +487,7 @@ CapacityControl.propTypes = {
  * screen: the testid is what lets a test name THIS one. Found by a test that
  * asserted the absence of any status region and matched the other one instead.
  */
-function BusyReadout({ busyWeek, complaint, timeZone }) {
+function BusyReadout({ member, busyWeek, complaint, timeZone, onUse, busy }) {
   if (!busyWeek && !complaint) return null
   const read = busyWeek ? busyComputedLabel(busyWeek.computed_at, timeZone) : null
 
@@ -214,6 +500,17 @@ function BusyReadout({ busyWeek, complaint, timeZone }) {
           {read ? <span className="member__busy-read"> · read {read}</span> : null}
         </span>
       ) : null}
+      {busyWeek && onUse ? (
+        <button
+          className="button button--quiet"
+          type="button"
+          onClick={onUse}
+          disabled={busy}
+          aria-label={`Use the calendar’s figure for ${member.display_name}`}
+        >
+          Use this
+        </button>
+      ) : null}
       {complaint ? (
         <span className="member__busy-complaint" role="status" data-testid="busy-complaint">
           {complaint}
@@ -224,9 +521,12 @@ function BusyReadout({ busyWeek, complaint, timeZone }) {
 }
 
 BusyReadout.propTypes = {
+  member: PropTypes.object.isRequired,
   busyWeek: PropTypes.object,
   complaint: PropTypes.string,
   timeZone: PropTypes.string,
+  onUse: PropTypes.func,
+  busy: PropTypes.bool,
 }
 
 /**
@@ -425,6 +725,7 @@ function MemberRow({
   onProvision,
   onSetCapacity,
   onClearCapacity,
+  onProposeCapacity,
   connection,
   onConnectCalendar,
   busyWeek,
@@ -562,21 +863,23 @@ function MemberRow({
             purpose: an override that hid what it was overriding would make the
             figure impossible to sanity-check, and the product's claim is that
             the fairness number is one anybody can check. */}
+        {/* #96's readout renders INSIDE the control since #97, directly under
+            this week's minutes, which is the number it exists to inform. Own
+            row only for the COMPLAINT (it is about a read this device
+            attempted), household-wide for the FIGURE and for the tap that
+            takes it: the derived rows are readable by everybody `0030`'s
+            policy scopes them to, the same way a housemate's weekly minutes
+            have always been, and this editor has never gated who may set. */}
         <CapacityControl
           member={member}
           override={override}
+          isMe={isMe}
           busy={busy}
           onSet={onSetCapacity}
           onClear={onClearCapacity}
-        />
-        {/* #96 — directly under this week's minutes, which is the number it
-            exists to inform. Own row only for the COMPLAINT (it is about a read
-            this device attempted), household-wide for the FIGURE: the derived
-            rows are readable by everybody `0030`'s policy scopes them to, the
-            same way a housemate's weekly minutes have always been. */}
-        <BusyReadout
+          onPropose={onProposeCapacity}
           busyWeek={busyWeek}
-          complaint={isMe ? busyComplaint : null}
+          busyComplaint={isMe ? busyComplaint : null}
           timeZone={timeZone}
         />
         {/* #95 — the calendar sits directly under this week's minutes, because
@@ -679,6 +982,7 @@ MemberRow.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  onProposeCapacity: PropTypes.func,
   connection: PropTypes.object,
   onConnectCalendar: PropTypes.func,
   busyWeek: PropTypes.object,
@@ -715,6 +1019,7 @@ export default function Roster({
   periodStart = null,
   onSetCapacity,
   onClearCapacity,
+  onProposeCapacity,
   connections = [],
   onConnectCalendar,
   busyWeeks = [],
@@ -894,6 +1199,9 @@ export default function Roster({
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
+                // #210 — optional, and its absence is the manual floor: a
+                // roster with no proposer wired renders the #46 editor exactly.
+                onProposeCapacity={onProposeCapacity}
                 // #95 — resolved through `connectionFor` rather than by a local
                 // `find`, so the roster and any later consumer agree on what
                 // "connected" means by construction. The unique constraint in
@@ -1021,6 +1329,7 @@ Roster.propTypes = {
   periodStart: PropTypes.string,
   onSetCapacity: PropTypes.func.isRequired,
   onClearCapacity: PropTypes.func.isRequired,
+  onProposeCapacity: PropTypes.func,
   connections: PropTypes.array,
   onConnectCalendar: PropTypes.func,
   busyWeeks: PropTypes.array,

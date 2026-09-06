@@ -8,6 +8,11 @@ import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
 import {
+  SHOPPING_ITEM_COLUMNS,
+  SHOPPING_LIST_COLUMNS,
+  SHOPPING_RUN_COLUMNS,
+} from './shopping.js'
+import {
   LIVE_EDGE_FUNCTIONS,
   PREFLIGHT_HEADERS,
   describeEdgeFunctionError,
@@ -92,13 +97,14 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // stops matching - a switch to a query builder, or a renamed helper. Same
     // guard, and the same reason, as gate.test.js's class-name scan.
     expect(files.length).toBeGreaterThan(5)
-    // SEVEN since #96 added `calendar_busy` — six after #95's
-    // `calendar_connections`, five after #37's `chore_exclusions`, four after
-    // #62 dropped `household_devices`. The number is a floor against a vacuous
-    // pass, not a target: it goes DOWN when a table legitimately leaves and UP
-    // when one arrives, and either edit should be visible in review rather than
+    // TEN since #352 added the three `shopping_*` tables in one file — seven
+    // after #96's `calendar_busy`, six after #95's `calendar_connections`,
+    // five after #37's `chore_exclusions`, four after #62 dropped
+    // `household_devices`. The number is a floor against a vacuous pass, not
+    // a target: it goes DOWN when a table legitimately leaves and UP when one
+    // arrives, and either edit should be visible in review rather than
     // automatic.
-    expect(readTables.size).toBeGreaterThanOrEqual(7)
+    expect(readTables.size).toBeGreaterThanOrEqual(10)
     expect(readTables).toContain('chores')
   })
 
@@ -118,12 +124,16 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the seven tables the app still reads', () => {
+  it('covers the ten tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
-    // fifth — to six with #95's `calendar_connections`, and to seven with #96's
-    // `calendar_busy`. Every edit is stated, because a required-set that changes
-    // size silently is exactly how somebody quietly weakens a check.
+    // fifth — to six with #95's `calendar_connections`, to seven with #96's
+    // `calendar_busy`, and to ten with #352's three shopping tables. Every edit
+    // is stated, because a required-set that changes size silently is exactly
+    // how somebody quietly weakens a check. (`member_split_seen` and
+    // `chore_repeat_exceptions` are read too and are asserted by the two
+    // directional tests above; this list is the one that has to be edited by
+    // hand, and it has lagged the set before.)
     for (const table of [
       'households',
       'members',
@@ -132,6 +142,9 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'chore_exclusions',
       'calendar_connections',
       'calendar_busy',
+      'shopping_lists',
+      'shopping_runs',
+      'shopping_items',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
@@ -167,6 +180,10 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
     expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
     expect(byTable.calendar_busy).toBe(CALENDAR_BUSY_COLUMNS)
+    // #352 — three tables, three constants, one module.
+    expect(byTable.shopping_lists).toBe(SHOPPING_LIST_COLUMNS)
+    expect(byTable.shopping_runs).toBe(SHOPPING_RUN_COLUMNS)
+    expect(byTable.shopping_items).toBe(SHOPPING_ITEM_COLUMNS)
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -183,6 +200,22 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(exclusions).toContain('.select(EXCLUSION_COLUMNS)')
     expect(calendar).toContain('.select(CALENDAR_CONNECTION_COLUMNS)')
     expect(calendar).toContain('.select(CALENDAR_BUSY_COLUMNS)')
+    const shopping = readFileSync(resolve(process.cwd(), 'src/lib/shopping.js'), 'utf8')
+    expect(shopping).toContain('.select(SHOPPING_LIST_COLUMNS)')
+    expect(shopping).toContain('.select(SHOPPING_RUN_COLUMNS)')
+    expect(shopping).toContain('.select(SHOPPING_ITEM_COLUMNS)')
+  })
+
+  it('#352 — the three shopping tables are here, and the client reads all three', () => {
+    // Three tables in one migration and all three in the list, because the
+    // client reads all three — lists by household, open runs by list, items by
+    // run. Asserted as a set: a Shop tab that read lists and runs and reached
+    // items through an embed would drop one entry here and pass the two
+    // directional tests above, and the embed filter is the shape #352 rules out.
+    for (const table of ['shopping_lists', 'shopping_runs', 'shopping_items']) {
+      expect(LIVE_TABLES).toContain(table)
+      expect(readTables).toContain(table)
+    }
   })
 })
 
@@ -304,6 +337,13 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
       'assign_chore',
       'unassign_chore',
       'catch_up_repeats',
+      // #352 — the four shopping writers, arriving with `0032`.
+      'create_shopping_list',
+      'add_shopping_item',
+      'purchase_shopping_item',
+      'unpurchase_shopping_item',
+      // #354 — the run's closer and the next run's opener, arriving with `0033`.
+      'finish_shopping_run',
     ]) {
       expect(LIVE_RPC_NAMES).toContain(fn)
     }

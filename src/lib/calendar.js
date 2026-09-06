@@ -324,6 +324,45 @@ export function busyWeekFor(busyWeeks, memberId, periodStart) {
 }
 
 /**
+ * How old a derived figure may be before an app open reads the week again —
+ * #98 AC 1's "staleness bound, a named constant".
+ *
+ * Twelve hours, so a member's free/busy is read on their behalf at most twice
+ * a day: a morning open and an evening open each see what today has become,
+ * and a phone opened six times between them spends nothing. The decision and
+ * the two values rejected beside it (one hour, one day) are recorded in
+ * `docs/refresh-charter.md`, "Decision taken 2026-09-05". WALL-CLOCK age, not
+ * calendar day: a figure read at 23:00 is not stale at 00:01.
+ *
+ * Client-triggered, and only ever client-triggered. #53 settled why for every
+ * periodic read this app will ever do — the free plan's pg_cron stops silently
+ * when the project pauses — and `gate.test.js` refuses a scheduler anywhere in
+ * the tree so that decision cannot be quietly re-taken one story at a time.
+ * What "on app open" can cost is bounded twice: by this constant, and by the
+ * once-per-session key in App.jsx. Nothing here loops.
+ */
+export const BUSY_STALE_AFTER_HOURS = 12
+export const BUSY_STALE_AFTER_MS = BUSY_STALE_AFTER_HOURS * 60 * 60 * 1000
+
+/**
+ * Is a derived row old enough that an app open should read the week again?
+ *
+ * Strictly OLDER than the bound: a row exactly twelve hours old is fresh, so
+ * the boundary is pinned in one direction rather than left to whichever
+ * comparison somebody writes next. A row whose `computed_at` nothing can parse
+ * is reported STALE, not fresh — its age is unknown, and a bounded refresh is
+ * cheap where a figure of unknown age presented as current is not. No row at
+ * all is NOT stale: that is #96's trigger, and this predicate is the other
+ * half of the boundary the two stories draw between them.
+ */
+export function isBusyWeekStale(busyWeek, now = Date.now()) {
+  if (!busyWeek) return false
+  const at = new Date(busyWeek.computed_at).getTime()
+  if (Number.isNaN(at)) return true
+  return now - at > BUSY_STALE_AFTER_MS
+}
+
+/**
  * Every derived busy figure ONE household has for a week — #96 AC 4.
  *
  * Scoped by `memberIds` like capacity, exclusions and connections: `0030` grants

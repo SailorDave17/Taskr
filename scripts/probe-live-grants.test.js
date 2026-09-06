@@ -147,6 +147,12 @@ describe('what it asks for — AC 3', () => {
       // create: a table reaching the client without anybody deciding what
       // `authenticated` should hold on it is the thing being prevented.
       'calendar_busy',
+      // #352 — the three shopping tables, in the same change that adds them to
+      // LIVE_SCHEMA, for the same reason: what `authenticated` holds on each
+      // is decided in `0032` and asserted in `MEASURED_TABLE_ACLS`.
+      'shopping_lists',
+      'shopping_runs',
+      'shopping_items',
     ])
   })
 
@@ -302,14 +308,19 @@ describe('reconciling against what #150 measured — AC 4', () => {
     // wrong grant means one ran and did something else.
     const rows = agreeing.filter((row) => row.column_name !== 'household_id')
     const differing = reconcile(rows).filter((verdict) => !verdict.agrees)
-    expect(differing).toHaveLength(3)
+    expect(differing).toHaveLength(6)
     expect(differing.every((verdict) => verdict.note === 'the column is not there')).toBe(true)
     // `member_capacity.household_id` joined the expectation set in 0022 — the
-    // column PostgREST's upsert reads through `EXCLUDED."household_id"`.
+    // column PostgREST's upsert reads through `EXCLUDED."household_id"` — and
+    // the three shopping tables' in 0032 (#352), one row each on the scoping
+    // column. SIX since then; it read three until that story.
     expect(differing.map((verdict) => verdict.key).sort()).toEqual([
       'chores.household_id',
       'member_capacity.household_id',
       'members.household_id',
+      'shopping_items.household_id',
+      'shopping_lists.household_id',
+      'shopping_runs.household_id',
     ])
   })
 
@@ -355,6 +366,14 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // `check:live` sees the select half (42703 until the apply); the ABSENCE
       // of `a` and `w` is this probe's alone.
       'chores.missed_at=r',
+      // 0032, story #352. One row per shopping table on `household_id`, the
+      // column the read model rests on (the 0014 route); `r` alone, because
+      // no client role inserts a row on any of the three and a list does not
+      // move house. `check:live` sees the select half; the absences are this
+      // probe's.
+      'shopping_lists.household_id=r',
+      'shopping_runs.household_id=r',
+      'shopping_items.household_id=r',
     ])
   })
 })

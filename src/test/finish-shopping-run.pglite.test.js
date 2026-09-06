@@ -435,7 +435,11 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
       // And nothing on shopping_items changed either: no insert grant, so the
       // rollover is the RPC's alone.
       expect(await columnGrants('shopping_items', 'INSERT')).toEqual([])
-      expect(await tableGrants('shopping_items')).toEqual(['DELETE'])
+      // #368 — this read `['DELETE']` until `0034`, which withdrew the last
+      // client DML on the table. The change belongs to a story about a race,
+      // and it reddened a test about which grants a RUN carries: the tests a
+      // rule change breaks are not the tests about the rule.
+      expect(await tableGrants('shopping_items')).toEqual([])
     })
 
     it('BEHAVIOUR: a client writing closed_at, closed_by_member_id or a new run row is refused by the grant', async () => {
@@ -552,6 +556,19 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
     // the clause (cairn: a guard that reads source must survive its own docs).
     // Every match below is anchored on the clause's terminator `;`, which no
     // comment carries.
+    /**
+     * Every writer of `shopping_items`, which since 0034 (#368) is four
+     * FUNCTIONS and nothing else. Named in one place because three assertions
+     * below fold over it, and because the set being closed is the property —
+     * see the privileges test.
+     */
+    const ITEM_WRITERS = [
+      'public.add_shopping_item(uuid, text, text)',
+      'public.purchase_shopping_item(uuid)',
+      'public.unpurchase_shopping_item(uuid)',
+      'public.remove_shopping_item(uuid)',
+    ]
+
     const RUN_FOR_UPDATE = /for update of r;/
     const RUN_KEY_SHARE = /for key share of r;/
     const ITEM_FOR_UPDATE = /for update of i;/
@@ -565,15 +582,36 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
       expect(def).toMatch(/and i\.purchased_at is null\s+for update of i;/)
     })
 
-    it('the three 0032 item writers now take the run FOR KEY SHARE before they read closed_at', async () => {
-      for (const signature of [
-        'public.add_shopping_item(uuid, text, text)',
-        'public.purchase_shopping_item(uuid)',
-        'public.unpurchase_shopping_item(uuid)',
-      ]) {
+    it('every item writer takes the run FOR KEY SHARE before it reads closed_at', async () => {
+      // Three of these are 0032's, replaced here; the fourth is #368's
+      // `remove_shopping_item`, which 0034 added for exactly this reason — it
+      // was the client's own DELETE under a policy, and a policy cannot take a
+      // lock. With it the set is CLOSED: every writer of shopping_items is a
+      // function, and this list is the whole of them.
+      for (const signature of ITEM_WRITERS) {
         const def = await bodyOf(signature)
         expect(def, signature).toMatch(RUN_KEY_SHARE)
       }
+    })
+
+    it('the four writers this file names ARE every writer of shopping_items — nothing else may touch it', async () => {
+      // The assertion that makes the loop above mean something. Without it a
+      // fifth writer — or a re-granted client DELETE — could reopen #368's
+      // window while every test here stayed green, which is precisely how the
+      // window existed in the first place: 0033 gave three writers the lock
+      // and the fourth was not code at all.
+      const { rows: dml } = await db.query(
+        `select grantee, privilege_type from information_schema.table_privileges
+          where table_schema = 'public' and table_name = 'shopping_items'
+            and privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+          order by grantee, privilege_type`,
+      )
+      expect(dml.filter((r) => r.grantee === 'authenticated' || r.grantee === 'anon')).toEqual([])
+      const { rows: policies } = await db.query(
+        `select policyname, cmd from pg_policies
+          where tablename = 'shopping_items' and cmd <> 'SELECT' order by policyname`,
+      )
+      expect(policies).toEqual([])
     })
 
     it('the lock ORDER is run-then-item in every writer, so a finish and a tick cannot deadlock', async () => {
@@ -581,7 +619,13 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
       // on a finish holding the run while the finish waited on the item.
       // Position in the body is the honest proxy for order of execution here:
       // plpgsql runs its statements top to bottom.
-      for (const signature of ['public.purchase_shopping_item(uuid)', 'public.unpurchase_shopping_item(uuid)']) {
+      for (const signature of [
+        'public.purchase_shopping_item(uuid)',
+        'public.unpurchase_shopping_item(uuid)',
+        // #368 — the remove takes the same order, and it is the writer that
+        // most needs it: the row it is about to delete is the carry's source.
+        'public.remove_shopping_item(uuid)',
+      ]) {
         const def = await bodyOf(signature)
         const runLock = def.search(RUN_KEY_SHARE)
         const itemLock = def.search(ITEM_FOR_UPDATE)
@@ -606,6 +650,41 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
       expect(commentsOnly).not.toMatch(RUN_KEY_SHARE) // … and the regex cannot see it
       expect(commentsOnly).not.toMatch(RUN_FOR_UPDATE)
       expect(commentsOnly).not.toMatch(ITEM_FOR_UPDATE)
+    })
+
+    it('#368: the fourth writer is executable by authenticated and NOT by anon', async () => {
+      // WHAT THIS CAN AND CANNOT SAY, measured rather than assumed. `0034`'s
+      // first draft revoked `from public` where the house idiom is
+      // `from public, anon`, and the live catalog reported `anon` still
+      // holding execute — a real stray, found by `npm run probe:live-grants`
+      // after the apply. The obvious lesson would be "assert it here so pglite
+      // catches it next time", and it is WRONG: putting the first draft back
+      // and running this test reddens NOTHING (measured, 0 of 1), because a
+      // bare `revoke … from public` removes the PUBLIC default and this
+      // harness's `anon` holds nothing else. The live project's does. So this
+      // assertion is a regression guard on the SHAPE — definer, empty
+      // search_path, executable by authenticated — and the anon half is only
+      // ever provable by the catalog probe against the real project. The
+      // harness builds the schema it certifies, and cannot see a grant the
+      // platform made outside it.
+      const { rows } = await db.query(
+        `select p.proname, pg_get_function_identity_arguments(p.oid) as args,
+                has_function_privilege('authenticated', p.oid, 'execute') as auth,
+                has_function_privilege('anon', p.oid, 'execute') as anon,
+                p.prosecdef, p.proconfig
+           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'remove_shopping_item'`,
+      )
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        proname: 'remove_shopping_item',
+        args: 'item uuid',
+        auth: true,
+        anon: false,
+        prosecdef: true,
+      })
+      // `set search_path = ''`, which the catalog stores quoted.
+      expect(rows[0].proconfig).toEqual(['search_path=""'])
     })
 
     it('the replaced writers keep their 0032 signatures, privileges and refusals — a true replace, no overload', async () => {
@@ -640,6 +719,36 @@ describe('#354 — finish_shopping_run, run against a real Postgres', () => {
       // safe is the one that ends on 0033.
       await db.exec(migrationSql(THIS_FILE))
       expect(await bodyOf('public.purchase_shopping_item(uuid)')).toMatch(RUN_KEY_SHARE)
+    })
+
+    it('HAZARD, sharpened by #368: re-pasting 0032 also gives the CLIENT its delete back, and only 0034 takes it away', async () => {
+      // The hazard above is a body being replaced by an older body. This one
+      // is worse in kind: 0032 grants `delete on shopping_items` and creates
+      // the policy admitting it, so a re-paste hands the client back the one
+      // writer that cannot take the run's lock — reopening #368's window —
+      // and re-applying 0033 does NOT close it, because 0033 never touched
+      // the grant. The safe re-paste order ends on 0034, not on 0033.
+      const clientMayDelete = async () => {
+        const { rows } = await db.query(
+          `select count(*)::int as n from information_schema.table_privileges
+            where table_schema = 'public' and table_name = 'shopping_items'
+              and grantee = 'authenticated' and privilege_type = 'DELETE'`,
+        )
+        return rows[0].n > 0
+      }
+      expect(await clientMayDelete()).toBe(false)
+
+      await db.exec(migrationSql('0032_shopping_lists_runs_items.sql'))
+      expect(await clientMayDelete()).toBe(true)
+      await db.exec(migrationSql(THIS_FILE))
+      expect(await clientMayDelete(), '0033 alone does not close it').toBe(true)
+
+      await db.exec(migrationSql('0034_remove_shopping_item.sql'))
+      expect(await clientMayDelete()).toBe(false)
+      const { rows } = await db.query(
+        `select policyname from pg_policies where tablename = 'shopping_items' and cmd = 'DELETE'`,
+      )
+      expect(rows).toEqual([])
     })
   })
 

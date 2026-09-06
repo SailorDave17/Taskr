@@ -261,12 +261,13 @@ function ShoppingItem({
       )}
 
       <span className="shopping-item__actions">
-        {/* A bought item is history and offers no Remove: the delete policy
-            would refuse it anyway (zero rows), and a control that is always
-            refused is worse than none. The window between another phone buying
-            the item and this one re-reading is real, and it is settled by the
-            policy rather than the client — see App.test.jsx. What a bought row
-            offers instead is the way back. */}
+        {/* A bought item is history and offers no Remove: `remove_shopping_item`
+            would refuse it anyway — `item already bought` since #368, where
+            the delete policy used to match zero rows — and a control that is
+            always refused is worse than none. The window between another phone
+            buying the item and this one re-reading is real, and it is settled
+            by the database rather than by the client — see App.test.jsx. What
+            a bought row offers instead is the way back. */}
         {bought ? (
           <button
             className="button button--quiet"

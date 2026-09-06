@@ -231,8 +231,12 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
       // what is NOT here: no insert policy anywhere, no update policy on runs or
       // items. A policy with no matching grant would be inert, and an inert
       // policy is a second way in waiting for a grant.
+      // #368 — `shopping_items_delete_unbought_on_open_run` stood at the top of
+      // this list until `0034` dropped it with the grant it bounded. The
+      // comment above still holds and now holds completely: there is no
+      // insert, update or DELETE policy anywhere in the feature, because there
+      // is no client DML left for one to bound.
       expect(policies.map((p) => [p.tablename, p.policyname, p.cmd])).toEqual([
-        ['shopping_items', 'shopping_items_delete_unbought_on_open_run', 'DELETE'],
         ['shopping_items', 'shopping_items_select_same_household', 'SELECT'],
         ['shopping_lists', 'shopping_lists_select_same_household', 'SELECT'],
         ['shopping_lists', 'shopping_lists_update_same_household', 'UPDATE'],
@@ -408,8 +412,12 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
       expect(await tableGrants('INSERT')).toEqual([])
     })
 
-    it('grants delete on shopping_items only', async () => {
-      expect(await tableGrants('DELETE')).toEqual(['shopping_items'])
+    it('grants no table-level DELETE anywhere — #368 withdrew the last one', async () => {
+      // This read `['shopping_items']` until `0034`. The remove is an RPC now,
+      // for a reason no grant could fix: a policy bounds which ROWS and cannot
+      // take the run's lock, so a remove racing a finish deleted the original
+      // out of the closed run's record.
+      expect(await tableGrants('DELETE')).toEqual([])
     })
 
     it('withholds update on every stamp column, which the update assertion above already implies — stated by name', async () => {
@@ -779,7 +787,7 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
   // AC 8 — the delete policy: any member, unbought, open run
   // -------------------------------------------------------------------------
 
-  describe('AC 8 — removing an item', () => {
+  describe('AC 8 — removing an item, through the RPC 0034 made it (#368)', () => {
     let item
 
     beforeEach(async () => {
@@ -788,45 +796,80 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
       ).value
     })
 
-    const deleteAs = (device, id) =>
-      asDevice(db, device, async () => {
-        const result = await db.query('delete from public.shopping_items where id = $1', [id])
-        return result.affectedRows
-      })
+    // The whole block was written against `delete from public.shopping_items`
+    // under `0032`'s policy. `0034` withdrew that grant and the policy with it,
+    // so the SUBJECT of these assertions has moved — and they are rewritten to
+    // follow it rather than deleted, because what they protect is unchanged:
+    // any member may remove an unbought item on an open run, and nothing else
+    // is removable by anyone. What is NEW is that each refusal now has a name.
+    const removeAs = (device, id) =>
+      attempt(() => asDevice(db, device, () => db.query('select public.remove_shopping_item($1)', [id])))
 
-    it('a housemate who did not add it removes an unbought item from the open run — one row', async () => {
-      expect(await deleteAs(housemate, item.id)).toBe(1)
+    const deleteDirectlyAs = (device, id) =>
+      attempt(() => asDevice(db, device, () => db.query('delete from public.shopping_items where id = $1', [id])))
+
+    it('a housemate who did not add it removes an unbought item from the open run', async () => {
+      const removed = await removeAs(housemate, item.id)
+      expect(removed.error).toBeNull()
       expect(await countAsOwner('shopping_items', 'where id = $1', [item.id])).toBe(0)
     })
 
-    it('a BOUGHT item is not removable — zero rows, and it survives', async () => {
+    it('a BOUGHT item is refused BY NAME, and it survives', async () => {
       await rpc(person, 'select * from public.purchase_shopping_item($1)', [item.id])
-      expect(await deleteAs(person, item.id)).toBe(0)
+      const refused = await removeAs(person, item.id)
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/item already bought/)
       expect(await countAsOwner('shopping_items', 'where id = $1', [item.id])).toBe(1)
     })
 
-    it('an item on a CLOSED run is not removable — zero rows, and it survives', async () => {
+    it('an item on a CLOSED run is refused BY NAME, and it survives', async () => {
       await closeRun(runA.id, memberInA)
-      expect(await deleteAs(person, item.id)).toBe(0)
+      const refused = await removeAs(person, item.id)
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/run already closed/)
       expect(await countAsOwner('shopping_items', 'where id = $1', [item.id])).toBe(1)
     })
 
-    it('an item in another household is not removable by a member of this one', async () => {
+    it('an item in another household is refused as one this member cannot see', async () => {
       const itemB = (
         await rpc(outsider, 'select * from public.add_shopping_item($1, $2, $3)', [runB.id, 'Bread', null])
       ).value
-      expect(await deleteAs(housemate, itemB.id)).toBe(0)
+      const refused = await removeAs(housemate, itemB.id)
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/no such item in your household/)
       expect(await countAsOwner('shopping_items', 'where id = $1', [itemB.id])).toBe(1)
     })
 
-    it('the policy predicate names both conditions, so neither can be dropped silently', async () => {
+    // The revoke's own proof, and the reason the RPC route was taken over a
+    // trigger: after `0034` there is no client DML on `shopping_items` at all,
+    // so the racing path this story closes is not merely guarded — it is gone.
+    it('the client can no longer delete from the table at all — the grant is withdrawn', async () => {
+      const refused = await deleteDirectlyAs(person, item.id)
+      expect(refused.ok).toBe(false)
+      expect(refused.error).toMatch(/permission denied/i)
+      expect(await countAsOwner('shopping_items', 'where id = $1', [item.id])).toBe(1)
+    })
+
+    it('and the policy that used to admit that delete is gone with it', async () => {
+      // This assertion used to read the policy's predicate for its two
+      // conditions. The policy is what `0034` removed, so the check inverts:
+      // a policy still standing here would be `0032`'s "second way in waiting
+      // for a grant to arrive", and the next person to grant a delete would
+      // reopen the window without touching this file.
       const { rows } = await db.query(
-        `select qual from pg_policies where policyname = 'shopping_items_delete_unbought_on_open_run'`,
+        `select policyname from pg_policies
+          where tablename = 'shopping_items' and cmd = 'DELETE'`,
       )
-      expect(rows).toHaveLength(1)
-      expect(rows[0].qual).toMatch(/purchased_at IS NULL/)
-      expect(rows[0].qual).toMatch(/closed_at IS NULL/)
-      expect(rows[0].qual).toMatch(/current_household_ids/)
+      expect(rows).toEqual([])
+    })
+
+    it('POSITIVE CONTROL: the fixture item really was removable before it was bought', async () => {
+      // Without this, every refusal above is satisfied by an item that could
+      // never be removed by anyone — the whole block would pass against a
+      // function that always raises.
+      const removed = await removeAs(person, item.id)
+      expect(removed.error).toBeNull()
+      expect(await countAsOwner('shopping_items', 'where id = $1', [item.id])).toBe(0)
     })
   })
 

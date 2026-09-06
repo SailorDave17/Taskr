@@ -7,7 +7,9 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0033` are ALL applied to the live project (`0033` on 2026-09-05 in #354's own
+- Status: **`0001`–`0034` are ALL applied to the live project (`0034` on 2026-09-06 in #368's own
+  session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
+  identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and the expected-red set holds ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
   it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
@@ -444,6 +446,54 @@
       and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
       project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
       reddens the member-delete test, predicted 1.
+  - **`0034`** (#368) — `remove_shopping_item(item)`: delete an unbought item from an open run,
+    holding the run row `for key share` FIRST, and the withdrawal of the client DELETE grant and
+    the policy `0032` created for it. Applied 2026-09-06 in #368's own session;
+*measured* **44 of 46** on `check:live` immediately before and
+    **45 of 46** immediately after, the one remaining red being the excused `extract-description`;
+    and `probe:live-grants` **18 of 18, negative control included, anon reaching nothing**. What
+    this entry records is the access model:
+    - **The client no longer writes `shopping_items` at all.** `0032` granted `delete` and wrote
+      `shopping_items_delete_unbought_on_open_run` to bound it: household, `purchased_at is null`,
+      and the item's run open. That policy is correct about WHICH ROWS and can say nothing about
+      WHEN, because **a policy cannot take a lock**. `0033` gave the other three writers the run's
+      `for key share` and could not give it to this one — the header of `0033` said so and filed
+      it here. After `0034`: `authenticated` holds SELECT on every column of `shopping_items`,
+      `UPDATE (name)` on `shopping_lists`, and no INSERT, UPDATE or DELETE anywhere in the
+      feature; the four writers of the item table are four `security definer` functions with one
+      lock order between them.
+    - **The window it closes is a LOST RECORD, not a lost delete.** A finish holds an unbought item
+      as a carry source; a remove of that item waits, the finish commits (run closed, copy made
+      with `carried_from_item_id` set), and the delete then proceeds against the ORIGINAL under a
+      predicate evaluated on its own older snapshot, where the run still read as open. The closed
+      run loses its record of an item it held — `0032`'s "a closed run is the record", broken —
+      and the copy survives with `carried_from_item_id` nulled by `on delete set null`, so it is
+      indistinguishable from an item somebody typed. Nothing raises. Found by #354's review
+      fan-out before `0033` reached any project, and unreachable by every instrument here: pglite
+      is one connection and #356's live harness is finish-against-finish.
+    - **It refuses by name** — `run already closed` and `item already bought`, the family's own
+      sentences (owner decision, 2026-09-06, taken against preserving the DELETE's silence). The
+      catalogue tests assert the clause and its ORDER for all four writers now, anchored on the
+      statement's terminator so a body's own prose about the clause cannot satisfy them.
+    - **The re-paste hazard is sharper than `0033`'s and is asserted.** Re-applying `0032` over
+      the top restores the delete grant AND the policy, handing the client back the writer that
+      cannot lock — and re-applying `0033` does not fix it, because `0033` never touched a grant.
+      The safe re-paste order ends on `0034`.
+    - **This file was applied TWICE, and the second apply is the record worth keeping.** Its first
+      draft revoked `from public` where `0032` and `0033` both write `from public, anon`, and
+      `probe:live-grants` read **anon still holding execute on `remove_shopping_item`** — a stray,
+      on a project where `0017` exists precisely to keep anon at nothing. The obvious repair is a
+      pglite assertion so the harness catches it next time, and it is **wrong**: putting the first
+      draft back and running that assertion reddens NOTHING (*measured*, 0 of 1), because a bare
+      `revoke … from public` removes the PUBLIC default and this harness's `anon` holds nothing
+      else, while the live project's does. **The catalog probe is the only instrument for this
+      class**, which is what it was built for, and the pglite assertion added here is a regression
+      guard on the definer/search_path/authenticated shape and says so in its own comment.
+    - **One control row in `probe:live-grants` moved, deliberately.** It recorded
+      `shopping_items authenticated=d` — the one whole-row privilege the client held — and `0034`
+      withdraws it, so the recorded expectation is now `null` in the same change. Left alone it
+      would have made that probe red forever on a change somebody chose, which is how an
+      instrument stops being read.
   - **`0033`** (#354) — `finish_shopping_run(run_id)`: close the named open run and open the
     list's next one with every unbought item copied forward, as ONE transaction under
     `select … for update`, returning the new run. Applied 2026-09-05 in #354's own session; the
@@ -623,6 +673,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#368 opened ONE row on 2026-09-06 and drained it in its own session** — the
+  `remove_shopping_item` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
+  `npm run migrate:live` applied `0034`: *measured **44 of 46** before and
+  **45 of 46** after*, the denominator having moved from 45 to 46 on the one new
+  function. Written down here and in README's `check:live` cell in the same change that created
+  the row, for the reason the #352 bullet below gives.
 - **#354 opened ONE row on 2026-09-05 and drained it in its own session** — the
   `finish_shopping_run` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
   `npm run migrate:live` applied `0033`: *measured **43 of 45** before and

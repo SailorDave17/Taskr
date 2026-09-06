@@ -337,14 +337,29 @@ describe('the writers go through the RPCs, by name AND argument object', () => {
   })
 })
 
-describe('the two direct writes the client holds', () => {
-  it('removeItem deletes the row it names, and nothing else', async () => {
+describe('the ONE direct write the client holds, and the remove that stopped being one', () => {
+  // #368 — removeItem was a `delete().eq('id', …)` under 0032's policy until
+  // 0034 made it the fourth definer function and withdrew the grant. These two
+  // assertions were written against the DELETE and are rewritten rather than
+  // deleted: what they were protecting — that the client names one row and
+  // touches nothing else, and that a refusal reaches the caller — is still
+  // true and still checkable, and it is the shape of empty pass this file
+  // keeps finding to leave an assertion standing over a subject that has left.
+  it('removeItem calls the RPC by name with the item, and issues no table DML at all', async () => {
     await removeItem(client, 'i1')
-    expect(opsOn('shopping_items')).toEqual([
-      { op: 'delete', table: 'shopping_items' },
-      { op: 'eq', table: 'shopping_items', column: 'id', value: 'i1' },
+    expect(rpcs()).toEqual([
+      { op: 'rpc', name: 'remove_shopping_item', args: { item: 'i1' } },
     ])
-    expect(rpcs()).toEqual([])
+    // The point of the story, asserted where a reader will look for it: after
+    // 0034 there is no client DML on shopping_items, so a delete here would be
+    // a call the live project no longer grants.
+    expect(opsOn('shopping_items')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([])
+  })
+
+  it('refuses an item it cannot name before any request', async () => {
+    await expect(removeItem(client, '')).rejects.toThrow(/which item/i)
+    expect(calls).toEqual([])
   })
 
   it('renameList updates only `name`, trimmed, on the row it names, and reads the row back with the constant', async () => {
@@ -363,9 +378,15 @@ describe('the two direct writes the client holds', () => {
     expect(calls).toEqual([])
   })
 
-  it('throws with what we were doing when the delete is refused', async () => {
-    results.shopping_items = { data: null, error: { message: 'permission denied' } }
-    await expect(removeItem(client, 'i1')).rejects.toThrow('removing the item: permission denied')
+  it('carries the RPC’s own refusal to the caller, by its sentence', async () => {
+    // #368 — the two the function raises by name, and the reason the sentence
+    // matters: the owner took "refuse by name" over the DELETE's silence at
+    // this story's gate, so these strings are what a person reads on the error
+    // strip when another phone got there first.
+    for (const message of ['run already closed', 'item already bought']) {
+      results.remove_shopping_item = { data: null, error: { message } }
+      await expect(removeItem(client, 'i1')).rejects.toThrow(`removing the item: ${message}`)
+    }
   })
 })
 

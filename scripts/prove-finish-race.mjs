@@ -99,7 +99,14 @@ import { pathToFileURL } from 'node:url'
 
 import { createClient } from '@supabase/supabase-js'
 
-import { addItem, createList, finishRun, purchaseItem, readShopping } from '../src/lib/shopping.js'
+import {
+  addItem,
+  createList,
+  finishRun,
+  purchaseItem,
+  readShopping,
+  removeItem,
+} from '../src/lib/shopping.js'
 import { parseEnvFile, projectRefFrom, resolveSupabaseUrl } from './deploy-function.mjs'
 import {
   Refusal,
@@ -123,6 +130,17 @@ export const FIXTURE_ITEMS = Object.freeze(['first', 'second', 'third'])
 
 /** How many purchase-versus-finish repetitions the recorded second case runs. */
 export const PURCHASE_REPETITIONS = 5
+
+/**
+ * How many remove-versus-finish repetitions the #368 case runs.
+ *
+ * More than the purchase case's, because this one is asking a question about
+ * ORDERING and not only about an invariant: the invariant holds trivially if
+ * the remove is refused every time, so the run is only evidence about the
+ * window once both orderings have been observed. Ten gives that a chance and
+ * the report says plainly when it did not happen.
+ */
+export const REMOVE_REPETITIONS = 10
 
 /**
  * How many rows the witness run carries.
@@ -345,6 +363,68 @@ export function purchaseRaceFaults({ closedItems, carriedItems, originalIds }) {
     if (!bought && times !== 1) {
       faults.push(`unbought ${item.name} was carried ${times} times, expected exactly 1`)
     }
+  }
+
+  return faults
+}
+
+/**
+ * The THIRD case, and the one #368 exists for: a remove racing a finish.
+ *
+ * The window this proves closed is a LOST RECORD, not a lost delete. Before
+ * `0034` the client's own DELETE could wait out a finish that had already
+ * locked the item as a carry source, then delete the ORIGINAL under a predicate
+ * evaluated on its own older snapshot — leaving the closed run without an item
+ * it held, and a copy on the next run whose `carried_from_item_id` had been
+ * nulled by `on delete set null`. Nothing raised.
+ *
+ * ONE invariant, holding whichever side commits first, stated per original:
+ *
+ *   - still on the closed run  → carried forward exactly once;
+ *   - gone from the closed run → carried ZERO times, and it must be the item
+ *     the remove actually named.
+ *
+ * "Gone and carried once" is the defect, in as many words. A copy with a null
+ * source is its other signature and is called out separately, because that is
+ * what a reader of the next list would see: an item nobody typed.
+ *
+ * Which side wins is timing and is RECORDED, never asserted — the same rule
+ * `purchaseRaceFaults` follows.
+ */
+export function removeRaceFaults({ closedItems, carriedItems, originalIds, removedId, removeWon }) {
+  const faults = []
+  const closedIds = new Set(closedItems.map((item) => item.id))
+  const originalSet = new Set(originalIds)
+  const sources = carriedItems.map((item) => item.carried_from_item_id)
+
+  if (carriedItems.some((item) => !item.carried_from_item_id)) {
+    faults.push('an item on the new run has no carried_from_item_id — a copy whose original was deleted')
+  }
+  if (sources.some((source) => source && !originalSet.has(source))) {
+    faults.push('a carried item points outside the fixture')
+  }
+
+  for (const id of originalIds) {
+    const times = sources.filter((source) => source === id).length
+    if (closedIds.has(id)) {
+      if (times !== 1) faults.push(`${id} is on the closed run and was carried ${times} times, expected exactly 1`)
+    } else {
+      if (times !== 0) {
+        faults.push(`${id} is GONE from the closed run and was carried ${times} times — the closed run lost its record`)
+      }
+      if (id !== removedId) faults.push(`${id} vanished from the closed run and the remove never named it`)
+    }
+  }
+
+  // And the two orderings are the only two outcomes. A remove that reported
+  // success while the row survives, or was refused while the row is gone, is
+  // the client and the database disagreeing about what happened.
+  const removedSurvives = closedIds.has(removedId)
+  if (removeWon && removedSurvives) {
+    faults.push('the remove reported success and the item is still on the closed run')
+  }
+  if (!removeWon && !removedSurvives) {
+    faults.push('the remove was refused and the item is gone anyway')
   }
 
   return faults
@@ -739,6 +819,7 @@ export async function main(env) {
     stamp,
     repetitions: [],
     purchaseRaces: [],
+    removeRaces: [],
     witness: null,
     faults: [],
   }
@@ -746,6 +827,7 @@ export async function main(env) {
   try {
     await runRepetitions({ one, two, householdId, report })
     await runPurchaseRaces({ one, two, householdId, report })
+    await runRemoveRaces({ one, two, householdId, report })
     await runWitness({ one, two, admin, householdId, report })
   } finally {
     await cleanUp({ admin, householdId, report })
@@ -885,6 +967,101 @@ async function runPurchaseRaces({ one, two, householdId, report }) {
       ...overlap,
     })
     for (const fault of faults) report.faults.push(`tick race ${index}: ${fault}`)
+  }
+}
+
+/**
+ * #368's case: `remove_shopping_item` against `finish_shopping_run`.
+ *
+ * The reason it is here and not in `finish-shopping-run.pglite.test.js`: pglite
+ * is one connection, so the two calls run end to end there and the interleaving
+ * this is about cannot happen. Before `0034` the remove was a client DELETE
+ * under a policy, which could not take the run's lock; after it, the remove is
+ * a function taking `for key share` on the run first, so it either commits
+ * before the carry locks the item or waits and is refused by name.
+ *
+ * Which side wins is recorded, never asserted. What IS asserted is
+ * `removeRaceFaults`'s invariant, and the run is only evidence about the window
+ * once BOTH orderings have been seen — the report says so either way rather
+ * than letting ten refusals read as a proof.
+ */
+async function runRemoveRaces({ one, two, householdId, report }) {
+  console.log(`\n${REMOVE_REPETITIONS} remove-versus-finish repetitions (#368 AC 5)\n`)
+
+  for (let index = 1; index <= REMOVE_REPETITIONS; index += 1) {
+    const { list, runId } = await seedFixture(one, householdId, `remove race ${index}`)
+    const before = await readList(one, list.id)
+    const items = before.itemsByRun.get(runId) ?? []
+    if (items.length !== FIXTURE_ITEMS.length) {
+      report.faults.push(`remove race ${index}: fixture holds ${items.length} items`)
+      continue
+    }
+    const originalIds = items.map((item) => item.id)
+    const target = items[0]
+
+    const outcomes = await Promise.all([
+      attempt(() => finishRun(one, runId)),
+      attempt(() => removeItem(two, target.id)),
+    ])
+    const [finish, remove] = outcomes
+    const overlap = overlapOf(finish, remove)
+
+    const faults = []
+    if (!finish.ok) faults.push(`the finish was refused: ${finish.error?.message ?? ''}`)
+
+    const after = await readList(one, list.id)
+    const closedRun = after.runs.find((run) => run.closed_at !== null)
+    const openRun = after.runs.find((run) => run.closed_at === null)
+    if (!closedRun || !openRun) {
+      faults.push(`expected one closed and one open run, got ${after.runs.length} runs`)
+    } else {
+      faults.push(
+        ...removeRaceFaults({
+          closedItems: after.itemsByRun.get(closedRun.id) ?? [],
+          carriedItems: after.itemsByRun.get(openRun.id) ?? [],
+          originalIds,
+          removedId: target.id,
+          removeWon: remove.ok,
+        }),
+      )
+    }
+
+    report.removeRaces.push({
+      index,
+      faults,
+      removeWon: remove.ok,
+      removeMessage: remove.ok ? '' : (remove.error?.cause?.message ?? remove.error?.message ?? ''),
+      carried: openRun ? (after.itemsByRun.get(openRun.id) ?? []).length : 0,
+      onClosed: closedRun ? (after.itemsByRun.get(closedRun.id) ?? []).length : 0,
+      ...overlap,
+    })
+    for (const fault of faults) report.faults.push(`remove race ${index}: ${fault}`)
+  }
+}
+
+/**
+ * Both orderings, or the honest absence of one.
+ *
+ * A phase where the remove was refused ten times out of ten holds its invariant
+ * and says NOTHING about the window — the same shape as the witness, which is
+ * why this is a named judgement with its own tests rather than a sentence
+ * assembled at print time.
+ */
+export function removeOrderingVerdict(rows) {
+  const won = rows.filter((row) => row.removeWon).length
+  const refused = rows.length - won
+  if (rows.length === 0) return { seen: false, won, refused, text: 'NOT RUN' }
+  if (won > 0 && refused > 0) {
+    return { seen: true, won, refused, text: `BOTH ORDERINGS OBSERVED — ${won} committed, ${refused} refused` }
+  }
+  return {
+    seen: false,
+    won,
+    refused,
+    text:
+      won === 0
+        ? `only the finish-first ordering was observed (${refused} of ${rows.length} refused) — the invariant held, the window was not exercised`
+        : `only the remove-first ordering was observed (${won} of ${rows.length} committed) — the invariant held, the window was not exercised`,
   }
 }
 
@@ -1158,6 +1335,19 @@ function printReport(report) {
     )
   }
 
+  console.log('\n── a remove racing a finish (#368 AC 5) ' + '─'.repeat(32))
+  for (const row of report.removeRaces) {
+    console.log(
+      `  ${String(row.index).padStart(2)}  remove ${row.removeWon ? 'committed' : 'refused  '}` +
+        `  on-closed ${row.onClosed}  carried ${row.carried}` +
+        `  faults ${row.faults.length}` +
+        (row.removeMessage ? `  (${row.removeMessage})` : ''),
+    )
+  }
+  if (report.removeRaces.length > 0) {
+    console.log(`  ${removeOrderingVerdict(report.removeRaces).text}`)
+  }
+
   const witness = report.witness
   if (witness) {
     console.log('\n── the witness ' + '─'.repeat(57))
@@ -1216,8 +1406,8 @@ function printReport(report) {
 
   console.log(
     `\n${report.faults.length === 0 ? 'NO FAULTS' : `${report.faults.length} FAULT(S)`} ` +
-      `across ${report.repetitions.length} finish races, ${report.purchaseRaces.length} tick races ` +
-      'and the witness.\n',
+      `across ${report.repetitions.length} finish races, ${report.purchaseRaces.length} tick races, ` +
+      `${report.removeRaces.length} remove races and the witness.\n`,
   )
 }
 

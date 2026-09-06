@@ -9,9 +9,10 @@
 // into a sentence.
 //
 // The Shop tab (`src/components/Shopping.jsx`, #353) renders it; App's
-// `refresh()` calls `readShopping` on every re-read, and the three writes the
-// tab offers — create a list, add an item, remove an unbought one — go through
-// App's `mutate()` like every other write. The module landed one story ahead
+// `refresh()` calls `readShopping` on every re-read, and four of the writes the
+// tab offers — create a list, add an item, remove an unbought one, finish a run
+// (#357) — go through App's `mutate()` like every other write. The tick is the
+// exception and says so below. The module landed one story ahead
 // of the tab (#352) because `liveSchema.test.js` refuses a `LIVE_SCHEMA` or
 // `LIVE_RPCS` entry with no call site in `src/`, so the tables, their RPCs and
 // the code that calls them had to arrive together.
@@ -314,7 +315,8 @@ export async function unpurchaseItem(client, itemId) {
  * a second phone whose screen still shows the old run names THAT run, finds it
  * closed, and is refused — it can never finish the fresh run a first phone just
  * opened. The caller re-reads the list afterwards, as with every write here;
- * #357 is the confirmed tap that calls this.
+ * the confirmed tap that calls this is the Shop tab's "Done shopping" (#357),
+ * and the run it names is the one that tab is showing.
  */
 export async function finishRun(client, runId) {
   if (!runId) throw new Error('Which run? Finishing needs the run this screen shows.')

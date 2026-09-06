@@ -1236,6 +1236,16 @@ body {
   color: var(--ink-dim);
 }
 
+/* #357 — "from last run", on the meta line rather than on one of its own.
+   Every carried item is at the top of the next run's list, so a third line
+   would be paid on exactly the rows a person reads first. It carries weight
+   the rest of the line does not, because it answers a question ("why is this
+   here when I did not add it?") where the adder and the stamp only report. */
+.shopping-item__carried {
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .shopping-add {
   margin-top: 0.875rem;
 }
@@ -1248,6 +1258,30 @@ body {
   margin: 0 0 0.5rem;
   font-size: 0.875rem;
   color: var(--ink-dim);
+}
+
+/* #357 — the end of the trip, directly under the list and separated from it by
+   a rule: everything above the line is the list, and this is the one control
+   that ends it. It sits ABOVE the add form, which is this surface's one
+   departure from the actions-after-everything order used everywhere else —
+   measured at 360x800, a bought row sinks, so the last row a shopper ticks is
+   near the top of the list, and with the control under the two-field form
+   finishing a twelve-item trip meant scrolling 1,700px back down.
+
+   Quiet in its resting state on purpose: a person walks a store tapping rows,
+   and the loudest thing on the tab should stay the row. */
+.shopping-finish {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* The consequence, named. This is the sentence decision 8 chose over an undo,
+   so it is full-strength text rather than the dimmed register the meta lines
+   use — it is the thing to read before the tap, not a footnote under it. */
+.shopping-finish__question {
+  margin: 0 0 0.5rem;
+  font-size: 0.9375rem;
 }
 
 /* ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '../lib/shopping.js'
 
@@ -14,11 +14,12 @@ import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '
 //
 // What this surface does NOT do, and why each absence is deliberate:
 //
-//   - It does not finish a run (#357), pick between lists (#358), show past
-//     runs (#359) or archive (#360). Every list the read returns is drawn, in
-//     the read's order, so nothing is hidden if a second one exists — but only
+//   - It does not pick between lists (#358), show past runs (#359) or archive
+//     (#360). Every list the read returns is drawn, in the read's order, so
+//     nothing is hidden if a second one exists — but only
 //     `create_shopping_list` writes one, and this tab offers it only when there
-//     are none, so until #358 a household has one list.
+//     are none, so until #358 a household has one list. Finishing a run was
+//     the same kind of absence until #357, below.
 //   - It does not rank, count or score who added what. #35 AC 9 binds this
 //     surface as it binds Done: an item says who added it, and no figure
 //     anywhere says how many anyone added. Shopping.test.jsx fails on one.
@@ -66,6 +67,37 @@ import { firstNameOf, normalizeName, orderShoppingItems, purchasedLabel } from '
 // A bought row is history with a way back: it reads "bought by Robin · 4:02 PM"
 // and offers "Not bought after all", the app's reversible-action idiom from
 // Chores and Done — no dialog, because the reversal of a mistap is a tap.
+//
+// THE END OF THE TRIP — story #357, and the one control here that is NOT
+// reversible.
+//
+// "Done shopping" closes the run and opens the next one with everything
+// unbought carried forward, in one server transaction (`0033`). A mis-tap
+// cannot be undone: the run is closed, the next one exists, and anything
+// anybody adds to it afterwards would have to be reconciled by an undo that
+// does not exist. So the mitigation is an inline two-step confirm NAMING THE
+// CONSEQUENCE — "3 items not bought will carry over to the next list" — which
+// is epic #349's decision 8, taken against an undo. `window.confirm` is not
+// used, here or anywhere in this app: the confirm is the same confirm-in-place
+// idiom Roster uses for Remove and for signing every device out.
+//
+// Two details of it are load-bearing rather than taste:
+//
+//   - FOCUS LANDS ON "Keep shopping", not on "Finish". The confirm appears
+//     under a thumb that has just tapped, and a keyboard or a switch user
+//     arrives on it with Enter armed; landing on the way out means an
+//     accidental Enter costs a tap and not a trip.
+//   - The confirming control is the PRIMARY button, not `button--danger`.
+//     Finishing a run destroys nothing — the unbought items move forward and
+//     the bought ones stay on the closed run as its record — so the red the
+//     roster's Remove wears would be saying something untrue.
+//
+// A carried item says so: `carried_from_item_id` is not null on the copy, and
+// the row reads "from last run" beside who added it. The adder and the time
+// are the ORIGINAL's (`0033` copies both, deliberately — the finisher is the
+// one member known not to have added it), which is also why a carried item
+// sorts to the top of the next run's unbought half without this file doing
+// anything: its `added_at` predates the run it is on.
 
 /**
  * Trim an optional note and turn an empty one into null.
@@ -150,6 +182,11 @@ function ShoppingItem({
   onUnpurchaseItem,
 }) {
   const bought = Boolean(item.purchased_at)
+  // #357 — this row is a copy the last finish carried forward. The column is
+  // the whole test: `0033` sets it on the copy and on nothing else, so a
+  // client that guessed from `added_at < opened_at` would be inferring what
+  // the database already states.
+  const carried = Boolean(item.carried_from_item_id)
   const adder = members.find((m) => m.id === item.added_by_member_id)
   const adderName = adder ? firstNameOf(adder.display_name) : null
   const buyer = members.find((m) => m.id === item.purchased_by_member_id)
@@ -170,8 +207,15 @@ function ShoppingItem({
     <span className="shopping-item__body">
       <span className="shopping-item__name">{item.name}</span>
       {item.note ? <span className="shopping-item__note">{item.note}</span> : null}
-      {adderName || stamp ? (
+      {/* #357 — "from last run" rides on the SAME line as the adder rather
+          than taking one of its own: after a finish every carried item is at
+          the top of the list, so a third line would be paid on every row a
+          person sees first. Its own span so the mark can carry weight the rest
+          of the meta line does not. */}
+      {carried || adderName || stamp ? (
         <span className="shopping-item__meta">
+          {carried ? <span className="shopping-item__carried">from last run</span> : null}
+          {carried && (adderName || stamp) ? ' · ' : null}
           {adderName ? `added by ${adderName}` : null}
           {adderName && stamp ? ' · ' : null}
           {stamp}
@@ -268,6 +312,100 @@ ShoppingItem.propTypes = {
   onUnpurchaseItem: PropTypes.func.isRequired,
 }
 
+/**
+ * The confirm's sentence — #357 AC 1.
+ *
+ * It names the CONSEQUENCE rather than asking "are you sure", because the
+ * thing a person needs to know before an irreversible tap is what happens to
+ * the items they did not find. At zero it says so in as many words instead of
+ * printing a nought: "0 items not bought will carry over" is a sentence about
+ * nothing that still has to be read as one.
+ */
+function finishQuestion(carryCount) {
+  if (carryCount === 0) return 'Finish this run? Nothing carries over.'
+  const items = carryCount === 1 ? '1 item' : `${carryCount} items`
+  return `Finish this run? ${items} not bought will carry over to the next list.`
+}
+
+/**
+ * "Done shopping", and the two-step confirm in front of it — #357.
+ *
+ * Mounted with `key={run.id}` by the caller, which is what resets it: a finish
+ * that succeeds returns a NEW run, the key changes, and this remounts closed.
+ * A finish that is REFUSED leaves the run where it was, so the confirm stays
+ * open under the error strip with both ways out still on screen — which is the
+ * right end state for a refusal the person may want to retry.
+ */
+function FinishRun({ runId, carryCount, busy, onFinishRun }) {
+  const [confirming, setConfirming] = useState(false)
+  const keepRef = useRef(null)
+
+  // AC 6 — the confirm appears with focus on the way OUT. Without this the
+  // focus stays on a button that no longer exists and a keyboard user lands
+  // wherever the browser puts them next, which on this markup is "Finish".
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus()
+  }, [confirming])
+
+  if (!confirming) {
+    return (
+      <div className="shopping-finish">
+        <div className="row row--end">
+          <button
+            className="button button--quiet"
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirming(true)}
+          >
+            Done shopping
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="shopping-finish">
+      <p className="shopping-finish__question">{finishQuestion(carryCount)}</p>
+      <div className="row row--end">
+        <button
+          className="button"
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            // Both arms empty, for CreateListForm's reason: on success the
+            // re-read replaces this run with the one the server opened, and on
+            // a refusal App's mutate() has already put the message in the
+            // strip. Nothing here is patched from the answer.
+            onFinishRun(runId).then(
+              () => {},
+              () => {},
+            )
+          }
+        >
+          Finish
+        </button>
+        <button
+          ref={keepRef}
+          className="button button--quiet"
+          type="button"
+          disabled={busy}
+          onClick={() => setConfirming(false)}
+        >
+          Keep shopping
+        </button>
+      </div>
+    </div>
+  )
+}
+
+FinishRun.propTypes = {
+  runId: PropTypes.string.isRequired,
+  carryCount: PropTypes.number.isRequired,
+  busy: PropTypes.bool,
+  onFinishRun: PropTypes.func.isRequired,
+}
+
 /** One list: its heading, the items on its open run, and the add form. */
 function ShoppingList({
   list,
@@ -280,6 +418,7 @@ function ShoppingList({
   onRemoveItem,
   onPurchaseItem,
   onUnpurchaseItem,
+  onFinishRun,
 }) {
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
@@ -330,6 +469,33 @@ function ShoppingList({
             />
           ))}
         </ul>
+      ) : null}
+
+      {/* #357 AC 4 — an empty run offers no way to finish: there is nothing to
+          close and nothing to carry, and a control whose only outcome is an
+          identical empty run is worse than no control (the same rule that
+          keeps Remove off a bought row).
+
+          DIRECTLY UNDER THE LIST, above the add form, which is the one place
+          this file departs from the app's actions-after-everything order —
+          owner decision at #357's design pass, on a measurement. A bought row
+          sinks, so the last row a shopper ticks is near the TOP of the list,
+          and with the control under the two-field add form finishing a
+          twelve-item trip meant scrolling 1,700px back down (page 2,339px,
+          control at y=2,177 at 360x800). Adding an item is the least urgent
+          thing in a store; finishing is what the person came to this end of
+          the screen to do.
+
+          Keyed on the run, which is what closes the confirm after a finish —
+          see FinishRun's docblock. */}
+      {run && ordered.length > 0 ? (
+        <FinishRun
+          key={run.id}
+          runId={run.id}
+          carryCount={left}
+          busy={busy}
+          onFinishRun={onFinishRun}
+        />
       ) : null}
 
       {run ? (
@@ -408,6 +574,7 @@ ShoppingList.propTypes = {
   onRemoveItem: PropTypes.func.isRequired,
   onPurchaseItem: PropTypes.func.isRequired,
   onUnpurchaseItem: PropTypes.func.isRequired,
+  onFinishRun: PropTypes.func.isRequired,
 }
 
 export default function Shopping({
@@ -423,6 +590,7 @@ export default function Shopping({
   onRemoveItem,
   onPurchaseItem,
   onUnpurchaseItem,
+  onFinishRun,
 }) {
   return (
     <section className="card" aria-labelledby="shop-heading">
@@ -449,6 +617,7 @@ export default function Shopping({
             onRemoveItem={onRemoveItem}
             onPurchaseItem={onPurchaseItem}
             onUnpurchaseItem={onUnpurchaseItem}
+            onFinishRun={onFinishRun}
           />
         )
       })}
@@ -479,4 +648,5 @@ Shopping.propTypes = {
   onRemoveItem: PropTypes.func.isRequired,
   onPurchaseItem: PropTypes.func.isRequired,
   onUnpurchaseItem: PropTypes.func.isRequired,
+  onFinishRun: PropTypes.func.isRequired,
 }

@@ -1287,6 +1287,10 @@ describe('#19 — no real household name reaches version control', () => {
     Bread: 'a shopping item name in shopping.pglite.test.js and the #353 tests — the other household’s',
     Eggs: 'a shopping item name in shopping.pglite.test.js and the #353 tests',
     Late: 'a shopping item refused because its run is closed, in shopping.pglite.test.js',
+    // #354 — two more item names, so the finish fixture can hold two BOUGHT
+    // items beside three unbought ones and tell every row apart by name.
+    Butter: 'a shopping item bought before the run is finished, in finish-shopping-run.pglite.test.js',
+    Flour: 'a second bought item in finish-shopping-run.pglite.test.js',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
     'Placeholder Item': 'a shopping item name in shopping.io.test.js',

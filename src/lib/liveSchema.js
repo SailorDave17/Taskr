@@ -246,6 +246,16 @@ export const LIVE_RPCS = Object.freeze([
   }),
   Object.freeze({ fn: 'purchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
   Object.freeze({ fn: 'unpurchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  // #354, arriving with `0033` — red on purpose until that file is applied,
+  // the same deliberate window as the four above. The argument is the RUN and
+  // not the list, and the name is the contract: with `list_id` a stale second
+  // phone would finish the FRESH run and carry every item twice. The body's
+  // first act after the auth check is a row lock (`select … for update`), so
+  // the read-only GET refuses it at executor start with `25006` — the shape
+  // `complete_chore` and `purchase_shopping_item` answer, NOT the `P0001` the
+  // two lock-free writers above answer — which classifies as PRESENT with
+  // nothing touched. Predicted from the body, not measured, until the apply.
+  Object.freeze({ fn: 'finish_shopping_run', args: Object.freeze({ run_id: 'uuid' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

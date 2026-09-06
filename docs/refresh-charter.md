@@ -949,7 +949,8 @@ epic as a **future idea only**, and no story couples the two.
 - **One list per household** (the recommendation). Simpler picker, simpler rollover, one open run to
   reason about. Rejected by the owner because the household shops at more than one kind of store and
   a hardware list mixed into groceries is the failure the feature exists to remove. The schema is
-  multi-list from `0032`; the picker and rename arrive in #358.
+  multi-list from `0032`; the picker and rename arrived in #358 on 2026-09-06, and the paragraph
+  below records what that surface decided.
 - **Household-learned aisle locations** for the stretch (the recommendation: remember where each
   item was found last time). Rejected in favour of **retailer APIs** (decision 7, Kroger, Walmart
   and Target named), groomed behind a spike (#362) because API availability is unverified — and the
@@ -1013,6 +1014,34 @@ has no answer to and no reason to invent. The confirm is the same in-place idiom
 Remove and for signing every device out; `window.confirm` is used nowhere in this app. What it
 costs is stated rather than hidden: a confirmed mis-tap is not reversible, and the sentence naming
 what carries over is the whole of the protection.
+
+**Several named lists are reached by a picker, and the tab draws exactly one of them** (the
+rejected one-list alternative above, built in #358 on 2026-09-06). A household shops at more than
+one kind of store, so choosing which list an item goes on is choosing the list you are on: there is
+no per-item list menu, the add form under a list can only aim at that list's open run, and "Done
+shopping" can only finish that list's run. Four decisions inside it are worth keeping because each
+was a fork:
+
+- **The picker appears only with a second list.** A segmented control holding one button offers no
+  choice, and this surface already refuses to draw a control whose only outcome is nothing (Remove
+  on a bought row, Done shopping on an empty run). A household with one list sees what it saw
+  before, plus a quiet "New list".
+- **Each picker button carries its own count, and the standalone count line stands down while it
+  does.** The other lists' counts are the whole reason to look at the picker; the selected list's
+  count printed twice would be two representations of one number.
+- **Which list is on screen is app state, not a device setting.** It is held in `App.jsx` beside
+  the current tab and resolved through one pure rule — honour a choice that still names a list on
+  screen, otherwise the first list by name — so a household change, a removed list and a first
+  arrival are one case rather than three. Nothing is written to the server and nothing to browser
+  storage: which list a phone is looking at is not a fact about the household.
+- **Renaming rides here and archiving does not.** `0032` grants `update (name)` and nothing else,
+  so a rename is the one direct write the client holds on a list and it destroys nothing; ending a
+  list needs its own column, its own RPCs and an answer about its runs, which is #360. There is no
+  delete or archive control anywhere on the tab.
+
+A duplicate name is the one refusal on this surface a person can act on, and it is mapped from
+**SQLSTATE 23505** on the error object rather than from the message text — Postgres's own sentence
+is about an index, and it is free to reword it.
 
 **The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
 otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same

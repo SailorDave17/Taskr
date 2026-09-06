@@ -72,10 +72,13 @@ import {
   addItem,
   createList,
   finishRun,
+  orderShoppingLists,
   purchaseItem,
   readShopping,
   removeItem,
+  renameList,
   replaceShoppingItem,
+  resolveSelectedListId,
   shoppingClient,
   unpurchaseItem,
 } from './lib/shopping.js'
@@ -233,6 +236,15 @@ export default function App() {
   // from it"), and it is the whole reason the tabs exist rather than a stack:
   // the thing judged at arm's length has to be the thing on screen.
   const [view, setView] = useState('split')
+  // #358 — which shopping list the Shop tab is showing, held HERE and beside
+  // `view` for the reason the tab strip is here: `Shopping` unmounts the moment
+  // another tab is chosen, so a choice held inside it would last exactly as
+  // long as the person stayed on the screen. It is a preference and not a fact
+  // about the household — nothing is written to the server and nothing to
+  // browser storage — and it is deliberately not reconciled by an effect: the
+  // resolution below runs at render, so no frame is ever drawn against a list
+  // id the current read does not hold.
+  const [shoppingListId, setShoppingListId] = useState(null)
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
@@ -925,9 +937,28 @@ export default function App() {
   // inside the module — shopping.js takes it as a parameter so its io test can
   // hand in a fake — and `shoppingClient()` is the same `getSupabase()` every
   // other data-layer module reads.
+  //
+  // #358 — a list somebody just named is the list they want to be looking at,
+  // so the created row's id becomes the choice. It is set AFTER `mutate()`
+  // resolves, which is after the re-read, so the id it names is one the current
+  // read holds; setting it before would be a choice `resolveSelectedListId`
+  // would immediately discard as naming nothing. A refused create — a duplicate
+  // name — rejects here and moves the choice nowhere.
   const handleCreateShoppingList = useCallback(
-    (name) => mutate(() => createList(shoppingClient(), household?.id, name)),
+    (name) =>
+      mutate(() => createList(shoppingClient(), household?.id, name)).then((made) => {
+        if (made?.id) setShoppingListId(made.id)
+        return made
+      }),
     [mutate, household],
+  )
+  // #358 — the one direct write the client holds on `shopping_lists` (0032's
+  // `update (name)`), through `mutate()` like every other write on this tab.
+  // The id does not change, so the choice above needs no help: the heading
+  // re-reads with the new name under the same id.
+  const handleRenameShoppingList = useCallback(
+    (listId, name) => mutate(() => renameList(shoppingClient(), listId, name)),
+    [mutate],
   )
   const handleAddShoppingItem = useCallback(
     (runId, name, note) => mutate(() => addItem(shoppingClient(), runId, name, note)),
@@ -1049,6 +1080,20 @@ export default function App() {
     (itemId) => tickItem(() => unpurchaseItem(shoppingClient(), itemId)),
     [tickItem],
   )
+
+  // #358 — the lists in the order the Shop tab draws them, and which one it is
+  // showing. Both are DERIVED at render from the read and the preference above,
+  // for the reason every other fold on this screen is: there is one
+  // representation of the read and no second copy to fall out of step with it.
+  //
+  // `resolveSelectedListId` is what makes AC 6's three fallbacks one rule — a
+  // household change, a list that is gone after a re-read, and an arrival with
+  // no choice yet are all "the preference names nothing on screen", and all
+  // land on the first list by name. The preference itself is left alone rather
+  // than corrected in state: a person who switches household and switches back
+  // finds the list they were on, and nothing had to remember to write it.
+  const shoppingLists = orderShoppingLists(shopping.lists)
+  const selectedShoppingListId = resolveSelectedListId(shoppingLists, shoppingListId)
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
   // same state object `isOrganizer` compares against below, so who-you-are and
@@ -1505,14 +1550,17 @@ export default function App() {
           other date on this app is spelled in the household's zone. */}
       {status === 'joined' && household && view === 'shop' ? (
         <Shopping
-          lists={shopping.lists}
+          lists={shoppingLists}
           runs={shopping.runs}
           items={shopping.items}
           members={members}
           timezone={household.timezone}
           busy={busy}
           error={error}
+          selectedListId={selectedShoppingListId}
+          onSelectList={setShoppingListId}
           onCreateList={handleCreateShoppingList}
+          onRenameList={handleRenameShoppingList}
           onAddItem={handleAddShoppingItem}
           onRemoveItem={handleRemoveShoppingItem}
           onPurchaseItem={handlePurchaseShoppingItem}

@@ -7,8 +7,8 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0031` are ALL applied to the live project (`0031` on 2026-09-05 in #97's own
-  session, before the merge — see its entry below), and the expected-red set holds ONE
+- Status: **`0001`–`0032` are ALL applied to the live project (`0032` on 2026-09-05 in #352's own
+  session, before the merge — see its entry below; `0031` the same day in #97's), and the expected-red set holds ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
   it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
   the name was listed and 36 of 37 immediately after*, in #210's own session (see the #210 bullet
@@ -25,6 +25,28 @@
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0032` on 2026-09-05 (#352, the shopping schema with stamped RPCs)**, applied with
+  `npm run migrate:live` in the story's own session, before the merge and the `release`
+  promotion — `0020`'s safe order — at md5 `0ee0b917e6a5a3d8ab6e50b7370068bc` (28001 characters, 48 statements), read back identical. Three tables (`shopping_lists`,
+  `shopping_runs`, `shopping_items`), row-level security on each with every policy keyed on
+  `current_household_ids()`, four `security definer` RPCs (`create_shopping_list`,
+  `add_shopping_item`, `purchase_shopping_item`, `unpurchase_shopping_item`) executable by
+  `authenticated` and not by `anon`, and the grants the entry below records. **`check:live` is NOT
+  blind to this one** — it moved the denominator from 37 to **44** (three table probes and four RPC
+  probes) and every one of the seven was red on purpose until the apply: *measured **36 of 44**
+  immediately before*, the three tables answering `PGRST205` and the four functions `PGRST202`, the
+  eighth red the standing `extract-description` row — and *measured **43 of 44** immediately after*, the one red the `extract-description` row.
+  `npm run probe:live-grants` gained three rows, one per table on `household_id` (`r` alone — the
+  `0014` route on the read side, and the absence of `a` and `w` on the write side, which is the
+  half `check:live` cannot see), and three table-level control rows (`shopping_items`
+  `authenticated=d`, the other two no table-level grant at all): *measured **15 of 18** before*,
+  the three new rows reporting `the column is not there`, and *measured **18 of 18** after, negative control included*, the three table-level controls reading `shopping_items authenticated=d` and no table-level grant on the other two. What
+  testifies beyond both is a read-only catalog query over the Management API taken on both sides in
+  the same session: **before**, `version()` read PostgreSQL 17.6 and no relation, function, policy
+  or constraint named `shopping` existed; **after**, 32 rows — the three tables `rls=true`; the four functions at `household uuid, name text`, `run uuid, name text, note text`, `item uuid` and `item uuid`, each executable by `authenticated` and not by `anon`; the five policies with `current_household_ids` in every predicate and the delete policy carrying `purchased_at IS NULL` and `r.closed_at IS NULL`; both unique indexes, the run one `WHERE (closed_at IS NULL)`; every attribution FK reading `ON DELETE SET NULL (<column>)` and the two whole-stamp checks one-directional. The version
+  reading is load-bearing rather than decorative: the attribution foreign keys use the column-list
+  form `on delete set null (added_by_member_id)`, which is Postgres 15+, and the whole reason it is
+  there is recorded in the migration's header and the entry below.
   **`0031` on 2026-09-05 (#97, a confirmed calendar suggestion is a capacity source)**, applied
   with `npm run migrate:live` in the story's own session, before the merge and the `release`
   promotion — `0020`'s safe order — at md5 `76868d316606f673c8c116cdd91f8cf5` (4415 characters,
@@ -349,6 +371,59 @@
     it), which is what a widening test has to do — the accepted arm alone would be green against a
     constraint that never bit. Applied 2026-09-05 in #97's own session; the readings are in the
     Status bullet above, the one place this page records live state.
+  - **`0032`** (#352) — the shopping schema: `shopping_lists`, `shopping_runs` and
+    `shopping_items`, the first tables here with no fairness arithmetic behind them (charter,
+    2026-09-05: a standalone household utility). Applied 2026-09-05 in #352's own session; the
+    readings are in the Status bullet above. What this entry records is the ACCESS model, which
+    is the half a check cannot carry:
+    - **The stamp columns are withheld from every client write.** `added_by_member_id`,
+      `added_at`, `purchased_at`, `purchased_by_member_id`, `closed_at` and
+      `closed_by_member_id` carry no UPDATE grant for `authenticated` (the only UPDATE grant on
+      the three tables is `shopping_lists(name)`), for `0004`'s clock reason and its who reason:
+      a timestamp says WHEN and is written from `now()` inside a definer function, never accepted
+      from a phone; a member id says WHO and is resolved by `acting_member()` from the caller,
+      never named by them. `shopping.pglite.test.js` asserts the exact UPDATE column set and the
+      behavioural refusal, and the AC 4 mutation — adding `grant update (purchased_at)` — reddened
+      the three tests predicted.
+    - **There is NO client INSERT grant on any of the three tables**, table-level or column-level,
+      and the reason is structural rather than cautious: `create_shopping_list` opens the list's
+      first run in the same transaction, so a direct insert would produce a runless list, a state
+      the Shop tab cannot draw; `add_shopping_item` is the only way an item arrives before #354's
+      rollover, because the stamps have to be written in the same statement as the row. Creation
+      is the RPCs' alone, and the four are granted `execute` to `authenticated` with `public` and
+      `anon` revoked, `0010`'s shape.
+    - **`household_id` is granted for SELECT on all three** — the `0014` route, and the one
+      grant that decides the read model: the Shop tab reads *this household's* lists by naming the
+      household, then the open run of each list by list id, then the items by run id — three plain
+      filters, never a filter through a PostgREST embed (cairn's
+      `postgrest-filtering-on-an-embedded-resource`: an embed filter nulls the embed and keeps the
+      parent, so the row count never moves). Every column of all three is readable, so
+      `select('*')` succeeds on them as it does on `members` since `0014`; what survives is the
+      per-column grant shape (no table-level SELECT), asserted in pglite.
+    - **The delete policy's predicate** — the only client-side row delete in the feature (owner
+      decision, 2026-09-05: any member may remove an unbought item from an open run):
+      `household_id in (select public.current_household_ids()) and purchased_at is null and
+      exists (select 1 from public.shopping_runs r where r.id = shopping_items.run_id and
+      r.closed_at is null)`. A delete matching a bought item or an item on a closed run affects
+      zero rows rather than raising, which is how row-level security refuses; pglite asserts the
+      count both ways, and dropping the `purchased_at` clause reddened the two tests predicted.
+    - **One correction taken in band, and it is a RECURRENCE of a rule this schema already
+      carries three times.** The first draft wrote the attribution foreign keys as composite
+      `(member_id, household_id) references members (id, household_id) on delete set null` —
+      `0030`'s shape with the delete rule changed — and paired them with symmetric whole-stamp
+      check constraints (`(closed_at is null) = (closed_by_member_id is null)`). *Measured in
+      pglite before the file reached any project*: removing a member was REFUSED with `null value
+      in column "household_id"`, because a composite FK's `set null` nulls **every** referencing
+      column, the scoping column included. `0006` writes the column-list form `on delete set null
+      (assigned_member_id)` and its comment says exactly this; `0012` and `0018` repeat it; cairn
+      records it twice. The draft did not meet it because `0030` — the nearest migration that
+      CREATES a table with a composite member FK — cascades, and the three files carrying the rule
+      are column additions. The suite caught it, not the reading. The fix is that column list,
+      `on delete set null (closed_by_member_id)`, and one-directional checks — a closer implies a
+      close, a buyer implies a purchase, never the converse — so a removed member leaves the WHEN
+      and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
+      project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
+      reddens the member-delete test, predicted 1.
   - **`0011` also needed a DEPLOY, not only a paste**, and it was the only migration on this page
     that did until `0030`: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
     there. Two actions, two expected reds — and, as this page said it would, **the paste cleared
@@ -400,6 +475,12 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#352 opened SEVEN rows on 2026-09-05 and drained all seven in its own session** — the three
+  `shopping_*` table probes and the four shopping RPC probes, red on purpose from the moment the
+  entries were listed until `npm run migrate:live` applied `0032`: *measured **36 of 44** before
+  and **43 of 44***. They were written down here and in README's
+  `check:live` cell in the same change that created them, for the reason the next bullet's history
+  gives. The set is back to the one row below.
 - **The excused-red set holds ONE row since 2026-09-04 (#210): the `extract-description` Edge
   Function probe, cleared by #209's deploy and by nothing else.** The plain-language capacity flow
   (`src/lib/capture.js`) invokes that function by name ahead of #208 writing it — owner decision at

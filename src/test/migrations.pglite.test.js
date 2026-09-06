@@ -944,6 +944,67 @@ describe('the migrations, run against a real Postgres', () => {
       expect(rows[0].n).toBe(4)
     })
   })
+
+  // -------------------------------------------------------------------------
+  // #352 — a composite FK's `on delete set null` must name its columns
+  //
+  // A bare `set null` on a composite key nulls EVERY referencing column, and on
+  // every attribution FK here the other column is `household_id`, which is
+  // `not null` — so the parent delete is refused rather than the stamp cleared.
+  // `0006` wrote the column-list form and said why; `0012` and `0018` repeated
+  // it; `0032`'s first draft still shipped three bare ones, because the template
+  // for a new table was the nearest migration that CREATES a table (`0030`,
+  // which cascades) and the rule lived in the ones that ADD a column. This
+  // asks the catalog, so the next table cannot make the same choice quietly:
+  // `confdelsetcols` is the column list (Postgres 15+), empty when bare.
+  // -------------------------------------------------------------------------
+
+  describe('#352 — every composite set-null foreign key names the columns it nulls', () => {
+    const setNullFks = async () => {
+      const { rows } = await db.query(
+        `select c.conrelid::regclass::text as on_table,
+                c.conname,
+                array_length(c.conkey, 1) as key_columns,
+                coalesce(array_length(c.confdelsetcols, 1), 0) as nulled_columns
+           from pg_constraint c
+          where c.contype = 'f' and c.confdeltype = 'n'
+            and c.connamespace = 'public'::regnamespace
+          order by 1, 2`,
+      )
+      return rows
+    }
+
+    it('names a column list on every composite set-null FK, and fewer columns than the key', async () => {
+      const rows = await setNullFks()
+      const bare = rows
+        .filter((r) => r.key_columns > 1 && r.nulled_columns === 0)
+        .map((r) => `${r.on_table}.${r.conname}`)
+      expect(
+        bare,
+        'composite set-null FKs with NO column list — a parent delete nulls household_id and is refused',
+      ).toEqual([])
+      for (const r of rows.filter((r) => r.key_columns > 1)) {
+        expect(r.nulled_columns, `${r.conname} nulls the whole key`).toBeLessThan(r.key_columns)
+      }
+    })
+
+    it('POSITIVE CONTROL: the query finds the composite set-null FKs the migrations declare', async () => {
+      // Without this, a catalog column renamed or a filter that matches nothing
+      // passes the test above on an empty set. The named ones are 0006's,
+      // 0012's and 0032's three; 0018 alters no FK.
+      const names = (await setNullFks()).filter((r) => r.key_columns > 1).map((r) => r.conname)
+      expect(names).toEqual(
+        expect.arrayContaining([
+          'chores_assigned_member_in_household',
+          'chores_generated_from_in_household',
+          'shopping_items_adder_in_household',
+          'shopping_items_buyer_in_household',
+          'shopping_runs_closer_in_household',
+        ]),
+      )
+      expect(names.length).toBeGreaterThanOrEqual(5)
+    })
+  })
 })
 
 describe('the bypass this migration closes', () => {

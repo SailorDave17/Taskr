@@ -118,6 +118,7 @@ export const MIGRATIONS = [
   '0029_completion_assigns_the_completer.sql',
   '0030_calendar_busy_minutes.sql',
   '0031_calendar_capacity_source.sql',
+  '0032_shopping_lists_runs_items.sql',
 ]
 
 export function migrationSql(name) {

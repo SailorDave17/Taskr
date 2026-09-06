@@ -1266,6 +1266,19 @@ describe('#19 — no real household name reaches version control', () => {
     // schema.integration.test.js quotes it inside a template literal, where the
     // scan sees it standalone. Declared rather than re-quoted to slip past.
     'Auto Confirm User': 'the dashboard checkbox both live suites tell you to tick',
+    // #352 — the shopping fixtures. List names and item names are the shape
+    // the scan looks for, and declared rather than lower-cased for the tab
+    // labels' reason: a list called "Groceries" is what a household types,
+    // and the case-insensitive uniqueness test needs the capitalised form.
+    Groceries: 'a shopping list name in shopping.pglite.test.js — and the epic’s prefilled default',
+    Hardware: 'a second shopping list name in shopping.pglite.test.js',
+    Milk: 'a shopping item name in shopping.pglite.test.js',
+    Bread: 'a shopping item name in shopping.pglite.test.js — the other household’s',
+    Eggs: 'a shopping item name in shopping.pglite.test.js',
+    Late: 'a shopping item refused because its run is closed, in shopping.pglite.test.js',
+    'Placeholder List': 'a shopping list name in shopping.io.test.js',
+    'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
+    'Placeholder Item': 'a shopping item name in shopping.io.test.js',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])

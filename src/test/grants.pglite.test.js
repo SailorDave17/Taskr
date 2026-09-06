@@ -238,6 +238,42 @@ const CLIENT_OPERATIONS = [
     site: 'calendar.js listBusyWeeks()',
     sql: 'select id, member_id, period_start, busy_minutes, event_count, computed_at from public.calendar_busy limit 0',
   },
+  // #352 — the shopping tables. Every column of all three is readable,
+  // `household_id` included (the 0014 route: the Shop tab names the household
+  // it reads). The client's only writes are a rename and a whole-row delete;
+  // there is NO insert on any of the three — creation and every stamp go
+  // through the four RPCs in `0032` — and shopping.pglite.test.js asserts the
+  // absences, which is this list's mirror image for RPC-written tables.
+  {
+    table: 'shopping_lists',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, household_id, name, created_at from public.shopping_lists limit 0',
+  },
+  {
+    table: 'shopping_lists',
+    op: 'update',
+    site: 'shopping.js renameList()',
+    sql: "update public.shopping_lists set name = 'Placeholder' where false",
+  },
+  {
+    table: 'shopping_runs',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, list_id, household_id, opened_at, closed_at, closed_by_member_id from public.shopping_runs limit 0',
+  },
+  {
+    table: 'shopping_items',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id from public.shopping_items limit 0',
+  },
+  {
+    table: 'shopping_items',
+    op: 'delete',
+    site: 'shopping.js removeItem()',
+    sql: 'delete from public.shopping_items where false',
+  },
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {

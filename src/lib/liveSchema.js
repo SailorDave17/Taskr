@@ -5,6 +5,11 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import {
+  SHOPPING_ITEM_COLUMNS,
+  SHOPPING_LIST_COLUMNS,
+  SHOPPING_RUN_COLUMNS,
+} from './shopping.js'
 
 /**
  * What the client asks the live project for — story #78.
@@ -85,6 +90,18 @@ export const LIVE_SCHEMA = Object.freeze([
   // the derived figures are readable by the household, the refresh token is not,
   // and that split is the whole of the minimization decision.
   Object.freeze({ table: 'calendar_busy', columns: CALENDAR_BUSY_COLUMNS }),
+  // #352, arriving with `0032` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file. Three tables in one file and all three are here, because the client
+  // reads all three: lists by household, the OPEN run of each list, and the
+  // items on those runs — three plain filters, never an embed filter, which
+  // is why `household_id` is in every one of these column lists (the `0014`
+  // route). What the client does NOT hold — any insert, any stamp column's
+  // update — is `0032`'s and grants.pglite.test.js's to say; this list is what
+  // it reads.
+  Object.freeze({ table: 'shopping_lists', columns: SHOPPING_LIST_COLUMNS }),
+  Object.freeze({ table: 'shopping_runs', columns: SHOPPING_RUN_COLUMNS }),
+  Object.freeze({ table: 'shopping_items', columns: SHOPPING_ITEM_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -211,6 +228,24 @@ export const LIVE_RPCS = Object.freeze([
     fn: 'skip_repeat_occurrence',
     args: Object.freeze({ chore_id: 'uuid', skip_date: 'date' }),
   }),
+  // #352, arriving with `0032` — red on purpose until that file is applied,
+  // the same deliberate window every migration-borne entry here has had. The
+  // four writers of a list, an item or a stamp; the client holds no insert
+  // grant on any shopping table, so these are the only way a row arrives.
+  // Argument names are the epic's, and PostgREST resolves by their SET: a
+  // `text` placeholder is the nil UUID, which `create_shopping_list` refuses
+  // at its household check (`P0001`) and `add_shopping_item` at its run check,
+  // both before any write — PRESENT, and nothing touched.
+  Object.freeze({
+    fn: 'create_shopping_list',
+    args: Object.freeze({ household: 'uuid', name: 'text' }),
+  }),
+  Object.freeze({
+    fn: 'add_shopping_item',
+    args: Object.freeze({ run: 'uuid', name: 'text', note: 'text' }),
+  }),
+  Object.freeze({ fn: 'purchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  Object.freeze({ fn: 'unpurchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

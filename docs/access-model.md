@@ -520,6 +520,55 @@
       cannot lock the run. And the mirror hazard, stated: re-pasting `0032` on top of this file
       puts the three UNLOCKED bodies back (cairn's `0004`-over-`0007` shape); the suite asserts
       that direction so it is written down rather than discovered.
+    - **The interleaving is PROVED against this project, not inferred from the source** — #356,
+      `npm run prove:finish-race`, measured 2026-09-06. Everything above about the lock is a claim
+      about two transactions being open at once, and until this story **no instrument here could
+      reach it**: pglite is one connection, so `finish-shopping-run.pglite.test.js` runs the two
+      calls back to back and what it proves is the stale-screen guard, never the contended lock.
+      *What pglite could not prove and this did*, in one line each:
+      - **The outcome, ten times.** Two independent authenticated clients on the seeded account,
+        both `finish_shopping_run(run_id)` inside one `Promise.all` against a fresh list each time
+        (one open run, three unbought items, confirmed by a read first): **10 of 10** gave exactly
+        one new run and exactly one refusal, and the read-back was identical every time — two runs
+        on the list, three items on the new one each carrying exactly once from an original the
+        closed run still holds, none bought, none moved. **40 of 40 over four runs of the script.**
+      - **Which refusal path, which #357 needs.** All ten took the RPC's own `run already closed`,
+        **none** the `shopping_runs_one_open_per_list` violation and **none any other path** — so
+        the second caller waited on the row lock and re-read the close, exactly as the header above
+        says, and the index stayed the belt under the braces rather than the thing doing the work.
+        #357's error copy therefore has one SQLSTATE to map (`P0001`) on this evidence, not two.
+        The third count is not a formality: a loser cancelled behind a slow winner comes back
+        **57014**, having never reached the lock, and a repetition like that proves nothing while
+        looking identical in every other column — so it is a fault rather than a footnote.
+      - **The interleaving itself, read out of the server, and it is the ONLY evidence of it.** The
+        outcome alone is not evidence — a platform that ran the two calls end to end produces the
+        same one winner and one refusal, which is what pglite already shows — so the script carries
+        a witness: a race over **8,000** bulk-loaded rows, slow enough to sample while it happens.
+        **Eight of eight samples taken, none failed, every one showing two `active` backends inside
+        `finish_shopping_run` with a `transactionid` lock wait among them — witnessed in sample 1**
+        (winner 5,652 ms, loser 5,687 ms, 8,000 carried and 8,000 kept). That is the second caller
+        blocked on the first's `for update`, observed rather than argued. A miss is reported as a
+        miss, and a FAILED sample is counted apart from an empty one.
+      - **The `for key share` clauses, on live.** Twenty purchase-versus-finish races across the
+        four runs, **both orderings observed** — the tick committing first and the carry then
+        skipping the bought row, and the tick arriving during a finish and being refused
+        `run already closed`. No item was ever bought on the closed run AND carried forward, which
+        is the double-buy the clauses exist to make unreachable. **Not** covered, and unchanged:
+        the client `delete`, which is #368.
+      - **Four bounds on the instrument — two found by running it, two by review, none by reading
+        the code.** A client read-back of the witness run is silently capped at PostgREST's
+        `db-max-rows` (**475 of 20,000 rows, no error and no gap in the response**), so the count
+        goes through `head: true`; at 20,000 items the carry ran past `authenticated`'s **8 s
+        `statement_timeout`** on one run of two, killing the WINNER mid-carry so both callers came
+        back refused, which is why the fixture is 8,000 and the phase retries. Review then found
+        two more: the retry loop reported the **last** attempt rather than the one that stands, so
+        a machine-killed final attempt could fail a proof two clean attempts had already made —
+        repaired by fault KIND rather than by preferring clean attempts, because an attempt that
+        saw **two winners** is the epic's own defect and must reach the report from wherever it
+        happened; and the verdict was computed as a max and a sum **across** samples, so the two
+        halves of the sentence could come from different instants. **The final run used the
+        corrected instrument and reached the same verdict as the run before it** — which is why the
+        figures here were re-measured rather than carried across.
     - **What is NOT here, on purpose**: no `list_id` overload, no undo (owner decision 8: an
       inline confirm, no undo), no client-side close of any kind, and no backfill — every run
       open before this file stays open until somebody finishes it from a phone.

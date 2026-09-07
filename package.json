@@ -24,7 +24,9 @@
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs",
     "rebalance:corpus": "node scripts/rebalance-churn-report.mjs",
     "extraction:corpus": "node scripts/extraction-corpus-report.mjs",
-    "extraction:run": "node scripts/extraction-run.mjs"
+    "extraction:run": "node scripts/extraction-run.mjs",
+    "extraction:members": "node scripts/extraction-members.mjs",
+    "extraction:verdict": "node scripts/extraction-verdict.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.1",

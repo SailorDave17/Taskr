@@ -92,9 +92,16 @@ export function axisLine(row) {
       `internal: ${row.axis.key} claims "${row.verdict}" with no figure`
     )
   }
+  // An estimated figure is spelled as one in the verdict column AND carries the
+  // reason on the same line — #207 AC 3. Printing "PASS" for a figure nobody
+  // measured end to end is the same misreading as printing it for one nobody
+  // measured at all, one step weaker: the number is real, the path it describes
+  // has never been walked in a single request.
+  const verdictCell = row.estimate === undefined ? cell : `${cell} (est.)`
+  const estimateNote = row.estimate === undefined ? '' : `   ESTIMATE: ${row.estimate}`
   return (
-    `${label}${row.axis.render(row.value, row.outOf).padEnd(14)}${cell.padEnd(14)}` +
-    `threshold ${row.axis.renderThreshold(row.threshold, row.outOf)}`
+    `${label}${row.axis.render(row.value, row.outOf).padEnd(14)}${verdictCell.padEnd(14)}` +
+    `threshold ${row.axis.renderThreshold(row.threshold, row.outOf)}${estimateNote}`
   )
 }
 
@@ -118,6 +125,10 @@ export function killConditionLines(label, figures, scope) {
   if (summary.kills.length) parts.push(`FAILS on ${named(summary.kills)}`)
   if (summary.narrows.length) parts.push(`NARROWS on ${named(summary.narrows)}`)
   if (!summary.kills.length && !summary.narrows.length) parts.push('clears every axis with a figure')
+  // The third outcome #207 AC 3 names — "cleared, PROVISIONALLY CLEARED pending
+  // the deployed endpoint, or failed" — and it has to be its own clause rather
+  // than a footnote on the pass, because the proceed decision reads this line.
+  if (summary.provisional.length) parts.push(`PROVISIONALLY on ${named(summary.provisional)} (estimated, not measured end to end)`)
   if (!summary.complete) parts.push(`NOT YET MEASURED: ${named(summary.notMeasured)}`)
   lines.push(`    ${'verdict'.padEnd(28)}${parts.join(' · ')}`)
   return lines

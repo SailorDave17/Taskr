@@ -173,8 +173,20 @@ describe('#352 — the shopping schema, run against a real Postgres', () => {
     }
 
     it('creates shopping_lists with exactly the named columns, created_at defaulting to now()', async () => {
+      // `archived_at` is `0035`'s (#360), and it is listed here rather than
+      // filtered out: this harness applies EVERY migration, so the assertion is
+      // about the table as the app finds it and not as `0032` left it. Naming
+      // the later column keeps the "exactly" honest — a column a future
+      // migration adds still has to be a line somebody wrote in this diff,
+      // which is the whole value of an exact list over a `toContain`.
       const cols = await columnsOf('shopping_lists')
-      expect(cols.map((c) => c.column_name)).toEqual(['id', 'household_id', 'name', 'created_at'])
+      expect(cols.map((c) => c.column_name)).toEqual([
+        'id',
+        'household_id',
+        'name',
+        'created_at',
+        'archived_at',
+      ])
       expect(cols.find((c) => c.column_name === 'created_at').column_default).toBe('now()')
     })
 

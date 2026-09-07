@@ -70,9 +70,11 @@ import {
 } from './lib/calendar.js'
 import {
   addItem,
+  archiveList,
   createList,
   finishRun,
   orderShoppingLists,
+  partitionShoppingLists,
   purchaseItem,
   readClosedRuns,
   readShopping,
@@ -81,6 +83,7 @@ import {
   replaceShoppingItem,
   resolveSelectedListId,
   shoppingClient,
+  unarchiveList,
   unpurchaseItem,
 } from './lib/shopping.js'
 import Announcement from './components/Announcement.jsx'
@@ -263,6 +266,16 @@ export default function App() {
   // resolution below runs at render, so no frame is ever drawn against a list
   // id the current read does not hold.
   const [shoppingListId, setShoppingListId] = useState(null)
+  // #360 — whether the Shop tab is also drawing the lists that were put away.
+  // Held here for exactly `shoppingListId`'s reason and with exactly its
+  // consequences: it is a preference about what this phone is looking at, not a
+  // fact about the household, and it has to outlive `Shopping` unmounting on a
+  // tab switch — otherwise a person who went to look at an archived list and
+  // glanced at Chores would come back to the picker having forgotten. It is
+  // also what decides which lists `resolveSelectedListId` may choose from, so
+  // it belongs beside that resolution rather than inside the component that
+  // reads its answer.
+  const [showArchivedLists, setShowArchivedLists] = useState(false)
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
@@ -978,6 +991,28 @@ export default function App() {
     (listId, name) => mutate(() => renameList(shoppingClient(), listId, name)),
     [mutate],
   )
+  // #360 — put a list away, and bring it back. Both through `mutate()` like
+  // every other write on this tab bar the tick: what changes is not one row on
+  // screen but which lists the picker draws, so the full re-read is the point
+  // rather than a cost.
+  //
+  // NEITHER TOUCHES `shoppingListId`, and both cases are already answered by
+  // the resolution below. Archiving the list on screen leaves the preference
+  // naming a list the visible set no longer holds, which is exactly what
+  // `resolveSelectedListId`'s fallback is for — the picker moves to the first
+  // active list by name, the same as it does for a removed list or a household
+  // change. Unarchiving names a list that is in the visible set under either
+  // setting of the toggle, so the person keeps looking at what they just
+  // brought back. Writing the preference here would be a second rule saying
+  // what that one rule already says.
+  const handleArchiveShoppingList = useCallback(
+    (listId) => mutate(() => archiveList(shoppingClient(), listId)),
+    [mutate],
+  )
+  const handleUnarchiveShoppingList = useCallback(
+    (listId) => mutate(() => unarchiveList(shoppingClient(), listId)),
+    [mutate],
+  )
   const handleAddShoppingItem = useCallback(
     (runId, name, note) => mutate(() => addItem(shoppingClient(), runId, name, note)),
     [mutate],
@@ -1147,8 +1182,18 @@ export default function App() {
   // land on the first list by name. The preference itself is left alone rather
   // than corrected in state: a person who switches household and switches back
   // finds the list they were on, and nothing had to remember to write it.
+  //
+  // #360 — the split is applied AFTER the ordering and never instead of it, so
+  // there is one ordering rule and the archived half arrives in the same order
+  // it would be drawn in. `visibleShoppingLists` is what the tab draws and what
+  // the resolution chooses from, which is what makes archiving the list on
+  // screen fall back rather than leave the tab pointing at nothing: an archived
+  // list is, to that resolution, a list the read no longer shows.
   const shoppingLists = orderShoppingLists(shopping.lists)
-  const selectedShoppingListId = resolveSelectedListId(shoppingLists, shoppingListId)
+  const { active: activeShoppingLists, archived: archivedShoppingLists } =
+    partitionShoppingLists(shoppingLists)
+  const visibleShoppingLists = showArchivedLists ? shoppingLists : activeShoppingLists
+  const selectedShoppingListId = resolveSelectedListId(visibleShoppingLists, shoppingListId)
 
   // #160 — resolved WITHIN the household on screen. `household?.id` is the
   // same state object `isOrganizer` compares against below, so who-you-are and
@@ -1605,7 +1650,10 @@ export default function App() {
           other date on this app is spelled in the household's zone. */}
       {status === 'joined' && household && view === 'shop' ? (
         <Shopping
-          lists={shoppingLists}
+          lists={visibleShoppingLists}
+          archivedCount={archivedShoppingLists.length}
+          showArchived={showArchivedLists}
+          onShowArchived={setShowArchivedLists}
           runs={shopping.runs}
           items={shopping.items}
           members={members}
@@ -1616,6 +1664,8 @@ export default function App() {
           onSelectList={setShoppingListId}
           onCreateList={handleCreateShoppingList}
           onRenameList={handleRenameShoppingList}
+          onArchiveList={handleArchiveShoppingList}
+          onUnarchiveList={handleUnarchiveShoppingList}
           onAddItem={handleAddShoppingItem}
           onRemoveItem={handleRemoveShoppingItem}
           onPurchaseItem={handlePurchaseShoppingItem}

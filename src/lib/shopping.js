@@ -3,10 +3,15 @@
 // Same contract as chores.js and household.js: nothing in this file is a
 // security boundary. The rules that protect the data are the row-level policies
 // and the column grants in supabase/migrations/0032_shopping_lists_runs_items.sql,
-// and the four RPCs there plus `finish_shopping_run` (0033, #354) are the only
-// writers of a list, a run, an item or a stamp. What this file does is name the
-// household it means, ask for the granted columns by name, and turn a refusal
-// into a sentence.
+// and the four RPCs there plus `finish_shopping_run` (0033, #354),
+// `remove_shopping_item` (0034, #368) and the archive pair (0035, #360) are the
+// only writers of a list, a run, an item or a stamp. What this file does is
+// name the household it means, ask for the granted columns by name, and turn a
+// refusal into a sentence.
+//
+// A LIST IS PUT AWAY, NEVER DELETED (#360). `archived_at` is a stamp the client
+// reads and cannot write, and `partitionShoppingLists` is the whole of the
+// rule: an archived list leaves the picker and keeps every run it ever had.
 //
 // The Shop tab (`src/components/Shopping.jsx`, #353) renders it; App's
 // `refresh()` calls `readShopping` on every re-read, and four of the writes the
@@ -92,7 +97,11 @@ function unwrap({ data, error }, whatWeWereDoing, duplicateName = null) {
 // `household_id` is in every list — the 0014 route. The client scopes lists by
 // naming the household, and a withheld column here would force the embed
 // filter the docblock above rules out.
-export const SHOPPING_LIST_COLUMNS = 'id, household_id, name, created_at'
+//
+// `archived_at` joined it with `0035` (#360). Read-only here like every other
+// column on this table bar `name`: the two RPCs below are its only writers, so
+// a client cannot put a list away by writing to it directly.
+export const SHOPPING_LIST_COLUMNS = 'id, household_id, name, created_at, archived_at'
 
 export const SHOPPING_RUN_COLUMNS =
   'id, list_id, household_id, opened_at, closed_at, closed_by_member_id'
@@ -204,6 +213,32 @@ export function orderShoppingLists(lists) {
     if (byName !== 0) return byName
     return String(a?.id ?? '') < String(b?.id ?? '') ? -1 : 1
   })
+}
+
+/**
+ * Split the household's lists into the ones on the picker and the ones put
+ * away — #360.
+ *
+ * `archived_at` is the whole rule and the database is its only writer, so this
+ * asks the row rather than remembering anything: a list is archived when it
+ * carries a stamp. Pure, total, and it PRESERVES THE INPUT ORDER within each
+ * half, which is what lets the caller sort once (`orderShoppingLists`) and split
+ * afterwards — sorting each half separately would be a second copy of the
+ * ordering rule and could fall out of step with the first.
+ *
+ * Both halves are always arrays, so a caller can count them without a guard.
+ * The archived half is a count and a set to reveal, never a second list to
+ * draw: what the Shop tab does with it is #360's own decision, not this
+ * function's.
+ */
+export function partitionShoppingLists(lists) {
+  const active = []
+  const archived = []
+  for (const list of lists ?? []) {
+    if (list?.archived_at) archived.push(list)
+    else active.push(list)
+  }
+  return { active, archived }
 }
 
 /**
@@ -603,6 +638,36 @@ export async function renameList(client, listId, name) {
       .single(),
     'renaming the list',
     listName,
+  )
+}
+
+/**
+ * Put a list away — #360. Nothing is deleted and nothing is closed: the list
+ * keeps its empty open run and every finished run it ever had, and the picker
+ * stops drawing it.
+ *
+ * An RPC rather than an update, and the client holds no update grant on
+ * `archived_at` at all — because the stamp is only safe to write once
+ * somebody has checked the list's open run is empty, and that check has to
+ * happen under the run's lock (`0035`). A client `update` could not take one.
+ *
+ * The refusal a person can act on is `finish or clear this run first`, and both
+ * ways out are already on the screen they are looking at.
+ */
+export async function archiveList(client, listId) {
+  if (!listId) throw new Error('Which list?')
+  return unwrap(
+    await client.rpc('archive_shopping_list', { list: listId }),
+    'archiving the list',
+  )
+}
+
+/** Bring an archived list back. Clears the stamp and moves nothing else. */
+export async function unarchiveList(client, listId) {
+  if (!listId) throw new Error('Which list?')
+  return unwrap(
+    await client.rpc('unarchive_shopping_list', { list: listId }),
+    'bringing the list back',
   )
 }
 

@@ -21,12 +21,9 @@ import {
 //
 // What this surface does NOT do, and why each absence is deliberate:
 //
-//   - It does not archive a list (#360). There is no delete control and no
-//     archive control anywhere on this tab, and that is #358 AC 8 rather than an
-//     oversight: a list is the container everything else on the surface lives
-//     in, so ending one needs its own column, its own RPCs and a decision about
-//     what happens to its runs — which is #360. Renaming is here because the
-//     grant is (0032's `update (name)`), and a rename destroys nothing.
+//   - It does not DELETE a list, and #360 did not add one either. Putting a
+//     list away is an archive: a stamp on the row, the list off the picker, and
+//     every run it ever had still readable. See the section on it below.
 //   - It does not rank, count or score who added what. #35 AC 9 binds this
 //     surface as it binds Done: an item says who added it, and no figure
 //     anywhere says how many anyone added. Shopping.test.jsx fails on one.
@@ -179,6 +176,45 @@ import {
 //     no per-person total, no rank and nothing about who bought the most.
 //     Shopping.test.jsx fails on one.
 //
+// PUTTING A LIST AWAY — story #360, and the last of epic #349's first phase.
+//
+// A list for a renovation, or for a party that happened, is finished with long
+// before the household is finished with the app. It leaves the picker and it
+// loses nothing: `archived_at` is a stamp, not a delete, and everything #359
+// draws about it stays exactly where it was.
+//
+// Four properties of it are decisions rather than mechanics:
+//
+//   - THE TOGGLE APPEARS ONLY ONCE SOMETHING IS ARCHIVED, and it carries the
+//     count. A household that never archives anything sees precisely the tab it
+//     saw before this story. It sits in the picker's region rather than beside
+//     "New list" because what it changes is which lists the picker draws, and a
+//     control whose effect happens at the other end of the screen is a control
+//     people press twice to find out what it did.
+//   - IT DOES NOT FORCE THE PICKER TO EXIST. #358 refuses to draw a segmented
+//     control holding one button, and that still holds: a household with one
+//     active list and one archived one sees no picker until it reveals the
+//     archived one, at which point there are two lists and a choice to make.
+//   - AN ARCHIVED LIST IS ITS HISTORY AND NOTHING ELSE. No add form, no Done
+//     shopping, no count, no Rename — one line saying what it is, the past runs,
+//     and the way back. Its open run is EMPTY by construction: `0035` refuses an
+//     archive while the run holds any item, which is what makes "there is
+//     nothing here to draw" a fact about the database rather than a decision to
+//     hide something. The refusal names both ways out ("finish or clear this run
+//     first") and both are on screen when it fires.
+//   - ARCHIVE SITS BESIDE RENAME, on the heading, because both are things you do
+//     to the LIST — the rule the rule above `New list` states. It is a quiet
+//     control and not `button--danger`: nothing is destroyed, and the red the
+//     roster's Remove wears would be saying something untrue, exactly as it
+//     would on Done shopping.
+//
+// A NAME STAYS TAKEN WHILE IT IS ARCHIVED. The unique index is
+// `(household_id, lower(name))` and `0035` does not exclude archived rows from
+// it, so naming a new list "Groceries" while an archived "Groceries" exists is
+// refused with #358's own sentence. That is the better failure of the two: the
+// alternative is a household holding two lists it cannot tell apart in a picker
+// that shows the name and nothing else.
+//
 // A row here is deliberately NOT the working row struck through — the #302
 // design-bar verdict, and #308's direction for the Done tab: it is one compact
 // line carrying the name, its note, and either who bought it and when or the
@@ -312,6 +348,13 @@ function ListPicker({ lists, runs, items, selectedListId, busy, onSelectList }) 
         const left = run
           ? items.filter((item) => item.run_id === run.id && !item.purchased_at).length
           : 0
+        // #360 — an archived list says so where every other list says how much
+        // is left to buy. The count would be honest and useless: an archived
+        // list's open run is empty by `0035`'s precondition, so every one of
+        // them would read "Nothing left to buy" — a sentence about shopping, on
+        // a list nobody is shopping from, in the one place a person is choosing
+        // between them.
+        const archived = Boolean(list.archived_at)
         return (
           <button
             key={list.id}
@@ -322,7 +365,7 @@ function ListPicker({ lists, runs, items, selectedListId, busy, onSelectList }) 
             onClick={() => onSelectList(list.id)}
           >
             <span className="shopping-picker__name">{list.name}</span>
-            <span className="shopping-picker__count">{leftToBuy(left)}</span>
+            <span className="shopping-picker__count">{archived ? 'Archived' : leftToBuy(left)}</span>
           </button>
         )
       })}
@@ -364,35 +407,93 @@ ListPicker.propTypes = {
  * is unaffected either way — its caller names it from `list.name` rather than
  * from whichever element happens to be drawing it.
  */
-function ListHeading({ list, busy, showName, onRenameList }) {
+function ListHeading({ list, busy, showName, onRenameList, onArchiveList, onUnarchiveList }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(list.name)
   const [complaint, setComplaint] = useState(null)
   const fieldRef = useRef(null)
+  const archived = Boolean(list.archived_at)
 
   useEffect(() => {
     if (editing) fieldRef.current?.focus()
   }, [editing])
 
-  if (!editing) {
+  // #360 — an archived list holds ONE control and the way back is it. Rename
+  // goes with the rest of the working surface: the client's `update (name)`
+  // grant is untouched by `0035`, so this is a screen decision rather than a
+  // refusal waiting to happen, and the reason is that a list somebody put away
+  // is a record — the name on it is the name the household filed it under.
+  if (archived) {
     return (
       <div className="shopping-heading">
         {showName ? <h3 className="shopping-heading__name">{list.name}</h3> : null}
         <button
           className="button button--quiet"
           type="button"
-          aria-label={`Rename ${list.name}`}
+          aria-label={`Unarchive ${list.name}`}
           disabled={busy}
-          onClick={() => {
-            // Opened from the SERVER's name every time, never from whatever was
-            // left in the field by an abandoned edit or a refused save.
-            setName(list.name)
-            setComplaint(null)
-            setEditing(true)
-          }}
+          onClick={() =>
+            onUnarchiveList(list.id).then(
+              () => {},
+              () => {},
+            )
+          }
         >
-          Rename
+          Unarchive
         </button>
+      </div>
+    )
+  }
+
+  if (!editing) {
+    return (
+      <div className="shopping-heading">
+        {showName ? <h3 className="shopping-heading__name">{list.name}</h3> : null}
+        {/* THE TWO CONTROLS WRAP AS ONE UNIT, and that is a measurement rather
+            than tidiness. At 360 the row has 263.2px and "Groceries" (72.3) +
+            Rename (92) + Archive (87.6) + two 8px gaps is 267.9 — over by 4.7px
+            — so with all three as siblings of the flex row, Rename stayed
+            beside the name and Archive alone dropped to a second row, reading
+            as an unrelated control rather than as one of a pair. Grouped, the
+            name takes row one and both controls take row two together, which is
+            also what a long name does. Owner's call at #360's design pass. */}
+        <span className="shopping-heading__actions">
+          <button
+            className="button button--quiet"
+            type="button"
+            aria-label={`Rename ${list.name}`}
+            disabled={busy}
+            onClick={() => {
+              // Opened from the SERVER's name every time, never from whatever
+              // was left in the field by an abandoned edit or a refused save.
+              setName(list.name)
+              setComplaint(null)
+              setEditing(true)
+            }}
+          >
+            Rename
+          </button>
+          {/* #360 — no confirm in front of it, unlike Done shopping, and the
+              asymmetry is the point: a finish cannot be undone and this is
+              undone by the control that replaces it. A refusal ("finish or
+              clear this run first") arrives on the strip below, which the tab
+              scrolls into view — see the Shopping component's own effect, and
+              the measurement behind it. */}
+          <button
+            className="button button--quiet"
+            type="button"
+            aria-label={`Archive ${list.name}`}
+            disabled={busy}
+            onClick={() =>
+              onArchiveList(list.id).then(
+                () => {},
+                () => {},
+              )
+            }
+          >
+            Archive
+          </button>
+        </span>
       </div>
     )
   }
@@ -461,6 +562,8 @@ ListHeading.propTypes = {
   busy: PropTypes.bool,
   showName: PropTypes.bool,
   onRenameList: PropTypes.func.isRequired,
+  onArchiveList: PropTypes.func.isRequired,
+  onUnarchiveList: PropTypes.func.isRequired,
 }
 
 /** One item on the open run. */
@@ -846,6 +949,8 @@ function ShoppingList({
   onPurchaseItem,
   onUnpurchaseItem,
   onRenameList,
+  onArchiveList,
+  onUnarchiveList,
   onFinishRun,
   onOpenPastRuns,
 }) {
@@ -858,6 +963,11 @@ function ShoppingList({
   // derived from the same rows, so the number and the list cannot disagree.
   const ordered = orderShoppingItems(items)
   const left = ordered.filter((item) => !item.purchased_at).length
+  // #360 — the one flag that turns this section from a working list into a
+  // record. Everything it switches off is switched off because `0035` would
+  // refuse the write behind it, so nothing here is a control being hidden from
+  // somebody who could otherwise have used it.
+  const archived = Boolean(list.archived_at)
 
   return (
     // #358 — named by the LIST rather than by whatever element is currently
@@ -871,9 +981,34 @@ function ShoppingList({
           rename the region on every tick. The count is its own line under it —
           unless the picker is drawing it (#358), which is what `showCount`
           says. */}
-      <ListHeading list={list} busy={busy} showName={soleList} onRenameList={onRenameList} />
+      <ListHeading
+        list={list}
+        busy={busy}
+        showName={soleList}
+        onRenameList={onRenameList}
+        onArchiveList={onArchiveList}
+        onUnarchiveList={onUnarchiveList}
+      />
 
-      {soleList && run && ordered.length > 0 ? (
+      {/* #360 — what an archived list IS, in one line, because the absence of
+          everything below it would otherwise read as a list that failed to
+          load. It says what a tap on Unarchive would buy rather than "this is
+          archived", which the picker already said. */}
+      {archived ? (
+        <p className="shopping-archived">
+          Put away. Bring it back to add to it again; everything it bought is still below.
+        </p>
+      ) : null}
+
+      {/* The `!archived` here is UNREACHABLE and kept on purpose — *measured*,
+          dropping it reddens nothing against any valid fixture, because an
+          archived list's open run is empty by `0035`'s precondition and so
+          `ordered.length > 0` is false for every archived list the database can
+          produce. Recorded rather than removed for two reasons: it says what
+          the branch is for, and it is the line that would matter first if the
+          archive precondition were ever loosened to admit bought items. The
+          same shape as the `if (error)` in the scroll effect above. */}
+      {!archived && soleList && run && ordered.length > 0 ? (
         <p className="shopping-count">{leftToBuy(left)}</p>
       ) : null}
 
@@ -881,12 +1016,15 @@ function ShoppingList({
           create_shopping_list opens the first run in the same transaction, and
           the finish RPC (#354) opens the next — but the read model admits it,
           and a list that vanished from the screen would be worse than one that
-          says so. */}
-      {!run ? <p className="card__body">This list has no open run.</p> : null}
+          says so. Not said of an archived list: there is nothing to shop from
+          either way, and the line above has already said which. */}
+      {!archived && !run ? <p className="card__body">This list has no open run.</p> : null}
 
-      {run && items.length === 0 ? <p className="card__body">Nothing to buy yet.</p> : null}
+      {!archived && run && items.length === 0 ? (
+        <p className="card__body">Nothing to buy yet.</p>
+      ) : null}
 
-      {ordered.length > 0 ? (
+      {!archived && ordered.length > 0 ? (
         <ul className="shopping-items">
           {ordered.map((item) => (
             <ShoppingItem
@@ -920,7 +1058,7 @@ function ShoppingList({
 
           Keyed on the run, which is what closes the confirm after a finish —
           see FinishRun's docblock. */}
-      {run && ordered.length > 0 ? (
+      {!archived && run && ordered.length > 0 ? (
         <FinishRun
           key={run.id}
           runId={run.id}
@@ -930,7 +1068,7 @@ function ShoppingList({
         />
       ) : null}
 
-      {run ? (
+      {!archived && run ? (
         <form
           className="stack shopping-add"
           noValidate
@@ -1034,12 +1172,17 @@ ShoppingList.propTypes = {
   onPurchaseItem: PropTypes.func.isRequired,
   onUnpurchaseItem: PropTypes.func.isRequired,
   onRenameList: PropTypes.func.isRequired,
+  onArchiveList: PropTypes.func.isRequired,
+  onUnarchiveList: PropTypes.func.isRequired,
   onFinishRun: PropTypes.func.isRequired,
   onOpenPastRuns: PropTypes.func.isRequired,
 }
 
 export default function Shopping({
   lists,
+  archivedCount,
+  showArchived,
+  onShowArchived,
   runs,
   items,
   members,
@@ -1051,6 +1194,8 @@ export default function Shopping({
   onSelectList,
   onCreateList,
   onRenameList,
+  onArchiveList,
+  onUnarchiveList,
   onAddItem,
   onRemoveItem,
   onPurchaseItem,
@@ -1066,6 +1211,51 @@ export default function Shopping({
   // did not leave there.
   const [creating, setCreating] = useState(false)
 
+  // #360 — BRING THE REFUSAL TO THE PERSON WHO CAUSED IT.
+  //
+  // The error strip is outside every list, at the foot of the tab, which is
+  // right: it is the server's refusal and not a judgement of anyone, and #35
+  // AC 9 holds the list itself free of alert styling. What that placement costs
+  // was never measured until this story, and it is expensive: at 360x800, a
+  // refused Archive put the sentence **770px below the control and off screen,
+  // with the page not scrolled and nothing at the control changing** — the tap
+  // produced an identical screen. The same is true of #358's rename (757px,
+  // measured as the control for this finding), which at least leaves its editor
+  // open with the typed text; an archive leaves no trace at all.
+  //
+  // So the strip is scrolled to when it appears, and this is the whole of the
+  // fix — the strip does not move, the placement argument is untouched, and
+  // every refusal on this surface is covered rather than the two this story
+  // added. Owner's call at #360's design pass; #97 set the precedent with
+  // `scrollIntoView` on the field a fold had pushed away.
+  //
+  // `block: 'center'` rather than `'nearest'`, and that was measured too rather
+  // than chosen. `nearest` scrolls the minimum, which put the sentence's bottom
+  // edge at **800.0 of an 800px viewport** — legible in a screenshot and
+  // exactly where a phone's browser chrome and gesture bar sit. `center` leaves
+  // it **118px clear of the bottom** on both the archive and the rename
+  // refusals, and the extra scrolling costs nothing on a path that has already
+  // failed.
+  //
+  // Guarded with `?.` because jsdom has no `scrollIntoView` — the assertion in
+  // Shopping.test.jsx is a scroll request on `Element.prototype`, which is what
+  // a DOM-less environment can honestly see.
+  //
+  // THE `if (error)` IS BELT-AND-BRACES AND NO TEST CAN SEE IT, which is worth
+  // saying so the next reader does not read a zero as a coverage hole. Removing
+  // it reddens NOTHING — *measured, 0 of 1* — and the mutation is UNREACHABLE
+  // rather than uncovered: `errorRef` is attached to the strip, the strip
+  // renders only when `error` is truthy, so `errorRef.current` is null in
+  // exactly the case the condition excludes and the optional chain
+  // short-circuits anyway. It stays because it says what the effect is for.
+  // The dependency array is a different matter and IS covered: `[error]` to
+  // `[]` reddens the arrival test, which is the one that mounts without a
+  // sentence and then receives one.
+  const errorRef = useRef(null)
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: 'center' })
+  }, [error])
+
   // `lists` arrives in the order it is drawn — App orders it by name — so the
   // picker, the fallback in `resolveSelectedListId` and this line agree on what
   // "first" means without any of them sorting a second time.
@@ -1074,13 +1264,22 @@ export default function Shopping({
   // only open runs — so a list's run is the one row naming it.
   const run = selected ? (runs.find((r) => r.list_id === selected.id) ?? null) : null
 
+  // #360 — `lists` is what this tab DRAWS, which is App's `visibleShoppingLists`
+  // and therefore already excludes the archived ones unless the toggle is on. So
+  // "the household has no list" is not `lists.length === 0`, and this line is
+  // the whole of that distinction: a household that archived its only list would
+  // otherwise be shown the first-list form, prefilled "Groceries", under a
+  // sentence saying it has no shopping list — while holding one, with its whole
+  // history in it.
+  const hasAnyList = lists.length > 0 || archivedCount > 0
+
   return (
     <section className="card" aria-labelledby="shop-heading">
       <h2 id="shop-heading" className="card__heading">
         Shop
       </h2>
 
-      {lists.length === 0 ? (
+      {!hasAnyList ? (
         <CreateListForm
           busy={busy}
           initialName="Groceries"
@@ -1100,6 +1299,36 @@ export default function Shopping({
         />
       ) : null}
 
+      {/* #360 — under the picker rather than over it, so revealing the archived
+          lists extends the row the person is already looking at. Drawn only
+          once there is something to reveal, and it carries the count because
+          that is what decides whether the tap is worth making. The label says
+          what a tap DOES rather than wearing `aria-pressed`: this is one
+          control with two jobs, not a member of a group of choices, and the tab
+          strip's own rule against borrowing one attribute for two things cuts
+          this way too. */}
+      {archivedCount > 0 ? (
+        <div className="shopping-archived-toggle row row--end">
+          <button
+            className="button button--quiet"
+            type="button"
+            disabled={busy}
+            onClick={() => onShowArchived(!showArchived)}
+          >
+            {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
+          </button>
+        </div>
+      ) : null}
+
+      {/* Everything is put away and the toggle is off — a household state that
+          exists, and one the tab has to say something about rather than
+          rendering a heading with nothing under it. */}
+      {lists.length === 0 && archivedCount > 0 ? (
+        <p className="card__body">
+          Every list is put away. Show them to bring one back, or name a new one.
+        </p>
+      ) : null}
+
       {selected ? (
         <ShoppingList
           key={selected.id}
@@ -1116,6 +1345,8 @@ export default function Shopping({
           onPurchaseItem={onPurchaseItem}
           onUnpurchaseItem={onUnpurchaseItem}
           onRenameList={onRenameList}
+          onArchiveList={onArchiveList}
+          onUnarchiveList={onUnarchiveList}
           onFinishRun={onFinishRun}
           onOpenPastRuns={onOpenPastRuns}
         />
@@ -1126,7 +1357,7 @@ export default function Shopping({
           rarest thing on this tab and the loudest control on it should stay the
           row. The form replaces the button while it is open, so there is one
           "Create list" on screen and never two. */}
-      {lists.length > 0 ? (
+      {hasAnyList ? (
         creating ? (
           <div className="shopping-new">
             <CreateListForm
@@ -1160,7 +1391,7 @@ export default function Shopping({
           list is what #35 AC 9 holds free of alert styling, and this is the
           server's refusal, not a judgement of anyone. */}
       {error ? (
-        <p className="error" role="alert">
+        <p className="error" role="alert" ref={errorRef}>
           {error}
         </p>
       ) : null}
@@ -1169,7 +1400,14 @@ export default function Shopping({
 }
 
 Shopping.propTypes = {
+  // #360 — the lists this tab DRAWS, which App has already filtered by the
+  // toggle below. `archivedCount` is how many it withheld, and it is a count
+  // rather than the rows because nothing here draws a hidden list: it decides
+  // whether the toggle exists and whether "no list yet" is true.
   lists: PropTypes.array.isRequired,
+  archivedCount: PropTypes.number.isRequired,
+  showArchived: PropTypes.bool,
+  onShowArchived: PropTypes.func.isRequired,
   runs: PropTypes.array.isRequired,
   items: PropTypes.array.isRequired,
   members: PropTypes.array.isRequired,
@@ -1184,6 +1422,8 @@ Shopping.propTypes = {
   onSelectList: PropTypes.func.isRequired,
   onCreateList: PropTypes.func.isRequired,
   onRenameList: PropTypes.func.isRequired,
+  onArchiveList: PropTypes.func.isRequired,
+  onUnarchiveList: PropTypes.func.isRequired,
   onAddItem: PropTypes.func.isRequired,
   onRemoveItem: PropTypes.func.isRequired,
   onPurchaseItem: PropTypes.func.isRequired,

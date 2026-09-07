@@ -30,6 +30,7 @@ import {
   SHOPPING_LIST_COLUMNS,
   SHOPPING_RUN_COLUMNS,
   addItem,
+  archiveList,
   createList,
   finishRun,
   normalizeName,
@@ -38,6 +39,7 @@ import {
   readShopping,
   removeItem,
   renameList,
+  unarchiveList,
   unpurchaseItem,
 } from './shopping.js'
 
@@ -117,7 +119,10 @@ describe('the column constants', () => {
       expect(cols).not.toContain('*')
       expect(cols.split(',').map((c) => c.trim())).toContain('household_id')
     }
-    expect(SHOPPING_LIST_COLUMNS).toBe('id, household_id, name, created_at')
+    // #360 — `archived_at` joined the list's constant with `0035`, which grants
+    // exactly this column and no other. The pairing is what liveSchema.test.js
+    // holds: a column asked for here and not granted there answers `42703`.
+    expect(SHOPPING_LIST_COLUMNS).toBe('id, household_id, name, created_at, archived_at')
     expect(SHOPPING_RUN_COLUMNS).toBe('id, list_id, household_id, opened_at, closed_at, closed_by_member_id')
     expect(SHOPPING_ITEM_COLUMNS).toBe(
       'id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id',
@@ -509,6 +514,53 @@ describe('the ONE direct write the client holds, and the remove that stopped bei
       results.remove_shopping_item = { data: null, error: { message } }
       await expect(removeItem(client, 'i1')).rejects.toThrow(`removing the item: ${message}`)
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // #360 — putting a list away and bringing it back.
+  //
+  // Both are RPCs and NEITHER writes `shopping_lists` directly, which is the
+  // property worth asserting here rather than in prose: the client holds
+  // `update (name)` and nothing else on that table, so an implementation that
+  // reached for `.update({ archived_at: … })` would be refused by the live
+  // project and pass every pure test in this repo. The absence of a table op
+  // is what this file can see and the pglite suite cannot.
+  // -------------------------------------------------------------------------
+
+  it('archiveList calls the RPC by name with the list, and writes no column itself', async () => {
+    results.archive_shopping_list = { data: { ...LIST, archived_at: '2026-09-06T12:00:00Z' }, error: null }
+    const away = await archiveList(client, 'l1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'archive_shopping_list', args: { list: 'l1' } }])
+    expect(opsOn('shopping_lists')).toEqual([])
+    expect(away.archived_at).toBe('2026-09-06T12:00:00Z')
+  })
+
+  it('unarchiveList calls the RPC by name with the list, and writes no column itself', async () => {
+    results.unarchive_shopping_list = { data: { ...LIST, archived_at: null }, error: null }
+    const back = await unarchiveList(client, 'l1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'unarchive_shopping_list', args: { list: 'l1' } }])
+    expect(opsOn('shopping_lists')).toEqual([])
+    expect(back.archived_at).toBeNull()
+  })
+
+  it('both refuse a list they cannot name before any request', async () => {
+    await expect(archiveList(client, '')).rejects.toThrow(/which list/i)
+    await expect(unarchiveList(client, null)).rejects.toThrow(/which list/i)
+    expect(calls).toEqual([])
+  })
+
+  it('carries each archive refusal to the caller, by its sentence', async () => {
+    // The one a person can act on is the first, and both ways out of it are on
+    // the screen that raised it: Done shopping under the list, Remove on every
+    // unbought row. The other two are what a second phone reads.
+    for (const message of ['finish or clear this run first', 'this list is archived']) {
+      results.archive_shopping_list = { data: null, error: { message } }
+      await expect(archiveList(client, 'l1')).rejects.toThrow(`archiving the list: ${message}`)
+    }
+    results.unarchive_shopping_list = { data: null, error: { message: 'this list is not archived' } }
+    await expect(unarchiveList(client, 'l1')).rejects.toThrow(
+      'bringing the list back: this list is not archived',
+    )
   })
 })
 

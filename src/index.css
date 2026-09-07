@@ -1395,6 +1395,41 @@ body {
   color: var(--ink);
 }
 
+/* #360 — the toggle that reveals the lists the household put away. It sits
+   under the picker so that pressing it extends the row above it rather than
+   changing something off screen, and it is drawn only once there is something
+   to reveal. Quiet and right-aligned, on `.shopping-new`'s reasoning: the
+   loudest control on this tab stays the row a shopper taps. The bottom margin
+   matches `.shopping-picker`'s so the gap above the list is the same whether
+   the picker, the toggle, or both are on screen. */
+.shopping-archived-toggle {
+  margin-bottom: 0.875rem;
+}
+
+/* What an archived list is, in one line. The dimmed register `.shopping-count`
+   and the meta lines use — it is a fact about the list rather than an
+   instruction — and the same top margin the count has, so the line under the
+   heading sits in one place whichever of the two is drawn. */
+.shopping-archived {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #360 — the list's controls, wrapping as a PAIR rather than as two siblings of
+   the heading row. Measured at 360x800: the name (72.3px for "Groceries"), a
+   92px Rename and an 87.6px Archive with two 8px gaps come to 267.9px against
+   263.2px of row, so as siblings the row broke between the two controls and
+   Archive landed alone underneath, reading as something else entirely. As one
+   flex child they go over together and the name keeps the line above them,
+   which is what a long name already did. */
+.shopping-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 /* The editor that replaces it. The top margin is the heading's, so the list
    does not jump up the screen when the editor opens. */
 .shopping-rename {

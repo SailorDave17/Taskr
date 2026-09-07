@@ -438,6 +438,11 @@ client two acts in an order somebody chooses.
   the week boundary.**
 - [`license-scope.md`](docs/license-scope.md) — what the MIT license in `LICENSE` does and does not
   cover, given the legacy code's five classroom contributors.
+- [`shopping-aisle-spike.md`](docs/shopping-aisle-spike.md) — which retailer APIs expose per-store
+  aisle location to an individual developer, cell by cell with the URL and the date each was read
+  (#362, 2026-09-06): Kroger does, Walmart's documented response has no such field and Target has
+  no public programme, plus the terms that shape how Kroger's could be used. **Read before filing
+  or re-cutting any Phase 2 shopping stretch story.**
 
 ## License
 

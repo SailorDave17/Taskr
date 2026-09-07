@@ -256,6 +256,29 @@ export const LIVE_RPCS = Object.freeze([
   // two lock-free writers above answer — which classifies as PRESENT with
   // nothing touched. Predicted from the body, not measured, until the apply.
   Object.freeze({ fn: 'finish_shopping_run', args: Object.freeze({ run_id: 'uuid' }) }),
+  // #368, arriving with `0034` — red on purpose until that file is applied.
+  // The fourth writer of `shopping_items`, and the one that used to be the
+  // client's own DELETE: `0034` withdraws that grant and its policy in the
+  // same file, so after the apply there is no client DML on the table at all.
+  // Its body's first act after the auth check is an unlocked read, then the
+  // RUN row `for key share` — a lock, so the read-only GET refuses it at
+  // executor start with `25006` like `finish_shopping_run` above, not the
+  // `P0001` a lock-free writer answers. Predicted from the body, not measured,
+  // until the apply.
+  Object.freeze({ fn: 'remove_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  // #360, arriving with `0035` — red on purpose until that file is applied.
+  // Putting a list away and bringing it back; the only writers of
+  // `shopping_lists.archived_at`, which the client may read and not write.
+  //
+  // The two answer the read-only GET DIFFERENTLY, and both classify as
+  // PRESENT. `archive_shopping_list` takes the run row `for update` after its
+  // list check, so a list id that names nothing is refused at `P0001` before
+  // any lock — which is the shape the two lock-free `0032` writers answer —
+  // while a real list would reach the lock and answer `25006`. The nil UUID
+  // this probe sends names nothing, so `P0001` is the predicted reading for
+  // both. Predicted from the bodies, not measured, until the apply.
+  Object.freeze({ fn: 'archive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
+  Object.freeze({ fn: 'unarchive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

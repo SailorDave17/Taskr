@@ -87,13 +87,21 @@
 --      referenced, which is what stood between a concurrent remove and a raw
 --      `23503` aborting the whole finish.
 --
--- What this does NOT close, stated rather than implied: a client `delete`
--- that arrives AFTER the carry has locked the item waits for the finish and
--- then proceeds against the original under a policy evaluated on its own
--- older snapshot — the closed run loses its record of the item while the copy
--- survives on the next run. The delete path is a policy (`0032`) and a policy
--- cannot lock the run, so that is filed as #368 under #349 rather than
--- reached from here. Sequential behaviour of the three writers is
+-- What this did NOT close, and what did (amended by #368, 2026-09-06): a
+-- client `delete` that arrives AFTER the carry has locked the item waits for
+-- the finish and then proceeds against the original under a policy evaluated
+-- on its own older snapshot — the closed run loses its record of the item
+-- while the copy survives on the next run. The delete path was a policy
+-- (`0032`) and a policy cannot lock the run, so it was filed as #368 under
+-- #349 rather than reached from here. **`0034` closed it**, by the only route
+-- that could: it makes the remove the fourth `security definer` writer of
+-- `shopping_items`, taking `for key share` on the run first like the three
+-- below, and withdraws the client's DELETE grant and that policy in the same
+-- file. So the set of writers of this table is now closed, and re-pasting
+-- `0032` over the top hands the client its delete back — a hazard this file's
+-- own test asserts, and one that re-applying THIS file does not fix.
+--
+-- Sequential behaviour of the three writers is
 -- unchanged and `shopping.pglite.test.js` holds it; the only observable of
 -- the new clauses in a single connection is the catalog, which
 -- `finish-shopping-run.pglite.test.js` reads.

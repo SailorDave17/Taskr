@@ -7,7 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0033` are ALL applied to the live project (`0033` on 2026-09-05 in #354's own
+- Status: **`0001`–`0035` are ALL applied to the live project (`0035` on 2026-09-06 in #360's own
+  session, at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back
+  identical — see its entry below; `0034` on 2026-09-06 in #368's own
+  session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
+  identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and the expected-red set holds ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
   it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
@@ -25,6 +29,78 @@
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0035` on 2026-09-06 (#360, archiving a shopping list)**, applied with `npm run migrate:live`
+  in the story's own session, before the merge and the `release` promotion — `0020`'s safe order —
+  at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back identical.
+  One nullable COLUMN (`shopping_lists.archived_at`) with a SELECT grant for `authenticated` and
+  no write grant for anybody, two NEW `security definer` functions with `search_path` emptied
+  (`archive_shopping_list`, `unarchive_shopping_list`) executable by `authenticated` and not by
+  `anon`, and `0032`/`0033`'s `add_shopping_item` and `0033`'s `finish_shopping_run` REPLACED at
+  their exact signatures to refuse an archived list. No policy changes and no other grant moves.
+  **`check:live` is NOT blind to this one, in two ways at once**: two new argument sets moved the
+  denominator from 46 to **48** and both rows were red on purpose, and the new column turned the
+  EXISTING `shopping_lists` table row red (`42703`) without moving the denominator, because a table
+  is probed once with every column the app selects — *measured
+  **44 of 48** immediately before* (three reds of `0035`'s making plus
+  the standing `extract-description`) and *measured **47 of 48**
+  immediately after*. What it cannot see is the half that matters most here — that the stamp is
+  readable and writable by NO client role, which is what makes the archive's precondition
+  unbypassable — so `npm run probe:live-grants` gained a row on `chores.missed_at`'s reasoning,
+  reading **18 of 19** before and
+  **19 of 19** after. And what neither can see — the bodies, the
+  archive's `for update` on the run row, the ACLs and the comments — a read-only catalog query over
+  the Management API carries, taken on both sides in the same session:
+  **before** (*measured*), PostgreSQL 17.6, no `archived_at` column on
+  `shopping_lists` and no grant for it, no function named `archive_shopping_list` or
+  `unarchive_shopping_list`, `add_shopping_item`'s body md5 `078c3b833c31e8f35f736ab8142bc250` and
+  `finish_shopping_run`'s `f8407233ccd48d4e3a3677b610bd13a2` with neither mentioning `archived_at`,
+  `finish_shopping_run`'s comment naming #354 only, and six functions matching `%shopping%`;
+  **after**, one nullable `timestamptz` column carrying #360's comment, `authenticated` holding
+  **SELECT and only SELECT** on it, both new functions present at `list uuid` with `secdef=true`,
+  `search_path=""`, executable by `authenticated` and not by `anon`, the two replaced bodies moved to
+  `6a61b75969bf18dc680019ded154cc42` and `4fb0ec0bbc8e0b1919a9efa3796a6fc3` and both now mentioning
+  `archived_at`, `finish_shopping_run`'s comment gaining "Refuses an archived list (#360)", and eight
+  functions matching `%shopping%`.
+
+  **The controls held on both sides**, and the first is the one the design rests on: the columns
+  `authenticated` may UPDATE on `shopping_lists` read `name` before and `name` after — so the client
+  still cannot write the stamp, and the archive's precondition cannot be bypassed by a direct
+  `update`. Policies on `shopping_lists` stayed at 2, `shopping_items` held no table-level privilege
+  for `authenticated` or `anon` on either side (`0034`'s revoke, intact), and the table comment is
+  unchanged.
+
+  **`0035` was applied TWICE in this session, and the second apply is the one that counts.** The
+  readings above are the first. A review fan-out then found that the first draft's
+  `archive_shopping_list` took its lock through the MUTABLE predicate `closed_at is null … for update
+  of r`: a `finish_shopping_run` committing during the lock wait retires the matched row, READ
+  COMMITTED's recheck drops it, the successor run is outside the archive statement's snapshot, so
+  `found` is false, **the emptiness check is skipped whole**, and the list is archived holding the
+  items the finish carried forward — falsifying this entry's own "empty by the archive precondition",
+  which is the stated reason the other three item writers carry no archive check. The fix moves the
+  lock to the row whose identity cannot change: `for update` on `shopping_lists`, with
+  `add_shopping_item` and `finish_shopping_run` taking `for key share` on the same row before their
+  run lock, so the order is **list → run → item**.
+
+  Re-applied at md5 `715b22131f51be676cdbc818cdb04bee` (26208 characters, 15 statements), read back
+  identical. Only the three function bodies moved: `add_shopping_item` from
+  `6a61b75969bf18dc680019ded154cc42` to `6c44e92e3005db85fb357e644205e17f`, `finish_shopping_run`
+  from `4fb0ec0bbc8e0b1919a9efa3796a6fc3` to `c3515cea2026f1d969bd090a5fe6095c`, and
+  `archive_shopping_list` rewritten; the column, its comment, its grant, the two function ACLs and
+  every control above read identically on both applies.
+
+  **The lock order is verified on the live bodies rather than inferred from a moved hash** — a
+  changed md5 says a replace landed and nothing about what landed. *Measured* by
+  `pg_get_functiondef` through the Management API immediately after the second apply:
+  `archive_shopping_list` carries `for update;` on the list and **no run lock of either mode**, and
+  reaches the items by joining `shopping_runs` through the list; `add_shopping_item` carries
+  `for key share;` at offset 1524, `for key share of r;` at 1842 and its `archived_at` read at 2263;
+  `finish_shopping_run` carries them at 1380, `for update of r;` at 1874 and its read at 2370 — so
+  **list before run before stamp in both**. `purchase_shopping_item`, `unpurchase_shopping_item` and
+  `remove_shopping_item` carry the run's key share and no list lock, which is the intended
+  asymmetry; `unarchive_shopping_list` carries none at all.
+
+  Re-runnable by construction, which is what made a second apply safe rather than alarming — the
+  same shape `0034` records, and for the same reason: the first apply is what surfaced the defect.
   **`0033` on 2026-09-05 (#354, `finish_shopping_run`)**, applied with `npm run migrate:live` in
   the story's own session, before the merge and the `release` promotion — `0020`'s safe order —
   at md5 `70af1c0af2dc5fbec17f927dcee9452b` (19651 characters, 10 statements),
@@ -444,6 +520,103 @@
       and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
       project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
       reddens the member-delete test, predicted 1.
+  - **`0035`** (#360) — `shopping_lists.archived_at`, `archive_shopping_list(list)` and
+    `unarchive_shopping_list(list)`: put a list away so the picker stops drawing it, and bring it
+    back, without deleting a row. Applied 2026-09-06 in #360's own session;
+    *measured* **44 of 48** on `check:live` immediately before and
+    **47 of 48** immediately after, the one remaining red being the
+    excused `extract-description`; and `probe:live-grants`
+    **19 of 19**, negative control included. What this entry
+    records is the access model:
+    - **The stamp is read by the client and written by nobody but the two RPCs.** `archived_at`
+      joins the SELECT grant `0032` set per column, and joins no UPDATE grant — the client still
+      holds `update (name)` on `shopping_lists` and nothing else. That is not a convenience: the
+      archive is refused while the list's open run holds any item, and that check is a read
+      followed by a write, so it is only sound taken under a lock. A client `update` could take
+      none. `probe:live-grants` is the only instrument that can see the absence, on
+      `chores.missed_at`'s reasoning — a check that only ever reads cannot report being allowed a
+      write it never attempts.
+    - **The archive takes the RUN row `for update`, and that is the schema's existing lock order.**
+      `0033` gave the three item writers `for key share` on the run row before they touch an item,
+      and `0034` gave the fourth the same; `for update` conflicts with all of them, so an add
+      arriving while an archive is in flight waits and is then refused by the stamp, and an archive
+      arriving while an add is in flight waits and then counts the item it added. Nothing new is
+      lockable: the list row is deliberately NOT locked, because the state being protected — "the
+      open run is empty" — lives on the run.
+    - **Two writers can reach an archived list and both are replaced here**, at their exact
+      signatures so neither becomes an overload (`PGRST203`): `add_shopping_item`, which would
+      otherwise put an item on a list nobody can see, and `finish_shopping_run`, which would
+      otherwise CLOSE an archived list's empty run and OPEN a fresh one. The other three item
+      writers are untouched, and the reason is structural rather than an omission — an archived
+      list's open run is empty by the archive's own precondition, so a purchase, an un-purchase and
+      a remove have no item to name.
+    - **The refusal is stricter than the story's AC said, and the owner chose it at pickup**
+      (2026-09-06). AC 1 said "unbought items"; the story's own rationale called an archived list's
+      open run "empty". Under the looser rule a list whose open run held only BOUGHT items could be
+      archived, and those rows would be reachable from nowhere — an open run is not history
+      (`readClosedRuns` is `closed_at is not null`) and an archived list draws its finished runs
+      only. The stricter rule makes "there is nothing here to draw" a fact about the database.
+    - **The re-paste hazard is two files deep and both directions are asserted.** Re-applying
+      `0033` alone silently restores the pre-archive bodies of both replaced functions, so an
+      archived list becomes writable with nothing erroring. Re-applying `0032` is worse in kind: it
+      opens with `revoke all on public.shopping_lists from authenticated, anon` and re-grants four
+      columns by name, so the client stops being able to READ the stamp — every list comes back
+      looking active, the picker draws the ones the household put away, and nothing refuses
+      anything. The safe re-paste order is the whole sequence and now ends on `0035`;
+      `archive-shopping-list.pglite.test.js` asserts both.
+    - **An archived name stays taken.** The unique index is `(household_id, lower(name))` and
+      `0035` does not exclude archived rows from it, so a new "Groceries" beside an archived one is
+      refused with #358's own sentence. The better of the two failures: the alternative is a
+      household holding two lists it cannot tell apart in a picker that shows the name and nothing
+      else.
+  - **`0034`** (#368) — `remove_shopping_item(item)`: delete an unbought item from an open run,
+    holding the run row `for key share` FIRST, and the withdrawal of the client DELETE grant and
+    the policy `0032` created for it. Applied 2026-09-06 in #368's own session;
+*measured* **44 of 46** on `check:live` immediately before and
+    **45 of 46** immediately after, the one remaining red being the excused `extract-description`;
+    and `probe:live-grants` **18 of 18, negative control included, anon reaching nothing**. What
+    this entry records is the access model:
+    - **The client no longer writes `shopping_items` at all.** `0032` granted `delete` and wrote
+      `shopping_items_delete_unbought_on_open_run` to bound it: household, `purchased_at is null`,
+      and the item's run open. That policy is correct about WHICH ROWS and can say nothing about
+      WHEN, because **a policy cannot take a lock**. `0033` gave the other three writers the run's
+      `for key share` and could not give it to this one — the header of `0033` said so and filed
+      it here. After `0034`: `authenticated` holds SELECT on every column of `shopping_items`,
+      `UPDATE (name)` on `shopping_lists`, and no INSERT, UPDATE or DELETE anywhere in the
+      feature; the four writers of the item table are four `security definer` functions with one
+      lock order between them.
+    - **The window it closes is a LOST RECORD, not a lost delete.** A finish holds an unbought item
+      as a carry source; a remove of that item waits, the finish commits (run closed, copy made
+      with `carried_from_item_id` set), and the delete then proceeds against the ORIGINAL under a
+      predicate evaluated on its own older snapshot, where the run still read as open. The closed
+      run loses its record of an item it held — `0032`'s "a closed run is the record", broken —
+      and the copy survives with `carried_from_item_id` nulled by `on delete set null`, so it is
+      indistinguishable from an item somebody typed. Nothing raises. Found by #354's review
+      fan-out before `0033` reached any project, and unreachable by every instrument here: pglite
+      is one connection and #356's live harness is finish-against-finish.
+    - **It refuses by name** — `run already closed` and `item already bought`, the family's own
+      sentences (owner decision, 2026-09-06, taken against preserving the DELETE's silence). The
+      catalogue tests assert the clause and its ORDER for all four writers now, anchored on the
+      statement's terminator so a body's own prose about the clause cannot satisfy them.
+    - **The re-paste hazard is sharper than `0033`'s and is asserted.** Re-applying `0032` over
+      the top restores the delete grant AND the policy, handing the client back the writer that
+      cannot lock — and re-applying `0033` does not fix it, because `0033` never touched a grant.
+      The safe re-paste order ends on `0034`.
+    - **This file was applied TWICE, and the second apply is the record worth keeping.** Its first
+      draft revoked `from public` where `0032` and `0033` both write `from public, anon`, and
+      `probe:live-grants` read **anon still holding execute on `remove_shopping_item`** — a stray,
+      on a project where `0017` exists precisely to keep anon at nothing. The obvious repair is a
+      pglite assertion so the harness catches it next time, and it is **wrong**: putting the first
+      draft back and running that assertion reddens NOTHING (*measured*, 0 of 1), because a bare
+      `revoke … from public` removes the PUBLIC default and this harness's `anon` holds nothing
+      else, while the live project's does. **The catalog probe is the only instrument for this
+      class**, which is what it was built for, and the pglite assertion added here is a regression
+      guard on the definer/search_path/authenticated shape and says so in its own comment.
+    - **One control row in `probe:live-grants` moved, deliberately.** It recorded
+      `shopping_items authenticated=d` — the one whole-row privilege the client held — and `0034`
+      withdraws it, so the recorded expectation is now `null` in the same change. Left alone it
+      would have made that probe red forever on a change somebody chose, which is how an
+      instrument stops being read.
   - **`0033`** (#354) — `finish_shopping_run(run_id)`: close the named open run and open the
     list's next one with every unbought item copied forward, as ONE transaction under
     `select … for update`, returning the new run. Applied 2026-09-05 in #354's own session; the
@@ -481,7 +654,8 @@
       member known NOT to have added the item, and preserving `added_at` keeps carried items at
       the top of the next run's unbought order. The originals are COPIED, never moved: the closed
       run keeps all five of the fixture's rows as the record of what that trip did not manage,
-      which is what #359's past runs will show. Each of the three copy fields has its own
+      which is what #359's past runs show — it reads exactly those rows back, through the
+      client grants `0032` already gives, adding no table, no grant and no migration. Each of the three copy fields has its own
       mutation — the finisher as adder, `now()` as `added_at`, `null` as the origin — and each
       reddened the carry test alone or with the two AC 2 tests that count origins (predicted
       1 / 1 / 3, actual 1 / 1 / 3). Dropping the
@@ -623,6 +797,22 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#360 opened THREE reds on 2026-09-06 and drained all three in its own session** — the
+  `archive_shopping_list` and `unarchive_shopping_list` RPC probes, red from the moment `LIVE_RPCS`
+  listed them, and the `shopping_lists` TABLE probe, which went red the moment `archived_at` joined
+  `SHOPPING_LIST_COLUMNS`. All three until `npm run migrate:live` applied `0035`: *measured
+  **44 of 48** before and **47 of 48** after*,
+  the denominator having moved from 46 to 48 on the two new functions and NOT on the column — a
+  table is probed once, with every column the app selects, so a new column reddens an existing row
+  rather than adding one. Written down here and in README's `check:live` cell in the same change
+  that created the rows, for the reason the #352 bullet below gives. The set is back to the one row
+  below.
+- **#368 opened ONE row on 2026-09-06 and drained it in its own session** — the
+  `remove_shopping_item` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
+  `npm run migrate:live` applied `0034`: *measured **44 of 46** before and
+  **45 of 46** after*, the denominator having moved from 45 to 46 on the one new
+  function. Written down here and in README's `check:live` cell in the same change that created
+  the row, for the reason the #352 bullet below gives.
 - **#354 opened ONE row on 2026-09-05 and drained it in its own session** — the
   `finish_shopping_run` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
   `npm run migrate:live` applied `0033`: *measured **43 of 45** before and

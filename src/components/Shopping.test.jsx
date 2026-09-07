@@ -60,23 +60,37 @@ const boughtBread = {
 // what resolves that id from the read. So every render here names it too; a
 // default of the single fixture list keeps the #353/#355/#357 arrangements
 // saying what they said, and the picker tests below override it.
+/**
+ * #359 — nobody has opened the Past runs disclosure, which is every render
+ * above this story's own tests. App holds this state; the component is handed
+ * it, so a test of the history hands over rows rather than mocking a read.
+ */
+const NO_PAST = { loading: false, loaded: false, runs: [], items: [] }
+
 function setup(overrides = {}) {
   const handlers = {
     onSelectList: vi.fn(),
+    onShowArchived: vi.fn(),
     onCreateList: vi.fn().mockResolvedValue(undefined),
     onRenameList: vi.fn().mockResolvedValue(undefined),
+    onArchiveList: vi.fn().mockResolvedValue(undefined),
+    onUnarchiveList: vi.fn().mockResolvedValue(undefined),
     onAddItem: vi.fn().mockResolvedValue(undefined),
     onRemoveItem: vi.fn().mockResolvedValue(undefined),
     onPurchaseItem: vi.fn().mockResolvedValue(undefined),
     onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
     onFinishRun: vi.fn().mockResolvedValue(undefined),
+    onOpenPastRuns: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Shopping
       lists={[list]}
+      archivedCount={0}
+      showArchived={false}
       runs={[run]}
       items={[milk, eggs]}
       members={members}
+      past={NO_PAST}
       timezone="America/New_York"
       selectedListId="l1"
       {...handlers}
@@ -956,10 +970,289 @@ describe('#358 AC 4 — renaming, on the heading', () => {
   })
 })
 
-describe('#358 AC 8 — nothing on this tab deletes or archives a list', () => {
-  it('offers no such control, on several lists, with an editor open or a form open', async () => {
+// ---------------------------------------------------------------------------
+// #359 — the record of what the household already bought.
+//
+// The arithmetic (which run, what order, how many, whose name) is
+// groupClosedRuns's and is tested in shopping.test.js; the read and its trigger
+// are App's and are tested in App.test.jsx. What is proved here is the SCREEN:
+// the disclosure is closed until somebody opens it, opening asks for this list's
+// history, only the newest run is open, a row is one compact line with no
+// affordance on it, and nothing counts a person.
+// ---------------------------------------------------------------------------
+
+/** A finished run of the fixture list, closed by a member the roster holds. */
+const closedRun = (id, closedAt, closedBy = 'm2') => ({
+  id,
+  list_id: 'l1',
+  household_id: 'h1',
+  opened_at: '2026-09-01T00:00:00Z',
+  closed_at: closedAt,
+  closed_by_member_id: closedBy,
+})
+
+/** An item on a closed run: bought by somebody, or carried into the next one. */
+const pastItem = (id, runId, name, { boughtBy = null, at = null, note = null } = {}) => ({
+  id,
+  run_id: runId,
+  household_id: 'h1',
+  name,
+  note,
+  added_by_member_id: 'm1',
+  added_at: '2026-09-01T01:00:00Z',
+  purchased_at: at,
+  purchased_by_member_id: boughtBy,
+  carried_from_item_id: null,
+})
+
+/** Three trips, ids deliberately not in the order they were finished. */
+const threeRuns = {
+  loading: false,
+  loaded: true,
+  runs: [
+    closedRun('r-mid', '2026-09-04T22:00:00Z'),
+    closedRun('r-new', '2026-09-05T22:00:00Z', 'm1'),
+    closedRun('r-old', '2026-09-03T22:00:00Z'),
+  ],
+  items: [
+    pastItem('p1', 'r-new', 'Milk', { boughtBy: 'm2', at: '2026-09-05T21:02:00Z', note: 'a dozen' }),
+    pastItem('p2', 'r-new', 'Bread'),
+    pastItem('p3', 'r-mid', 'Eggs', { boughtBy: 'm1', at: '2026-09-04T21:00:00Z' }),
+  ],
+}
+
+const pastDisclosure = () => screen.getByText('Past runs').closest('details')
+const runDisclosures = () => Array.from(document.querySelectorAll('.shopping-past__run'))
+
+/**
+ * Open (or close) the disclosure the way a person does — a tap on the summary.
+ *
+ * The wait is not decoration and it is the whole reason this is a helper.
+ * *Measured on this jsdom*: a click on a `<summary>` flips the `open` attribute
+ * synchronously and fires the `toggle` event on a QUEUED TASK, so a
+ * microtask-only flush (`await Promise.resolve()`, which is what `act` gives an
+ * async callback that awaits nothing else) reads zero toggles and the read looks
+ * as though it never fired. A `setTimeout(0)` is what lets the platform's own
+ * event arrive, and the gesture under test is then the real one: click, the
+ * browser's toggle, the handler. Nothing here is a synthetic stand-in for an
+ * event the platform would have to send.
+ */
+const openPast = async (summary = screen.getByText('Past runs')) => {
+  fireEvent.click(summary)
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+describe('#359 AC 4 — the history is read when it is opened, and never on arrival', () => {
+  it('renders the disclosure closed, and asks for nothing', () => {
+    const { onOpenPastRuns } = setup()
+    expect(pastDisclosure()).not.toHaveAttribute('open')
+    expect(onOpenPastRuns).not.toHaveBeenCalled()
+  })
+
+  it('asks for THIS list’s history on the tap, once, naming the list', async () => {
+    const { onOpenPastRuns } = setup()
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+    expect(onOpenPastRuns).toHaveBeenCalledWith('l1')
+  })
+
+  it('asks again on a re-open, and asks nothing when it is closed', async () => {
+    // A person asking twice wants the current answer, not the one this device
+    // happened to keep. Closing is not a question.
+    const { onOpenPastRuns } = setup()
+    const summary = screen.getByText('Past runs')
+    await openPast(summary)
+    await openPast(summary)
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+    await openPast(summary)
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(2)
+  })
+
+  it('a RUN’s own disclosure opening does not re-read — the toggle that is not this one’s', async () => {
+    // `toggle` does not bubble, so React attaches it at the root and simulates
+    // bubbling: a run's disclosure opening arrives at the outer handler as
+    // though this element had been toggled. Measured in Chrome at 360x800
+    // BEFORE the target check: one tap on Past runs produced 55 toggle events
+    // in 1.5 s — the newest run mounting with `open` re-read, which remounted
+    // the runs, which fired another — and the screen sat on "Reading the
+    // finished runs…" forever.
+    //
+    // IT CAN FAIL, and the prediction that said otherwise was wrong. This test
+    // was written expecting jsdom to be blind to the inner toggle — the #359
+    // App test records exactly one call while a run mounts open, which looked
+    // like the same evidence — so the mutation was predicted at 0 and *measured
+    // at 1 of 268*: deleting the target check from Shopping.jsx reddens this
+    // row and nothing else. What the earlier count actually shows is that a run
+    // mounting open inside the same commit does not reach the handler, while a
+    // person opening one later does; the browser hit the first case 55 times in
+    // 1.5 s and jsdom hits the second here.
+    const { onOpenPastRuns } = setup({ past: threeRuns })
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+
+    const older = runDisclosures()[1]
+    fireEvent.click(older.querySelector('summary'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(older).toHaveAttribute('open')
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the list the picker is on, not the first list of the household', async () => {
+    const { onOpenPastRuns } = setup({
+      lists: [list, { ...list, id: 'l2', name: 'Hardware' }],
+      runs: [run, { ...run, id: 'r2', list_id: 'l2' }],
+      selectedListId: 'l2',
+    })
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledWith('l2')
+  })
+
+  it('says it is reading while the read is in flight, and writes nothing', async () => {
+    const handlers = setup({ past: { ...NO_PAST, loading: true } })
+    expect(screen.getByText(/reading the finished runs/i)).toBeInTheDocument()
+    // Not the empty-state sentence: "reading" and "there are none" are different
+    // answers and the first must not read as the second.
+    expect(screen.queryByText(/no finished runs yet/i)).not.toBeInTheDocument()
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onOpenPastRuns') expect(handler).not.toHaveBeenCalled()
+    }
+  })
+})
+
+describe('#359 AC 1 — one disclosure per finished run, newest first and newest open', () => {
+  it('orders the runs newest first and heads each with when and who, then how much', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const headings = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)
+    expect(headings).toEqual([
+      'Finished Sep 5, 2026 by Placeholder',
+      'Finished Sep 4, 2026 by Robin',
+      'Finished Sep 3, 2026 by Robin',
+    ])
+    // The counts are the run's own — items, and never a person (#35 AC 9).
+    expect(runDisclosures()[0]).toHaveTextContent('1 bought, 1 carried over')
+    expect(runDisclosures()[1]).toHaveTextContent('1 bought, 0 carried over')
+  })
+
+  it('opens the NEWEST and leaves every earlier run collapsed', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    expect(runDisclosures().map((node) => node.hasAttribute('open'))).toEqual([true, false, false])
+  })
+
+  it('a closer the roster no longer holds is "a former member" rather than a blank', async () => {
+    setup({
+      past: { ...threeRuns, runs: [closedRun('r-new', '2026-09-05T22:00:00Z', null)], items: [] },
+    })
+    await openPast()
+    expect(screen.getByRole('heading', { level: 4 })).toHaveTextContent(
+      'Finished Sep 5, 2026 by a former member',
+    )
+  })
+
+  it('draws the history of THIS list even while App still holds another list’s rows', async () => {
+    // The window is real: the read names one list, and a switch between two
+    // lists while it is in flight would otherwise draw the other list's trips
+    // under this list's name.
+    setup({
+      lists: [list, { ...list, id: 'l2', name: 'Hardware' }],
+      runs: [run, { ...run, id: 'r2', list_id: 'l2' }],
+      selectedListId: 'l2',
+      past: threeRuns,
+    })
+    await openPast()
+    expect(screen.queryByRole('heading', { level: 4 })).not.toBeInTheDocument()
+    expect(screen.getByText(/no finished runs yet/i)).toBeInTheDocument()
+  })
+})
+
+describe('#359 AC 2 — a closed row is one compact line, not the working row struck through', () => {
+  it('carries the name, the note, and who bought it and when', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    // Scoped to the history: the open run is showing an item of the same name,
+    // which is the ordinary case — a household buys milk most weeks.
+    const row = within(pastDisclosure()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('a dozen')
+    // #355's own sentence, reused rather than reworded: 21:02 UTC is 5:02 PM in
+    // New York, and the zone is the household's.
+    expect(row).toHaveTextContent('bought by Robin · 5:02 PM')
+  })
+
+  it('says "carried over" for an item the trip did not buy', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const row = within(pastDisclosure()).getByText('Bread').closest('li')
+    expect(row).toHaveTextContent('carried over')
+    expect(row).not.toHaveTextContent(/bought by/i)
+  })
+
+  it('offers no tick, no remove and no undo anywhere in the history', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const history = pastDisclosure()
+    expect(history.querySelectorAll('button')).toHaveLength(0)
+    for (const forbidden of [/^mark /i, /^remove /i, /not bought after all/i]) {
+      expect(within(history).queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+    }
+    // And it is not the working row: the classes that carry the tap target and
+    // the controls appear nowhere inside it.
+    expect(history.querySelectorAll('.shopping-item__tick')).toHaveLength(0)
+    expect(history.querySelectorAll('.shopping-item__actions')).toHaveLength(0)
+  })
+
+  it('leaves the working list alone — the open run’s controls are all still there', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    expect(screen.getByRole('button', { name: 'Mark Milk bought' })).toBeInTheDocument()
+    // Two rows called Milk are on screen now: one on the open run and one in the
+    // history. The tap target is the open run's, and only the open run's.
+    expect(screen.getAllByText('Milk')).toHaveLength(2)
+  })
+})
+
+describe('#359 AC 5 and AC 6 — nothing finished yet, and nothing about anybody', () => {
+  it('reads "No finished runs yet" once the read has landed and found none', async () => {
+    setup({ past: { loading: false, loaded: true, runs: [], items: [] } })
+    await openPast()
+    expect(screen.getByText(/no finished runs yet/i)).toBeInTheDocument()
+  })
+
+  it('says nothing about an empty history before anybody has asked', () => {
+    // `loaded` is what distinguishes them, which is why App's state is an object
+    // and not an array: an unasked question is not an answer of "none".
+    setup()
+    expect(screen.queryByText(/no finished runs yet/i)).not.toBeInTheDocument()
+  })
+
+  it('carries no per-person total, no rank, and nothing styled as an error', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const history = pastDisclosure()
+    for (const forbidden of [/most/i, /rank/i, /streak/i, /score/i, /leader/i, /total/i]) {
+      expect(within(history).queryByText(forbidden)).not.toBeInTheDocument()
+    }
+    expect(within(history).queryByRole('alert')).not.toBeInTheDocument()
+    expect(history.querySelectorAll('.error')).toHaveLength(0)
+  })
+})
+
+// #358 AC 8 said "nothing on this tab deletes OR ARCHIVES a list", and #360 is
+// the story that supersedes the second half of it. The first half survives
+// unchanged and is the half worth keeping: nothing here destroys a list, and an
+// archive is not a soft delete — the row, its runs and its items are all still
+// there, which is `archive-shopping-list.pglite.test.js`'s to prove. Rewritten
+// rather than deleted, and rewritten rather than narrowed to `/delete/`: the
+// property is "no control on this tab ends a list", and the vocabulary a future
+// control might use for that is the part the regex is for.
+describe('#358 AC 8, as #360 leaves it — nothing on this tab DESTROYS a list', () => {
+  it('offers no delete, on several lists, with an editor open or a form open', async () => {
     setup({ ...twoLists, selectedListId: 'l1' })
-    const forbidden = /delete|archive|remove list|close list/i
+    const forbidden = /delete|remove list|close list|discard/i
     expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
     await clickAndSettle(screen.getByRole('button', { name: /^rename /i }))
     expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
@@ -968,5 +1261,413 @@ describe('#358 AC 8 — nothing on this tab deletes or archives a list', () => {
     expect(screen.queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
     // The only Remove on the surface is an item's, which #353 already holds.
     expect(screen.getAllByRole('button', { name: /^remove /i }).length).toBeGreaterThan(0)
+  })
+
+  it('CONTROL: the control that DID arrive is the archive, and it is not styled as a danger', async () => {
+    // Without this the test above is satisfied by a tab with no list controls
+    // at all — which is what it asserted before #360, and would go on asserting
+    // if the archive were dropped tomorrow.
+    setup({ ...twoLists, selectedListId: 'l1' })
+    const archive = screen.getByRole('button', { name: /^archive groceries$/i })
+    expect(archive).toBeInTheDocument()
+    // Nothing is destroyed, so the red the roster's Remove wears would be
+    // saying something untrue — the same argument #357 made about Finish.
+    expect(archive.className).toContain('button--quiet')
+    expect(archive.className).not.toContain('button--danger')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #360 — putting a list away, and what the tab does with one that is away.
+//
+// The stamp is the whole rule and it arrives on the row, so every case here is
+// a fixture rather than a gesture: App decides which lists this tab is handed
+// (`visibleShoppingLists`) and how many it withheld (`archivedCount`), and this
+// file proves what the tab does with each answer. That App computes them from
+// `partitionShoppingLists` and the toggle is App.test.jsx's.
+// ---------------------------------------------------------------------------
+
+/** Hardware, put away. The stamp is all that distinguishes it. */
+const hardwareAway = { ...hardware, archived_at: '2026-09-06T10:00:00Z' }
+
+describe('#360 AC 3 — the toggle that reveals the lists a household put away', () => {
+  it('is absent while nothing is archived, so a household that never archives sees the tab it always saw', () => {
+    setup()
+    expect(screen.queryByRole('button', { name: /archived/i })).not.toBeInTheDocument()
+  })
+
+  it('appears with the COUNT once something is archived, and asks the toggle rather than writing', async () => {
+    // The count is what decides whether the tap is worth making, so it is on
+    // the label rather than left to be discovered by pressing.
+    const handlers = setup({ lists: [list], archivedCount: 2, runs: [run], items: [milk, eggs] })
+    const toggle = screen.getByRole('button', { name: 'Show archived (2)' })
+    await clickAndSettle(toggle)
+    expect(handlers.onShowArchived).toHaveBeenCalledWith(true)
+    // Nothing else moved: revealing a list is a view change, not a write.
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onShowArchived') expect(handler, name).not.toHaveBeenCalled()
+    }
+  })
+
+  it('says how to put them back when they are showing', async () => {
+    const { onShowArchived } = setup({
+      lists: [list, hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [run, hardwareRun],
+      items: [milk, eggs, screws, boughtNails],
+      selectedListId: 'l1',
+    })
+    await clickAndSettle(screen.getByRole('button', { name: 'Hide archived' }))
+    expect(onShowArchived).toHaveBeenCalledWith(false)
+  })
+
+  it('does NOT force a picker into existence — #358’s one-button rule still holds', () => {
+    // One active list and one archived one, hidden. There is still no choice
+    // to make, so there is still no segmented control — the household sees its
+    // list, plus a way to find the other one.
+    setup({ lists: [list], archivedCount: 1, runs: [run], items: [milk, eggs] })
+    expect(screen.queryByRole('group', { name: /which list/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+  })
+
+  it('and the picker appears once they are revealed, with the archived one saying so instead of a count', () => {
+    setup({
+      lists: [list, hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [run, hardwareRun],
+      items: [milk, eggs, screws, boughtNails],
+      selectedListId: 'l1',
+    })
+    const labels = pickerButtons().map((b) => b.textContent)
+    expect(labels).toEqual(['Groceries2 left to buy', 'HardwareArchived'])
+    // The count would be honest and useless — an archived list's open run is
+    // empty by 0035's precondition, so every one of them would read "Nothing
+    // left to buy" in the one place a person is choosing between lists.
+    expect(labels[1]).not.toMatch(/left to buy/i)
+  })
+})
+
+describe('#360 AC 3 — an archived list is its history, and the way back', () => {
+  const archivedOnScreen = (overrides = {}) =>
+    setup({
+      lists: [list, hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [run, hardwareRun],
+      items: [milk, eggs, screws, boughtNails],
+      selectedListId: 'l2',
+      ...overrides,
+    })
+
+  it('offers no add form, no Done shopping, no Rename and no item rows', () => {
+    archivedOnScreen()
+    expect(screen.queryByLabelText(/^item$/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^note or quantity$/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /add item/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /done shopping/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^rename /i })).not.toBeInTheDocument()
+    // Nor the rows themselves. NOTE the fixture: `screws` and `boughtNails`
+    // are on `r2`, which is the ARCHIVED list's own run — not the other list's,
+    // as an earlier version of this comment claimed. So these two assertions
+    // are about rows that really are on the list being drawn, and the guard is
+    // what keeps them off the screen.
+    expect(screen.queryByRole('button', { name: /^mark .* bought$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^remove /i })).not.toBeInTheDocument()
+  })
+
+  it('says what it is, in a line, so the absence does not read as a list that failed to load', () => {
+    archivedOnScreen()
+    // Scoped to the archived list's own region, not the whole tab: the picker
+    // above it is drawing "2 left to buy" for the OTHER list, and a surface-wide
+    // query would be answered by that — the assertion would then be about a
+    // sentence belonging to a list this test is not looking at.
+    const region = screen.getByRole('region', { name: 'Hardware' })
+    expect(within(region).getByText(/put away/i)).toBeInTheDocument()
+  })
+
+  it('draws none of the working list’s three sentences — IN THE SHAPE 0035 ACTUALLY PRODUCES', () => {
+    // THE FIXTURE IS THE TEST, and the previous version of it proved nothing.
+    // This file's other archived-list arrangement has two lists (so `soleList`
+    // is false) and items on the run (so `items.length === 0` is false), which
+    // means all three of these sentences were already blocked by conditions
+    // that have nothing to do with `archived` — *measured*: deleting
+    // `!archived &&` from any of the three guarded lines in Shopping.jsx
+    // reddened NOTHING. Found by review, not by this file.
+    //
+    // What `0035` guarantees is narrower and is exactly the shape that makes
+    // the guard bite: an archive is refused while the open run holds anything,
+    // so a real archived list has its open run PRESENT and EMPTY. One list, so
+    // `soleList` is true; a run, so the no-open-run line is reachable; no
+    // items, so "Nothing to buy yet." is reachable. In this arrangement each
+    // sentence is held off the screen by `archived` and by nothing else.
+    setup({
+      lists: [hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [hardwareRun],
+      items: [],
+      selectedListId: 'l2',
+    })
+    const region = screen.getByRole('region', { name: 'Hardware' })
+    expect(within(region).getByText(/put away/i)).toBeInTheDocument()
+    // :1015 — the run is present and EMPTY, so `archived` is the only thing
+    // stopping this. *Measured*: dropping `!archived &&` from that line reddens
+    // this test, where against the two-list fixture it reddened nothing. It is
+    // also the one whose mutation ships a visible defect — without the guard
+    // every archived list reads "Nothing to buy yet." under "Put away."
+    expect(within(region).queryByText(/nothing to buy yet/i)).not.toBeInTheDocument()
+    expect(within(region).queryByText(/this list has no open run/i)).not.toBeInTheDocument()
+
+    // :1003, the count line, is NOT covered here and cannot be — stated rather
+    // than left as an apparent hole. It reads
+    // `!archived && soleList && run && ordered.length > 0`, and an archived
+    // list's open run is empty by `0035`'s precondition, so `ordered.length > 0`
+    // is false for every archived list the database can produce. *Measured*:
+    // dropping `!archived &&` from it reddens 0 against this fixture too, and
+    // no VALID fixture can change that — the guard is unreachable rather than
+    // untested, the same shape as the `if (error)` in the scroll effect. It
+    // stays because it says what the branch is for, and because it is the line
+    // that would matter first if the archive precondition were ever loosened.
+    expect(within(region).queryByText(/left to buy/i)).not.toBeInTheDocument()
+  })
+
+  it('an archived list with NO open run says only that it is put away', () => {
+    // The other reachable archived shape, and the one that covers :1013. A list
+    // with no open run is a state nothing writes today, but the read model
+    // admits it and `archive-shopping-list.pglite.test.js` proves the database
+    // ARCHIVES one — so an archived list can reach this client with `run` null.
+    // Without `!archived &&` on that line it would read "This list has no open
+    // run." under "Put away.", which is the working list's sentence on a record.
+    setup({
+      lists: [hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [],
+      items: [],
+      selectedListId: 'l2',
+    })
+    const region = screen.getByRole('region', { name: 'Hardware' })
+    expect(within(region).getByText(/put away/i)).toBeInTheDocument()
+    expect(within(region).queryByText(/this list has no open run/i)).not.toBeInTheDocument()
+    expect(within(region).queryByText(/nothing to buy yet/i)).not.toBeInTheDocument()
+    // And still the record it is: the history is there, the way back is there.
+    expect(within(region).getByText(/past runs/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unarchive Hardware' })).toBeInTheDocument()
+  })
+
+  it('offers Unarchive, named for the list, and calls the handler with its id', async () => {
+    const { onUnarchiveList, onArchiveList } = archivedOnScreen()
+    const back = screen.getByRole('button', { name: 'Unarchive Hardware' })
+    await clickAndSettle(back)
+    expect(onUnarchiveList).toHaveBeenCalledWith('l2')
+    expect(onArchiveList).not.toHaveBeenCalled()
+  })
+
+  it('still draws its finished runs — the whole point of an archive over a delete', () => {
+    archivedOnScreen()
+    expect(screen.getByText(/past runs/i)).toBeInTheDocument()
+  })
+
+  it('a survivable refusal leaves the list exactly where it was', async () => {
+    // `mutate()` puts the sentence on the strip and this component patches
+    // nothing from the answer — the same both-arms-empty shape every other
+    // write here uses.
+    // The mock is held HERE rather than read back off `setup`'s return: an
+    // override reaches the component and `setup` still returns the spy it
+    // built, so asserting on the returned one would be asserting about a
+    // function the render never saw.
+    const refuses = vi.fn().mockRejectedValue(new Error('nope'))
+    archivedOnScreen({ onUnarchiveList: refuses, error: 'bringing the list back: nope' })
+    await clickAndSettle(screen.getByRole('button', { name: 'Unarchive Hardware' }))
+    expect(refuses).toHaveBeenCalledWith('l2')
+    expect(screen.getByRole('alert')).toHaveTextContent('bringing the list back: nope')
+    expect(screen.getByRole('button', { name: 'Unarchive Hardware' })).toBeInTheDocument()
+  })
+})
+
+describe('#360 — archiving from the working list', () => {
+  it('calls the handler with the list on screen, with no confirm in front of it', async () => {
+    // The asymmetry with Done shopping is deliberate and stated in the
+    // component: a finish cannot be undone, and this is undone by the control
+    // that replaces it.
+    const { onArchiveList } = setup({ ...twoLists, selectedListId: 'l2' })
+    const actions = document.querySelector('.shopping-heading__actions')
+    expect(Array.from(actions.querySelectorAll('button')).map((b) => b.textContent)).toEqual([
+      'Rename',
+      'Archive',
+    ])
+
+    await clickAndSettle(screen.getByRole('button', { name: 'Archive Hardware' }))
+    expect(onArchiveList).toHaveBeenCalledWith('l2')
+
+    // ONE TAP, asserted on the GESTURE rather than on the absence of the words
+    // "are you sure". This line used to be
+    // `queryByText(/are you sure/i)).not.toBeInTheDocument()`, which could
+    // never fail: this surface rules out `window.confirm` and its own confirm
+    // idiom names the consequence instead ("Finish this run? 3 items not bought
+    // will carry over"), so a confirm written in the house style would leave
+    // that regex matching nothing while the property was false. Found by
+    // review. The heading's action group still holding exactly its two
+    // controls is the thing a two-step confirm would actually break.
+    expect(Array.from(actions.querySelectorAll('button')).map((b) => b.textContent)).toEqual([
+      'Rename',
+      'Archive',
+    ])
+  })
+
+  it('every list control is held by `busy`, so a second tap cannot ride a write', async () => {
+    setup({ ...twoLists, selectedListId: 'l1', archivedCount: 1, busy: true })
+    for (const name of [/^archive groceries$/i, /^rename groceries$/i, /show archived/i]) {
+      expect(screen.getByRole('button', { name }), String(name)).toBeDisabled()
+    }
+  })
+})
+
+describe('#360 — a refusal is brought to the person who caused it', () => {
+  // The strip is outside every list, at the foot of the tab, and that placement
+  // is #353's and stays. What it costs was measured on the prototype at
+  // 360x800: a refused Archive put the sentence 770px below the control, off
+  // screen, with the page unscrolled and NOTHING at the control changing.
+  // jsdom has no layout and no `scrollIntoView`, so what it can honestly see is
+  // the request — asserted on `Element.prototype`, which is where the component
+  // has to find the method for the guarded call to fire at all.
+  const withScrollSpy = (run) => {
+    const spy = vi.fn()
+    Element.prototype.scrollIntoView = spy
+    try {
+      return run(spy)
+    } finally {
+      delete Element.prototype.scrollIntoView
+    }
+  }
+
+  it('scrolls the strip into view when a refusal arrives', () => {
+    withScrollSpy((spy) => {
+      setup({ ...twoLists, selectedListId: 'l1', error: 'archiving the list: finish or clear this run first' })
+      expect(screen.getByRole('alert')).toHaveTextContent(/finish or clear this run first/)
+      expect(spy).toHaveBeenCalled()
+    })
+  })
+
+  it('does NOT scroll a tab that is showing no refusal', () => {
+    // WHAT THIS HOLDS, stated at the strength it actually has. An earlier
+    // version of this comment claimed it was the control against an effect with
+    // no dependency array — it is not, and could not be: with no `error` the
+    // strip never mounts, so `errorRef.current` is null and the optional chain
+    // short-circuits whatever the deps say. Found by review.
+    //
+    // What it does hold is worth keeping: no scroll is issued on a tab with no
+    // sentence on it. That is the guard against `errorRef` being re-parented to
+    // an always-mounted node, which would make every arrival on the Shop tab
+    // jump the page. The deps array is covered by the call-count assertion in
+    // the arrival test below.
+    withScrollSpy((spy) => {
+      setup({ ...twoLists, selectedListId: 'l1' })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(spy).not.toHaveBeenCalled()
+    })
+  })
+
+  it('scrolls when the refusal ARRIVES, not only when the tab mounts holding one', () => {
+    // The case the two above cannot see, and it is the real one: a person taps
+    // Archive on a tab that is already open. Both tests above mount WITH the
+    // sentence already set, so an effect whose dependency array were empty —
+    // fire once on mount, never again — would pass them and never scroll for
+    // anybody. Predicted and measured: mutating `[error]` to `[]` reddens THIS
+    // test and neither of those.
+    withScrollSpy((spy) => {
+      const handlers = {
+        onSelectList: vi.fn(),
+        onShowArchived: vi.fn(),
+        onCreateList: vi.fn().mockResolvedValue(undefined),
+        onRenameList: vi.fn().mockResolvedValue(undefined),
+        onArchiveList: vi.fn().mockResolvedValue(undefined),
+        onUnarchiveList: vi.fn().mockResolvedValue(undefined),
+        onAddItem: vi.fn().mockResolvedValue(undefined),
+        onRemoveItem: vi.fn().mockResolvedValue(undefined),
+        onPurchaseItem: vi.fn().mockResolvedValue(undefined),
+        onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
+        onFinishRun: vi.fn().mockResolvedValue(undefined),
+        onOpenPastRuns: vi.fn().mockResolvedValue(undefined),
+      }
+      const props = {
+        ...twoLists,
+        archivedCount: 0,
+        showArchived: false,
+        members,
+        past: NO_PAST,
+        timezone: 'America/New_York',
+        selectedListId: 'l1',
+        ...handlers,
+      }
+      const withError = { ...props, error: 'archiving the list: finish or clear this run first' }
+      const { rerender } = render(<Shopping {...props} />)
+      expect(spy).not.toHaveBeenCalled()
+      rerender(<Shopping {...withError} />)
+      expect(spy).toHaveBeenCalledTimes(1)
+
+      // ONCE, and the count is the assertion rather than decoration. Dropping
+      // the dependency array ENTIRELY — `useEffect(() => {…})` with no second
+      // argument — fires on every render, and a bare `toHaveBeenCalled()` is
+      // green under it: the sentence IS on screen, so the guard passes and the
+      // ref is live. Re-rendering with the same sentence is what separates
+      // "scrolled when it arrived" from "scrolls on every render while it is
+      // there", which on this tab means a page that jumps under the thumb on
+      // every tick until the sentence is cleared. Found by review.
+      rerender(<Shopping {...withError} />)
+      expect(spy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('survives an environment with no scrollIntoView at all', () => {
+    // jsdom is that environment by default, so this is not hypothetical: the
+    // call is guarded with `?.` and an unguarded one would throw inside an
+    // effect and take the whole tab down with it.
+    expect(Element.prototype.scrollIntoView).toBeUndefined()
+    setup({ ...twoLists, selectedListId: 'l1', error: 'archiving the list: this list is archived' })
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+})
+
+describe('#360 — a household whose lists are ALL put away', () => {
+  it('is not told it has no shopping list, and is not offered the first-list form', () => {
+    // The distinction `hasAnyList` exists for: `lists` is what this tab DRAWS,
+    // so a household that archived its only list would otherwise meet the empty
+    // state — a form prefilled "Groceries" under a sentence saying it has no
+    // list, while holding one with its whole history in it.
+    setup({ lists: [], archivedCount: 1, runs: [], items: [] })
+    expect(screen.queryByText(/no shopping list yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^list name$/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/every list is put away/i)).toBeInTheDocument()
+    // Both ways out are on screen.
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /new list/i })).toBeInTheDocument()
+  })
+
+  it('and the FIRST-list form is still what a household with nothing at all sees', () => {
+    // The control for the test above: with `archivedCount` at zero the empty
+    // state is unchanged, so the line above is about the archive rather than
+    // about having quietly removed the empty state.
+    setup({ lists: [], archivedCount: 0, runs: [], items: [] })
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Groceries')
+    expect(screen.queryByText(/every list is put away/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the archived list, and only it, once they are revealed', () => {
+    setup({
+      lists: [hardwareAway],
+      archivedCount: 1,
+      showArchived: true,
+      runs: [hardwareRun],
+      items: [screws, boughtNails],
+      selectedListId: 'l2',
+    })
+    // One list is not a choice, so no picker — and the name comes back onto
+    // the heading, which is the `soleList` rule doing its ordinary job.
+    expect(screen.queryByRole('group', { name: /which list/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hardware', level: 3 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unarchive Hardware' })).toBeInTheDocument()
   })
 })

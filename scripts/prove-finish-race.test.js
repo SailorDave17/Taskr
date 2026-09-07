@@ -28,6 +28,7 @@ import {
   FIXTURE_ITEMS,
   GUARD_SQLSTATE,
   PURCHASE_REPETITIONS,
+  REMOVE_REPETITIONS,
   REPETITIONS,
   UNIQUE_VIOLATION_SQLSTATE,
   WITNESS_ITEMS,
@@ -40,6 +41,8 @@ import {
   raceFaults,
   readBackFaults,
   refusalPath,
+  removeOrderingVerdict,
+  removeRaceFaults,
   selectWitness,
   witnessFaults,
   witnessVerdict,
@@ -582,5 +585,132 @@ describe('#356 — the two judgements that used to be inline and untested', () =
     expect(faults.join(' ')).toMatch(/1 households/)
     expect(faults.join(' ')).toMatch(/2 members/)
     expect(faults.join(' ')).toMatch(/9 items/)
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// #368 — a remove racing a finish, and the ordering verdict that says whether
+// the window was exercised at all.
+//
+// Same discipline as every block above: the healthy states are asserted clean
+// FIRST, then each broken state names the clause it breaks. A live run never
+// presents a broken state — the database will not build one now — so these are
+// the only thing that can tell this checker from one returning [] forever.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param removedIndex which original the remove named
+ * @param removeWon    did the remove commit
+ * @param lost         build the DEFECT: the original gone AND carried anyway
+ */
+function removeHealthy({ removedIndex = 0, removeWon = false, lost = false } = {}) {
+  const removedId = ORIGINAL_IDS[removedIndex]
+  let closedItems = ORIGINAL_IDS.map((id) => ({ id, name: id, purchased_at: null }))
+  let carriedItems = closedItems.map((item) => ({ id: `c-${item.id}`, carried_from_item_id: item.id }))
+  if (removeWon || lost) {
+    // The remove committed: the original is gone from the closed run …
+    closedItems = closedItems.filter((item) => item.id !== removedId)
+    // … and, unless we are building the defect, nothing was carried from it.
+    if (!lost) carriedItems = carriedItems.filter((item) => item.carried_from_item_id !== removedId)
+  }
+  return { closedItems, carriedItems, originalIds: ORIGINAL_IDS, removedId, removeWon: removeWon || lost }
+}
+
+describe('#368 — a remove racing a finish', () => {
+  it('POSITIVE CONTROL: the finish-wins ordering is clean', () => {
+    // The remove was refused with `run already closed`, so all three originals
+    // are on the closed run and each is carried exactly once.
+    expect(removeRaceFaults(removeHealthy())).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the remove-wins ordering is clean too', () => {
+    // The remove committed before the carry: two originals on the closed run,
+    // two carried, and the third is simply gone.
+    expect(removeRaceFaults(removeHealthy({ removeWon: true }))).toEqual([])
+  })
+
+  it('REFUSES THE DEFECT: the original gone from the closed run and carried anyway', () => {
+    // #368 in one state — the closed run has lost its record of an item while
+    // a copy of it survives on the next run.
+    expect(removeRaceFaults(removeHealthy({ lost: true })).join(' ')).toMatch(
+      /GONE from the closed run and was carried 1 times — the closed run lost its record/,
+    )
+  })
+
+  it('refuses a copy whose source pointer was nulled — the on-delete-set-null signature', () => {
+    const state = removeHealthy()
+    state.carriedItems[0].carried_from_item_id = null
+    expect(removeRaceFaults(state).join(' ')).toMatch(/no carried_from_item_id/)
+  })
+
+  it('refuses an original that vanished without the remove naming it', () => {
+    const state = removeHealthy({ removeWon: true })
+    state.closedItems.pop()
+    expect(removeRaceFaults(state).join(' ')).toMatch(/vanished from the closed run and the remove never named it/)
+  })
+
+  it('refuses an unbought original carried twice, and one carried none', () => {
+    const twice = removeHealthy()
+    twice.carriedItems.push({ id: 'dup', carried_from_item_id: ORIGINAL_IDS[1] })
+    expect(removeRaceFaults(twice).join(' ')).toMatch(/o2 is on the closed run and was carried 2 times/)
+
+    const none = removeHealthy()
+    none.carriedItems = none.carriedItems.filter((item) => item.carried_from_item_id !== ORIGINAL_IDS[2])
+    expect(removeRaceFaults(none).join(' ')).toMatch(/o3 is on the closed run and was carried 0 times/)
+  })
+
+  it('refuses a carried item pointing outside the fixture', () => {
+    const state = removeHealthy()
+    state.carriedItems[0].carried_from_item_id = 'somebody-elses-item'
+    expect(removeRaceFaults(state).join(' ')).toMatch(/points outside the fixture/)
+  })
+
+  it('refuses the client and the database disagreeing, in both directions', () => {
+    // Reported success, row still there.
+    const survived = removeHealthy()
+    survived.removeWon = true
+    expect(removeRaceFaults(survived).join(' ')).toMatch(
+      /reported success and the item is still on the closed run/,
+    )
+    // Reported refusal, row gone.
+    const vanished = removeHealthy({ removeWon: true })
+    vanished.removeWon = false
+    expect(removeRaceFaults(vanished).join(' ')).toMatch(/refused and the item is gone anyway/)
+  })
+})
+
+describe('#368 — the ordering verdict, which must be able to say NOT EXERCISED', () => {
+  const row = (removeWon) => ({ removeWon })
+
+  it('says so when both orderings were observed', () => {
+    const verdict = removeOrderingVerdict([row(true), row(false), row(false)])
+    expect(verdict.seen).toBe(true)
+    expect(verdict.text).toMatch(/BOTH ORDERINGS OBSERVED — 1 committed, 2 refused/)
+  })
+
+  it('REFUSES to call ten refusals evidence about the window', () => {
+    // The whole reason this is a named judgement: the invariant holds trivially
+    // when the remove never commits, and a run like that must not read as a
+    // proof that the race was exercised.
+    const verdict = removeOrderingVerdict(Array.from({ length: 10 }, () => row(false)))
+    expect(verdict.seen).toBe(false)
+    expect(verdict.text).toMatch(/only the finish-first ordering was observed \(10 of 10 refused\)/)
+    expect(verdict.text).toMatch(/the window was not exercised/)
+  })
+
+  it('refuses the mirror case too — every remove committing proves as little', () => {
+    const verdict = removeOrderingVerdict([row(true), row(true)])
+    expect(verdict.seen).toBe(false)
+    expect(verdict.text).toMatch(/only the remove-first ordering was observed/)
+  })
+
+  it('says NOT RUN rather than inventing a verdict from nothing', () => {
+    expect(removeOrderingVerdict([]).text).toBe('NOT RUN')
+    expect(removeOrderingVerdict([]).seen).toBe(false)
+  })
+
+  it('runs enough repetitions for both orderings to have a chance', () => {
+    expect(REMOVE_REPETITIONS).toBeGreaterThanOrEqual(10)
   })
 })

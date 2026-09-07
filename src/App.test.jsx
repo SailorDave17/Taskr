@@ -204,10 +204,21 @@ vi.mock('./lib/household.js', async () => {
 // `createList`'s fake starts RETURNING the row it made: App reads the created
 // list's id to move the picker onto it, so a fake resolving `undefined` could
 // not tell "the new list is on screen" from "the first list by name is".
+// #359 — `readClosedRuns` joins them, and its fake carries the LIST IDS for the
+// argument reason above: the history read is the one read on this surface that
+// `refresh()` does not perform, and a fake that only recorded the call could not
+// tell "asked for the list on screen" from "asked for the household's history"
+// — nor tell either from a read that fired on arrival, which is the criterion.
 const shoppingApi = {
   readShopping: vi.fn(),
+  readClosedRuns: vi.fn(),
   createList: vi.fn(),
   renameList: vi.fn(),
+  // #360 — both carry the LIST ID for the argument reason above: an archive
+  // names the list this tab is showing, and a fake recording only the call
+  // could not tell that from one passing the household or the run.
+  archiveList: vi.fn(),
+  unarchiveList: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
   purchaseItem: vi.fn(),
@@ -289,8 +300,13 @@ beforeEach(() => {
   Object.values(shoppingApi).forEach((fn) => fn.mockReset())
   shoppingApi.shoppingClient.mockReturnValue(SHOPPING_CLIENT)
   shoppingApi.readShopping.mockResolvedValue(EMPTY_SHOPPING)
+  // #359 — no finished run, which is the ordinary state of a new list. Tests
+  // about the history override this.
+  shoppingApi.readClosedRuns.mockResolvedValue({ runs: [], items: [] })
   shoppingApi.createList.mockResolvedValue(undefined)
   shoppingApi.renameList.mockResolvedValue(undefined)
+  shoppingApi.archiveList.mockResolvedValue(undefined)
+  shoppingApi.unarchiveList.mockResolvedValue(undefined)
   shoppingApi.addItem.mockResolvedValue(undefined)
   shoppingApi.removeItem.mockResolvedValue(undefined)
   shoppingApi.purchaseItem.mockResolvedValue(undefined)
@@ -4372,5 +4388,381 @@ describe('#358 — several named lists, from App', () => {
     await tab('Shop')
 
     await waitFor(() => expect(heading()).toBe('Bakery'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 4 — the history read, and the discipline it deliberately departs from.
+//
+// Every other read on this surface runs on arrival; this one runs when the Past
+// runs disclosure is opened, because history is unbounded. Only App can answer
+// either half — what the disclosure DRAWS is Shopping.test.jsx's, and which
+// filters the read sends is shopping.io.test.js's.
+// ---------------------------------------------------------------------------
+describe('#359 — past runs, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const groceries = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const hardware = { id: 'l2', household_id: 'h1', name: 'Hardware', created_at: '2026-09-06T00:00:00Z' }
+  const openRun = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: 'h1',
+    opened_at: '2026-09-06T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const item = (id, runId, name, purchased = null) => ({
+    id,
+    run_id: runId,
+    household_id: 'h1',
+    name,
+    note: null,
+    added_by_member_id: 'm1',
+    added_at: '2026-09-06T10:00:00Z',
+    purchased_at: purchased,
+    purchased_by_member_id: purchased ? 'm2' : null,
+    carried_from_item_id: null,
+  })
+  const oneList = {
+    lists: [groceries],
+    runs: [openRun(groceries, 'r-open')],
+    items: [item('i1', 'r-open', 'Milk')],
+  }
+  const twoLists = {
+    lists: [groceries, hardware],
+    runs: [openRun(groceries, 'r-open'), openRun(hardware, 'r-open-2')],
+    items: [item('i1', 'r-open', 'Milk'), item('i2', 'r-open-2', 'Bread')],
+  }
+  /** One finished trip on the Groceries list: one bought, one carried forward. */
+  const finished = {
+    runs: [
+      {
+        id: 'r-closed',
+        list_id: 'l1',
+        household_id: 'h1',
+        opened_at: '2026-09-04T00:00:00Z',
+        closed_at: '2026-09-05T22:00:00Z',
+        closed_by_member_id: 'm2',
+      },
+    ],
+    items: [item('p1', 'r-closed', 'Eggs', '2026-09-05T21:02:00Z'), item('p2', 'r-closed', 'Butter')],
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  /**
+   * Open the disclosure with a real tap, then let the platform's own `toggle`
+   * arrive — jsdom queues it as a task, so a microtask-only flush reads zero
+   * toggles and the read looks as though it never fired. The measurement behind
+   * that sentence is in Shopping.test.jsx's own helper.
+   */
+  const openPast = async () => {
+    fireEvent.click(screen.getByText('Past runs'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  const history = () => screen.getByText('Past runs').closest('details')
+
+  it('does NOT read the history on arrival, on a re-arrival, or on a write — only on the disclosure', async () => {
+    await renderApp('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(0)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // A second arrival, which is a full re-read of everything else.
+    await tab('Chores')
+    await tab('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // And a write, which drags a re-read behind it through mutate().
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Bread' } })
+    await tab(/add item/i)
+    expect(shoppingApi.addItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+  })
+
+  it('reads it when the disclosure opens, naming the list on screen and its client', async () => {
+    shoppingApi.readClosedRuns.mockResolvedValue(finished)
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await openPast()
+
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    // The LIST, as an array of one — the read filters `.in('list_id', …)`, and
+    // the household's other lists are not what somebody just asked about.
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledWith(SHOPPING_CLIENT, ['l1'])
+    // It is a read: nothing goes through mutate(), so nothing else is re-read.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+
+    // And what came back is on the screen, with the roster resolved and the
+    // household's zone applied — 21:02 UTC is 5:02 PM in New York.
+    expect(within(history()).getByRole('heading', { level: 4 })).toHaveTextContent(
+      'Finished Sep 5, 2026 by Robin',
+    )
+    expect(within(history()).getByText('Eggs').closest('li')).toHaveTextContent(
+      'bought by Robin · 5:02 PM',
+    )
+    expect(within(history()).getByText('Butter').closest('li')).toHaveTextContent('carried over')
+  })
+
+  it('reads the list the picker is on, not the household’s first', async () => {
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    await renderApp('Shop')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Hardware/ })))
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenLastCalledWith(SHOPPING_CLIENT, ['l2'])
+  })
+
+  it('a refused history read reports itself on the strip and shows no rows', async () => {
+    shoppingApi.readClosedRuns.mockRejectedValue(
+      new Error('loading finished runs: permission denied'),
+    )
+    await renderApp('Shop')
+    await openPast()
+
+    expect(
+      within(screen.getByRole('region', { name: 'Shop' })).getByRole('alert'),
+    ).toHaveTextContent(/loading finished runs: permission denied/)
+    // Not "reading…" forever, and not the last answer either: a failure clears
+    // the rows rather than leaving somebody looking at a history nothing here
+    // can vouch for.
+    expect(screen.queryByText(/reading the finished runs/i)).not.toBeInTheDocument()
+    expect(within(history()).queryByRole('heading', { level: 4 })).not.toBeInTheDocument()
+  })
+
+  it('finishing a run closes the disclosure, so nobody reads a history from before the trip ended', async () => {
+    await renderApp('Shop')
+    await openPast()
+    expect(history()).toHaveAttribute('open')
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+
+    // One list draws ONE finish control. This is the assertion that caught the
+    // duplicate React key — `PastRuns` and `FinishRun` are siblings, and while
+    // both were keyed on the run id React rendered three of them.
+    expect(document.querySelectorAll('.shopping-finish')).toHaveLength(1)
+
+    // The trip ends: the RPC returns the new run and the re-read shows it.
+    const nextRun = openRun(groceries, 'r-next')
+    shoppingApi.finishRun.mockResolvedValue(nextRun)
+    shoppingApi.readShopping.mockResolvedValue({ lists: [groceries], runs: [nextRun], items: [] })
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+
+    // Keyed on the open run, so a new run remounts it closed — and the run that
+    // just closed is now part of the history, which the next open re-reads.
+    await waitFor(() => expect(history()).not.toHaveAttribute('open'))
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #360 — putting a list away, from App.
+//
+// The half only App can answer: that both writes go through `mutate()` (write,
+// then a full re-read), and that the list the picker shows follows the read
+// rather than a second copy of it. What the tab DRAWS for an archived list is
+// Shopping.test.jsx's, what the module sends is shopping.io.test.js's, and what
+// the database refuses is archive-shopping-list.pglite.test.js's.
+//
+// The fallback is the interesting one and it is asserted nowhere else:
+// archiving the list on screen leaves `shoppingListId` naming a list the
+// visible set no longer holds, and `resolveSelectedListId` is what turns that
+// into "the first active list by name" rather than an empty tab.
+// ---------------------------------------------------------------------------
+describe('#360 — archiving a list, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const groceries = {
+    id: 'l1',
+    household_id: 'h1',
+    name: 'Groceries',
+    created_at: '2026-09-05T00:00:00Z',
+    archived_at: null,
+  }
+  const hardware = {
+    id: 'l2',
+    household_id: 'h1',
+    name: 'Hardware',
+    created_at: '2026-09-06T00:00:00Z',
+    archived_at: null,
+  }
+  const AWAY = '2026-09-06T12:00:00Z'
+  const openRunOf = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: list.household_id,
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const runA = openRunOf(groceries, 'r1')
+  const runB = openRunOf(hardware, 'r2')
+  // Both runs are EMPTY, which is not a convenience: `0035` refuses an archive
+  // while the open run holds anything, so a fixture with items on the list
+  // being archived would be a state the database cannot produce.
+  const twoLists = { lists: [groceries, hardware], runs: [runA, runB], items: [] }
+  /** The same household after Hardware has been put away. */
+  const oneAway = {
+    lists: [groceries, { ...hardware, archived_at: AWAY }],
+    runs: [runA, runB],
+    items: [],
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const pickerNames = () => {
+    const group = screen.queryByRole('group', { name: /which list/i })
+    if (!group) return null
+    return Array.from(group.querySelectorAll('.shopping-picker__name')).map((n) => n.textContent)
+  }
+
+  it('AC 3: Archive goes through archiveList with the list on screen, then re-reads', async () => {
+    await renderApp('Shop')
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    // Onto the SECOND list, so the id this asserts is the one on screen rather
+    // than the first by name — which is what the tab lands on and what a
+    // handler passing the wrong thing would most likely send.
+    await tab(/^hardware/i)
+
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/^archive hardware$/i)
+
+    expect(shoppingApi.archiveList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.archiveList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l2')
+    // Through mutate(): written, THEN re-read. The write is what changes which
+    // lists exist, so a screen that did not re-read would be showing the answer
+    // from before the tap.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.archiveList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder.at(-1),
+    )
+  })
+
+  it('AC 3: the archived list leaves the picker, and the tab falls back to the first active list', async () => {
+    await renderApp('Shop')
+    // Stand on Hardware, so the list being archived is the one on screen —
+    // the only case where the fallback has anything to do.
+    await tab(/^hardware/i)
+    expect(screen.getByRole('button', { name: /^archive hardware$/i })).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await tab(/^archive hardware$/i)
+
+    // One visible list, so #358's one-button rule takes the picker away and the
+    // heading carries the name again.
+    await waitFor(() => expect(pickerNames()).toBeNull())
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    expect(within(shop()).queryByText(/put away/i)).not.toBeInTheDocument()
+    // And the way back is offered, with the count.
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+  })
+
+  it('AC 3: revealing the archived lists puts them back in the picker and lets one be chosen', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    expect(pickerNames()).toBeNull()
+
+    await tab('Show archived (1)')
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    // Nothing was written to reveal them — it is a view change.
+    expect(shoppingApi.archiveList).not.toHaveBeenCalled()
+    expect(shoppingApi.unarchiveList).not.toHaveBeenCalled()
+
+    await tab(/^hardware/i)
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unarchive Hardware' })).toBeInTheDocument()
+    // An archived list on screen offers none of the working controls.
+    expect(within(shop()).queryByLabelText(/^item$/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 3: Unarchive goes through unarchiveList, re-reads, and the list comes back working', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    await tab('Show archived (1)')
+    await tab(/^hardware/i)
+
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/^unarchive hardware$/i)
+
+    expect(shoppingApi.unarchiveList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.unarchiveList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l2')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Still the list on screen — it was in the visible set under both settings
+    // of the toggle — and it works again.
+    expect(within(shop()).queryByText(/put away/i)).not.toBeInTheDocument()
+    expect(within(shop()).getByLabelText(/^item$/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /archived/i })).not.toBeInTheDocument()
+  })
+
+  it('the toggle survives a tab switch, because which list this phone is looking at is not a fact about the household', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    await tab('Show archived (1)')
+    await tab(/^hardware/i)
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+
+    // `Shopping` unmounts on a tab switch, so a toggle held inside it would
+    // last exactly as long as the person stayed on the screen.
+    await tab(/^chores$/i)
+    await tab(/^shop$/i)
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+  })
+
+  it('AC 3: a refused archive reaches the strip outside the list, and nothing is re-read', async () => {
+    await renderApp('Shop')
+    await tab(/^hardware/i)
+    shoppingApi.archiveList.mockRejectedValue(
+      new Error('archiving the list: finish or clear this run first'),
+    )
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/^archive hardware$/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('archiving the list: finish or clear this run first')
+    expect(alert.closest('ul, li, form')).toBeNull()
+    // `mutate()` does not re-read after a failed write, and the picker is
+    // exactly where it was.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('a household whose only list is archived is not told it has none', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [{ ...groceries, archived_at: AWAY }],
+      runs: [runA],
+      items: [],
+    })
+    await renderApp('Shop')
+    expect(within(shop()).queryByText(/no shopping list yet/i)).not.toBeInTheDocument()
+    expect(within(shop()).getByText(/every list is put away/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
   })
 })

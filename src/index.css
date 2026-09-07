@@ -1395,6 +1395,41 @@ body {
   color: var(--ink);
 }
 
+/* #360 — the toggle that reveals the lists the household put away. It sits
+   under the picker so that pressing it extends the row above it rather than
+   changing something off screen, and it is drawn only once there is something
+   to reveal. Quiet and right-aligned, on `.shopping-new`'s reasoning: the
+   loudest control on this tab stays the row a shopper taps. The bottom margin
+   matches `.shopping-picker`'s so the gap above the list is the same whether
+   the picker, the toggle, or both are on screen. */
+.shopping-archived-toggle {
+  margin-bottom: 0.875rem;
+}
+
+/* What an archived list is, in one line. The dimmed register `.shopping-count`
+   and the meta lines use — it is a fact about the list rather than an
+   instruction — and the same top margin the count has, so the line under the
+   heading sits in one place whichever of the two is drawn. */
+.shopping-archived {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #360 — the list's controls, wrapping as a PAIR rather than as two siblings of
+   the heading row. Measured at 360x800: the name (72.3px for "Groceries"), a
+   92px Rename and an 87.6px Archive with two 8px gaps come to 267.9px against
+   263.2px of row, so as siblings the row broke between the two controls and
+   Archive landed alone underneath, reading as something else entirely. As one
+   flex child they go over together and the name keeps the line above them,
+   which is what a long name already did. */
+.shopping-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 /* The editor that replaces it. The top margin is the heading's, so the list
    does not jump up the screen when the editor opens. */
 .shopping-rename {
@@ -1408,6 +1443,189 @@ body {
   margin-top: 0.875rem;
   padding-top: 0.875rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------------------
+   What the household already bought — story #359.
+
+   A disclosure at the foot of the list, closed on arrival, holding one
+   disclosure per finished run with only the newest open. That is `.chore-done`'s
+   grammar on the Done tab, borrowed rather than reinvented for the reason the
+   picker borrows the tab strip's: it is the same gesture about the same kind of
+   thing, and a second idiom for "there is more here if you want it" would read
+   as a second app.
+
+   The rows are NOT `.shopping-item`. A closed run is a record, so a row has no
+   tap target, no 44px floor and no controls — it is three lines of text at the
+   registers this file already uses for a name, a note and a meta line. The
+   height that buys is the point of the story: eight runs of fifteen items is
+   only readable because a closed run is a heading.
+   --------------------------------------------------------------------------- */
+
+.shopping-past {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* The 44px floor applies here and not to the rows inside: this IS a control. */
+.shopping-past__summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+/* THE MARKER IS DRAWN BY HAND, and that is a fix rather than decoration.
+   `display: flex` on a `<summary>` suppresses the browser's own disclosure
+   triangle — measured in Chrome at 360x800 on this surface: "Past runs" and
+   seven collapsed "Finished Sep 4, 2026 by Robin" rows read as plain labels
+   with nothing on screen saying they open, which is
+   `a-geometry-criterion-is-satisfied-by-an-invisible-control` one level up from
+   a tap target. Every number was inside its bar and the screenshot was what
+   said so (owner's call at this story's design pass, 2026-09-06).
+
+   A BORDER TRIANGLE, not a glyph in `content`. Text in a pseudo-element can be
+   announced, and the `<summary>` already tells a screen reader whether it is
+   expanded; an empty `content` says nothing to anybody. There is no transition:
+   this stylesheet carries no animation and no `prefers-reduced-motion` block,
+   and this is not the place to open either.
+
+   THE RUN'S MARKER RIDES ON ITS HEADING, not on the summary. On the summary it
+   is a flex item of its own, and a flex line is packed at each item's own
+   width before anything shrinks — so "Finished Aug 4, 2026 by Placeholder"
+   moved to the second line whole and left the triangle stranded alone on the
+   first, on two of the eight runs measured at 360px. Inside the heading it
+   cannot be separated from the words it points at. */
+.shopping-past__summary::before {
+  content: '';
+  flex: 0 0 auto;
+  align-self: center;
+  width: 0;
+  height: 0;
+  margin-right: 0.5rem;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.shopping-past__run-summary > .card__subheading::before {
+  content: '';
+  display: inline-block;
+  vertical-align: 0.1em;
+  width: 0;
+  height: 0;
+  margin-right: 0.5rem;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+details[open] > .shopping-past__summary::before,
+details[open] > .shopping-past__run-summary > .card__subheading::before {
+  transform: rotate(90deg);
+}
+
+/* The browsers that would still draw their own marker beside ours. */
+.shopping-past__summary,
+.shopping-past__run-summary {
+  list-style: none;
+}
+
+.shopping-past__summary::-webkit-details-marker,
+.shopping-past__run-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* One run is one thing, and a stack of collapsed headings needs to say where
+   each ends: without the rule, seven finished trips read as fourteen lines of
+   alternating text. Between adjacent runs only — the first sits under the Past
+   runs summary, which is its own separation. */
+.shopping-past__run {
+  margin: 0;
+}
+
+.shopping-past__run + .shopping-past__run {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* `.chore-done__summary`'s arrangement — the heading and its count on one
+   baseline — because it is the same summary answering the same two questions
+   ("when" and "how much"), and both are 44px for the same reason. */
+.shopping-past__run-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+/* The run's own heading is the SUBJECT of the region it heads, so it wears the
+   item-name grade rather than `.card__subheading`'s quiet one — the same call
+   #358 took for a list's name beside its Rename control. Measured before the
+   change: the heading was 15px/600 in `--ink-dim`, identical to the "Past runs"
+   label above it and dimmer than the 16px/600 full-ink item names inside it, so
+   the faintest text in the region was what the region is about. The class stays
+   for its margin and for what it says about the element's role. */
+.shopping-past__run-summary > .card__subheading {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+  /* It TAKES the line it is on and wraps inside itself. Without this the
+     heading is a flex item that moves to the next line whole the moment it
+     stops fitting, which left the marker stranded alone above it on two of the
+     eight runs measured at 360px — the marker beside nothing, and the heading
+     under it looking like a line of body text. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shopping-past__count {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+.shopping-past__items {
+  list-style: none;
+  margin: 0 0 0.875rem;
+  padding: 0 0 0 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* One row, one column, no border and no background. A bordered card per item
+   would give a fifteen-item run the weight of the working list, which is the
+   surface a person is meant to act on. */
+.shopping-past__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+/* A shade quieter than `.shopping-item__name`'s 17px: on the working list the
+   name is the tap target's label, and here it is a line in a logbook. */
+.shopping-past__item-name {
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.shopping-past__item-note {
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Bought by whom and when, or carried over — the same register as
+   `.shopping-item__meta`, because it is the same sentence about the same row. */
+.shopping-past__item-fate {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
 }
 
 /* ---------------------------------------------------------------------------

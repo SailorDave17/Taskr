@@ -30,13 +30,16 @@ import {
   SHOPPING_LIST_COLUMNS,
   SHOPPING_RUN_COLUMNS,
   addItem,
+  archiveList,
   createList,
   finishRun,
   normalizeName,
   purchaseItem,
+  readClosedRuns,
   readShopping,
   removeItem,
   renameList,
+  unarchiveList,
   unpurchaseItem,
 } from './shopping.js'
 
@@ -65,6 +68,13 @@ function makeQuery(table) {
     },
     is(column, value) {
       calls.push({ op: 'is', table, column, value })
+      return q
+    },
+    // #359 — the negation of `.is`, and the reason the fake carries all three
+    // arguments: `not('closed_at', 'is', null)` and `is('closed_at', null)` are
+    // one character apart at the call site and are opposite reads.
+    not(column, operator, value) {
+      calls.push({ op: 'not', table, column, operator, value })
       return q
     },
     update(patch) {
@@ -109,7 +119,10 @@ describe('the column constants', () => {
       expect(cols).not.toContain('*')
       expect(cols.split(',').map((c) => c.trim())).toContain('household_id')
     }
-    expect(SHOPPING_LIST_COLUMNS).toBe('id, household_id, name, created_at')
+    // #360 — `archived_at` joined the list's constant with `0035`, which grants
+    // exactly this column and no other. The pairing is what liveSchema.test.js
+    // holds: a column asked for here and not granted there answers `42703`.
+    expect(SHOPPING_LIST_COLUMNS).toBe('id, household_id, name, created_at, archived_at')
     expect(SHOPPING_RUN_COLUMNS).toBe('id, list_id, household_id, opened_at, closed_at, closed_by_member_id')
     expect(SHOPPING_ITEM_COLUMNS).toBe(
       'id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id',
@@ -210,6 +223,120 @@ describe('readShopping — lists by household, open runs by list, items by run',
     const failure = await readShopping(client, HOUSEHOLD).catch((e) => e)
     expect(failure.message).toBe('loading shopping runs: permission denied')
     expect(failure.cause).toEqual({ message: 'permission denied', code: '42501' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 4 — the history read: the same two tables, the same two column
+// constants, and the OTHER half of the one predicate. No new table, no new
+// grant, no migration; what this file can prove is that it asks for exactly
+// that, which is the claim "no new grant" rests on.
+// ---------------------------------------------------------------------------
+
+const CLOSED_RUN = {
+  ...RUN,
+  id: 'r0',
+  closed_at: '2026-09-05T18:00:00Z',
+  closed_by_member_id: 'm1',
+}
+
+describe('readClosedRuns — closed runs by list, then their items by run', () => {
+  beforeEach(() => {
+    results.shopping_runs = { data: [CLOSED_RUN], error: null }
+    results.shopping_items = { data: [ITEM], error: null }
+  })
+
+  it('selects both tables with the SAME imported constants the open read uses, never a wildcard', () => {
+    // The claim in the story is that history needs no new grant. It holds only
+    // because these are the same column lists `LIVE_SCHEMA` already carries — a
+    // read that named one more column would need one.
+    return readClosedRuns(client, ['l1']).then(() => {
+      expect(opsOn('shopping_runs').find((c) => c.op === 'select').cols).toBe(SHOPPING_RUN_COLUMNS)
+      expect(opsOn('shopping_items').find((c) => c.op === 'select').cols).toBe(SHOPPING_ITEM_COLUMNS)
+      for (const c of calls.filter((c) => c.op === 'select')) {
+        expect(c.cols).not.toContain('*')
+        expect(c.cols).not.toMatch(/\(/)
+      }
+    })
+  })
+
+  it('asks for the runs that are CLOSED — `.not(closed_at, is, null)` — and names the lists', async () => {
+    await readClosedRuns(client, ['l1', 'l2'])
+    const runOps = opsOn('shopping_runs')
+    expect(runOps).toContainEqual(
+      expect.objectContaining({ op: 'in', column: 'list_id', values: ['l1', 'l2'] }),
+    )
+    expect(runOps).toContainEqual(
+      expect.objectContaining({ op: 'not', column: 'closed_at', operator: 'is', value: null }),
+    )
+    // And it is NOT the open read's predicate. The two differ by one call and
+    // return disjoint sets, so asserting the absence is asserting the direction.
+    expect(runOps.some((c) => c.op === 'is')).toBe(false)
+  })
+
+  it('reads the items by the run ids the first read returned, in added order', async () => {
+    await readClosedRuns(client, ['l1'])
+    expect(opsOn('shopping_items')).toContainEqual(
+      expect.objectContaining({ op: 'in', column: 'run_id', values: ['r0'] }),
+    )
+    expect(opsOn('shopping_items').filter((c) => c.op === 'order').map((c) => c.column)).toEqual([
+      'added_at',
+      'id',
+    ])
+  })
+
+  it('leaves the ORDER of the runs to groupClosedRuns rather than asking the database twice', async () => {
+    // The rule is one pure function with its own tests (`closed_at` descending,
+    // total on id). A second copy of it in the query would be a second thing to
+    // keep in step, and the read's order is not what the screen renders.
+    await readClosedRuns(client, ['l1'])
+    expect(opsOn('shopping_runs').filter((c) => c.op === 'order')).toEqual([])
+  })
+
+  it('issues the reads in order, and returns the two sets under their names', async () => {
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [CLOSED_RUN], items: [ITEM] })
+    expect(calls.filter((c) => c.op === 'select').map((c) => c.table)).toEqual([
+      'shopping_runs',
+      'shopping_items',
+    ])
+  })
+
+  it('with no closed run, issues ONE read and returns two empty arrays — no `.in([])`', async () => {
+    results.shopping_runs = { data: [], error: null }
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [], items: [] })
+    expect(calls.filter((c) => c.op === 'select').map((c) => c.table)).toEqual(['shopping_runs'])
+  })
+
+  it('treats a null data as empty rather than crashing on `.map`', async () => {
+    results.shopping_runs = { data: null, error: null }
+    expect(await readClosedRuns(client, ['l1'])).toEqual({ runs: [], items: [] })
+  })
+
+  it('refuses before any request when it is named no list — including an array of nothing', async () => {
+    // `.in('list_id', [])` is a query that can only ever return nothing, and
+    // sending one would spend a round trip to be told so.
+    for (const bad of [undefined, null, [], [null], ['']]) {
+      await expect(readClosedRuns(client, bad)).rejects.toThrow(/Which list/)
+    }
+    expect(calls).toEqual([])
+  })
+
+  it('throws with what we were doing when either read fails, carrying the cause', async () => {
+    results.shopping_runs = { data: null, error: { message: 'permission denied', code: '42501' } }
+    const refused = await readClosedRuns(client, ['l1']).catch((e) => e)
+    expect(refused.message).toBe('loading finished runs: permission denied')
+    expect(refused.cause.code).toBe('42501')
+
+    results.shopping_runs = { data: [CLOSED_RUN], error: null }
+    results.shopping_items = { data: null, error: { message: 'permission denied', code: '42501' } }
+    await expect(readClosedRuns(client, ['l1'])).rejects.toThrow(
+      'loading finished run items: permission denied',
+    )
+  })
+
+  it('issues no DML at all — history is a read, and this client may not write a closed run', async () => {
+    await readClosedRuns(client, ['l1'])
+    expect(calls.filter((c) => ['insert', 'update', 'delete', 'rpc'].includes(c.op))).toEqual([])
   })
 })
 
@@ -337,14 +464,29 @@ describe('the writers go through the RPCs, by name AND argument object', () => {
   })
 })
 
-describe('the two direct writes the client holds', () => {
-  it('removeItem deletes the row it names, and nothing else', async () => {
+describe('the ONE direct write the client holds, and the remove that stopped being one', () => {
+  // #368 — removeItem was a `delete().eq('id', …)` under 0032's policy until
+  // 0034 made it the fourth definer function and withdrew the grant. These two
+  // assertions were written against the DELETE and are rewritten rather than
+  // deleted: what they were protecting — that the client names one row and
+  // touches nothing else, and that a refusal reaches the caller — is still
+  // true and still checkable, and it is the shape of empty pass this file
+  // keeps finding to leave an assertion standing over a subject that has left.
+  it('removeItem calls the RPC by name with the item, and issues no table DML at all', async () => {
     await removeItem(client, 'i1')
-    expect(opsOn('shopping_items')).toEqual([
-      { op: 'delete', table: 'shopping_items' },
-      { op: 'eq', table: 'shopping_items', column: 'id', value: 'i1' },
+    expect(rpcs()).toEqual([
+      { op: 'rpc', name: 'remove_shopping_item', args: { item: 'i1' } },
     ])
-    expect(rpcs()).toEqual([])
+    // The point of the story, asserted where a reader will look for it: after
+    // 0034 there is no client DML on shopping_items, so a delete here would be
+    // a call the live project no longer grants.
+    expect(opsOn('shopping_items')).toEqual([])
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([])
+  })
+
+  it('refuses an item it cannot name before any request', async () => {
+    await expect(removeItem(client, '')).rejects.toThrow(/which item/i)
+    expect(calls).toEqual([])
   })
 
   it('renameList updates only `name`, trimmed, on the row it names, and reads the row back with the constant', async () => {
@@ -363,9 +505,62 @@ describe('the two direct writes the client holds', () => {
     expect(calls).toEqual([])
   })
 
-  it('throws with what we were doing when the delete is refused', async () => {
-    results.shopping_items = { data: null, error: { message: 'permission denied' } }
-    await expect(removeItem(client, 'i1')).rejects.toThrow('removing the item: permission denied')
+  it('carries the RPC’s own refusal to the caller, by its sentence', async () => {
+    // #368 — the two the function raises by name, and the reason the sentence
+    // matters: the owner took "refuse by name" over the DELETE's silence at
+    // this story's gate, so these strings are what a person reads on the error
+    // strip when another phone got there first.
+    for (const message of ['run already closed', 'item already bought']) {
+      results.remove_shopping_item = { data: null, error: { message } }
+      await expect(removeItem(client, 'i1')).rejects.toThrow(`removing the item: ${message}`)
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // #360 — putting a list away and bringing it back.
+  //
+  // Both are RPCs and NEITHER writes `shopping_lists` directly, which is the
+  // property worth asserting here rather than in prose: the client holds
+  // `update (name)` and nothing else on that table, so an implementation that
+  // reached for `.update({ archived_at: … })` would be refused by the live
+  // project and pass every pure test in this repo. The absence of a table op
+  // is what this file can see and the pglite suite cannot.
+  // -------------------------------------------------------------------------
+
+  it('archiveList calls the RPC by name with the list, and writes no column itself', async () => {
+    results.archive_shopping_list = { data: { ...LIST, archived_at: '2026-09-06T12:00:00Z' }, error: null }
+    const away = await archiveList(client, 'l1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'archive_shopping_list', args: { list: 'l1' } }])
+    expect(opsOn('shopping_lists')).toEqual([])
+    expect(away.archived_at).toBe('2026-09-06T12:00:00Z')
+  })
+
+  it('unarchiveList calls the RPC by name with the list, and writes no column itself', async () => {
+    results.unarchive_shopping_list = { data: { ...LIST, archived_at: null }, error: null }
+    const back = await unarchiveList(client, 'l1')
+    expect(rpcs()).toEqual([{ op: 'rpc', name: 'unarchive_shopping_list', args: { list: 'l1' } }])
+    expect(opsOn('shopping_lists')).toEqual([])
+    expect(back.archived_at).toBeNull()
+  })
+
+  it('both refuse a list they cannot name before any request', async () => {
+    await expect(archiveList(client, '')).rejects.toThrow(/which list/i)
+    await expect(unarchiveList(client, null)).rejects.toThrow(/which list/i)
+    expect(calls).toEqual([])
+  })
+
+  it('carries each archive refusal to the caller, by its sentence', async () => {
+    // The one a person can act on is the first, and both ways out of it are on
+    // the screen that raised it: Done shopping under the list, Remove on every
+    // unbought row. The other two are what a second phone reads.
+    for (const message of ['finish or clear this run first', 'this list is archived']) {
+      results.archive_shopping_list = { data: null, error: { message } }
+      await expect(archiveList(client, 'l1')).rejects.toThrow(`archiving the list: ${message}`)
+    }
+    results.unarchive_shopping_list = { data: null, error: { message: 'this list is not archived' } }
+    await expect(unarchiveList(client, 'l1')).rejects.toThrow(
+      'bringing the list back: this list is not archived',
+    )
   })
 })
 
@@ -443,7 +638,10 @@ describe('a duplicate list name is translated, and only that', () => {
     await expect(addItem(client, 'r1', 'Placeholder Item')).rejects.toThrow(
       /^adding the item: duplicate key/,
     )
-    results.shopping_items = duplicate('duplicate key value violates unique constraint')
+    // #368 moved the remove off the table and onto `remove_shopping_item`, so
+    // the error now arrives from the RPC rather than from `shopping_items`.
+    // What is asserted is unchanged: an ITEM writer keeps its own wording.
+    results.remove_shopping_item = duplicate('duplicate key value violates unique constraint')
     await expect(removeItem(client, 'i1')).rejects.toThrow(/^removing the item: duplicate key/)
   })
 })

@@ -3,10 +3,15 @@
 // Same contract as chores.js and household.js: nothing in this file is a
 // security boundary. The rules that protect the data are the row-level policies
 // and the column grants in supabase/migrations/0032_shopping_lists_runs_items.sql,
-// and the four RPCs there plus `finish_shopping_run` (0033, #354) are the only
-// writers of a list, a run, an item or a stamp. What this file does is name the
-// household it means, ask for the granted columns by name, and turn a refusal
-// into a sentence.
+// and the four RPCs there plus `finish_shopping_run` (0033, #354),
+// `remove_shopping_item` (0034, #368) and the archive pair (0035, #360) are the
+// only writers of a list, a run, an item or a stamp. What this file does is
+// name the household it means, ask for the granted columns by name, and turn a
+// refusal into a sentence.
+//
+// A LIST IS PUT AWAY, NEVER DELETED (#360). `archived_at` is a stamp the client
+// reads and cannot write, and `partitionShoppingLists` is the whole of the
+// rule: an archived list leaves the picker and keeps every run it ever had.
 //
 // The Shop tab (`src/components/Shopping.jsx`, #353) renders it; App's
 // `refresh()` calls `readShopping` on every re-read, and four of the writes the
@@ -26,6 +31,13 @@
 // moves — which is the shape cairn's `postgrest-filtering-on-an-embedded-resource`
 // note measured. Three round trips is the cost, and #351 has already priced
 // what a round trip costs; #355 settled the shape of the tick, below.
+//
+// HISTORY IS READ WHEN SOMEBODY ASKS FOR IT, not on arrival — `readClosedRuns`
+// (#359) is the same two tables under the other half of the same predicate, and
+// it is the one read on this surface that `refresh()` does not perform. The
+// reason is unbounded growth: what is open is bounded by the week a household is
+// having, and what is closed grows by one run per trip forever. The freshness
+// that buys is stated in that function's own docblock.
 //
 // THE TICK IS THE ONE WRITE HERE THAT DOES NOT RE-READ EVERYTHING. #351
 // measured a full `refresh()` per tick at 6.5 s on Slow 4G against the 1 s bar
@@ -85,7 +97,11 @@ function unwrap({ data, error }, whatWeWereDoing, duplicateName = null) {
 // `household_id` is in every list — the 0014 route. The client scopes lists by
 // naming the household, and a withheld column here would force the embed
 // filter the docblock above rules out.
-export const SHOPPING_LIST_COLUMNS = 'id, household_id, name, created_at'
+//
+// `archived_at` joined it with `0035` (#360). Read-only here like every other
+// column on this table bar `name`: the two RPCs below are its only writers, so
+// a client cannot put a list away by writing to it directly.
+export const SHOPPING_LIST_COLUMNS = 'id, household_id, name, created_at, archived_at'
 
 export const SHOPPING_RUN_COLUMNS =
   'id, list_id, household_id, opened_at, closed_at, closed_by_member_id'
@@ -200,6 +216,32 @@ export function orderShoppingLists(lists) {
 }
 
 /**
+ * Split the household's lists into the ones on the picker and the ones put
+ * away — #360.
+ *
+ * `archived_at` is the whole rule and the database is its only writer, so this
+ * asks the row rather than remembering anything: a list is archived when it
+ * carries a stamp. Pure, total, and it PRESERVES THE INPUT ORDER within each
+ * half, which is what lets the caller sort once (`orderShoppingLists`) and split
+ * afterwards — sorting each half separately would be a second copy of the
+ * ordering rule and could fall out of step with the first.
+ *
+ * Both halves are always arrays, so a caller can count them without a guard.
+ * The archived half is a count and a set to reveal, never a second list to
+ * draw: what the Shop tab does with it is #360's own decision, not this
+ * function's.
+ */
+export function partitionShoppingLists(lists) {
+  const active = []
+  const archived = []
+  for (const list of lists ?? []) {
+    if (list?.archived_at) archived.push(list)
+    else active.push(list)
+  }
+  return { active, archived }
+}
+
+/**
  * Which list the Shop tab is showing, given what the person last chose — #358.
  *
  * The rule AC 6 asks for, in one place and pure, rather than as an effect that
@@ -277,6 +319,107 @@ export function purchasedLabel(purchasedAt, buyerFirstName, timeZone) {
 }
 
 /**
+ * "Finished Sep 5, 2026 by Robin" — the heading on one closed run, #359.
+ *
+ * The date is the DATABASE's `closed_at` in the household's zone, for
+ * `purchasedLabel`'s reason: two phones reading the same history read the same
+ * sentence, and a phone whose clock is wrong says nothing wrong. The year is
+ * always spelled rather than dropped when it happens to be this one — a
+ * history view is exactly where "Sep 5" stops being enough, and deciding
+ * whether to print it would mean asking this pure function what today is.
+ *
+ * The date only, and no time: a run is a trip, and the trip's own items carry
+ * the times (`purchasedLabel`). Two trips finished on one day therefore share a
+ * heading, which the counts beside it tell apart.
+ *
+ * A name it is not given is left out rather than replaced here — the phrase for
+ * a member the roster no longer holds is `groupClosedRuns`'s, which is where
+ * the null arrives from, so there is one place that decides what to call
+ * somebody who is gone.
+ */
+export function finishedLabel(closedAt, closedByName, timeZone) {
+  const at = new Date(closedAt ?? '')
+  const date = Number.isNaN(at.getTime())
+    ? null
+    : new Intl.DateTimeFormat('en-US', {
+        ...(timeZone ? { timeZone } : {}),
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(at)
+  const finished = date ? `Finished ${date}` : 'Finished'
+  return closedByName ? `${finished} by ${closedByName}` : finished
+}
+
+/**
+ * The closed runs of one or more lists, grouped by list and newest first — the
+ * arithmetic behind the Past runs disclosure (#359 AC 3).
+ *
+ * Pure, and it is the only place the history's shape is decided: which run
+ * belongs to which list, what order they read in, how many items were bought
+ * and how many went forward, and which member's name goes on each stamp. The
+ * component is handed the answer and formats it, so a test of the rule needs no
+ * DOM and a test of the screen needs no roster arithmetic.
+ *
+ * NEWEST FIRST, by `closed_at` — the run a person is looking for is the one
+ * they just finished, and `Done.jsx` made the same choice about weeks for the
+ * same reason. Ties break on id, which the app cannot produce (one open run per
+ * list, closed one at a time) and which is asserted anyway: a comparator that
+ * returned 0 for two different rows would leave the order to the read, and the
+ * read's order is not one this function chose.
+ *
+ * A RUN'S closer resolves to 'a former member' where the roster no longer holds
+ * them (`0032`'s `on delete set null`), and an ITEM's buyer resolves to null.
+ * That asymmetry is deliberate rather than an oversight: "Finished Sep 5, 2026
+ * by …" needs a subject or it dangles, while a bought item already has #355's
+ * wording for a buyer who has left ("bought · 4:02 PM"), and inventing a second
+ * sentence for it here would say the same thing two ways.
+ *
+ * Items keep the READ's order — added, oldest first — because a closed run is
+ * the record of what the household put on that list, in the order it put it
+ * there. #355's sink-the-bought-rows ordering is about a person standing in a
+ * shop, and there is nobody standing in a shop here.
+ */
+export function groupClosedRuns(runs, items, members) {
+  const roster = new Map((members ?? []).filter((m) => m?.id).map((m) => [m.id, m]))
+  const firstName = (memberId) => {
+    const member = memberId ? roster.get(memberId) : null
+    return member ? firstNameOf(member.display_name) : null
+  }
+
+  const byList = new Map()
+  for (const run of runs ?? []) {
+    // `closed_at` is the predicate everywhere in this feature, so a caller that
+    // handed over an open run gets it dropped rather than drawn as history.
+    if (!run?.closed_at) continue
+    const rows = (items ?? []).filter((item) => item?.run_id === run.id)
+    const listId = run.list_id ?? null
+    if (!byList.has(listId)) byList.set(listId, [])
+    byList.get(listId).push({
+      id: run.id,
+      listId,
+      closedAt: run.closed_at,
+      closedByName: firstName(run.closed_by_member_id) ?? 'a former member',
+      bought: rows.filter((item) => item.purchased_at).length,
+      carried: rows.filter((item) => !item.purchased_at).length,
+      items: rows.map((item) => ({ ...item, boughtByName: firstName(item.purchased_by_member_id) })),
+    })
+  }
+
+  // The groups are returned in the order the runs arrived, because the caller
+  // looks its own list up by id — one list is on screen at a time (#358) and no
+  // screen shows two histories. The order WITHIN a group is the rule above.
+  return [...byList.entries()].map(([listId, group]) => ({
+    listId,
+    runs: group.sort((a, b) => {
+      const byStamp = stampOrder(b.closedAt, a.closedAt)
+      if (byStamp !== 0) return byStamp
+      return String(a.id) < String(b.id) ? -1 : 1
+    }),
+  }))
+}
+
+/**
  * Everything the Shop tab draws for one household, in one call: the lists, the
  * OPEN run of each, and the items on those runs.
  *
@@ -286,7 +429,9 @@ export function purchasedLabel(purchasedAt, buyerFirstName, timeZone) {
  *
  * "Open" is `closed_at is null`, never the latest `opened_at` — the predicate
  * the migration writes everywhere, and the one that survives #354 and #359
- * admitting more states.
+ * admitting more states. #359's `readClosedRuns` is the other half of exactly
+ * this predicate, and it is deliberately not called from here: see its own
+ * docblock for why history is read on a disclosure rather than on arrival.
  */
 export async function readShopping(client, householdId) {
   if (!householdId) throw new Error('Which household? A shopping read must name one.')
@@ -327,6 +472,61 @@ export async function readShopping(client, householdId) {
   ) ?? []
 
   return { lists, runs, items }
+}
+
+/**
+ * The CLOSED runs of the named lists, and their items — #359.
+ *
+ * The mirror image of `readShopping`'s middle read (`.is('closed_at', null)`),
+ * against the same tables with the same column constants, so nothing here is a
+ * new grant, a new table or a new migration: history is the rows the client
+ * already reads, asked for by the other half of one predicate.
+ *
+ * NOT part of `refresh()`, and that is the story's one deliberate departure
+ * from this app's read-on-arrival discipline. Every other read on this surface
+ * runs on every arrival because what it returns is bounded by what a household
+ * is doing this week; closed runs are bounded by nothing and grow by one per
+ * trip forever, so paying for them on every tab press would make the Shop tab
+ * slower every week whether or not anybody ever looks. It is read when the Past
+ * runs disclosure is OPENED, which is the moment somebody asked.
+ *
+ * The freshness that costs is stated rather than hidden: a run another phone
+ * finished after this disclosure was opened is not here until it is opened
+ * again — the same thing decision 3 (re-read on open, no Realtime) already says
+ * about every other row on this surface, one level down.
+ *
+ * Two reads and never an embed, for the reason the docblock at the head of this
+ * file gives: a filter written against an embedded resource is applied to the
+ * EMBED, so the parent row comes back with the embed nulled and the count never
+ * moves.
+ */
+export async function readClosedRuns(client, listIds) {
+  const ids = (listIds ?? []).filter(Boolean)
+  if (ids.length === 0) throw new Error('Which list? A history read must name one.')
+
+  const runs = unwrap(
+    await client
+      .from('shopping_runs')
+      .select(SHOPPING_RUN_COLUMNS)
+      .in('list_id', ids)
+      .not('closed_at', 'is', null),
+    'loading finished runs',
+  ) ?? []
+
+  const runIds = runs.map((run) => run.id)
+  if (runIds.length === 0) return { runs: [], items: [] }
+
+  const items = unwrap(
+    await client
+      .from('shopping_items')
+      .select(SHOPPING_ITEM_COLUMNS)
+      .in('run_id', runIds)
+      .order('added_at', { ascending: true })
+      .order('id', { ascending: true }),
+    'loading finished run items',
+  ) ?? []
+
+  return { runs, items }
 }
 
 /**
@@ -400,14 +600,29 @@ export async function finishRun(client, runId) {
 }
 
 /**
- * Remove an item. A plain delete, under a policy that admits only an unbought
- * item on an open run — so a delete of anything else affects zero rows and
- * raises nothing, which is how row-level security refuses. The caller reads
- * the list back rather than trusting this to have removed anything.
+ * Remove an unbought item from an open run — an RPC since #368, and no longer
+ * a delete this client is allowed to issue.
+ *
+ * It was `from('shopping_items').delete().eq('id', …)` under `0032`'s
+ * `shopping_items_delete_unbought_on_open_run` policy, which refused a bought
+ * item or a closed run by matching zero rows. What a policy cannot do is take
+ * a LOCK: a remove that arrived while a finish held the item as a carry source
+ * waited for the finish and then deleted the original under a predicate
+ * evaluated on its own older snapshot, so the closed run lost its record of an
+ * item while the copy survived on the next run with `carried_from_item_id`
+ * nulled. `0034` makes this the fourth `security definer` writer of
+ * `shopping_items`, taking the run row `for key share` first like the other
+ * three, and withdraws the client's DELETE grant and the policy in the same
+ * file.
+ *
+ * It REFUSES BY NAME rather than affecting nothing (owner decision at this
+ * story's gate): `run already closed` and `item already bought`, the family's
+ * own sentences, which App's `mutate()` puts on the error strip. The caller
+ * still re-reads on success, as it did before.
  */
 export async function removeItem(client, itemId) {
   if (!itemId) throw new Error('Which item?')
-  unwrap(await client.from('shopping_items').delete().eq('id', itemId), 'removing the item')
+  unwrap(await client.rpc('remove_shopping_item', { item: itemId }), 'removing the item')
 }
 
 /** Rename a list. The one direct write the client holds on `shopping_lists`. */
@@ -423,6 +638,36 @@ export async function renameList(client, listId, name) {
       .single(),
     'renaming the list',
     listName,
+  )
+}
+
+/**
+ * Put a list away — #360. Nothing is deleted and nothing is closed: the list
+ * keeps its empty open run and every finished run it ever had, and the picker
+ * stops drawing it.
+ *
+ * An RPC rather than an update, and the client holds no update grant on
+ * `archived_at` at all — because the stamp is only safe to write once
+ * somebody has checked the list's open run is empty, and that check has to
+ * happen under the run's lock (`0035`). A client `update` could not take one.
+ *
+ * The refusal a person can act on is `finish or clear this run first`, and both
+ * ways out are already on the screen they are looking at.
+ */
+export async function archiveList(client, listId) {
+  if (!listId) throw new Error('Which list?')
+  return unwrap(
+    await client.rpc('archive_shopping_list', { list: listId }),
+    'archiving the list',
+  )
+}
+
+/** Bring an archived list back. Clears the stamp and moves nothing else. */
+export async function unarchiveList(client, listId) {
+  if (!listId) throw new Error('Which list?')
+  return unwrap(
+    await client.rpc('unarchive_shopping_list', { list: listId }),
+    'bringing the list back',
   )
 }
 

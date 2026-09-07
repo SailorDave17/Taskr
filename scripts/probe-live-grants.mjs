@@ -264,6 +264,21 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'r',
     source: '0032 (#352) — `r` only; items arrive through add_shopping_item',
   }),
+  // `0035` (#360): the archive stamp, and the row is here for `missed_at`'s
+  // reason — `r` is what it grants and `a`/`w` are the whole point. The client
+  // must READ the stamp, because hiding an archived list from the picker is a
+  // decision it makes; it must never WRITE it, or a list could be put away
+  // without the RPC that refuses an archive over a run holding items. This
+  // check is the only instrument for that absence: `check:live` sees the column
+  // is readable and cannot see that no client role may set it. RED until `0035`
+  // is applied — `the column is not there`, the same deliberate window
+  // `household_id` had before `0032`.
+  Object.freeze({
+    table: 'shopping_lists',
+    column: 'archived_at',
+    privileges: 'r',
+    source: '0035 (#360) — `r` only; the stamp is archive_shopping_list’s to write',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -537,16 +552,17 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // way once the columns are granted).
   Object.freeze({ table: 'member_split_seen', authenticated: null }),
   Object.freeze({ table: 'members', authenticated: 'd' }),
-  // #352, arriving with `0032`. Two absences and one letter, and each is the
-  // write model stated at table level: `shopping_lists` is read and renamed by
-  // column and never inserted (no table-level grant at all); `shopping_runs`
-  // is read by column and written by nothing but the RPCs (none); and
-  // `shopping_items` carries the one whole-row privilege the client holds —
-  // DELETE, under the unbought-on-an-open-run policy — so `d`. A letter
-  // appearing on the first two, or a second letter on the third, means a later
-  // migration widened the write model, which is what this control reports.
-  // UNMEASURED until `0032` is applied; red on purpose until then.
-  Object.freeze({ table: 'shopping_items', authenticated: 'd' }),
+  // #352, arriving with `0032`, and amended by #368. THREE absences now, and
+  // each is the write model stated at table level: `shopping_lists` is read and
+  // renamed by column and never inserted (no table-level grant at all);
+  // `shopping_runs` is read by column and written by nothing but the RPCs
+  // (none); and `shopping_items` — which carried `d` until `0034` — now carries
+  // nothing either, because the remove became an RPC and the client's DELETE
+  // grant went with the policy that bounded it. ANY letter on any of the three
+  // means a later migration widened the write model, which is what this control
+  // reports; before #368 the third row read `d` and this comment explained why
+  // the client held one whole-row privilege.
+  Object.freeze({ table: 'shopping_items', authenticated: null }),
   Object.freeze({ table: 'shopping_lists', authenticated: null }),
   Object.freeze({ table: 'shopping_runs', authenticated: null }),
 ])

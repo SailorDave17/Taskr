@@ -651,6 +651,47 @@ describe('#303 — the shell is not a phone-width column on a wide screen', () =
 // MIGRATIONS array, and the same reason: a hand-maintained list that nothing
 // compares against its source drifts silently, and prose asking a human to keep
 // two lists in step is how it recurs.
+// #360 — the marker convention, gated.
+//
+// Stories that apply a migration write their after-readings as `<<PENDING:…>>`
+// tokens and fill them once the apply has actually happened, so the documents
+// never carry a past-tense sentence about a reading nobody took. `0033` (#354)
+// and `0034` (#368) both used it and both drained it by hand.
+//
+// Nothing enforced it. A review of #360 put the question the right way round:
+// the risk is not that a reader mistakes a marker for a reading — a marker is
+// loud and the sentence disagrees with itself — it is that **the unfinished
+// state can be merged**, because no test, no CI step and no script looks. So
+// this is the check that expires the exemption (cairn:
+// `an-exemption-should-carry-the-test-that-expires-it`): the convention stays
+// usable mid-story and cannot reach `develop`.
+describe('#360 — no PENDING marker survives into a merge', () => {
+  const MARKER = '<<PENDING'
+  const SUBJECTS = ['README.md', ...readdirSync(resolve(process.cwd(), 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)]
+
+  it('README.md and every docs/*.md are free of them', () => {
+    const carrying = SUBJECTS.filter((path) =>
+      readFileSync(resolve(process.cwd(), path), 'utf8').includes(MARKER),
+    )
+    expect(
+      carrying,
+      `${carrying.join(', ')} still carries a ${MARKER}…>> marker — take the reading and substitute it, ` +
+        'or reword the sentence to the future tense. A marker is a note to yourself mid-story, not a shippable state.',
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: there are documents to check, and the marker is what would be found', () => {
+    // Without the first half this passes vacuously the day somebody renames
+    // docs/; without the second it passes if the marker string is ever changed
+    // in the convention and not here, which is the drift it exists to stop.
+    expect(SUBJECTS.length).toBeGreaterThan(5)
+    expect(SUBJECTS).toContain('README.md')
+    expect(SUBJECTS).toContain('docs/access-model.md')
+    const seeded = `a reading of <<PENDING:check:live after 0035>> taken later`
+    expect(seeded.includes(MARKER)).toBe(true)
+  })
+})
+
 describe('the README lists nothing has fallen behind', () => {
   const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8')
 
@@ -1299,9 +1340,46 @@ describe('#19 — no real household name reaches version control', () => {
     // target that is not the name already on the fixture.
     Bakery: 'a third shopping list name in the #358 picker, ordering and rename tests',
     'Rename Hardware': 'the rename control’s accessible name in the #358 picker tests — the control names its list when the picker has taken the heading’s place',
+    // #359 — the tick control's accessible name, asserted by its EXACT wording
+    // because the history and the open run both draw a row called Milk: what
+    // that test proves is that the tap target belongs to the working list and
+    // not to the record. Declared rather than matched by a lower-cased regex,
+    // for the tab labels' reason — the vocabulary exists to put every
+    // name-shaped literal in a diff somebody can look at.
+    'Mark Milk bought': 'the tick control’s accessible name in the #359 history tests',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
     'Placeholder Item': 'a shopping item name in shopping.io.test.js',
+    // #360 — three item names for the archive fixtures, because the refusal is
+    // about what is ON the open run and each case needs a row it can name: one
+    // unbought, one bought, and a third for the finished-run case that must NOT
+    // block an archive.
+    Screws: 'a shopping item name in archive-shopping-list.pglite.test.js',
+    Nails: 'a second item name there, added after a re-paste puts an older body back',
+    Glue: 'a third item name there, for the finished run that must not block an archive',
+    // The two archive controls' accessible names, asserted by their EXACT
+    // wording for `Rename Hardware`'s reason: with the picker up the heading
+    // stands down, so the control is what says WHICH list a tap is about, and
+    // a test matching a lower-cased regex would pass against a control naming
+    // the wrong one.
+    'Archive Hardware': 'the archive control’s accessible name in the #360 tests',
+    'Unarchive Hardware': 'the way back, on an archived list, in the #360 tests',
+    // The picker button's whole text content in the #360 picker test — the
+    // name and the word that replaces the count, concatenated by textContent
+    // with no separator, which is what makes it name-shaped.
+    HardwareArchived: 'the archived list’s picker button text in Shopping.test.jsx',
+    'Hide archived': 'the toggle’s label once the archived lists are showing, in Shopping.test.jsx',
+    // #360's pure ordering test needs a list name that sorts before every
+    // other one, so the split can be shown to preserve the caller's order
+    // rather than re-sorting.
+    Apples: 'a shopping list name in the partitionShoppingLists ordering test',
+    // The heading's two control LABELS, asserted as an exact list because that
+    // is the property a two-step archive confirm would break — the assertion
+    // that replaced a dead `/are you sure/i`. Bare capitalised words, so the
+    // shape scan reads them as name-shaped; declared rather than lower-cased,
+    // because the whole point is that they are the strings on the buttons.
+    Rename: 'the rename control’s visible label in the #360 gesture assertion',
+    Archive: 'the archive control’s visible label in the #360 gesture assertion',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])

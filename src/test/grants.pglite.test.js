@@ -268,12 +268,13 @@ const CLIENT_OPERATIONS = [
     site: 'shopping.js readShopping()',
     sql: 'select id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id from public.shopping_items limit 0',
   },
-  {
-    table: 'shopping_items',
-    op: 'delete',
-    site: 'shopping.js removeItem()',
-    sql: 'delete from public.shopping_items where false',
-  },
+  // #368 — `shopping_items` 'delete' / 'shopping.js removeItem()' stood here
+  // until `0034`. The privilege is gone (the remove is an RPC now), so the row
+  // cannot stay: every entry in this list is a statement the client must be
+  // ABLE to issue. Its absence is not left implicit — shopping.pglite.test.js
+  // AC 8 asserts the direct delete is refused by the grant, and
+  // finish-shopping-run.pglite.test.js asserts the table carries no client DML
+  // at all.
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {

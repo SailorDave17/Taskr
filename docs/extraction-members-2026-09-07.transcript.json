@@ -1,0 +1,3106 @@
+{
+  "version": 1,
+  "kind": "member-sentences",
+  "recordedAt": "2026-09-07T18:24:30.892Z",
+  "sentenceCount": 43,
+  "runs": [
+    {
+      "config": {
+        "label": "claude-opus-5 effort-low",
+        "model": "claude-opus-5",
+        "prompt": "You extract structured facts from one short household message. The message describes\neither weekly time capacity or chores, and the input names which. Answer with a single\nJSON object and nothing else: no prose, no explanation, no code fences.\n\nFor kind \"capacity\" answer:\n  {\"kind\":\"capacity\",\"minutesByPerson\":{\"<person>\":<minutes>}}\n- One entry per person the text gives time for, spelled exactly as the text spells them.\n- Convert every duration to whole minutes for the week, summing parts the text splits\n  across days.\n- A person the text says has no time gets 0. A person the text never mentions gets no entry.\n\nFor kind \"chores\" answer:\n  {\"kind\":\"chores\",\"chores\":[{\"title\":\"<job>\",\"expectedMinutes\":<minutes>,\"dueDate\":\"<as stated>\"}]}\n- One entry per job, titled with the job as the text states it.\n- expectedMinutes is how long the job takes, in whole minutes.\n- dueDate is the due date EXACTLY as the text states it: copy the phrase, whether it is a\n  weekday, a relative word, a spelled-out date or a numeric date. Do not resolve it to a\n  calendar date and do not reword it. Where the text states no date for a job, omit\n  dueDate entirely. Never invent one.\n\nWhen the message cannot be answered - it names no usable quantity, refers to a baseline\nit does not state, or offers figures too far apart to choose between - answer:\n  {\"kind\":\"refusal\",\"reason\":\"<one sentence saying what is missing>\"}\nRefuse rather than guess: a confident number for an undecidable message is worse than a\nrefusal.\n\nFor an explicit range, answer the midpoint. Amounts may be written as words - half an\nhour is 30 minutes.",
+        "effort": "low"
+      },
+      "responses": [
+        {
+          "key": "input kind: chores\ndescription: The grass needs mowed every week",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYUNchmnSCPjNGJ5742",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISnQIKjgEIERgCKkBGgFY2qrn1QDQUiVsHWz8MhkNZSuDeQpu1OQZjr/7TGMDLVlzybfcxdPixh+0+cy73AReTv9L2C2IzOHrAZNkgMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbGB/NQGEgxV6wYqlYc1/kziR5gaDFqBmW3TRDZWLIRR/CIwNEzrYME10Z38jj2NFXfT/rt8ceKKN9Ic6zZMlLUGndwFjdVcM8I1A5iUa/gOiA5OKjzH1K0W33lkmVSIKx22YLfVOX4hfRGh7Fvf4z/uK7WybNmQ0q8VQC1NGXKFAq3tDFI2cairxEMZzWWGCKAYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for mowing the grass.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 594,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 52,
+              "output_tokens_details": {
+                "thinking_tokens": 19
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2310
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to do a smart home checkup every week",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYUXU1Sv97bAa8E6LK8",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjgIKjgEIERgCKkDFcb7TETPJIiMmDuQaAAmSa6W63PYMjLdiumi2SpmktJzlzYH5mixyecpKQgbLz9KA9tiGbaNV7aG5sW2VRCBYMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbSB/NQGEgyJXAXY6rxffHsTbZwaDI+m3+mn8rmDskzppCIwp1RJhuCe3Aye8kMxxW7MNrLgzGv+6FZqs70RaxTNpSH0J59bY/B4UcxtOky9+XtpKi1yZDvwk/l/AVH47HrGwigrhNXpByMVuHyA0OOjGlfSW33fClbF97FOF23TZZMYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no duration for the smart home checkup, only that it recurs weekly.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2654
+        },
+        {
+          "key": "input kind: chores\ndescription: the refrigerator needs a deep clean every other week.",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYUj7VmDZDxZid8dt5R",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS9AIKjgEIERgCKkBMAHCXNoEu7eFBHcPzaWYKTegMnnhxUK4CQHn6Q6bUx2sJ03keU0i1mXm9qPtSJW7VbeyUi6oCwugsDnIZNtt5Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbaB/NQGEgxGgJNMPFqdn8zhXzsaDIDUKApmnQe3ildBAiIwiTUSEgaNz3KsvkMbCp7g5OxUN8jjatq65QGzbW+C9Exk56lrRwLKeYMFzbRxlW0ZKpIBr//Y3AJ1mddvMhzhMwthR9EWxl68c/u73ZwiYVW93quzL3zl1PL4tJRRnFY45Wn2hFy8wiVVRktZK85ZdsYme38iIdK96zltlHcoJOXCtAveUNvPxgu5WDobqYCRRcR79hzfiCAtrSW1UlgGIivgmSfYQV/3oz9tQtbzx8anCdMl4wTgPqsFE0+6LSA692AbSCMYAQ=="
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 601,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 45,
+              "output_tokens_details": {
+                "thinking_tokens": 45
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2667
+        },
+        {
+          "key": "input kind: chores\ndescription: We do the dishes evey day",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYV5rB6iLAg8H6V3EoK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISlwMKjgEIERgCKkDbo8NsLYrxFdG/SAgknnmCS8LSjXoSdRWuqV6RLVATIZqketr2y2J9PgjD9sT2eSGaQ8hJk/zGltE99PfkbxO8Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAbuB/NQGEgwkeMYRwKtDxbR7zfkaDBBre+9ycQyOmV4TgSIwyj+A10WYAbWuEXwT+7AeIS4v9cbzKFpMAyw0Tj4v9ZxrqSLk4MBMe9wxjevDNE/HKrUB/gx0Ey1w8r1v07ddTG558woYBv1Gqrr7Zd907sxs17f4WA8Ko5rbsu4q+U4lP77Xb3U56lqXXpRe5+IWPqg5s47gJ3VIEdnsN3bIH9tIZU1FY6Fs1f5GJg7JIIaLtIA1AzbR0zvbOerujRSbJlHJpMN1f+QL4Ny7DGKmVodOabPk5S3atgESGXPrVuDFONXzqRcmxCwPSdUsw2dqt6tA6XKxonRrFstnQHLquCsF9jYT+gSl9xgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message states no duration for the dishes, so the expected minutes cannot be determined.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 593,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 103,
+              "output_tokens_details": {
+                "thinking_tokens": 60
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2690
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex maintains the Robot Vaccum Water every day",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYVHsygxh96WwYD2kgb",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIStwIKjgEIERgCKkAP0vlQK45Z5amZtxo74wCp5P/k/4sYifcao6Yek3tGRhzQkpmegehHNxYTKXqicfzrQlmqvNs8DbF4B3bhoWcAMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAb6B/NQGEgwhmM/k+uYm40IssNcaDF+3rwzgR/jeYdQItSIwiBPPnDfT5GCjD1E/Hb4O1DVvO06jH09MVPV7BV9gQYrNTnQxXbpp2qxmRcSMrgc4KlZKPhLyXGhp24t95u2Rnc3OrqauEGykvOjnReMS7eQFV4fhuHv6h3SZlyULKGBhrKGsSKrTdceUT9syMlYO1nHRm1MdJ0TkWw57CXr1QabzANxdm2A8ZxgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no duration for maintaining the robot vacuum water, only a recurring frequency.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 603,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 75,
+              "output_tokens_details": {
+                "thinking_tokens": 28
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2462
+        },
+        {
+          "key": "input kind: chores\ndescription: We put away laundry every other day",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYVTqGDHksbyW7cbEXt",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISrQIKjgEIERgCKkBjX5T3ltnSihHx+uWH8QUIiDeTEs8xihb3neUwHu2uIIYUrCqT743BTJItMD8XEVdW9KV+XFnTQR4JjPx9QU/hMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcKB/NQGEgyQUKT4P7NyawA4My8aDDPzzF0no5Qv0eT1dSIwWC71XR796HJH4Zlcmr5TkMVUGAQUfcyDDBZsPWOFpOs4OhdZ9AgQTf664zN1D2xyKkyFSj9PaEXWzJMugBGhnxZ9Gr91uxl/XrVWuaLx6YIjahO2gA84/Ebz8IL3zTPE8yfwrAH2M6kty0Fk3gVdLWhL9DpwOV8AmaoWsV88GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for putting away laundry, only how often it happens.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 593,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 62,
+              "output_tokens_details": {
+                "thinking_tokens": 21
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3544
+        },
+        {
+          "key": "input kind: chores\ndescription: the fans need dusted every two weeks",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYVixr5KeqoPMHq4s7D",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjAIKjgEIERgCKkC8wzr0UZw2IYgm+/b5y+v4LCoAy1pp/FzzD743ITbPbH32Kqo6AsUN6BfrMoveHq3onN1jQwSLVKfM6UmRIVmEMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcOB/NQGEgx4rnOA/mm2nyW+CtAaDCAiRbJwY7iTyFMQRSIwiIKBkSOWm9Tx57TuGdmJTixLNCd89pehsiE5RrrdEAQedcCoGL7NOj8EwBSpEjmuKit6Pmfp5u+bM6alvJ97CEM8Fc7+SAo9/cLr2dNRsR2kGWvLwG4wimMH/ZpMGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for dusting the fans, only a recurrence interval.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 596,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2064
+        },
+        {
+          "key": "input kind: chores\ndescription: Robin scoops the cat little boxes every week on thursday",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYVu1b3ZWF1mAjw3BnY",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIStgIKjgEIERgCKkBqyQaAVTZjXLK8EBOJCF/7NnYpMeEDExYbHqcuXjWLX7yxtDHKEuHuWZ6Sc4UXTZuW1a2KoR+MzbJ6+nIqdbW4Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAceB/NQGEgzJrDd6LU4T+BDZ1YsaDPSIb0psXw2cIGcpkSIwoUuvIDbv4ON5Zzu96bX0OA7wvBrxUfE6iAjhkCGA+4iL7u9W4oCvw6ovbkQAOk/uKlXTxKF42VaOgp+iHZ8p5SmwUrETRdNUrn/tP7Rm2Yl9Bo8gJTyHh6/lt7fyFH0f3RgkJupTvwx+TfQQU4EY+PvVa0ROZm0ApzNshELLDcv9boHHVJokGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message states no expected duration for the litter box job.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 603,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 63,
+              "output_tokens_details": {
+                "thinking_tokens": 31
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3221
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex need to take the trash to the curb every Thursday",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYW7SweDnVcQEsTBbZ8",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISrwIKjgEIERgCKkDKoo79u/e+n0OGUD7ZCrONQuxrw32C0UW5XoMMOdVwxUpl0Mz4C2w3E71TgaIhBun+eRhTn9mGlODrEQIY6YsDMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAcqB/NQGEgwnYwTm47Vh5ly0Bo8aDD+lKGQyyLOSqI+N6iIw7XlgVoMF2tTyfFIBBhjNxe9azMGdjZnOG8/Vv1cDFdxm3uuamM4OsfU2XPANIiqMKk5aDD6w3URdLUbH/j9THQ6quUUrB9jokWd+lk9DmnRnCfyutjmL7lGGaqXT4C+hc19JkdsVnIaSTkrvbNRlSRLZrcIh5BOluwB93BT3XSMYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for taking the trash to the curb.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 602,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 61,
+              "output_tokens_details": {
+                "thinking_tokens": 24
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3430
+        },
+        {
+          "key": "input kind: chores\ndescription: The living room needs a deep clean every other week",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYWNRMGM2XeoNCzEr8B",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISrgIKjgEIERgCKkAl68jH7V/VLxal7UTocSZCGT5B5/QMUpoUS01RJdhtwYEVxGHVv0M+D5JozEIOR7Mab6tHTFu1yS6dn0JSk9SBMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAc2B/NQGEgxmMHmmQ82H+sLInQYaDLJabyDJ3GzaLkI2oCIweqWByxMPe8HMH9TRVBVQKpoaJoR6Ta9fDHRyJrhFvG/z9A4QszbUhnt9KEX9iq+KKk1r5IWPe3Th4JoyxYT3g1ZoDusbNBnTGab9OPIkpNWsr2VazaAeD7+uoi3oLZ1tKECJSXrEpK52SvJ1mGeJ0WyhDOsKACsqNnBu37xGqRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for the living room deep clean, only how often it recurs.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 65,
+              "output_tokens_details": {
+                "thinking_tokens": 23
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2702
+        },
+        {
+          "key": "input kind: chores\ndescription: The garage needs swept and organized once a week by alex",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYWZtfYHNqFuZsNyk1h",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjAIKjgEIERgCKkC8wzr0UZw2IYgm+/b5y+v4LCoAy1pp/FzzD743ITbPbH32Kqo6AsUN6BfrMoveHq3onN1jQwSLVKfM6UmRIVmEMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAc+B/NQGEgwf3mu3cSrfjRHxDRkaDPuYGztbfLw/nT+fsiIwCjP9DWSLeFfc5/QrMDSLcUI3fOjWnHXjaGgxo5H2Y4SN8D5bCH0+/t7Z4vgINIHLKiv0iIhvHKGgLZ3Oqh6A1JVAbDXQCr8iSYXNtrrTFjvLhKnMem0S4ycq9UQYGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no expected duration for sweeping and organizing the garage.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 51,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2004
+        },
+        {
+          "key": "input kind: chores\ndescription: organizing the garage will take abocut an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYWiCUpz5RtogaYQuZ9",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISvwIKjgEIERgCKkCBTzDr3y7yLqzbToTEj1e0pzwk9rj15e3uAyz55XblkwMVoyorpVGvIEtQUw0sXmw0pAZyoUZr3U1qhWqs8KmNMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAdKB/NQGEgxaRP2/2ceMM5YJLsAaDGFYtPTiblY+4OWnwCIweFev8iPPf6cK9xQTtXcs46CJfFAwUqfw417/l8ZoH6ZxCMzbglgLCInzs64dB30hKl4gpw213FsmcsXLkDlw3ROjaRL/MSgzAvWG8gYfNRafXTO9FMfYzrSFtlC+tIJbYKg7tM/igeTA/ix5LDzXLExIDXxrVuFweGKVkazsMr4GkIkEFsxapJIgWDymevMsGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"organizing the garage\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 65,
+              "output_tokens_details": {
+                "thinking_tokens": 26
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2810
+        },
+        {
+          "key": "input kind: chores\ndescription: Deep cleaning the fridge will take about an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYXF2P8fz2v45qnJERD",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISigIKjgEIERgCKkC0XBDObqBIpWd5cHcg3NM/iEOVHGslss8OW4edpWJyhSPUoEFmmQn7gQO1zZG0lrBD+9nHdww7mLTUC8jHPmysMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAdmB/NQGEgxFmuSGhzCQMx7wiXEaDEkPn/VmO08AGEXWayIwryJe01NW31qURwEYN6XOtGy1IoyM+8cDbujHnnZBLiormNY3ebQsQ356ygPd6gCqKilEX8s925/LybQ5jFt4LssUPk5fGKAbmL4UEDXzKPvOUrKCUkEIJ/+RwhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"Deep cleaning the fridge\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 601,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 56,
+              "output_tokens_details": {
+                "thinking_tokens": 12
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2491
+        },
+        {
+          "key": "input kind: chores\ndescription: takes about 45 min to mow the grass",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYXRn3FduMXTNRyXCVw",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISmwIKjgEIERgCKkC1k+YL1cqyVRtJ2Xgo9Nh/Z5X2t4K8u5g0aVRD+KL84FLRHeSEGBaC/mPQsqaXKpcjIToQMYqBhlcMiqM3HPfUMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAduB/NQGEgyjfyWXuUAlpFqBfhgaDG1cMVC1hc1A+cEVpSIwFXEIAdpYOal4JKPq09dLtPHZoAA5vR1F0cGU/2ODAff07uDM7OvlqCh9c4tqBb7hKjoV11SThI+NN4YFFbrMSBoJGBlfSCr9QObOSwyZDTaJpIPYVmZgXwv2XwY7RZrRO+Xv0EZ5y/NRaJHpGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"mow the grass\",\"expectedMinutes\":45}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 17
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2069
+        },
+        {
+          "key": "input kind: chores\ndescription: putting away laundry is about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYXak3E7eg3BiHCCVek",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS/QEKjgEIERgCKkCw8zBOM3OEx5w/Dw+Bp8G30p3iDemmEhXl6xQg4MBhrHJ/3nYMFp3yt2jipQ0PWTfmo0DNG9CC10jeq36w5X+ZMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAd6B/NQGEgwfe5s/DLPDXpoYZvkaDI7KuyG+a/2naxPssCIwCUC78pm80qKufyVaRU22I4hyMVIuFDuYUW9Up0or6p2Qv2rJPts69QVcwvdfbZmSKhynuQykEZP1aXw8nUmEZ7hQYBM2JW+JC4JyLkBiGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"putting away laundry\",\"expectedMinutes\":30}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 596,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 45,
+              "output_tokens_details": {
+                "thinking_tokens": 6
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2856
+        },
+        {
+          "key": "input kind: chores\ndescription: doing the dishes is about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYXnh8hdmBnFKNTkxee",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS/QEKjgEIERgCKkCYLpPIsAKCsQDIeM7wE9AaehJdZ4JPBy9ajB9iiqdh2rD0pEPIQbYu/l3pXeTIqMVJR4YbgfEMvgLj0gAGkHBhMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAeCB/NQGEgxEtiG2MLGONQmt1mIaDBSeGrPC4qNQI6EjjSIwzj9Ucubk26tIIOdf8HOQMcLI6pddaSYpa/1vz6HrwD/niKfLefDsABLnIjXlzWyXKhxcrVTHWoh6nCy1farnuwKQPToeT863Rt1uxp27GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"doing the dishes\",\"expectedMinutes\":30}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 596,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 45,
+              "output_tokens_details": {
+                "thinking_tokens": 6
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2381
+        },
+        {
+          "key": "input kind: chores\ndescription: dusting the fans will take abocut 25 min",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYXyAvKYVA5it8Tf2DY",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISiAIKjgEIERgCKkDOmF73AH/KQlZ1fuws4H09lJiYmkkr0tY3xJs51MDEtpr1xZK0uyzzZHwAQi1FAiDRySTjGu/uak1iBClfnOxOMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAeOB/NQGEgzZoFa1cZVN192TJloaDGbL+3JWQtBrnE+UnyIwNBYkeBGjy76fUujN4j6A7RMeklNxp546c2Gj1jEGyb41qQ8M1RSG8LKnLkB0MonrKiff19XZap7Qce+k7vJyhIiOtBBei3fnyWQp2b8JsKZPMW/61Yb5bM8YAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"dusting the fans\",\"expectedMinutes\":25}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 599,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 49,
+              "output_tokens_details": {
+                "thinking_tokens": 10
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2826
+        },
+        {
+          "key": "input kind: chores\ndescription: it takes robin about an hour to take care of the litter boxes",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYYAurjexrHegBarag2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISqwIKjgEIERgCKkAM+FW/Mui5RWKYM1bRt5uwbo4FPZIZO6fkvT48EbUeuJoiElXFrT4UO/WEp9sylnhsAPqBuq+TdSl8ywIf9wVPMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAeWB/NQGEgyKuJkvuD01DGAL+AYaDC3lIJ1rhWQ4Ee9CliIw30VzDtIJk2bjVX15KRledRAY0eAMzzzyTyHY5vEMt7noBLav8IxfaE7qoY0pxEu/KkogAFgy3+yTbCd78AOeYHeUnyOPFEqid1k6qsGWvKAHCwq7eONKB9OBddEYHyfAQ2dnGXA0b5oj2cjM3aXX9v1XnkzKa7/xE4j+nhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"take care of the litter boxes\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 603,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 67,
+              "output_tokens_details": {
+                "thinking_tokens": 25
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1949
+        },
+        {
+          "key": "input kind: chores\ndescription: the smart home checkup is about an hour each time",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYYKQ5simnhwQCbXuao",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS1QIKjgEIERgCKkAfKvNf221hxJAiMeyKrPMwAxYrInUrmTmqiFjQtPsUXZr8zK5DJ8Vy6tPVjP1H5FB3MZKLmvBk/ivKtsu5Zy8jMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAemB/NQGEgyhEy2QJbPm0hXuwBYaDAgrqB3RbEThgYi2OSIwyGiTUGeg+iDghTIVkWbr1OzyD4gyJDyvfnaiAxkgMGE+WEs9tEfmRwamQvoMKNbTKnR/30ZaINntMla/L8x/inRtGct92x1a4ePajMzI8O8GR7UKRgoxLsctyif+ZovKQI9RUo85+AUj06HtmOy4bYvl/igL/3DOPIlHoGDzIYJ/CNQ/7Uy/I0w+oCycnl9a05SiDFDfsmA6hFyHJk0qfHTuC+RvFxgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"smart home checkup\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 598,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 84,
+              "output_tokens_details": {
+                "thinking_tokens": 45
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3923
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to deep clean the microwave, it should take about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYYc7fgzfcWZaHjc4bG",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS+AEKjgEIERgCKkCYWMo4h+gTuoOJyej3UAvI/z9N7dYZpIw1rpyM0pAj/LGQIcM+c4h7Vk4GHtKp709n07ZxKqSK/CNlabX+vVcgMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAeuB/NQGEgxSrgqOTEqux8v4CDgaDChCJ5pf0JYgrbSjNiIwElm6+EctncPJyNrklqUhwH2il0wRMDR7QAtBwtlcAzZmn80eDZRfvwplCvwp4NCuKhdPL5mwhcAqczOr1Nke/EOQdYNsIFq3NhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"deep clean the microwave\",\"expectedMinutes\":30}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 47,
+              "output_tokens_details": {
+                "thinking_tokens": 6
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2126
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to clean up the mess in the garage, it should take about an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYYm6Ag4GBn62TMkBhc",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIStgIKjgEIERgCKkAtUMVR5r3t9UU1IJGyILAVsTCvuvDh5b/dKE//oDdh0lAMiBjx4Zb/2U4mQjqpROjIcZk6+Q2xU70AQ+sJ01M/Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAe6B/NQGEgz9t1F8VxebxgFvW5EaDB5G4aquG3elutK8myIwxDJXCpv4S+yqSEwvNP7DO5VFMHFNovl/Wz8h6nDl+X18MUtjbdoDPYdNLljGHIuPKlUy+hO0QtpDiU9/LjghXDuev7m2JRKtXthyh4cY6AsJCrIcNtHAvrMg5xUkvC3Im5rbh13ck+T3QsR3e0mhGr4A7f9SJB4oQg62M7cFcR2MVcB/QrBRGAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean up the mess in the garage\",\"expectedMinutes\":60}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 608,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 71,
+              "output_tokens_details": {
+                "thinking_tokens": 28
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3350
+        },
+        {
+          "key": "input kind: chores\ndescription: Robin Needs put the litter box in a new place. should take about 10 min",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYZ1VbUgXoaSBDGQuPC",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS+QIKjgEIERgCKkDam66bH9mXB4XQx0vtSVnfGW1nefWNWpug99vrO53DAuZfmKCo2M6QgNez+GFyA0jsxKTe0x/GF6My5vzRED7HMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfGB/NQGEgxlEzEFmYAZtQLkfR4aDLAbZz1urI+6YhFiISIwxl/DnE9If+iJt38OOIeoSj66fYkWVqVTlbqEFhD9jSNWQgcFoIQNUUlUqquJHmrKKpcBeGrgBo2secZxlP+stcLXVJKvGcsOcZhTNepgSTtNKqYJZL+KYTdYZEg3ssvkuqAK4V+Xja3LRONFLmTcJuqABMR1s4dZAaUwg0YU5N5zzWnl9LOZuIWqhU5CRr+4W8+rNK9AbGd9UJl4Fc2mtoEVR85q0oHBbqanhAbnf7ud+9Zh46XWWZDpa3Zx0Lnbv/Z0PvIAOUsaBRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"put the litter box in a new place\",\"expectedMinutes\":10}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 96,
+              "output_tokens_details": {
+                "thinking_tokens": 54
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2583
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to rebuild the outdoor fireplace, should take about 6 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYZCRv31a4EaYSsQrpj",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISuQIKjgEIERgCKkCCHajjCC6S/wmmLmcZEO1MQ/wXct9bm7hbW/QpeDDEDRUPLHq2fo8COt805Wx8fm1437DVo/Zex/5u9DoXGa7PMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfOB/NQGEgw4gd+Ks52R27N8qRwaDC++msijEKkw6P0tYCIw14PXwHxZD2Rss5m9Jdr79hffkLKtR7pBqQwj5KznTlWAWHcVdbs4Y35r9nyXc85yKlhnk/BAPUWYOMR0ixHZyOszOyDlDGQOYuh/AJVhTpC6blbJJDcXye+Yi4pG2sLvnOXe5FdH83e6AW6/Gk3M8ku52s2R/3JAlesUuqKCGfts10pTKwXdrby3GAE="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"chores\",\"chores\":[{\"title\":\"rebuild the outdoor fireplace\",\"expectedMinutes\":360}]}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 612,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 79,
+              "output_tokens_details": {
+                "thinking_tokens": 33
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2483
+        },
+        {
+          "key": "input kind: capacity\ndescription: I think I have about 8 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYZPKG7GsoCNooH2132",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS5gQKjgEIERgCKkBeKwJXPRHq8r28R4QpMXjLN9jlXf1amWsk0VB5kyhQXgTN+Sy3gtU5YPUzvzlX3Z1pP6FpgOD4j11I6QcO5o23Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfeB/NQGEgw7aZqQE036TwWDhUMaDGXkCvTxNSAOS12gmCIws+E+Vnf3amhWCuAnR3qCM9ZBFq+nrGpQxj+x/qQXCdj/fnZJo1TESbQ5U5wmyT/jKoQDXTZMPG71ZjT9z8dnqho/hyIhxW2l5uehxUSfq934MHjFFkWJlZm8tU050mY/WIWjO25g42INLTwYNcaPNAv3Hq1VTvfQCEDRGn+DdgDaI9zlxchmJ+2oW3+1c9L14BqLeqnWyVWYv/HF9Ims+EPyBZzGSvr6ljRcWhXPHxcMa7oIxet4h82gsvUqjEC0BV6YDqJEDo6MuEoSwscVMLlyMojRhFndD0TIRK5zeSjsNtAtjgJ9nbKK/piBT7HZohtXmGTTlWalnz3FUzNcdvQdSTrou2HQ+soYD7ZDJW6o/cTxe4zcvYUF8x/Xr6umfjmg0n0w0wwqto4wWWhBcBG7i4P3Lh5D80PzKzofpc2Ebm8/ccOCYoLpzftdHHD4aoOw2lJAJUYQbqaEkCoHbEiPVoyKgVu3ScKOEDs8G/HwJy3SykGcoiCQmwx9fJDVUj5sI+7dyFqnQ+0O8tPp+ImpmAu93Xa7y2+tY3TBRgjCdMYl27jB+8Bqlh4L6TyzIsnMkPAc6xgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"I\":480}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 595,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 168,
+              "output_tokens_details": {
+                "thinking_tokens": 141
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 4146
+        },
+        {
+          "key": "input kind: capacity\ndescription: I think Robin has about 4 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYZgshF4YKXcuxb71WE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISkQIKjgEIERgCKkAbHJzi6d0UiJSxGrN5bG0e0ttGBfkMt4TX+mfmeNyVdolCjAxNoj5Kxy0R3JyGD9zHrmlPjqRoF1l2wpY5r7TDMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAfmB/NQGEgzV92GoDOh53xCHwE4aDBgKRDgo5/eSsClGfSIwC5VgLTn2Ra/hkx+1RSx/Ml5TzMQPchKZr/mZmItlkLaMg2/hjezSUfXpuee07Y8XKjDrDrSMw/7F6dbHY8pYznhTjDI/ogBg4eaPdJ6d3txFc+RpLAtOIh0T0mBl1Z+FQvgYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":240}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 17
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2074
+        },
+        {
+          "key": "input kind: capacity\ndescription: this is pretty normal",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYZqkyvSxrgNBUJ7rwW",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISwAIKjgEIERgCKkDChNLUE+o7+xP9JY80Q1IaR79i4q4iN8srB8ct2kS+XBwliSRRXQyRpJsOgQUbZ+J/nwh+IOhm3v2qoyVicLg8Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAf2B/NQGEgyk8yxCXzJAOwRamVUaDIKqtORsxtr5DZ/4BSIwiELI8YoP0his3Y/xp4p6A939PThnnumgQ/htM+/AnuwdI6baslEYIgRKrwqu+yJFKl95Xo9S/OhPvYA8vJTmSLVUWwWQ4sXreUap9qiDxD4yxJGxXNpLtMyoemI0AcXFIfkf1t6GPeY7jHx/FeBVssCJAuVR3/5d7fn7/YgjmycrKZxBgqUcRA/YI61t7uS1PRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no stated times or names, only a vague comment about things being normal.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 592,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 67,
+              "output_tokens_details": {
+                "thinking_tokens": 27
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3811
+        },
+        {
+          "key": "input kind: capacity\ndescription: many things can change it, varies from week to week",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYa85kVEL8Tq2xHybhg",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no actual time amounts for anyone, only that availability varies.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 597,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2631
+        },
+        {
+          "key": "input kind: capacity\ndescription: I can do chores any day",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYaKCVP2wn1Z1TxVwNK",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIShAIKjgEIERgCKkCL5k6a67ZfYJ3LSrCsECwOwgTW8fFNgY/FIV0Sm3IiF4gqE+RA8/07R5u09MYbd+APu3KYz4lXKcwg1vjz3VzKMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYOC/NQGEgyFHw8/Kd08923zsRgaDKqcQSJ+nyb32jRs0CIw2JxF5TboRgdaG3QmvN2kRE6f3jmbvUKfX84SpnSvzrhNHuZqs/VW2nUeEy89mUwxKiN+6jRTUqSEyanjwe6xPIDZy9GiMtHo+N37mqCfiR8nU49CWRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no amount of time, only availability of days, so weekly minutes cannot be determined.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 592,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 56,
+              "output_tokens_details": {
+                "thinking_tokens": 9
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2759
+        },
+        {
+          "key": "input kind: capacity\ndescription: maybe 5 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYaX4ctYUgukC4CqBrd",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISigIKjgEIERgCKkDxns1Sy9dB/HntTePR9vXHzD218ooIqr1Spt8AWU6SWrRNeNpgaVbC+XhDJiETLN2EkOGAAfKZ5d4cjhvY94ECMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYSC/NQGEgxTq1hZhTDYqM4ZFqQaDEKWPxdYiRb7HoQRVCIwfMYOv1cFAuMGUWaA/eZ1qR4lzeWBRe8IA7/rGNXP84K5m4IHaCHp9C24MFwB+8PYKinB3pYI6zhDefQfO2LJqttQiHOQzQ0ONfySsQquu+qBS6u6U9uvIav1XhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives a duration but names no person to attribute it to.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 593,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 11
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 1907
+        },
+        {
+          "key": "input kind: capacity\ndescription: yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYafBXS8dzuDkCTEPpH",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISkAQKjgEIERgCKkDilJV+Ongj250/n004/z/fN6aIoAzUVGh4vvtlNLD8jshgZlCHTT/wwJakCfsuRl/mtYxgjN7MNF0yiecuJl0MMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYiC/NQGEgx17QNGmnzFNdBY5DsaDNo2h++GiuZ9R/cHRSIwRVUbGwrzCoKaKb5fKOd/5fejOeSe6WTzDnxjg+dQRpo45fy7ifzJbRwIdLSXZ+1tKq4ClvHA57IJpgTXzNUjf3ptoZEOGSrKvlcAnDersx4N/WEfu5ZBdjySjGt5B9LWK8+8b+6kPOiU0NCmVtGlclbEDR6808XwcgaAv+iOobDQFE9JCmc5Br7afTBqND+E1pICdXTKiSU8Io3+WQMYp3Z35JC017X2ADki8ibMQghs7ejXKowQhwJswqGxRloQzYpW0886WlVO0dv8VJIBAd3hgSWEY1uEzRWwKGQXqU3AVp8k93Ty+67ap0vKQyt440pw/cc0mcMQ2tPYIT0hbRnEDrsVz/LHj7HoUALWvg2oC42Q5ye6NU+7bwW5+1O0nOfYPzwQ94AL2lUnHQpQc7MYn76jOLz43z3Wr7RkKcbopy8Da09p/3PwTUVN2BqI3D2N+8KiISuE8r2XMzVBlV0YAQ=="
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 615,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 92,
+              "output_tokens_details": {
+                "thinking_tokens": 91
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3662
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYavva1yGvBPsAgTvrR",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS/wEKjgEIERgCKkCzr5nZqaxk9eAOFYEacRhcIq2qZk31MN3Tat/Ot8v1qMLzuaH/L7MO/MTcpIme7JmqT1/y8YWfnshzZRcomiVKMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAYqC/NQGEgz4qYHlFGjYelnL7MIaDL4QPBdqO3pJzX95diIwhzC5dcw4nJvNFpAVj0VRW21SYgpu6b3swL5q8Es1FQLZUchmTiOh6PGBHDfr76rmKh4S6dC6tbqXJIiDwx/SskRbsHtBEQlM+I/8f+tWPZAYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time amounts for anyone, only vague comparisons.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 612,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 7
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2825
+        },
+        {
+          "key": "input kind: capacity\ndescription: I got through everything but deep clean the fridge",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYb9nE2BJsVJotBtPLk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISjQIKjgEIERgCKkBUdDmV1YkFFhx8Dzk+M5zZBc5LJBKlt6gDBv2LRF+mhQYxvtVijDY3rTBPG7v+OFLcVRCh6sDgSpWyUM/6C0tkMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAY+C/NQGEgwRya+brR7FS4AQRIYaDOVDxrNraOfI83cydiIwChwT8Po/i+RUY4iF64bul1/fwrRYsea2JoeoY6jFcWuG16eXuyBJTt7/5g4LfLdbKixeRnTEljzcSdC/8ZUx2Qzu67ay4j/xPJ1SgcmvW+o9vPtAKp1oY7vMBw7f1RgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time amounts for anyone, only what was or wasn't finished.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 599,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 55,
+              "output_tokens_details": {
+                "thinking_tokens": 13
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3685
+        },
+        {
+          "key": "input kind: capacity\ndescription: I do have a sailing event on friday eveneing",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYbQbDFz4gTe2TZJEuH",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISkwIKjgEIERgCKkC+TwzMlK8cNQ/JAaaX4qypPfDuTMjF4oLAakZsGcR8E0HglWLe2B2ojVJNXOtQ0PeP0kBRpsqBSD0r+Y6dL9ZxMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZKC/NQGEgx0wlzq68jTqoJb6CQaDCR1Lo5J3ZKEm69LXyIwZsPwWivsjcptkzvZtFTH2B/droANKzAikk6lPsQZEtt3ylvwJvtnfr+XRYc3A2mbKjKbNOi0+BsPeuCsxIHSNQmed3DC0N951vAu/PUjQ9hPzuVzDp+mgMPLuAEGQ5+XipuKQBgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message states no amount of available time for anyone, only an unquantified Friday evening commitment.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 600,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 61,
+              "output_tokens_details": {
+                "thinking_tokens": 15
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3591
+        },
+        {
+          "key": "input kind: capacity\ndescription: How much time have you got for chores this week? I think I have about 8 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYbgF3v2zxo1FSXjQg3",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS0AIKjgEIERgCKkAA3lnTLOBpLlSPyKqbAbRu+jSWp0hxWLdgwCPtTMv6yYGWVqod+aSFwGeChJtZz8IZ+0lRkCf7v1nfhWpjQDC4Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZWC/NQGEgzXM9UJF+oiz+0a7yAaDD72i/Ta9OaEqKC2GCIw/O1I+J6mBuq953+AhmxRNIYVOjdjbqvlTO/NEmrlWV8BMEuyeCVdMs35/jwWGkwlKm/AjG1Fz5xHKxvBr9HeaCE7yiXm2sH8ATom6vjKTsf5/ZcjKbVAMj3Z4dGgdQek7XMtec48rAbQsvZ/GwtND2rRr1erF4Az9upFaiP63OF7JRLr6xog2bmwlcAJod+YjDSgOilS6Misrlj9LYRgDsUYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives a time amount but never names the person it belongs to.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 607,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 75,
+              "output_tokens_details": {
+                "thinking_tokens": 39
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3006
+        },
+        {
+          "key": "input kind: capacity\ndescription: And Robin? I think Robin has about 4 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYbtzGEVjUNkhaZyiqE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIShwIKjgEIERgCKkBUlFtsYdf+0aDrBMCbzQaHTUC+EMj/kR/Zo0RiXqqfbgS/vE8lmBSXsOVcEAXqj85GytuRIluvl1DsUQtlqpEOMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZeC/NQGEgxlG6/7WomkS82iTFMaDKPU36ubE9xdSmz2dCIwPJPD0SMqdE39yYaHUogDvxysCzvR+rL/P8CKFbhSdjv6LbaJkbAuKGXFkQFGOFJ6KiYSsybAWnJenHIhS504pWdb5jfOH1Qu9nTwZVSBVNyAN91OHjWLfRgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":240}}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 602,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "output_tokens_details": {
+                "thinking_tokens": 14
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2044
+        },
+        {
+          "key": "input kind: capacity\ndescription: Is that a normal week for both of you, or is this one different? this is pretty normal",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYc3p5xnxjbLmdQAzdk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS/wEKjgEIERgCKkCzr5nZqaxk9eAOFYEacRhcIq2qZk31MN3Tat/Ot8v1qMLzuaH/L7MO/MTcpIme7JmqT1/y8YWfnshzZRcomiVKMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZuC/NQGEgxiaft15WHmfUjZdIwaDEI1xPWC8YX3+8jadyIwTlqYncUncVD6nDYigr6CJkS47iq4z1mCaJH4mtKOu2SyN2zL92vCH5k69j9a1hLuKh4IXBennmSyYAiIIDoRgDQDOoI4UCQq6ruohY4enGQYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time amounts for anyone, only that the week is typical.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 46,
+              "output_tokens_details": {
+                "thinking_tokens": 7
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3492
+        },
+        {
+          "key": "input kind: capacity\ndescription: Does that change much week to week - and if it does, what changes it? many things can change it, varies from week to week",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYcJTtVnZEY5cpmqKJ4",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAIS8QIKjgEIERgCKkA4j+N8GEfdFL1XdK+kfKIoBQxLQ6oxxQMP56YB6pU5tBBPbLtXmxJdme4nNNq5TzCe+6I3Vixn99phnMH5TGhzMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAZ6C/NQGEgyk472rbhvsERzRJ8caDDLfbIWWX/0HtatoEiIwnMAKn6fuz3SZNCJxIogVMC6yUildRHuWWWXwFIOK/T0S5NzBRc4dg1qA50RxTs41Ko8B9mgjUmp6a/R8I3znGIy9gE0EsNhJk0la3M7o7LvppkwN3QU+cwUM268bIv0rde0IAqNjqM0ypvGxmeYS9aflp3aLOvjqKs9Mduk9JyJf0N8J7afCWarCkRMW3Ab8mNQDj7QgPAzdePdpv34b3Dv22IjpJibz15L60/kcMp4pQmFT4GJUA1NicaDR3gIlzdkYAQ=="
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 616,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 44,
+              "output_tokens_details": {
+                "thinking_tokens": 44
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2809
+        },
+        {
+          "key": "input kind: capacity\ndescription: Which days can you actually get chores done? I can do chores any day",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYcWWwJMmdWV72r4zfs",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISkAIKjgEIERgCKkCv+7j3KK0QLD9RgbLqDjSDrYrb/Ttn8GnDFfzAS88fUuAzuldRuoYr8kDjFRUYI5W3Xdtyge8xp1l5hsPoHFubMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaCC/NQGEgz/1E0X9k7eUcOSniUaDK63nHAokQ4ThVJyDiIwCW8Fii5VMtvcdNKP+kl2muqXcqKp4U5hxl/IF9ER+TFKiGVco7CAS5nVH1ryxUIoKi+Xd0rJbq1K9GlMmlIvpRH7vb5j2CILLvTjHNPyIe2YrHouVcngUg9ubxdtU2ABnxgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message names days of availability but no amount of time, so no weekly minutes can be determined.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 604,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 57,
+              "output_tokens_details": {
+                "thinking_tokens": 13
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2047
+        },
+        {
+          "key": "input kind: capacity\ndescription: If this week went sideways, how little time might you end up with? maybe 5 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYcfBpu1sjSuSYwdRHb",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISlQMKjgEIERgCKkAWGLleFap8fDM8OJrK01HgpkBW5dehG72hkjEnaqqOBTVOdrXDLeuoMzi7Zav5kO5yjXQDKCeJTR71VegcgAS7Mg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaOC/NQGEgymPT8ZEU4nbpvuYvcaDG2+g8u9BB4orFMjcyIwdL8Fzor2p4MeQW9ERp00yza4BjHiX6+p/TvW6G8fbXVTzM0CCBAOux6BTZfimDh8KrMBUks9NvHao0aNcfUxruD5cASMzMkmreA3i0sE9o4y4mQa31wXQAN2Ppx1EbAqJKUnL6m8nckdt/2LMXX1Ds31txkeKzBCbSK2pY/1qVjBTE6Ysgd97DK9jOfzwVOO9OC++LWGuEGcJwZwS3iW5XnE+lkXZCBsU7UlJosVWRtaGbybr5UXTLthtz3vGgH4+vnzjisq+a4oEYqZ0Qgs5bVU/aIKClxiaf+e1Bh/cap1Len++74YAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives a time amount but never says which person it belongs to.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 610,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 104,
+              "output_tokens_details": {
+                "thinking_tokens": 68
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3193
+        },
+        {
+          "key": "input kind: capacity\ndescription: Does the weekend look different from weekdays, for either of you? yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYctupk3pDrehQJc41n",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISnwIKjgEIERgCKkCOvGrlBmeA1drpbTrZJYpQBQ2AZWG/L+nvMlUqOssLwkaE2wzkxjlAhuVKJr79pH0rBzs+dd5kHxAMdq2w/EyUMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaWC/NQGEgwB+RHCJ6bNEAjLAEgaDIfhOv0wdUAb4hwlxiIwyOXbj75jP6CdgYL5zF20J6mze71+3DHJwcu+g6vuknLljcWu+vVA5RGaW7lc5kf1Kj7adt6Pp2h+3Nv2XQGdWO+TLBzJUAdvLJ8669i7FT8Cg6s/n+I6v4RcEVzezJdHNgIJotDwaq9njqOJKoyz7hgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no actual durations of available time for anyone, only that weekends have more.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 634,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 59,
+              "output_tokens_details": {
+                "thinking_tokens": 17
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2098
+        },
+        {
+          "key": "input kind: capacity\ndescription: Is Robin's time steadier than yours, or the other way round? Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYd3tpeP63K3B3zipRG",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISiAIKjgEIERgCKkAqUBCCsWVRp9bTFrYUzovoxSPVn8fsG2Vfm30ZC4I8b0j9aN9qaaQSV4rRNk/I/kwgQPyZ0r0ElCceUAepEQNpMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAaiC/NQGEgwnpdCuaK7GrC96N/saDLQ5258gIK8GMPCDxSIw+4dnJCHKUxWQHaBXGs/y7YayZaeSawx+jLYEe48WPpTuqZjOj4twYo2Mxswdh8HqKicAqQX7C+zf+7XUo6AEMaFcEFBjzYF/4MQy1FloTeQIfptQ9Q1B6nIYAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time amounts for either person, only a comparison of predictability and energy.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 632,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 54,
+              "output_tokens_details": {
+                "thinking_tokens": 11
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 2638
+        },
+        {
+          "key": "input kind: capacity\ndescription: Thinking back to last week - how much did you actually get through? I got through everything but deep clean the fridge",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYdFZJAVTLr6Md1H7H8",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISiwIKjgEIERgCKkDJwj0CXtgriDDFiZJwHob6fIeW14uTYEQs3nGf+eVmB+xwT22YyTPidWyH6PBY7SXOks2vVTRGR0UOfIuCOB0sMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAauC/NQGEgxU6YW9nLQQkx3g8xYaDDNvfmUBhcBdabPF1CIwL9l7xXgXknVv21+p8vLuL/x50goKUL8UdIhOobPWGuE2GZQqXHHHigeTT1N1NDfwKirKNPBQ83i8B6cuv+6AiAV3X8uKi1cUGrm96mwSTQtGuo0wJ32lbh1LjU8YAQ=="
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message gives no time amounts for anyone, only a vague recollection of tasks completed.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 617,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 56,
+              "output_tokens_details": {
+                "thinking_tokens": 11
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3413
+        },
+        {
+          "key": "input kind: capacity\ndescription: Anything already in the diary for next week that'll eat into those 8 hours? I do have a sailing event on friday eveneing",
+          "status": 200,
+          "body": {
+            "model": "claude-opus-5",
+            "id": "msg_011CepYdW7tySXnvBQQs9sk2",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "CAISggMKjgEIERgCKkChRiYLMyiLri1X0uTQ5wJ05US+Fe0FjNV26ocOjmZfAT3ZwPYLL70FgS5MmUnuMbHPP+FhHGPbgdLWWJEatnViMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQ5OTViMWEzNC0yOGUwLTQ3NDMtYmQzZS0zOTc2ODlkMDI0NzeoAa6C/NQGEgypW2iXPDKFyyKDE24aDChe8ux4u44PXHrz9CIw0cakWYgbD3Xqe2qwXjGwG/HoOaddbM9j+3xh2HZRVSPRJ2MWm/9n6dVGDwIGVDrFKqAB2dkq2fNTs1Z144l0jubWVbyetLMZJCnSPrlwPV4WAM8w6LCnPMk9QNMXhE+WoercLW4Mx4pr3FOWfMcfb59JG5mJ96dWyGdNT9MsOCzbjDcq+7p6WowGmKXZM+ug3hAQHkCzM0tNh6+jCYIcGnY0yRKyQ375wgkafgfJX2d/h2x2pGjyxXt/Y2jZ6vqRmKzazrElKj4XKFOcaXr6H5TsAhgB"
+              },
+              {
+                "type": "text",
+                "text": "{\"kind\":\"refusal\",\"reason\":\"The message names no person and refers to an unstated baseline of 8 hours without quantifying the sailing event, so no per-person weekly minutes can be determined.\"}"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 624,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 120,
+              "output_tokens_details": {
+                "thinking_tokens": 54
+              },
+              "service_tier": "standard",
+              "inference_geo": "global"
+            }
+          },
+          "ms": 3763
+        }
+      ]
+    },
+    {
+      "config": {
+        "label": "claude-haiku-4-5",
+        "model": "claude-haiku-4-5",
+        "prompt": "You extract structured facts from one short household message. The message describes\neither weekly time capacity or chores, and the input names which. Answer with a single\nJSON object and nothing else: no prose, no explanation, no code fences.\n\nFor kind \"capacity\" answer:\n  {\"kind\":\"capacity\",\"minutesByPerson\":{\"<person>\":<minutes>}}\n- One entry per person the text gives time for, spelled exactly as the text spells them.\n- Convert every duration to whole minutes for the week, summing parts the text splits\n  across days.\n- A person the text says has no time gets 0. A person the text never mentions gets no entry.\n\nFor kind \"chores\" answer:\n  {\"kind\":\"chores\",\"chores\":[{\"title\":\"<job>\",\"expectedMinutes\":<minutes>,\"dueDate\":\"<as stated>\"}]}\n- One entry per job, titled with the job as the text states it.\n- expectedMinutes is how long the job takes, in whole minutes.\n- dueDate is the due date EXACTLY as the text states it: copy the phrase, whether it is a\n  weekday, a relative word, a spelled-out date or a numeric date. Do not resolve it to a\n  calendar date and do not reword it. Where the text states no date for a job, omit\n  dueDate entirely. Never invent one.\n\nWhen the message cannot be answered - it names no usable quantity, refers to a baseline\nit does not state, or offers figures too far apart to choose between - answer:\n  {\"kind\":\"refusal\",\"reason\":\"<one sentence saying what is missing>\"}\nRefuse rather than guess: a confident number for an undecidable message is worse than a\nrefusal.\n\nFor an explicit range, answer the midpoint. Amounts may be written as words - half an\nhour is 30 minutes."
+      },
+      "responses": [
+        {
+          "key": "input kind: chores\ndescription: The grass needs mowed every week",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYdn37VpB79QE2EDpRX",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"grass needs mowed\",\"expectedMinutes\":0,\"dueDate\":\"every week\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 443,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1243
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to do a smart home checkup every week",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYdsK7LX9ZMiwKUeekX",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"smart home checkup\",\"expectedMinutes\":0,\"dueDate\":\"every week\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 40,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1004
+        },
+        {
+          "key": "input kind: chores\ndescription: the refrigerator needs a deep clean every other week.",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYdwJUHMn1gDWzokZuo",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"deep clean the refrigerator\",\"expectedMinutes\":0,\"dueDate\":\"every other week\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 43,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 997
+        },
+        {
+          "key": "input kind: chores\ndescription: We do the dishes evey day",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYe6oUSMcz6A94beBu3",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not state how long the dishes task takes in minutes.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 443,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 31,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 951
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex maintains the Robot Vaccum Water every day",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYeAoL33Dsp1aymz3wN",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"Robot Vaccum Water\",\"expectedMinutes\":0}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1102
+        },
+        {
+          "key": "input kind: chores\ndescription: We put away laundry every other day",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYeFTd23Z1JcTZMo7oe",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not specify how many minutes the laundry task takes.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 981
+        },
+        {
+          "key": "input kind: chores\ndescription: the fans need dusted every two weeks",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYeKoKCmgxRWvRUmxTJ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"fans need dusted\",\"expectedMinutes\":0,\"dueDate\":\"every two weeks\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1173
+        },
+        {
+          "key": "input kind: chores\ndescription: Robin scoops the cat little boxes every week on thursday",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYeQkiZsLe6h6KBeCZ9",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"scoops the cat little boxes\",\"expectedMinutes\":0,\"dueDate\":\"thursday\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1048
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex need to take the trash to the curb every Thursday",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYeVk7CsLHQ3AFoK34H",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"take the trash to the curb\",\"expectedMinutes\":0,\"dueDate\":\"every Thursday\"}]}\n```\n\nWait, let me reconsider. The text does not specify how long this task takes. I should refuse.\n\n```json\n{\"kind\":\"refusal\",\"reason\":\"The text does not state how long the task takes in minutes.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 448,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 95,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1680
+        },
+        {
+          "key": "input kind: chores\ndescription: The living room needs a deep clean every other week",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYecNiQnNtaHKK5bzLw",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not specify an expected duration in minutes for the deep clean task.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1020
+        },
+        {
+          "key": "input kind: chores\ndescription: The garage needs swept and organized once a week by alex",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYegjeivRVB49Y1bLm3",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"garage needs swept and organized\",\"expectedMinutes\":0,\"dueDate\":\"once a week\"}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1025
+        },
+        {
+          "key": "input kind: chores\ndescription: organizing the garage will take abocut an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYem5LxvxfaeKVEyHrj",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"organizing the garage\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 874
+        },
+        {
+          "key": "input kind: chores\ndescription: Deep cleaning the fridge will take about an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYevZMAC46e7qyF2rxz",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"Deep cleaning the fridge\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1192
+        },
+        {
+          "key": "input kind: chores\ndescription: takes about 45 min to mow the grass",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYezyWNww2rw9VTd961",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"mow the grass\",\"expectedMinutes\":45}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 938
+        },
+        {
+          "key": "input kind: chores\ndescription: putting away laundry is about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYf4x8RFU4ZwDKakrrQ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"putting away laundry\",\"expectedMinutes\":30}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 906
+        },
+        {
+          "key": "input kind: chores\ndescription: doing the dishes is about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYf8qXrGQGWdpkRHNEp",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"doing the dishes\",\"expectedMinutes\":30}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 702
+        },
+        {
+          "key": "input kind: chores\ndescription: dusting the fans will take abocut 25 min",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfBtLzupwtVh3FYdhY",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"dusting the fans\",\"expectedMinutes\":25}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 449,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 871
+        },
+        {
+          "key": "input kind: chores\ndescription: it takes robin about an hour to take care of the litter boxes",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfFhnQkd2Td3aNyi2J",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"take care of the litter boxes\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 450,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 992
+        },
+        {
+          "key": "input kind: chores\ndescription: the smart home checkup is about an hour each time",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfL1FPWgge7rHFNo4g",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"smart home checkup\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 937
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to deep clean the microwave, it should take about 30 min",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfPpw52X8fGEJhgJpP",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"deep clean the microwave\",\"expectedMinutes\":30}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 858
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to clean up the mess in the garage, it should take about an hour",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfTTiTS13YSEsjAHt5",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"clean up the mess in the garage\",\"expectedMinutes\":60}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 453,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 36,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 929
+        },
+        {
+          "key": "input kind: chores\ndescription: Robin Needs put the litter box in a new place. should take about 10 min",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfXV4Y9gEMBExf4jLa",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"put the litter box in a new place\",\"expectedMinutes\":10}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 456,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 38,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1031
+        },
+        {
+          "key": "input kind: chores\ndescription: Alex needs to rebuild the outdoor fireplace, should take about 6 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfbyvyZFnPgQa6rFph",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"chores\",\"chores\":[{\"title\":\"rebuild the outdoor fireplace\",\"expectedMinutes\":360}]}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 452,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 994
+        },
+        {
+          "key": "input kind: capacity\ndescription: I think I have about 8 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfgCBVgSP11R3bii3f",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"I\":480}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 844
+        },
+        {
+          "key": "input kind: capacity\ndescription: I think Robin has about 4 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfjuvTZb3VUeiKQNNQ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":240}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 820
+        },
+        {
+          "key": "input kind: capacity\ndescription: this is pretty normal",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfoGahXrJyBp8TQYvL",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message provides no specific time capacity information for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 439,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 29,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1781
+        },
+        {
+          "key": "input kind: capacity\ndescription: many things can change it, varies from week to week",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYfvpFxYZhUCLmB4txE",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes variability in capacity but provides no specific time quantities for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 446,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1104
+        },
+        {
+          "key": "input kind: capacity\ndescription: I can do chores any day",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYg1WXoxzArHEoZxn5i",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message states willingness to do chores but does not specify any actual time capacity in minutes or hours per week.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 442,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 937
+        },
+        {
+          "key": "input kind: capacity\ndescription: maybe 5 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYg5ZN95DqwPjNVkpbf",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message expresses uncertainty with 'maybe' rather than stating a definite weekly time capacity.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 440,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 37,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1052
+        },
+        {
+          "key": "input kind: capacity\ndescription: yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgAEu61NpMVD9gbMof",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message states that capacity has increased but does not provide specific time amounts in minutes or hours for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 462,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1231
+        },
+        {
+          "key": "input kind: capacity\ndescription: Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgFZsn3DUY8h1pkpq9",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message provides no specific time quantities in minutes or hours for either person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 457,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1055
+        },
+        {
+          "key": "input kind: capacity\ndescription: I got through everything but deep clean the fridge",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgKpMzmVipGPZEFEcX",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes what was completed, not weekly time capacity for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 32,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1017
+        },
+        {
+          "key": "input kind: capacity\ndescription: I do have a sailing event on friday eveneing",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgQQSfcFRwVeJXNpvQ",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message states a sailing event occurs on Friday evening but does not specify how many minutes of weekly time capacity are available.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 445,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1092
+        },
+        {
+          "key": "input kind: capacity\ndescription: How much time have you got for chores this week? I think I have about 8 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgUuokndbNr5uXPt8M",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"I\":480}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 456,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 843
+        },
+        {
+          "key": "input kind: capacity\ndescription: And Robin? I think Robin has about 4 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgYYqBLrUh6R2kK3gF",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"capacity\",\"minutesByPerson\":{\"Robin\":240}}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 447,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 24,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 863
+        },
+        {
+          "key": "input kind: capacity\ndescription: Is that a normal week for both of you, or is this one different? this is pretty normal",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgcCbqkJhBAy4Q78JN",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not state any specific time capacity in minutes or hours for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 455,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 34,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1078
+        },
+        {
+          "key": "input kind: capacity\ndescription: Does that change much week to week - and if it does, what changes it? many things can change it, varies from week to week",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYggquWKw4w8ekuHKjN",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes variability in time capacity but does not state any specific minutes per person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 463,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 35,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1054
+        },
+        {
+          "key": "input kind: capacity\ndescription: Which days can you actually get chores done? I can do chores any day",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgmLmqnnaCuMzNhFLq",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not state a specific time capacity in minutes or hours per week.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 452,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 33,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1042
+        },
+        {
+          "key": "input kind: capacity\ndescription: If this week went sideways, how little time might you end up with? maybe 5 hours",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgqeysMe8hcjoCo7sb",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not name a specific person, only refers to 'you' without identifying who that is.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 456,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 39,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1107
+        },
+        {
+          "key": "input kind: capacity\ndescription: Does the weekend look different from weekdays, for either of you? yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYgvgr7o2QP1FBQ8v3W",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes that both people have more time on weekends but does not state specific minute quantities for either weekdays or weekends.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 476,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 44,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1285
+        },
+        {
+          "key": "input kind: capacity\ndescription: Is Robin's time steadier than yours, or the other way round? Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYh26nYZiG6V7p8TUxk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes relative comparisons of schedule predictability and energy but does not state actual time capacity in minutes for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 472,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1216
+        },
+        {
+          "key": "input kind: capacity\ndescription: Thinking back to last week - how much did you actually get through? I got through everything but deep clean the fridge",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYh7N3ot3f7Li5EW8Tk",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message describes what was completed last week but does not state a specific time capacity in minutes or hours for any person.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 460,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 41,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1354
+        },
+        {
+          "key": "input kind: capacity\ndescription: Anything already in the diary for next week that'll eat into those 8 hours? I do have a sailing event on friday eveneing",
+          "status": 200,
+          "body": {
+            "model": "claude-haiku-4-5-20251001",
+            "id": "msg_011CepYhD7pN3pqZjUZANB7X",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "```json\n{\"kind\":\"refusal\",\"reason\":\"The message does not state a baseline weekly time capacity, only mentions a sailing event on Friday evening without specifying its duration.\"}\n```"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "stop_details": null,
+            "usage": {
+              "input_tokens": 464,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              },
+              "output_tokens": 42,
+              "service_tier": "standard",
+              "inference_geo": "not_available"
+            }
+          },
+          "ms": 1000
+        }
+      ]
+    }
+  ]
+}

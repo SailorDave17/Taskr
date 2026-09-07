@@ -1,0 +1,619 @@
+{
+  "_what": "The owner's corrections, as recorded at #207's clickable rulings. Ground truth for the correction rate; every entry is the member's judgement, not the session's.",
+  "entries": [
+    {
+      "key": "claude-haiku-4-5 / cho-1",
+      "config": "claude-haiku-4-5",
+      "id": "cho-1",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "The grass needs mowed every week",
+      "_answer": [
+        "        grass needs mowed: 0 min, due \"every week\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"every week\" — a cadence, not a date; the normaliser cannot parse it"
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-2",
+      "config": "claude-haiku-4-5",
+      "id": "cho-2",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex needs to do a smart home checkup every week",
+      "_answer": [
+        "        smart home checkup: 0 min, due \"every week\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"every week\""
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-3",
+      "config": "claude-haiku-4-5",
+      "id": "cho-3",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "the refrigerator needs a deep clean every other week.",
+      "_answer": [
+        "        deep clean the refrigerator: 0 min, due \"every other week\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"every other week\""
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-5",
+      "config": "claude-haiku-4-5",
+      "id": "cho-5",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "We do the dishes evey day",
+      "_answer": [
+        "        REFUSED — The message does not state how long the dishes task takes in minutes."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-6",
+      "config": "claude-haiku-4-5",
+      "id": "cho-6",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex maintains the Robot Vaccum Water every day",
+      "_answer": [
+        "        Robot Vaccum Water: 0 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-7",
+      "config": "claude-haiku-4-5",
+      "id": "cho-7",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "We put away laundry every other day",
+      "_answer": [
+        "        REFUSED — The message does not specify how many minutes the laundry task takes."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-8",
+      "config": "claude-haiku-4-5",
+      "id": "cho-8",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "the fans need dusted every two weeks",
+      "_answer": [
+        "        fans need dusted: 0 min, due \"every two weeks\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"every two weeks\""
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-9",
+      "config": "claude-haiku-4-5",
+      "id": "cho-9",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Robin scoops the cat little boxes every week on thursday",
+      "_answer": [
+        "        scoops the cat little boxes: 0 min, due \"thursday\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"thursday\" — collapsed a weekly recurrence to one Thursday"
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-10",
+      "config": "claude-haiku-4-5",
+      "id": "cho-10",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex need to take the trash to the curb every Thursday",
+      "_answer": [
+        "        REFUSED — unparseable-response: answer text is not a JSON object"
+      ],
+      "_figuresProposed": 0,
+      "corrections": [
+        {
+          "class": "refusal",
+          "note": "unparseable response: returned nothing where the date was available"
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-11",
+      "config": "claude-haiku-4-5",
+      "id": "cho-11",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "The living room needs a deep clean every other week",
+      "_answer": [
+        "        REFUSED — The message does not specify an expected duration in minutes for the deep clean task."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-12",
+      "config": "claude-haiku-4-5",
+      "id": "cho-12",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "The garage needs swept and organized once a week by alex",
+      "_answer": [
+        "        garage needs swept and organized: 0 min, due \"once a week\""
+      ],
+      "_figuresProposed": 2,
+      "corrections": [
+        {
+          "class": "wrong date",
+          "note": "returned due \"once a week\""
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-13",
+      "config": "claude-haiku-4-5",
+      "id": "cho-13",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "organizing the garage will take abocut an hour",
+      "_answer": [
+        "        organizing the garage: 60 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-15",
+      "config": "claude-haiku-4-5",
+      "id": "cho-15",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Deep cleaning the fridge will take about an hour",
+      "_answer": [
+        "        Deep cleaning the fridge: 60 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-16",
+      "config": "claude-haiku-4-5",
+      "id": "cho-16",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "takes about 45 min to mow the grass",
+      "_answer": [
+        "        mow the grass: 45 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-17",
+      "config": "claude-haiku-4-5",
+      "id": "cho-17",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "putting away laundry is about 30 min",
+      "_answer": [
+        "        putting away laundry: 30 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-18",
+      "config": "claude-haiku-4-5",
+      "id": "cho-18",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "doing the dishes is about 30 min",
+      "_answer": [
+        "        doing the dishes: 30 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-19",
+      "config": "claude-haiku-4-5",
+      "id": "cho-19",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "dusting the fans will take abocut 25 min",
+      "_answer": [
+        "        dusting the fans: 25 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-20",
+      "config": "claude-haiku-4-5",
+      "id": "cho-20",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "it takes robin about an hour to take care of the litter boxes",
+      "_answer": [
+        "        take care of the litter boxes: 60 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-21",
+      "config": "claude-haiku-4-5",
+      "id": "cho-21",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "the smart home checkup is about an hour each time",
+      "_answer": [
+        "        smart home checkup: 60 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-22",
+      "config": "claude-haiku-4-5",
+      "id": "cho-22",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex needs to deep clean the microwave, it should take about 30 min",
+      "_answer": [
+        "        deep clean the microwave: 30 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-23",
+      "config": "claude-haiku-4-5",
+      "id": "cho-23",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex needs to clean up the mess in the garage, it should take about an hour",
+      "_answer": [
+        "        clean up the mess in the garage: 60 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-24",
+      "config": "claude-haiku-4-5",
+      "id": "cho-24",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Robin Needs put the litter box in a new place. should take about 10 min",
+      "_answer": [
+        "        put the litter box in a new place: 10 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cho-25",
+      "config": "claude-haiku-4-5",
+      "id": "cho-25",
+      "kind": "chores",
+      "reviewed": true,
+      "_text": "Alex needs to rebuild the outdoor fireplace, should take about 6 hours",
+      "_answer": [
+        "        rebuild the outdoor fireplace: 360 min, no date"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-1",
+      "config": "claude-haiku-4-5",
+      "id": "cap-1",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "I think I have about 8 hours",
+      "_answer": [
+        "        I: 480 min"
+      ],
+      "_figuresProposed": 1,
+      "corrections": [
+        {
+          "class": "missed entity",
+          "note": "returned the person as \"I\" — 480 min attributed to nobody the app can resolve"
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-2",
+      "config": "claude-haiku-4-5",
+      "id": "cap-2",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "I think Robin has about 4 hours",
+      "_answer": [
+        "        Robin: 240 min"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-3",
+      "config": "claude-haiku-4-5",
+      "id": "cap-3",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "this is pretty normal",
+      "_answer": [
+        "        REFUSED — The message provides no specific time capacity information for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-4",
+      "config": "claude-haiku-4-5",
+      "id": "cap-4",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "many things can change it, varies from week to week",
+      "_answer": [
+        "        REFUSED — The message describes variability in capacity but provides no specific time quantities for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-5",
+      "config": "claude-haiku-4-5",
+      "id": "cap-5",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "I can do chores any day",
+      "_answer": [
+        "        REFUSED — The message states willingness to do chores but does not specify any actual time capacity in minutes or hours per week."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-6",
+      "config": "claude-haiku-4-5",
+      "id": "cap-6",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "maybe 5 hours",
+      "_answer": [
+        "        REFUSED — The message expresses uncertainty with 'maybe' rather than stating a definite weekly time capacity."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-7",
+      "config": "claude-haiku-4-5",
+      "id": "cap-7",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+      "_answer": [
+        "        REFUSED — The message states that capacity has increased but does not provide specific time amounts in minutes or hours for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-8",
+      "config": "claude-haiku-4-5",
+      "id": "cap-8",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+      "_answer": [
+        "        REFUSED — The message provides no specific time quantities in minutes or hours for either person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-9",
+      "config": "claude-haiku-4-5",
+      "id": "cap-9",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "I got through everything but deep clean the fridge",
+      "_answer": [
+        "        REFUSED — The message describes what was completed, not weekly time capacity for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-10",
+      "config": "claude-haiku-4-5",
+      "id": "cap-10",
+      "kind": "capacity",
+      "reviewed": true,
+      "_text": "I do have a sailing event on friday eveneing",
+      "_answer": [
+        "        REFUSED — The message states a sailing event occurs on Friday evening but does not specify how many minutes of weekly time capacity are available."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-1a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-1a",
+      "kind": "capacity",
+      "variantOf": "cap-1",
+      "reviewed": true,
+      "_text": "How much time have you got for chores this week? I think I have about 8 hours",
+      "_answer": [
+        "        I: 480 min"
+      ],
+      "_figuresProposed": 1,
+      "corrections": [
+        {
+          "class": "missed entity",
+          "note": "returned the person as \"I\", with the question attached and the speaker still unnamed"
+        }
+      ]
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-2a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-2a",
+      "kind": "capacity",
+      "variantOf": "cap-2",
+      "reviewed": true,
+      "_text": "And Robin? I think Robin has about 4 hours",
+      "_answer": [
+        "        Robin: 240 min"
+      ],
+      "_figuresProposed": 1,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-3a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-3a",
+      "kind": "capacity",
+      "variantOf": "cap-3",
+      "reviewed": true,
+      "_text": "Is that a normal week for both of you, or is this one different? this is pretty normal",
+      "_answer": [
+        "        REFUSED — The message does not state any specific time capacity in minutes or hours for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-4a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-4a",
+      "kind": "capacity",
+      "variantOf": "cap-4",
+      "reviewed": true,
+      "_text": "Does that change much week to week - and if it does, what changes it? many things can change it, varies from week to week",
+      "_answer": [
+        "        REFUSED — The message describes variability in time capacity but does not state any specific minutes per person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-5a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-5a",
+      "kind": "capacity",
+      "variantOf": "cap-5",
+      "reviewed": true,
+      "_text": "Which days can you actually get chores done? I can do chores any day",
+      "_answer": [
+        "        REFUSED — The message does not state a specific time capacity in minutes or hours per week."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-6a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-6a",
+      "kind": "capacity",
+      "variantOf": "cap-6",
+      "reviewed": true,
+      "_text": "If this week went sideways, how little time might you end up with? maybe 5 hours",
+      "_answer": [
+        "        REFUSED — The message does not name a specific person, only refers to 'you' without identifying who that is."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-7a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-7a",
+      "kind": "capacity",
+      "variantOf": "cap-7",
+      "reviewed": true,
+      "_text": "Does the weekend look different from weekdays, for either of you? yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+      "_answer": [
+        "        REFUSED — The message describes that both people have more time on weekends but does not state specific minute quantities for either weekdays or weekends."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-8a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-8a",
+      "kind": "capacity",
+      "variantOf": "cap-8",
+      "reviewed": true,
+      "_text": "Is Robin's time steadier than yours, or the other way round? Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+      "_answer": [
+        "        REFUSED — The message describes relative comparisons of schedule predictability and energy but does not state actual time capacity in minutes for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-9a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-9a",
+      "kind": "capacity",
+      "variantOf": "cap-9",
+      "reviewed": true,
+      "_text": "Thinking back to last week - how much did you actually get through? I got through everything but deep clean the fridge",
+      "_answer": [
+        "        REFUSED — The message describes what was completed last week but does not state a specific time capacity in minutes or hours for any person."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    },
+    {
+      "key": "claude-haiku-4-5 / cap-10a",
+      "config": "claude-haiku-4-5",
+      "id": "cap-10a",
+      "kind": "capacity",
+      "variantOf": "cap-10",
+      "reviewed": true,
+      "_text": "Anything already in the diary for next week that'll eat into those 8 hours? I do have a sailing event on friday eveneing",
+      "_answer": [
+        "        REFUSED — The message does not state a baseline weekly time capacity, only mentions a sailing event on Friday evening without specifying its duration."
+      ],
+      "_figuresProposed": 0,
+      "corrections": []
+    }
+  ]
+}

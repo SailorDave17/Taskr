@@ -39,7 +39,12 @@ const RATIFIED = {
   dates: { direction: 'atLeast', step: 1, at: { chores: 18, all: 18 } },
   latency: { direction: 'atMost', step: 1, at: { all: 3000 } },
   cost: { direction: 'atMost', step: 1, at: { all: 5 } },
-  correctionRate: { direction: 'atMost', step: 0.1, at: { all: 0.3 } },
+  // Per kind since #207, by the owner's own stated derivation rule — "the same
+  // RATE applied to each half" — which for a threshold that is already a rate
+  // leaves the number untouched. The rounding-toward-strictness half of that
+  // rule applies to counts, and there are none here. Ratified as a derivation,
+  // not as a new number: 30% is the figure the owner named on 2026-08-26.
+  correctionRate: { direction: 'atMost', step: 0.1, at: { capacity: 0.3, chores: 0.3, all: 0.3 } },
 }
 
 /** Which axes kill the bet, and the one that only narrows it. */
@@ -149,7 +154,10 @@ const gradedOf = (per = {}) => ({
 function figuresWith(key, scope, value) {
   if (key === 'latency') return { latency: { transportP95Ms: 0, providerCallP95Ms: value } }
   if (key === 'cost') return { costPerHouseholdPerYearUsd: value }
-  if (key === 'correctionRate') return { correctionRate: value }
+  // Per scope since #207. A bare number here would leave the capacity and
+  // chores rows unmeasured, so every boundary case at those scopes would read
+  // "not measured" and the step-either-side assertions could not fire at all.
+  if (key === 'correctionRate') return { correctionRate: { [scope]: value } }
   const field = {
     accuracy: (v) => ({ withinTolerance: v }),
     refusals: (v) => ({ refusals: { onAmbiguous: v } }),
@@ -361,7 +369,10 @@ describe('#204 AC 5 — an axis with no figure is not an axis that passed', () =
     const rows = killConditionRows({ graded: gradedOf() }, 'all')
     expect(rowFor(rows, 'latency').pending).toContain('#205')
     expect(rowFor(rows, 'cost').pending).toContain('#206')
-    expect(rowFor(rows, 'correctionRate').pending).toContain('production')
+    // Was 'production' until #207. The axis no longer waits on the capture
+    // flow: it was measured from a scored member-sentence review instead, and
+    // the pending message names the story that produces one.
+    expect(rowFor(rows, 'correctionRate').pending).toContain('#207')
   })
 
   it('reads a measured ZERO as a measurement, not as an absence', () => {
@@ -387,6 +398,97 @@ describe('#204 AC 5 — an axis with no figure is not an axis that passed', () =
     )
     expect(rowFor(bothHalves, 'latency').verdict).toBe(VERDICTS.PASS)
     expect(rowFor(bothHalves, 'latency').value, 'the axis is the whole path, not one leg').toBe(1700)
+  })
+
+  it('takes the correction rate PER KIND, because #207 measured the two halves coming apart', () => {
+    // Measured 2026-09-07: capacity 33.3% against chores 29.6%, on either side
+    // of the kill number. A run-level-only rate reports one figure over both.
+    const figures = {
+      graded: gradedOf(),
+      correctionRate: { capacity: 2 / 6, chores: 8 / 27, all: 10 / 33 },
+    }
+    expect(rowFor(killConditionRows(figures, 'capacity'), 'correctionRate').verdict).toBe(VERDICTS.FAIL)
+    expect(rowFor(killConditionRows(figures, 'chores'), 'correctionRate').verdict).toBe(VERDICTS.PASS)
+    expect(rowFor(killConditionRows(figures, 'all'), 'correctionRate').verdict).toBe(VERDICTS.FAIL)
+  })
+
+  it('holds every scope of the correction rate to the owner\'s 30%, unhalved', () => {
+    // The halving that rounds toward strictness applies to COUNTS. 30% is
+    // already a rate, so the same rate applied to each half is 30% again.
+    for (const scope of ['capacity', 'chores', 'all']) {
+      expect(rowFor(killConditionRows({ graded: gradedOf() }, scope), 'correctionRate').threshold).toBe(0.3)
+    }
+  })
+
+  it('leaves the per-kind rows unmeasured for a bare number rather than reusing the overall figure', () => {
+    // Reporting capacity's verdict from chores' evidence is the exact confusion
+    // the two-verdicts rule exists to stop.
+    const figures = { graded: gradedOf(), correctionRate: 0.1 }
+    expect(rowFor(killConditionRows(figures, 'all'), 'correctionRate').verdict).toBe(VERDICTS.PASS)
+    for (const scope of ['capacity', 'chores']) {
+      const row = rowFor(killConditionRows(figures, scope), 'correctionRate')
+      expect(row.verdict, `${scope} must not inherit the run-level rate`).toBe(VERDICTS.NOT_MEASURED)
+    }
+  })
+
+  it('labels the combined latency an ESTIMATE, because the sum of two p95s is not the p95 of the sum', () => {
+    // #207 AC 3. The two legs have never been in one request: #205 timed a
+    // phone to a trivial function, #206 timed a desk to the provider. Adding
+    // them produces a real number about a path nobody has walked.
+    const rows = killConditionRows(
+      { graded: gradedOf(), latency: { transportP95Ms: 800, providerCallP95Ms: 900 } },
+      'all',
+    )
+    const latency = rowFor(rows, 'latency')
+    expect(latency.estimate, 'the latency row must say it is an estimate').toBeTruthy()
+    expect(latency.estimate).toContain('p95')
+
+    // Every other axis with a figure is a measurement and must NOT carry one,
+    // or the label stops distinguishing anything.
+    for (const key of ['accuracy', 'refusals', 'overconfident']) {
+      expect(rowFor(rows, key).estimate, `${key} is measured, not estimated`).toBeUndefined()
+    }
+  })
+
+  it('calls a pass over an estimate PROVISIONAL, which is the third outcome the verdict must offer', () => {
+    const clears = verdictOf(
+      killConditionRows(
+        {
+          graded: gradedOf({ all: { withinTolerance: 50, refusals: { onAmbiguous: 10 }, dueExact: 25 } }),
+          latency: { transportP95Ms: 800, providerCallP95Ms: 900 },
+        },
+        'all',
+      ),
+    )
+    expect(clears.verdict).toBe(VERDICTS.PASS)
+    expect(clears.provisional.map((row) => row.axis.key)).toEqual(['latency'])
+
+    // A FAIL on an estimate is not provisional: the arithmetic overstates under
+    // independence, so a failing estimate is the weaker, conservative claim and
+    // is reported as a plain failure.
+    const fails = verdictOf(
+      killConditionRows(
+        { graded: gradedOf(), latency: { transportP95Ms: 3000, providerCallP95Ms: 3000 } },
+        'all',
+      ),
+    )
+    expect(fails.provisional).toEqual([])
+    expect(fails.kills.map((row) => row.axis.key)).toContain('latency')
+  })
+
+  it('prints the estimate in the axis line and in the scope verdict', () => {
+    const lines = killConditionLines(
+      'all',
+      {
+        graded: gradedOf({ all: { withinTolerance: 50, refusals: { onAmbiguous: 10 }, dueExact: 25 } }),
+        latency: { transportP95Ms: 800, providerCallP95Ms: 900 },
+      },
+      'all',
+    )
+    const latencyLine = lines.find((line) => line.includes('p95, deployed path'))
+    expect(latencyLine).toContain('(est.)')
+    expect(latencyLine).toContain('ESTIMATE:')
+    expect(lines.at(-1)).toContain('PROVISIONALLY on latency')
   })
 
   it('reports a scope as incomplete while any axis is unmeasured, even when nothing failed', () => {
@@ -474,8 +576,12 @@ describe('#204 AC 4 — the summary names the failing axis, never one combined v
   it('gives capacity no due-date row, because a week has no due date', () => {
     const keys = killConditionRows({ graded: gradedOf() }, 'capacity').map((row) => row.axis.key)
     expect(keys, 'the date axis reached the capacity block').not.toContain('dates')
+    // Latency and cost stay run-level: one provider call serves whichever kind
+    // it was handed, at one price. The correction rate is NOT like them — its
+    // unit is a figure, and every figure belongs to one kind (#207).
     expect(keys, 'a run-level axis was taken per kind').not.toContain('latency')
-    expect(keys).toEqual(['accuracy', 'refusals', 'overconfident'])
+    expect(keys, 'a run-level axis was taken per kind').not.toContain('cost')
+    expect(keys).toEqual(['accuracy', 'refusals', 'overconfident', 'correctionRate'])
   })
 })
 

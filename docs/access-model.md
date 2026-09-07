@@ -531,7 +531,8 @@
       member known NOT to have added the item, and preserving `added_at` keeps carried items at
       the top of the next run's unbought order. The originals are COPIED, never moved: the closed
       run keeps all five of the fixture's rows as the record of what that trip did not manage,
-      which is what #359's past runs will show. Each of the three copy fields has its own
+      which is what #359's past runs show — it reads exactly those rows back, through the
+      client grants `0032` already gives, adding no table, no grant and no migration. Each of the three copy fields has its own
       mutation — the finisher as adder, `now()` as `added_at`, `null` as the origin — and each
       reddened the carry test alone or with the two AC 2 tests that count origins (predicted
       1 / 1 / 3, actual 1 / 1 / 3). Dropping the

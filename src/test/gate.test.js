@@ -1299,6 +1299,13 @@ describe('#19 — no real household name reaches version control', () => {
     // target that is not the name already on the fixture.
     Bakery: 'a third shopping list name in the #358 picker, ordering and rename tests',
     'Rename Hardware': 'the rename control’s accessible name in the #358 picker tests — the control names its list when the picker has taken the heading’s place',
+    // #359 — the tick control's accessible name, asserted by its EXACT wording
+    // because the history and the open run both draw a row called Milk: what
+    // that test proves is that the tap target belongs to the working list and
+    // not to the record. Declared rather than matched by a lower-cased regex,
+    // for the tab labels' reason — the vocabulary exists to put every
+    // name-shaped literal in a diff somebody can look at.
+    'Mark Milk bought': 'the tick control’s accessible name in the #359 history tests',
     'Placeholder List': 'a shopping list name in shopping.io.test.js',
     'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
     'Placeholder Item': 'a shopping item name in shopping.io.test.js',

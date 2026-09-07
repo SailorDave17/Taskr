@@ -74,6 +74,7 @@ import {
   finishRun,
   orderShoppingLists,
   purchaseItem,
+  readClosedRuns,
   readShopping,
   removeItem,
   renameList,
@@ -131,6 +132,17 @@ const SURFACES = [
 /** No lists, no runs, no items — what a household reads before its first list. */
 const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
 
+/**
+ * #359 — nobody has asked for the history yet, which is where every arrival on
+ * the Shop tab starts.
+ *
+ * `loaded` is not `runs.length === 0`, and that is the whole reason this is an
+ * object rather than an array: *nothing asked for*, *reading it now* and *this
+ * list has never been finished* are three different sentences on a screen and
+ * one empty array underneath.
+ */
+const NO_PAST_RUNS = { loading: false, loaded: false, runs: [], items: [] }
+
 export default function App() {
   const [status, setStatus] = useState('loading')
   const [household, setHousehold] = useState(null)
@@ -157,6 +169,12 @@ export default function App() {
   // here: the Shop tab does the folding where it draws, so there is one
   // representation and no second copy to fall out of step with the first.
   const [shopping, setShopping] = useState(EMPTY_SHOPPING)
+  // #359 — the FINISHED runs of the list whose Past runs disclosure was last
+  // opened, and nothing before that. Deliberately not part of `shopping` above
+  // and deliberately not filled by `refresh()`: history is unbounded, so it is
+  // read when somebody opens the disclosure and never on a tab arrival. See
+  // `readClosedRuns`'s docblock for what that costs.
+  const [pastRuns, setPastRuns] = useState(NO_PAST_RUNS)
   // #95 — who in this household has connected a Google Calendar. Server state
   // like everything else here, read through the same refresh. The rows carry no
   // credential: the refresh token is in `calendar_tokens`, which this client is
@@ -1027,6 +1045,38 @@ export default function App() {
     [mutate, refresh],
   )
 
+  // #359 — the history read, and the ONE read on this screen that `refresh()`
+  // does not perform.
+  //
+  // Every other read here runs on arrival because what it returns is bounded by
+  // the week the household is having; closed runs grow by one per trip forever,
+  // so a tab press would get slower every week whether or not anybody ever looks
+  // back. The trigger is the disclosure opening, which is the moment somebody
+  // asked — and it fires again on every re-open, because a person asking twice
+  // wants the current answer rather than the one this device happened to keep.
+  //
+  // NOT through `mutate()`: nothing is written, so there is no re-read to
+  // follow and no reason to disable the tab's controls while it runs. The
+  // pending state is the disclosure's own sentence.
+  //
+  // A REFUSAL clears the rows rather than leaving the last list's history under
+  // this list's name, and reports itself on the error strip like every other
+  // refusal on this surface. It rethrows so the caller's rejection arm runs; the
+  // component supplies both arms for the reason every other write there does.
+  const handleOpenPastRuns = useCallback((listId) => {
+    setPastRuns({ ...NO_PAST_RUNS, loading: true })
+    return readClosedRuns(shoppingClient(), [listId]).then(
+      ({ runs, items }) => {
+        setPastRuns({ loading: false, loaded: true, runs, items })
+      },
+      (err) => {
+        setPastRuns(NO_PAST_RUNS)
+        setError(err.message)
+        throw err
+      },
+    )
+  }, [])
+
   // #355 — the tick, and the ONE write on this screen that does not re-read
   // everything. `mutate()` is write-then-full-refresh by design, and here that
   // design is too expensive to keep: #351 measured a full refresh per tick at
@@ -1571,6 +1621,8 @@ export default function App() {
           onPurchaseItem={handlePurchaseShoppingItem}
           onUnpurchaseItem={handleUnpurchaseShoppingItem}
           onFinishRun={handleFinishShoppingRun}
+          past={pastRuns}
+          onOpenPastRuns={handleOpenPastRuns}
         />
       ) : null}
 

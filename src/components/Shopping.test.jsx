@@ -60,6 +60,13 @@ const boughtBread = {
 // what resolves that id from the read. So every render here names it too; a
 // default of the single fixture list keeps the #353/#355/#357 arrangements
 // saying what they said, and the picker tests below override it.
+/**
+ * #359 — nobody has opened the Past runs disclosure, which is every render
+ * above this story's own tests. App holds this state; the component is handed
+ * it, so a test of the history hands over rows rather than mocking a read.
+ */
+const NO_PAST = { loading: false, loaded: false, runs: [], items: [] }
+
 function setup(overrides = {}) {
   const handlers = {
     onSelectList: vi.fn(),
@@ -70,6 +77,7 @@ function setup(overrides = {}) {
     onPurchaseItem: vi.fn().mockResolvedValue(undefined),
     onUnpurchaseItem: vi.fn().mockResolvedValue(undefined),
     onFinishRun: vi.fn().mockResolvedValue(undefined),
+    onOpenPastRuns: vi.fn().mockResolvedValue(undefined),
   }
   render(
     <Shopping
@@ -77,6 +85,7 @@ function setup(overrides = {}) {
       runs={[run]}
       items={[milk, eggs]}
       members={members}
+      past={NO_PAST}
       timezone="America/New_York"
       selectedListId="l1"
       {...handlers}
@@ -953,6 +962,277 @@ describe('#358 AC 4 — renaming, on the heading', () => {
   it('is unreachable while another write is in flight', () => {
     setup({ busy: true })
     expect(screen.getByRole('button', { name: /^rename /i })).toBeDisabled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 — the record of what the household already bought.
+//
+// The arithmetic (which run, what order, how many, whose name) is
+// groupClosedRuns's and is tested in shopping.test.js; the read and its trigger
+// are App's and are tested in App.test.jsx. What is proved here is the SCREEN:
+// the disclosure is closed until somebody opens it, opening asks for this list's
+// history, only the newest run is open, a row is one compact line with no
+// affordance on it, and nothing counts a person.
+// ---------------------------------------------------------------------------
+
+/** A finished run of the fixture list, closed by a member the roster holds. */
+const closedRun = (id, closedAt, closedBy = 'm2') => ({
+  id,
+  list_id: 'l1',
+  household_id: 'h1',
+  opened_at: '2026-09-01T00:00:00Z',
+  closed_at: closedAt,
+  closed_by_member_id: closedBy,
+})
+
+/** An item on a closed run: bought by somebody, or carried into the next one. */
+const pastItem = (id, runId, name, { boughtBy = null, at = null, note = null } = {}) => ({
+  id,
+  run_id: runId,
+  household_id: 'h1',
+  name,
+  note,
+  added_by_member_id: 'm1',
+  added_at: '2026-09-01T01:00:00Z',
+  purchased_at: at,
+  purchased_by_member_id: boughtBy,
+  carried_from_item_id: null,
+})
+
+/** Three trips, ids deliberately not in the order they were finished. */
+const threeRuns = {
+  loading: false,
+  loaded: true,
+  runs: [
+    closedRun('r-mid', '2026-09-04T22:00:00Z'),
+    closedRun('r-new', '2026-09-05T22:00:00Z', 'm1'),
+    closedRun('r-old', '2026-09-03T22:00:00Z'),
+  ],
+  items: [
+    pastItem('p1', 'r-new', 'Milk', { boughtBy: 'm2', at: '2026-09-05T21:02:00Z', note: 'a dozen' }),
+    pastItem('p2', 'r-new', 'Bread'),
+    pastItem('p3', 'r-mid', 'Eggs', { boughtBy: 'm1', at: '2026-09-04T21:00:00Z' }),
+  ],
+}
+
+const pastDisclosure = () => screen.getByText('Past runs').closest('details')
+const runDisclosures = () => Array.from(document.querySelectorAll('.shopping-past__run'))
+
+/**
+ * Open (or close) the disclosure the way a person does — a tap on the summary.
+ *
+ * The wait is not decoration and it is the whole reason this is a helper.
+ * *Measured on this jsdom*: a click on a `<summary>` flips the `open` attribute
+ * synchronously and fires the `toggle` event on a QUEUED TASK, so a
+ * microtask-only flush (`await Promise.resolve()`, which is what `act` gives an
+ * async callback that awaits nothing else) reads zero toggles and the read looks
+ * as though it never fired. A `setTimeout(0)` is what lets the platform's own
+ * event arrive, and the gesture under test is then the real one: click, the
+ * browser's toggle, the handler. Nothing here is a synthetic stand-in for an
+ * event the platform would have to send.
+ */
+const openPast = async (summary = screen.getByText('Past runs')) => {
+  fireEvent.click(summary)
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+describe('#359 AC 4 — the history is read when it is opened, and never on arrival', () => {
+  it('renders the disclosure closed, and asks for nothing', () => {
+    const { onOpenPastRuns } = setup()
+    expect(pastDisclosure()).not.toHaveAttribute('open')
+    expect(onOpenPastRuns).not.toHaveBeenCalled()
+  })
+
+  it('asks for THIS list’s history on the tap, once, naming the list', async () => {
+    const { onOpenPastRuns } = setup()
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+    expect(onOpenPastRuns).toHaveBeenCalledWith('l1')
+  })
+
+  it('asks again on a re-open, and asks nothing when it is closed', async () => {
+    // A person asking twice wants the current answer, not the one this device
+    // happened to keep. Closing is not a question.
+    const { onOpenPastRuns } = setup()
+    const summary = screen.getByText('Past runs')
+    await openPast(summary)
+    await openPast(summary)
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+    await openPast(summary)
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(2)
+  })
+
+  it('a RUN’s own disclosure opening does not re-read — the toggle that is not this one’s', async () => {
+    // `toggle` does not bubble, so React attaches it at the root and simulates
+    // bubbling: a run's disclosure opening arrives at the outer handler as
+    // though this element had been toggled. Measured in Chrome at 360x800
+    // BEFORE the target check: one tap on Past runs produced 55 toggle events
+    // in 1.5 s — the newest run mounting with `open` re-read, which remounted
+    // the runs, which fired another — and the screen sat on "Reading the
+    // finished runs…" forever.
+    //
+    // IT CAN FAIL, and the prediction that said otherwise was wrong. This test
+    // was written expecting jsdom to be blind to the inner toggle — the #359
+    // App test records exactly one call while a run mounts open, which looked
+    // like the same evidence — so the mutation was predicted at 0 and *measured
+    // at 1 of 268*: deleting the target check from Shopping.jsx reddens this
+    // row and nothing else. What the earlier count actually shows is that a run
+    // mounting open inside the same commit does not reach the handler, while a
+    // person opening one later does; the browser hit the first case 55 times in
+    // 1.5 s and jsdom hits the second here.
+    const { onOpenPastRuns } = setup({ past: threeRuns })
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+
+    const older = runDisclosures()[1]
+    fireEvent.click(older.querySelector('summary'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(older).toHaveAttribute('open')
+    expect(onOpenPastRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the list the picker is on, not the first list of the household', async () => {
+    const { onOpenPastRuns } = setup({
+      lists: [list, { ...list, id: 'l2', name: 'Hardware' }],
+      runs: [run, { ...run, id: 'r2', list_id: 'l2' }],
+      selectedListId: 'l2',
+    })
+    await openPast()
+    expect(onOpenPastRuns).toHaveBeenCalledWith('l2')
+  })
+
+  it('says it is reading while the read is in flight, and writes nothing', async () => {
+    const handlers = setup({ past: { ...NO_PAST, loading: true } })
+    expect(screen.getByText(/reading the finished runs/i)).toBeInTheDocument()
+    // Not the empty-state sentence: "reading" and "there are none" are different
+    // answers and the first must not read as the second.
+    expect(screen.queryByText(/no finished runs yet/i)).not.toBeInTheDocument()
+    for (const [name, handler] of Object.entries(handlers)) {
+      if (name !== 'onOpenPastRuns') expect(handler).not.toHaveBeenCalled()
+    }
+  })
+})
+
+describe('#359 AC 1 — one disclosure per finished run, newest first and newest open', () => {
+  it('orders the runs newest first and heads each with when and who, then how much', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const headings = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)
+    expect(headings).toEqual([
+      'Finished Sep 5, 2026 by Placeholder',
+      'Finished Sep 4, 2026 by Robin',
+      'Finished Sep 3, 2026 by Robin',
+    ])
+    // The counts are the run's own — items, and never a person (#35 AC 9).
+    expect(runDisclosures()[0]).toHaveTextContent('1 bought, 1 carried over')
+    expect(runDisclosures()[1]).toHaveTextContent('1 bought, 0 carried over')
+  })
+
+  it('opens the NEWEST and leaves every earlier run collapsed', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    expect(runDisclosures().map((node) => node.hasAttribute('open'))).toEqual([true, false, false])
+  })
+
+  it('a closer the roster no longer holds is "a former member" rather than a blank', async () => {
+    setup({
+      past: { ...threeRuns, runs: [closedRun('r-new', '2026-09-05T22:00:00Z', null)], items: [] },
+    })
+    await openPast()
+    expect(screen.getByRole('heading', { level: 4 })).toHaveTextContent(
+      'Finished Sep 5, 2026 by a former member',
+    )
+  })
+
+  it('draws the history of THIS list even while App still holds another list’s rows', async () => {
+    // The window is real: the read names one list, and a switch between two
+    // lists while it is in flight would otherwise draw the other list's trips
+    // under this list's name.
+    setup({
+      lists: [list, { ...list, id: 'l2', name: 'Hardware' }],
+      runs: [run, { ...run, id: 'r2', list_id: 'l2' }],
+      selectedListId: 'l2',
+      past: threeRuns,
+    })
+    await openPast()
+    expect(screen.queryByRole('heading', { level: 4 })).not.toBeInTheDocument()
+    expect(screen.getByText(/no finished runs yet/i)).toBeInTheDocument()
+  })
+})
+
+describe('#359 AC 2 — a closed row is one compact line, not the working row struck through', () => {
+  it('carries the name, the note, and who bought it and when', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    // Scoped to the history: the open run is showing an item of the same name,
+    // which is the ordinary case — a household buys milk most weeks.
+    const row = within(pastDisclosure()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('a dozen')
+    // #355's own sentence, reused rather than reworded: 21:02 UTC is 5:02 PM in
+    // New York, and the zone is the household's.
+    expect(row).toHaveTextContent('bought by Robin · 5:02 PM')
+  })
+
+  it('says "carried over" for an item the trip did not buy', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const row = within(pastDisclosure()).getByText('Bread').closest('li')
+    expect(row).toHaveTextContent('carried over')
+    expect(row).not.toHaveTextContent(/bought by/i)
+  })
+
+  it('offers no tick, no remove and no undo anywhere in the history', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const history = pastDisclosure()
+    expect(history.querySelectorAll('button')).toHaveLength(0)
+    for (const forbidden of [/^mark /i, /^remove /i, /not bought after all/i]) {
+      expect(within(history).queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+    }
+    // And it is not the working row: the classes that carry the tap target and
+    // the controls appear nowhere inside it.
+    expect(history.querySelectorAll('.shopping-item__tick')).toHaveLength(0)
+    expect(history.querySelectorAll('.shopping-item__actions')).toHaveLength(0)
+  })
+
+  it('leaves the working list alone — the open run’s controls are all still there', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    expect(screen.getByRole('button', { name: 'Mark Milk bought' })).toBeInTheDocument()
+    // Two rows called Milk are on screen now: one on the open run and one in the
+    // history. The tap target is the open run's, and only the open run's.
+    expect(screen.getAllByText('Milk')).toHaveLength(2)
+  })
+})
+
+describe('#359 AC 5 and AC 6 — nothing finished yet, and nothing about anybody', () => {
+  it('reads "No finished runs yet" once the read has landed and found none', async () => {
+    setup({ past: { loading: false, loaded: true, runs: [], items: [] } })
+    await openPast()
+    expect(screen.getByText(/no finished runs yet/i)).toBeInTheDocument()
+  })
+
+  it('says nothing about an empty history before anybody has asked', () => {
+    // `loaded` is what distinguishes them, which is why App's state is an object
+    // and not an array: an unasked question is not an answer of "none".
+    setup()
+    expect(screen.queryByText(/no finished runs yet/i)).not.toBeInTheDocument()
+  })
+
+  it('carries no per-person total, no rank, and nothing styled as an error', async () => {
+    setup({ past: threeRuns })
+    await openPast()
+    const history = pastDisclosure()
+    for (const forbidden of [/most/i, /rank/i, /streak/i, /score/i, /leader/i, /total/i]) {
+      expect(within(history).queryByText(forbidden)).not.toBeInTheDocument()
+    }
+    expect(within(history).queryByRole('alert')).not.toBeInTheDocument()
+    expect(history.querySelectorAll('.error')).toHaveLength(0)
   })
 })
 

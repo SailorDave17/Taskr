@@ -374,6 +374,14 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'shopping_lists.household_id=r',
       'shopping_runs.household_id=r',
       'shopping_items.household_id=r',
+      // 0035, story #360. `chores.missed_at`'s shape exactly: the archive stamp
+      // is written by `archive_shopping_list` from the database clock and by no
+      // client role, so `r` is what is granted and the absence of `a` and `w`
+      // is the whole content of the row. `check:live` sees the select half
+      // (42703 until the apply) and can never see that the client may not set
+      // the column — a probe that only ever reads cannot report being allowed a
+      // write it never attempts.
+      'shopping_lists.archived_at=r',
     ])
   })
 })

@@ -5,6 +5,7 @@ import {
   groupClosedRuns,
   orderShoppingItems,
   orderShoppingLists,
+  partitionShoppingLists,
   purchasedLabel,
   replaceShoppingItem,
   resolveSelectedListId,
@@ -230,11 +231,12 @@ describe('purchasedLabel', () => {
 // ---------------------------------------------------------------------------
 
 /** A list row, named by what the ordering is about. */
-const listRow = (id, name) => ({
+const listRow = (id, name, archivedAt = null) => ({
   id,
   household_id: 'h1',
   name,
   created_at: '2026-09-05T00:00:00Z',
+  archived_at: archivedAt,
 })
 
 describe('orderShoppingLists', () => {
@@ -318,6 +320,56 @@ const runItem = (id, runId, { boughtBy = null, at = null, note = null } = {}) =>
   purchased_at: at,
   purchased_by_member_id: boughtBy,
   carried_from_item_id: null,
+})
+
+describe('partitionShoppingLists — #360', () => {
+  const AWAY = '2026-09-06T10:00:00Z'
+
+  it('splits on the stamp, and both halves come back as arrays', () => {
+    const rows = [listRow('l1', 'Bakery'), listRow('l2', 'Hardware', AWAY), listRow('l3', 'Groceries')]
+    const { active, archived } = partitionShoppingLists(rows)
+    expect(idsOf(active)).toEqual(['l1', 'l3'])
+    expect(idsOf(archived)).toEqual(['l2'])
+  })
+
+  it('PRESERVES the caller’s order in each half, so one ordering rule serves both', () => {
+    // The rows arrive in the order `orderShoppingLists` produced (by name), and
+    // the archived half must come out in that order too — the toggle reveals
+    // them into the same picker. Ids DISAGREE with the name order on purpose,
+    // for the reason the ordering tests above give: a split that re-sorted, or
+    // that reversed, would otherwise be indistinguishable here.
+    const rows = [
+      listRow('l9', 'Apples'),
+      listRow('l7', 'Bakery', AWAY),
+      listRow('l5', 'Groceries'),
+      listRow('l3', 'Hardware', AWAY),
+    ]
+    const { active, archived } = partitionShoppingLists(rows)
+    expect(idsOf(active)).toEqual(['l9', 'l5'])
+    expect(idsOf(archived)).toEqual(['l7', 'l3'])
+  })
+
+  it('returns the rows themselves, not copies — the caller draws them', () => {
+    const away = listRow('l2', 'Hardware', AWAY)
+    const { archived } = partitionShoppingLists([listRow('l1', 'Bakery'), away])
+    expect(archived[0]).toBe(away)
+  })
+
+  it('reads a MISSING stamp as active, which is what a row from before 0035 is', () => {
+    // `archived_at` is nullable with no default and no backfill, so every row
+    // that existed before the migration carries null — and a row read by a
+    // client that has not been rebuilt carries nothing at all. Both are the
+    // active state, and neither may be mistaken for the other kind of falsy.
+    const legacy = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-01T00:00:00Z' }
+    expect(idsOf(partitionShoppingLists([legacy]).active)).toEqual(['l1'])
+    expect(partitionShoppingLists([legacy]).archived).toEqual([])
+    expect(idsOf(partitionShoppingLists([listRow('l2', 'Bakery', null)]).active)).toEqual(['l2'])
+  })
+
+  it('survives nothing to split', () => {
+    expect(partitionShoppingLists(null)).toEqual({ active: [], archived: [] })
+    expect(partitionShoppingLists([])).toEqual({ active: [], archived: [] })
+  })
 })
 
 describe('groupClosedRuns', () => {

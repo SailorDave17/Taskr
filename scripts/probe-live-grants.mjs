@@ -264,6 +264,21 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'r',
     source: '0032 (#352) — `r` only; items arrive through add_shopping_item',
   }),
+  // `0035` (#360): the archive stamp, and the row is here for `missed_at`'s
+  // reason — `r` is what it grants and `a`/`w` are the whole point. The client
+  // must READ the stamp, because hiding an archived list from the picker is a
+  // decision it makes; it must never WRITE it, or a list could be put away
+  // without the RPC that refuses an archive over a run holding items. This
+  // check is the only instrument for that absence: `check:live` sees the column
+  // is readable and cannot see that no client role may set it. RED until `0035`
+  // is applied — `the column is not there`, the same deliberate window
+  // `household_id` had before `0032`.
+  Object.freeze({
+    table: 'shopping_lists',
+    column: 'archived_at',
+    privileges: 'r',
+    source: '0035 (#360) — `r` only; the stamp is archive_shopping_list’s to write',
+  }),
 ])
 
 /** The role every expectation above is about. */

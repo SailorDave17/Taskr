@@ -67,6 +67,9 @@ const choresApi = {
 // the roster renders from.
 const captureApi = {
   extractCapacity: vi.fn(),
+  // #213 — the chore half, stubbed for the same reason: `proposeChores` is
+  // pure and has its own tests; what App owes is the WIRING.
+  extractChores: vi.fn(),
 }
 
 const capacityApi = {
@@ -3965,6 +3968,125 @@ describe('capacity — described in plain language (#210)', () => {
     await openTheWeekEditor()
     await describeWeek('I have three hours this week')
     expect(screen.getByTestId('proposal-m1')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+// #213 — the chore capture flow, wired. What App owes, as for #210: that a
+// description reaches lib/capture.js with the household ON SCREEN, today on
+// the household's calendar and the person typing (and NOT the Supabase
+// client); that asking is not a mutation — nothing re-reads and nothing is
+// written; and that confirming goes through the same addChores a typed batch
+// uses, with the household on screen and `source: 'extraction'` on every row,
+// followed by the same re-read.
+describe('chores — described in plain language (#213)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const chore = { id: 'c1', household_id: 'h1', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10' }
+  const PROPOSAL = {
+    outcome: 'proposal',
+    rows: [
+      {
+        key: 'proposed-1',
+        title: 'mow the grass',
+        minutes: '45',
+        dueOn: '2026-08-29',
+        problem: null,
+        note: 'Read as “mow the grass”, 45 min, due “Saturday”.',
+        derivedFrom: { title: 'mow the grass', expectedMinutes: 45, dueDate: 'Saturday', repeat: null, assignee: null },
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    choresApi.listChores.mockResolvedValue([chore])
+    captureApi.extractChores.mockResolvedValue(PROPOSAL)
+  })
+
+  const onTheChores = async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+  }
+
+  const describeChores = async (text) => {
+    fireEvent.change(screen.getByLabelText(/what needs doing this week/i), { target: { value: text } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /work out the chores/i })))
+  }
+
+  it('asks through lib/capture.js with the household on screen, today on its calendar and the person typing — and writes nothing', async () => {
+    await onTheChores()
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(captureApi.extractChores).toHaveBeenCalledTimes(1)
+    expect(captureApi.extractChores).toHaveBeenCalledWith({
+      householdId: 'h1',
+      text: 'takes about 45 min to mow the grass',
+      // Today in America/New_York, as `localTodayIn` says it — the same call
+      // the tab's skip picker is handed, never the phone's zone.
+      todayIso: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      speaker: 'Placeholder One',
+    })
+    // The proposal is on screen, editable, and NOTHING has been written or
+    // re-read: a proposal is not a mutation.
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(choresApi.listChores.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('confirming goes through addChores with the household on screen and source extraction on every row, then re-reads', async () => {
+    choresApi.addChores.mockResolvedValue([{ ok: true, chore: { id: 'n1' } }])
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add these chores/i })))
+
+    expect(choresApi.addChores).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChores).toHaveBeenCalledWith(
+      [{ title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' }],
+      { householdId: household.id },
+    )
+    await waitFor(() => expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(choresApi.addChores.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+    // Everything landed, so the list is gone.
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 6: when the endpoint fails, the typed form is the road in, and it is the SAME add path', async () => {
+    captureApi.extractChores.mockResolvedValue({ outcome: 'failed', sentence: 'The extraction service could not answer.' })
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(screen.getByTestId('capture-failure')).toHaveTextContent(/could not answer/)
+    expect(screen.getByLabelText(/^chore$/i)).toHaveFocus()
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+    expect(choresApi.addChore).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Dishes', expectedMinutes: '20', dueOn: '2026-08-10', householdId: 'h1' }),
+    )
+  })
+
+  it('the proposer never touches the Supabase client from App — it goes through lib/capture.js', async () => {
+    // getSupabase throws in this file's mock, so the flow completing to a
+    // proposal on screen is the assertion — #210's shape.
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

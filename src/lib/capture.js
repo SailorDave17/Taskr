@@ -73,9 +73,48 @@
 // recorded fixtures with no service and no credential; the impure half,
 // `extractCapacity`, takes its transport as an injectable so the three
 // failure outcomes can each be forced separately (AC 2).
+//
+// THE CHORE HALF — story #213
+//
+// `proposeChores(response, { todayIso })` is the same shape for the other
+// input kind: a pure function from a recorded `kind: 'chores'` response to an
+// outcome whose proposal is a LIST of draft rows rather than one figure (#213
+// AC 8). `extractChores` is its impure half. The two kinds share ONE endpoint
+// call — `askEndpoint`, below — so the wait, the abort, the failure sentences
+// and the gateway-body reading exist once; a second copy of that machinery
+// would be a second place for the fallback to rot (#213 AC 3's reason, one
+// layer down from the shell it names).
+//
+// A proposed row is the FORM's strings, not normalised values — the same
+// shape `ChoreDraftList` takes from the batch panel (#220) — and every row is
+// validated here by the data layer's OWN normalisers rather than by rules
+// restated beside them (#213 AC 4, AC 7): `normalizeTitle`'s 80 characters,
+// `normalizeExpectedMinutes`' bounds, and `normalizeDueDate` against today —
+// the one the grader uses, imported from the leaf it lives in. A row that
+// fails arrives marked with that normaliser's own sentence and cannot be
+// confirmed as it stands; the member edits it in place.
+//
+// Two rulings from #207's verdict land here rather than in the component:
+//
+//   - `expectedMinutes: 0` is an EMPTY field, never a value to accept. The
+//     model answers 0 for a chore whose sentence stated no duration — seven
+//     times in twelve cold sentences — and a chore at zero minutes is free
+//     work that makes the split read level while one person does all of it.
+//     The owner ruled that zero an honest blank, and that ruling is what puts
+//     the chore correction rate at 29.6% rather than 55.6%; it holds only if a
+//     member never has to treat the zero as a number they proposed.
+//   - a stated due date the normaliser refuses — `every week`, `once a week`,
+//     eleven of twelve cold sentences — is an empty date field carrying the
+//     phrase in its sentence, so the member sees what was read and picks a
+//     day. The contract carries `repeat` and `assignee` since #208, and both
+//     are shown in the row's derivation line and written nowhere: the row the
+//     batch write takes has no field for either, and inventing a schedule
+//     from a phrase is the extractor's job, not this layer's.
 
 import { getSupabase } from './supabase.js'
 import { MAX_CAPACITY_MINUTES, MIN_CAPACITY_MINUTES } from './capacity.js'
+import { normalizeExpectedMinutes, normalizeTitle } from './chores.js'
+import { normalizeDueDate } from './dueDates.js'
 import { normalizeEntity } from './extraction.js'
 import { ADAPTER_OUTCOMES } from './extractionAdapter.js'
 import { CLIENT_WAIT_MS } from './extractionThresholds.js'
@@ -132,8 +171,14 @@ const question = (sentence) => ({ outcome: CAPTURE_OUTCOMES.QUESTION, sentence }
 const unusable = (sentence) => ({ outcome: CAPTURE_OUTCOMES.UNUSABLE, sentence })
 const failed = (sentence) => ({ outcome: CAPTURE_OUTCOMES.FAILED, sentence })
 
-/** Ends a sentence the endpoint wrote, whatever punctuation it chose. */
-function sentenceOf(reason) {
+/**
+ * Ends a sentence the endpoint wrote, whatever punctuation it chose. Exported
+ * since #213 for the shell, which sets a failure sentence beside the manual
+ * hint — a gateway body or a thrown error carries no full stop, and the
+ * prototype read "network down Type them in below instead". The sentences
+ * themselves are kept verbatim (a #210 test asserts the gateway's own words).
+ */
+export function sentenceOf(reason) {
   const text = String(reason ?? '').trim()
   if (!text) return ''
   return /[.!?]$/.test(text) ? text : `${text}.`
@@ -240,20 +285,188 @@ export function proposeCapacity(response, { member, members = [] } = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The chore half — #213
+// ---------------------------------------------------------------------------
+
+/** The first sentence a normaliser refuses `value` with, or null. */
+function complaintOf(normalise, value) {
+  try {
+    normalise(value)
+    return null
+  } catch (error) {
+    return error.message
+  }
+}
+
+/**
+ * One sentence saying what a proposed row was read from — #213 AC 1's "what
+ * it was derived from", in this module so the chore flow and any later
+ * reader share one voice. The stated forms are quoted VERBATIM: the member is
+ * being shown what the model read, not what this layer made of it, and the
+ * unparsed date phrase is the thing they most need to see when the date field
+ * beside it is empty.
+ */
+export function describeDerivation(derivedFrom) {
+  if (!derivedFrom) return ''
+  const parts = [`“${derivedFrom.title}”`]
+  parts.push(
+    derivedFrom.expectedMinutes >= 1 ? `${derivedFrom.expectedMinutes} min` : 'no time stated',
+  )
+  parts.push(derivedFrom.dueDate ? `due “${derivedFrom.dueDate}”` : 'no date stated')
+  if (derivedFrom.repeat) parts.push(`repeats “${derivedFrom.repeat}”`)
+  if (derivedFrom.assignee) parts.push(`for ${derivedFrom.assignee}`)
+  return `Read as ${parts.join(', ')}.`
+}
+
+/**
+ * Is `answer` a `kind: 'chores'` response of the contract's shape? The same
+ * type rules the grader's `entitiesOf` applies — one rule per field, refusing
+ * a wrong TYPE and nothing else — stated here rather than borrowed, because
+ * the grader also refuses two chores of one title (its oracle keys on the
+ * title) and a member who described the dishes twice should see two rows to
+ * prune, not an unusable answer.
+ */
+function isChoresShape(answer) {
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return false
+  if (answer.kind !== 'chores' || !Array.isArray(answer.chores)) return false
+  return answer.chores.every(
+    (chore) =>
+      chore &&
+      typeof chore === 'object' &&
+      !Array.isArray(chore) &&
+      typeof chore.title === 'string' &&
+      Number.isFinite(chore.expectedMinutes) &&
+      ['dueDate', 'repeat', 'assignee'].every(
+        (field) => chore[field] === undefined || chore[field] === null || typeof chore[field] === 'string',
+      ),
+  )
+}
+
+/**
+ * The outcome of one endpoint response for a chore description — the pure
+ * half (#213 AC 8).
+ *
+ * @param {unknown} response what the endpoint answered
+ * @param {{todayIso: string}} context today on the household's calendar,
+ *   `YYYY-MM-DD` — the reference a stated date is resolved against, exactly
+ *   as the grader resolves the corpus's against `DUE_REFERENCE`. Required
+ *   whenever the answer states a date at all, and refused when missing
+ *   rather than defaulted: "tomorrow" resolved against the wrong zone is the
+ *   fault dueDates.js exists to keep out.
+ *
+ * A PROPOSAL carries `rows`, one per chore the answer named, each in the shape
+ * `ChoreDraftList` renders and the batch write consumes — `{ key, title,
+ * minutes, dueOn, problem, note, derivedFrom }`, the first four the form's
+ * strings. A row's `problem` is the FIRST normaliser complaint in the order
+ * the form's own validator checks them (title, minutes, date), or null; the
+ * component re-runs the same validators on confirm, so a row that arrives
+ * marked cannot be written until the member has changed it (AC 5, AC 7).
+ *
+ * An answer naming NO chores is a question, not a proposal of nothing: the
+ * box stays and the member is asked to say what needs doing (AC 8's "prose
+ * describing no chores at all"). A refusal is a question carrying the
+ * endpoint's reason, a wire failure is a failure, and anything that is not
+ * the contract is unusable — the same three classifications the capacity
+ * half makes, with the sentences naming a list rather than a figure.
+ */
+export function proposeChores(response, { todayIso } = {}) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return unusable('That did not come back as a list of chores.')
+  }
+
+  if (response.kind === 'refusal') {
+    const reason = String(response.reason ?? '')
+    if (WIRE_FAILURE_PREFIXES.some((prefix) => reason.startsWith(prefix))) {
+      return failed(`The extraction service could not answer (${reason}).`)
+    }
+    return question(
+      `One more detail is needed. ${sentenceOf(reason) || 'Say what needs doing and how long each one takes.'}`,
+    )
+  }
+
+  if (!isChoresShape(response)) {
+    return unusable('That did not come back as a list of chores.')
+  }
+
+  if (response.chores.length === 0) {
+    return question('No chores were found in that. Say what needs doing, and how long each one takes.')
+  }
+
+  const rows = response.chores.map((chore, index) => {
+    const title = chore.title.trim()
+    const derivedFrom = {
+      title: chore.title,
+      expectedMinutes: chore.expectedMinutes,
+      dueDate: typeof chore.dueDate === 'string' && chore.dueDate.trim() ? chore.dueDate.trim() : null,
+      repeat: typeof chore.repeat === 'string' && chore.repeat.trim() ? chore.repeat.trim() : null,
+      assignee: typeof chore.assignee === 'string' && chore.assignee.trim() ? chore.assignee.trim() : null,
+    }
+
+    // #207 ruling 2: below the floor is a BLANK — the field is empty and the
+    // complaint is the normaliser's own empty-field question, not "0 is too
+    // few". Above the ceiling the figure stays in the field so the member
+    // can split it, with the normaliser's own sentence beside it.
+    const minutes =
+      Number.isInteger(chore.expectedMinutes) && chore.expectedMinutes >= 1
+        ? String(chore.expectedMinutes)
+        : ''
+
+    let dueOn = ''
+    let dateProblem = null
+    if (derivedFrom.dueDate) {
+      try {
+        dueOn = normalizeDueDate(derivedFrom.dueDate, todayIso)
+      } catch {
+        // `normalizeDueDate` throws for a phrase it will not resolve AND for a
+        // missing reference; the member's sentence is the same either way,
+        // and the phrase is quoted so they see what was read (AC 8's
+        // "unparseable date", distinct from AC 5's "no date").
+        dateProblem = `Could not read “${derivedFrom.dueDate}” as a date — pick one.`
+      }
+    }
+
+    const problem =
+      complaintOf(normalizeTitle, title) ??
+      complaintOf(normalizeExpectedMinutes, minutes) ??
+      dateProblem ??
+      complaintOf(normalizeDueDate, dueOn)
+
+    return {
+      key: `proposed-${index + 1}`,
+      title,
+      minutes,
+      dueOn,
+      problem,
+      note: describeDerivation(derivedFrom),
+      derivedFrom,
+    }
+  })
+
+  return { outcome: CAPTURE_OUTCOMES.PROPOSAL, rows }
+}
+
+// ---------------------------------------------------------------------------
+// The endpoint call, shared by both kinds
+// ---------------------------------------------------------------------------
+
 /** `functions.invoke` against the real client; the injectable's default. */
 function defaultInvoke(options) {
   return getSupabase().functions.invoke(EXTRACTION_FUNCTION, options)
 }
 
 /**
- * Describe a week to the endpoint and classify the answer — the impure half.
+ * Send one description to the endpoint and either hand back its answer or
+ * the FAILURE outcome that stands in for one — the transport half both
+ * `extractCapacity` and `extractChores` share.
  *
- * @param {{householdId: string, text: string, member: object, members?: Array<object>}} input
+ * @param {{householdId: string, kind: 'capacity'|'chores', text: string, speaker?: string}} request
  * @param {{budgetMs?: number, invoke?: (options: object) => Promise<{data: unknown, error: unknown}>}} [deps]
  *   `invoke` is the transport, injectable so the tests force each failure
  *   outcome without a network; `budgetMs` defaults to the kill number and is
  *   overridable so a test can prove the budget is what times the wait out,
  *   not something else.
+ * @returns {Promise<{failure: object} | {data: unknown}>}
  *
  * THE TIMEOUT IS A RACE, AND THE SIGNAL IS A COURTESY. `Promise.race` against
  * the budget is what decides the outcome — the classification must not depend
@@ -266,20 +479,22 @@ function defaultInvoke(options) {
  * the SDK collapses every non-2xx into "Edge Function returned a non-2xx
  * status code", which names nothing. Two keys, because two writers: a handler
  * this repo wrote answers `{ error }`, and the functions GATEWAY answers
- * `{ code, message }` — which is what a 404 looks like before #209 deploys
+ * `{ code, message }` — which is what a 404 looked like before #209 deployed
  * the function, and is measured through the SDK's real error class in
  * capture.test.js rather than modelled (review-fanout, 2026-09-04: the first
  * fixture was a shape the SDK cannot emit). Only when there is no body at all
  * does the SDK's own message stand.
+ *
+ * The SPEAKER is #207's third contract gap: the endpoint names nobody when it
+ * is omitted, so this is the line that tells the model who "I" is. Sent only
+ * when it is a name — an empty string would be a speaker line with nothing
+ * after it — and which name is the caller's business: the capacity flow sends
+ * the ROW's, the chore flow the person typing.
  */
-export async function extractCapacity(
-  { householdId, text, member, members = [] },
+async function askEndpoint(
+  { householdId, kind, text, speaker },
   { budgetMs = CLIENT_WAIT_MS, invoke = defaultInvoke } = {},
 ) {
-  if (!householdId) throw new Error('Which household? A description must name one.')
-  const description = String(text ?? '').trim()
-  if (!description) throw new Error('Describe your week first.')
-
   const controller = new AbortController()
   let timer
   const budget = new Promise((_, reject) => {
@@ -291,23 +506,12 @@ export async function extractCapacity(
     }, budgetMs)
   })
 
+  const who = String(speaker ?? '').trim()
   let result
   try {
-    // The SPEAKER is the row this description is for — #207's third contract
-    // gap, and the owner's call at #208's review escalation (2026-09-07): the
-    // endpoint names nobody when this is omitted, so it is this line that
-    // tells the model who "I" is. The row's name rather than the caller's,
-    // because an organizer can type on another member's row and
-    // `proposeCapacity`'s first rule then attributes the figure by this name.
-    const speaker = String(member?.display_name ?? '').trim()
     result = await Promise.race([
       invoke({
-        body: {
-          householdId,
-          kind: 'capacity',
-          text: description,
-          ...(speaker ? { speaker } : {}),
-        },
+        body: { householdId, kind, text, ...(who ? { speaker: who } : {}) },
         signal: controller.signal,
       }),
       budget,
@@ -315,11 +519,15 @@ export async function extractCapacity(
   } catch (error) {
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
       return {
-        outcome: CAPTURE_OUTCOMES.TIMEOUT,
-        sentence: `No answer came back within ${Math.round(budgetMs / 1000)} seconds.`,
+        failure: {
+          outcome: CAPTURE_OUTCOMES.TIMEOUT,
+          sentence: `No answer came back within ${Math.round(budgetMs / 1000)} seconds.`,
+        },
       }
     }
-    return failed(`The extraction service could not be reached: ${String(error?.message ?? error)}`)
+    return {
+      failure: failed(`The extraction service could not be reached: ${String(error?.message ?? error)}`),
+    }
   } finally {
     clearTimeout(timer)
   }
@@ -332,10 +540,57 @@ export async function extractCapacity(
     } catch {
       detail = ''
     }
-    return failed(
-      detail ? String(detail) : `The extraction service could not answer: ${result.error.message}`,
-    )
+    return {
+      failure: failed(
+        detail ? String(detail) : `The extraction service could not answer: ${result.error.message}`,
+      ),
+    }
   }
 
-  return proposeCapacity(result?.data, { member, members })
+  return { data: result?.data }
+}
+
+/**
+ * Describe a week to the endpoint and classify the answer — the impure half.
+ *
+ * @param {{householdId: string, text: string, member: object, members?: Array<object>}} input
+ * @param {{budgetMs?: number, invoke?: Function}} [deps] see `askEndpoint`
+ *
+ * The speaker is the ROW this description is for — the owner's call at #208's
+ * review escalation (2026-09-07). The row's name rather than the caller's,
+ * because an organizer can type on another member's row and
+ * `proposeCapacity`'s first rule then attributes the figure by this name.
+ */
+export async function extractCapacity({ householdId, text, member, members = [] }, deps) {
+  if (!householdId) throw new Error('Which household? A description must name one.')
+  const description = String(text ?? '').trim()
+  if (!description) throw new Error('Describe your week first.')
+
+  const asked = await askEndpoint(
+    { householdId, kind: 'capacity', text: description, speaker: member?.display_name },
+    deps,
+  )
+  if (asked.failure) return asked.failure
+  return proposeCapacity(asked.data, { member, members })
+}
+
+/**
+ * Describe the week's chores to the endpoint and classify the answer — the
+ * chore flow's impure half (#213).
+ *
+ * @param {{householdId: string, text: string, todayIso: string, speaker?: string}} input
+ *   `todayIso` is today on the household's calendar, the reference every
+ *   stated date resolves against; `speaker` is the person TYPING — there is
+ *   no row here, and "I'll do the bins" is theirs — sent so the endpoint can
+ *   name an assignee rather than an "I" no roster row matches.
+ * @param {{budgetMs?: number, invoke?: Function}} [deps] see `askEndpoint`
+ */
+export async function extractChores({ householdId, text, todayIso, speaker }, deps) {
+  if (!householdId) throw new Error('Which household? A description must name one.')
+  const description = String(text ?? '').trim()
+  if (!description) throw new Error('Say what needs doing first.')
+
+  const asked = await askEndpoint({ householdId, kind: 'chores', text: description, speaker }, deps)
+  if (asked.failure) return asked.failure
+  return proposeChores(asked.data, { todayIso })
 }

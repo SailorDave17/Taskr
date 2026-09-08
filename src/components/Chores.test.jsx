@@ -1,6 +1,20 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import * as fsForSource from 'node:fs'
+import { resolve } from 'node:path'
 import Chores from './Chores.jsx'
+
+// #213 AC 3 — the single-implementation scan reads component SOURCE, so it
+// needs the tree and not the DOM. Comments are stripped first, for the reason
+// gate.test.js gives: a docblock explaining the shell would otherwise be a
+// second shell.
+const resolveDir = (dir) => resolve(process.cwd(), dir)
+const listSource = (dir) =>
+  fsForSource
+    .readdirSync(dir)
+    .filter((f) => /\.jsx?$/.test(f) && !/\.test\.jsx?$/.test(f))
+    .map((f) => `${dir}/${f}`)
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 
 // #34 — the chore list and the form that refuses a bad value BEFORE it becomes
 // a request (AC 2). Chore names are synthetic — see #19.
@@ -1484,6 +1498,264 @@ describe('batch entry — #220, several chores in one pass', () => {
       repeatWeekdays: [],
       repeatMonthday: '',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #213 — the week's chores in plain language
+//
+// The shell's four behaviours are CaptureShell.test.jsx's; what this block
+// owns is what a proposal LOOKS like on this tab and which handler each
+// gesture reaches: the review list fed from proposals, the marked rows that
+// cannot be confirmed as they stand, the confirm that goes through onAddMany
+// with `source: 'extraction'`, the three failures that hand the member the
+// form that was there throughout, and — AC 10 made structural — that a tab
+// rendered without a proposer is exactly the #34 surface. Titles are lower
+// case and sentences are the data layer's — see #19.
+// ---------------------------------------------------------------------------
+
+describe('chores described in plain language — #213', () => {
+  const row = (overrides = {}) => ({
+    key: 'proposed-1',
+    title: 'mow the grass',
+    minutes: '45',
+    dueOn: '2026-08-29',
+    problem: null,
+    note: 'Read as “mow the grass”, 45 min, due “Saturday”.',
+    derivedFrom: { title: 'mow the grass', expectedMinutes: 45, dueDate: 'Saturday', repeat: null, assignee: null },
+    ...overrides,
+  })
+  const proposal = (rows) => ({ outcome: 'proposal', rows })
+
+  /** Render with a proposer wired, the way App does. */
+  function setupWithProposer(result, overrides = {}) {
+    const onPropose = vi.fn().mockResolvedValue(result)
+    const handlers = setup({ onPropose, ...overrides })
+    return { ...handlers, onPropose }
+  }
+
+  const box = () => screen.queryByLabelText(/what needs doing this week/i)
+  const describeChores = async (text) => {
+    fireEvent.change(box(), { target: { value: text } })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the chores/i }))
+  }
+  const confirmProposed = () =>
+    clickAndSettle(screen.getByRole('button', { name: /add these chores/i }))
+  const draftField = (position, which) =>
+    screen.getByLabelText(new RegExp(`${which} for chore ${position}$`, 'i'))
+
+  it('AC 10: with no proposer wired, the tab is exactly the #34 surface — no box, no shell, the form and the batch button', () => {
+    setup()
+    expect(box()).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-shell')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+  })
+
+  it('asks a direct question, and the typed form is on screen beside it before anything is described (owner amendment, 2026-09-07)', () => {
+    setupWithProposer(proposal([row()]))
+    expect(box()).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /work out the chores/i })).toBeDisabled()
+    // The form is still an option: same fields, same button, no proposal.
+    expect(screen.getByLabelText(/^chore$/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a description becomes the review list — each row with title, minutes, date and what it was read from — and nothing is written', async () => {
+    const handlers = setupWithProposer(
+      proposal([
+        row(),
+        row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15', note: 'Read as “put the shopping away”, 15 min, due “Saturday”.' }),
+      ]),
+    )
+    await describeChores('do the weekly shop on saturday, an hour and a half, and put the shopping away, fifteen minutes')
+
+    expect(handlers.onPropose).toHaveBeenCalledWith(
+      'do the weekly shop on saturday, an hour and a half, and put the shopping away, fifteen minutes',
+    )
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(2)
+    expect(draftField(1, 'title')).toHaveValue('mow the grass')
+    expect(draftField(1, 'expected minutes')).toHaveValue(45)
+    expect(draftField(1, 'due date')).toHaveValue('2026-08-29')
+    expect(screen.getByText('Read as “mow the grass”, 45 min, due “Saturday”.')).toBeInTheDocument()
+    expect(draftField(2, 'title')).toHaveValue('put the shopping away')
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(handlers.onAdd).not.toHaveBeenCalled()
+    // The form is STILL there, under the proposal.
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('AC 2: one chore described is one row', async () => {
+    setupWithProposer(proposal([row()]))
+    await describeChores('takes about 45 min to mow the grass')
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(screen.getByText(/one chore read from what you wrote/i)).toBeInTheDocument()
+  })
+
+  it('AC 9: confirming writes every listed row through onAddMany with source extraction, and a removed row is not written', async () => {
+    const handlers = setupWithProposer(
+      proposal([row(), row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true, chore: { id: 'n1' } }])
+    await describeChores('the shop and putting it away')
+    await clickAndSettle(screen.getByRole('button', { name: /remove chore 2 from the list/i }))
+    // No placeholder: one row remains and it is the first.
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(draftField(1, 'title')).toHaveValue('mow the grass')
+
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledTimes(1)
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' },
+    ])
+    // Everything landed: the list is gone, the box is back and empty, the form is still there.
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    expect(box()).toHaveValue('')
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('AC 4: the date is editable per row before confirming, and the edited value is what is written', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('mow the grass on saturday')
+    fireEvent.change(draftField(1, 'due date'), { target: { value: '2026-08-31' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      expect.objectContaining({ dueOn: '2026-08-31', source: 'extraction' }),
+    ])
+  })
+
+  it('AC 5: a chore with no date arrives marked as needing one, cannot be confirmed as it stands, and can once a date is picked', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ dueOn: '', problem: 'When is this chore due?', note: 'Read as “mow the grass”, 45 min, no date stated.' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/when is this chore due/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    // Still marked — confirm re-ran the same validator and refused.
+    expect(screen.getByRole('alert')).toHaveTextContent(/when is this chore due/i)
+
+    fireEvent.change(draftField(1, 'due date'), { target: { value: '2026-08-29' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' },
+    ])
+  })
+
+  it('#207 ruling 2: a zero duration arrives as an EMPTY minutes field, marked, and is not a value the member can confirm', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ minutes: '', problem: 'How many minutes does this chore take?' })]),
+    )
+    await describeChores('the grass needs mowed every week')
+    expect(draftField(1, 'expected minutes')).toHaveValue(null)
+    expect(screen.getByRole('alert')).toHaveTextContent(/how many minutes/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+  })
+
+  it('AC 7: a row over the bounds arrives marked with the data layer’s sentence and cannot be confirmed until edited', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ minutes: '1441', problem: 'That is more than a day of work — split it into smaller chores.' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('rebuild the fireplace, a day and a bit')
+    expect(screen.getByRole('alert')).toHaveTextContent(/more than a day of work/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+
+    fireEvent.change(draftField(1, 'expected minutes'), { target: { value: '360' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([expect.objectContaining({ expectedMinutes: '360' })])
+  })
+
+  it('AC 7: confirm re-validates with the SAME validators — a row that arrived clean and was edited to a bad value is refused with OUR sentence', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    await describeChores('mow the grass')
+    fireEvent.change(draftField(1, 'expected minutes'), { target: { value: '0' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least a minute/i)
+  })
+
+  it('a partial failure on write keeps the refused rows listed and says how many saved — the #220 arithmetic, shared', async () => {
+    const handlers = setupWithProposer(
+      proposal([row(), row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15' })]),
+    )
+    handlers.onAddMany.mockResolvedValueOnce([
+      { ok: true, chore: { id: 'n1' } },
+      { ok: false, message: 'adding the chore: the server refused this row' },
+    ])
+    await describeChores('the shop and putting it away')
+    await confirmProposed()
+    expect(screen.getByTestId('proposal-notice')).toHaveTextContent(/1 of 2 saved/i)
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(draftField(1, 'title')).toHaveValue('put the shopping away')
+    expect(screen.getByRole('alert')).toHaveTextContent(/the server refused this row/i)
+  })
+
+  it('discarding the proposal writes nothing, clears the list, and leaves the form where it was', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    await describeChores('mow the grass')
+    await clickAndSettle(screen.getByRole('button', { name: /^discard$/i }))
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('a question keeps the box with the sentence under it, and no list', async () => {
+    setupWithProposer({ outcome: 'question', sentence: 'One more detail is needed. Say how long each one takes.' })
+    await describeChores('we do the dishes every day')
+    expect(screen.getByTestId('capture-question')).toHaveTextContent(/one more detail/i)
+    expect(box()).toHaveValue('we do the dishes every day')
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['failed', 'The extraction service could not be reached: network down'],
+    ['timeout', 'No answer came back within 6 seconds.'],
+    ['unusable', 'That did not come back as a list of chores.'],
+  ])('AC 6 (%s): the failure is stated, nothing is written, the typed form is focused, and typing completes the task through onAdd', async (outcome, sentence) => {
+    const handlers = setupWithProposer({ outcome, sentence })
+    await describeChores('mow the grass')
+
+    const failure = screen.getByTestId('capture-failure')
+    expect(failure).toHaveTextContent(sentence)
+    expect(failure).toHaveTextContent(/type them in below instead/i)
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(handlers.onAdd).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    // The form that was there throughout, now holding focus — not revealed.
+    const titleField = screen.getByLabelText(/^chore$/i)
+    expect(titleField).toHaveFocus()
+
+    fillAddForm({ title: 'mow the grass', minutes: '45', due: '2026-08-29' })
+    await submitAdd()
+    expect(handlers.onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29' }),
+    )
+  })
+
+  it('AC 3: the description field, the pending state and the swap live in ONE shell — Chores renders CaptureShell and defines none of them', () => {
+    const { readFileSync } = fsForSource
+    const components = resolveDir('src/components')
+    const shells = []
+    for (const file of listSource(components)) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      if (/data-testid="capture-shell"/.test(code) || /capture-pending/.test(code)) shells.push(file)
+    }
+    expect(shells).toHaveLength(1)
+    expect(shells[0]).toMatch(/[\\/]CaptureShell\.jsx$/)
+    const chores = stripComments(readFileSync(`${components}/Chores.jsx`, 'utf8'))
+    expect(chores).toMatch(/from '\.\/CaptureShell\.jsx'/)
+    expect(chores).toMatch(/<CaptureShell\b/)
+    // No second description box or pending line of its own.
+    expect(chores).not.toMatch(/<textarea/)
+    expect(chores).not.toMatch(/Working it out/)
   })
 })
 

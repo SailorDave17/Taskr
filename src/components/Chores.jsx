@@ -1,7 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import CaptureShell from './CaptureShell.jsx'
 import ChoreDraftList from './ChoreDraftList.jsx'
+import {
+  eventChorePrefill,
+  eventWhenLabel,
+  hasEventReadScope,
+  importedEventIds,
+} from '../lib/calendar.js'
 import { CAPTURE_OUTCOMES } from '../lib/capture.js'
 import {
   MAX_EXPECTED_MINUTES,
@@ -88,6 +94,25 @@ import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
 // never types a sentence adds a chore exactly as before, and the batch panel
 // (#220) stays where it was. A failure never REVEALS the form; it moves the
 // box out of the way and focuses the title field that was there throughout.
+//
+// #101 PUTS A THIRD WAY IN BESIDE THE FORM, AND IT WRITES THROUGH THE SAME
+// SUBMIT. "Import from calendar" lives HERE, on the tab where the chore lands
+// (owner decision at pickup, 2026-09-08, over the roster row beside "Calendar
+// connected"), and only for a member whose own calendar is connected —
+// `calendarConnection` is that member's row or null, and the control does not
+// mount without it, so every #34 test renders the tab exactly as before.
+// Picking an event PREFILLS the single form above it (title, minutes from the
+// duration, due date) and marks the form as importing; Add is then the same
+// submit, routed to `onImportEvent` so App writes the chore through `addChore`
+// with `source: 'calendar'` and records the import — AC 3's one write path.
+// Nothing is written by listing, and nothing by picking. The list itself is
+// transient (AC 2): fetched when the section opens, held in this state, gone
+// when it closes.
+//
+// The scope gate is the first thing the section shows a #95 connection: it
+// holds free/busy alone, which cannot list titles, so the section offers the
+// incremental consent step (AC 1) and nothing else until Google has granted
+// the wider scope and the connection row says so.
 
 /**
  * Settle a batch write's per-row outcomes against the rows that were sent —
@@ -1048,6 +1073,200 @@ ChoreRow.propTypes = {
   onRecordActual: PropTypes.func.isRequired,
 }
 
+/**
+ * The events a connected member could import, and the consent step in front
+ * of them — #101 AC 1 and AC 2.
+ *
+ * Owns the OPEN/CLOSED state and the transient list, and nothing about what a
+ * chore is: `onPick(event)` hands the chosen event to the tab, which prefills
+ * its own form. `onFetchEvents` resolves to the Edge Function's answer and is
+ * NOT routed through App's `mutate()` — nothing is written, so there is no
+ * change to re-read and no `busy` to set over the rest of the tab; the section
+ * carries its own pending state for the one thing that is waiting.
+ *
+ * `hasEventReadScope(connection)` decides which of two things the open section
+ * shows. The connection row is the readable half of what Google granted
+ * (`0011` stores the token response's scope), so a #95 connection reads as
+ * free/busy-only here and gets the consent step; the Edge Function refuses the
+ * same token with `needsScope`, which lands here too when the row is stale.
+ */
+function CalendarImport({
+  connection,
+  imports,
+  busy,
+  timeZone,
+  onFetchEvents,
+  onWidenConsent,
+  onPick,
+}) {
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [events, setEvents] = useState(null)
+  const [complaint, setComplaint] = useState(null)
+  const [needsScope, setNeedsScope] = useState(false)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  const canRead = hasEventReadScope(connection)
+  const imported = importedEventIds(imports)
+
+  async function load() {
+    setPending(true)
+    setComplaint(null)
+    setNeedsScope(false)
+    try {
+      const result = await onFetchEvents()
+      if (!mounted.current) return
+      setEvents(Array.isArray(result?.events) ? result.events : [])
+    } catch (err) {
+      // The tab may have been left while Google was thinking. Nothing to show,
+      // and nothing was written.
+      if (!mounted.current) return
+      setEvents(null)
+      setComplaint(err?.message ?? String(err))
+      setNeedsScope(Boolean(err?.needsScope))
+    } finally {
+      if (mounted.current) setPending(false)
+    }
+  }
+
+  function openSection() {
+    setOpen(true)
+    if (canRead) load()
+  }
+
+  function close() {
+    // The list is TRANSIENT (AC 2): closing forgets it, and the next open reads
+    // the calendar again rather than showing a week that may have moved on.
+    setOpen(false)
+    setEvents(null)
+    setComplaint(null)
+    setNeedsScope(false)
+  }
+
+  if (!open) {
+    return (
+      <button className="button button--quiet" type="button" disabled={busy} onClick={openSection}>
+        Import from calendar
+      </button>
+    )
+  }
+
+  return (
+    <section className="chore-import" aria-labelledby="import-heading" data-testid="calendar-import">
+      <h3 id="import-heading" className="card__subheading">
+        Import from your calendar
+      </h3>
+      {!canRead || needsScope ? (
+        <>
+          {/* AC 1 — the scope widening is a SECOND consent, said plainly: what
+              Taskr can see today, what it needs, and that Google asks once. */}
+          <p className="card__body" data-testid="import-consent">
+            Taskr can see when you’re busy, not what’s on your calendar. To import an event it
+            needs to read event titles — Google will ask you once, and Taskr keeps only the id
+            of an event you import.
+          </p>
+          <div className="row">
+            <button className="button" type="button" disabled={busy} onClick={onWidenConsent}>
+              Allow reading events
+            </button>
+            <button className="button button--quiet" type="button" disabled={busy} onClick={close}>
+              Not now
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {pending ? (
+            <p className="capture__outcome" role="status" data-testid="import-pending">
+              Reading your calendar…
+            </p>
+          ) : null}
+          {complaint ? (
+            <p className="capture__outcome" role="status" data-testid="import-complaint">
+              {complaint}
+            </p>
+          ) : null}
+          {events && events.length === 0 ? (
+            <p className="card__body">Nothing upcoming on your calendar this week.</p>
+          ) : null}
+          {events && events.length > 0 ? (
+            <ul className="chore-import__list">
+              {events.map((event) => {
+                const title = event.title || 'Untitled event'
+                const when = eventWhenLabel(event, timeZone)
+                const length =
+                  Number.isFinite(event.durationMinutes) && event.durationMinutes > 0
+                    ? formatMinutes(event.durationMinutes)
+                    : null
+                // AC 5 — already imported is a state, not a control: the mark
+                // is drawn where Use would be, and Use is absent rather than
+                // disabled, so nothing offers a second import that the ledger
+                // would refuse.
+                const done = imported.has(event.id)
+                return (
+                  <li key={event.id} className="chore-import__event">
+                    <span className="chore-import__title">{title}</span>
+                    {when || length ? (
+                      <span className="chore-import__when">
+                        {[when, length].filter(Boolean).join(' · ')}
+                      </span>
+                    ) : null}
+                    {done ? (
+                      <span className="chore-import__done" data-testid={`imported-${event.id}`}>
+                        Already imported
+                      </span>
+                    ) : (
+                      <button
+                        className="button button--quiet"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onPick(event)}
+                        aria-label={`Import ${title}`}
+                      >
+                        Use
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
+          <div className="row">
+            <button
+              className="button button--quiet"
+              type="button"
+              disabled={busy || pending}
+              onClick={load}
+            >
+              Read again
+            </button>
+            <button className="button button--quiet" type="button" disabled={busy} onClick={close}>
+              Close
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+CalendarImport.propTypes = {
+  connection: PropTypes.object.isRequired,
+  imports: PropTypes.array,
+  busy: PropTypes.bool,
+  timeZone: PropTypes.string,
+  onFetchEvents: PropTypes.func.isRequired,
+  onWidenConsent: PropTypes.func.isRequired,
+  onPick: PropTypes.func.isRequired,
+}
+
 export default function Chores({
   chores,
   members,
@@ -1062,6 +1281,11 @@ export default function Chores({
   onShowDone,
   onAddMany,
   onPropose,
+  calendarConnection,
+  calendarImports,
+  onFetchCalendarEvents,
+  onWidenCalendarConsent,
+  onImportEvent,
   onSave,
   onRemove,
   onComplete,
@@ -1107,6 +1331,42 @@ export default function Chores({
   const [proposed, setProposed] = useState([])
   const [proposedNotice, setProposedNotice] = useState(null)
   const [shellKey, setShellKey] = useState(0)
+
+  // #101 — the event the single form is currently an import OF, or null. Held
+  // here because the form is here: picking an event prefills the fields above
+  // and marks the submit as an import, and the mark travels with the write
+  // (`onImportEvent` gets the event id) rather than being inferred from the
+  // title. `title` is kept for the source line only.
+  const [importing, setImporting] = useState(null)
+  const titleRef = useRef(null)
+
+  const importReady = Boolean(
+    calendarConnection && onFetchCalendarEvents && onWidenCalendarConsent && onImportEvent,
+  )
+
+  /**
+   * Take an event into the form — #101 AC 3. A prefill and a mark, and
+   * deliberately not a write: the member is looking at a chore they have not
+   * yet agreed to, and Add is where they agree. The repeat is cleared and the
+   * control hidden while importing, because an imported event is a ONE-TIME
+   * chore by the story's terms. Focus follows the prefill so the member is
+   * looking at the field they will edit, not the button they pressed.
+   */
+  function pickEvent(event) {
+    const prefill = eventChorePrefill(event)
+    setTitle(prefill.title)
+    setMinutes(prefill.expectedMinutes)
+    setDueOn(prefill.dueOn)
+    setRepeatKind('none')
+    setRepeatDays([])
+    setRepeatMonthday('')
+    setComplaint(null)
+    setImporting({ eventId: event.id, title: prefill.title || 'this event' })
+    // Guarded: jsdom has no scrollIntoView, and a test that renders this tab
+    // must not need one to exist.
+    titleRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+    titleRef.current?.focus?.()
+  }
 
   function freshDraft() {
     return { key: `draft-${draftKey.current++}`, title: '', minutes: '', dueOn: '', problem: null }
@@ -1271,14 +1531,14 @@ export default function Chores({
         noValidate
         onSubmit={(e) => {
           e.preventDefault()
-          const problem = validate({
-            title,
-            expectedMinutes: minutes,
-            dueOn,
-            repeatKind,
-            repeatWeekdays: repeatDays,
-            repeatMonthday,
-          })
+          // #101 — an import is a ONE-TIME chore, so the schedule fields are
+          // 'none' by construction while the form is an import, whatever the
+          // hidden control's state was before the pick.
+          const schedule = importing
+            ? { repeatKind: 'none', repeatWeekdays: [], repeatMonthday: '' }
+            : { repeatKind, repeatWeekdays: repeatDays, repeatMonthday }
+          const chore = { title, expectedMinutes: minutes, dueOn, ...schedule }
+          const problem = validate(chore)
           if (problem) {
             // AC 2: the refusal happens here, before onAdd is ever called, so a
             // bad value never becomes a request.
@@ -1286,14 +1546,12 @@ export default function Chores({
             return
           }
           setComplaint(null)
-          onAdd({
-            title,
-            expectedMinutes: minutes,
-            dueOn,
-            repeatKind,
-            repeatWeekdays: repeatDays,
-            repeatMonthday,
-          }).then(
+          // #101 AC 3 — the SAME submit, the same fields; the one difference is
+          // which handler App is asked to run, and App's import handler calls
+          // the same `addChore` a typed chore does and then records the event
+          // id. A second submit button would have been a second write path.
+          const write = importing ? onImportEvent(chore, importing.eventId) : onAdd(chore)
+          write.then(
             () => {
               setTitle('')
               setMinutes('')
@@ -1301,6 +1559,7 @@ export default function Chores({
               setRepeatKind('none')
               setRepeatDays([])
               setRepeatMonthday('')
+              setImporting(null)
             },
             () => {},
           )
@@ -1309,6 +1568,7 @@ export default function Chores({
         <label className="field">
           <span className="field__label">Chore</span>
           <input
+            ref={titleRef}
             className="field__input"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -1339,15 +1599,35 @@ export default function Chores({
           />
         </label>
         {/* #53's controls, now the shared component #54's edit form also
-            renders — one copy of the schedule vocabulary. */}
-        <RepeatControl
-          kind={repeatKind}
-          days={repeatDays}
-          monthday={repeatMonthday}
-          onKindChange={setRepeatKind}
-          onDaysChange={setRepeatDays}
-          onMonthdayChange={setRepeatMonthday}
-        />
+            renders — one copy of the schedule vocabulary. Hidden while the
+            form is an import (#101): an imported event is a one-time chore. */}
+        {importing ? null : (
+          <RepeatControl
+            kind={repeatKind}
+            days={repeatDays}
+            monthday={repeatMonthday}
+            onKindChange={setRepeatKind}
+            onDaysChange={setRepeatDays}
+            onMonthdayChange={setRepeatMonthday}
+          />
+        )}
+        {/* #101 — where the fields came from, and the way to say they no longer
+            do. "Not from the calendar" keeps whatever the member has typed and
+            turns the submit back into an ordinary add, so an event used as a
+            starting point costs nothing to disown. */}
+        {importing ? (
+          <p className="chore-import__source" data-testid="import-source">
+            From your calendar · {importing.title}{' '}
+            <button
+              className="button button--link"
+              type="button"
+              disabled={busy}
+              onClick={() => setImporting(null)}
+            >
+              Not from the calendar
+            </button>
+          </p>
+        ) : null}
         {complaint ? (
           <p className="error" role="alert">
             {complaint}
@@ -1519,6 +1799,21 @@ export default function Chores({
         singleForm
       )}
 
+      {/* #101 — the third way in, beside the form it prefills. Mounts only for
+          a member whose own calendar is connected, and only when App has wired
+          all three handlers; a tab rendered without them is the #34 surface. */}
+      {importReady ? (
+        <CalendarImport
+          connection={calendarConnection}
+          imports={calendarImports ?? []}
+          busy={busy}
+          timeZone={timezone}
+          onFetchEvents={onFetchCalendarEvents}
+          onWidenConsent={onWidenCalendarConsent}
+          onPick={pickEvent}
+        />
+      ) : null}
+
       {/* #220 — the batch entry. An ADDITION behind its own control, never a
           replacement: the single form above is untouched and stays the default
           path (AC 6). The review list is ChoreDraftList, which #213 will feed
@@ -1598,6 +1893,14 @@ Chores.propTypes = {
   onAddMany: PropTypes.func.isRequired,
   // #213 — optional: the tab without it is exactly the #34 surface (AC 10).
   onPropose: PropTypes.func,
+  // #101 — all optional, and the import control mounts only with all four:
+  // the signed-in member's own connection row (null when none), the household's
+  // import ledger, and the three handlers. Without them the tab is unchanged.
+  calendarConnection: PropTypes.object,
+  calendarImports: PropTypes.array,
+  onFetchCalendarEvents: PropTypes.func,
+  onWidenCalendarConsent: PropTypes.func,
+  onImportEvent: PropTypes.func,
   onShowDone: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,

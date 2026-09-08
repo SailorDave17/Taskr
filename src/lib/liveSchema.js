@@ -1,6 +1,10 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
 import { SPLIT_SEEN_COLUMNS } from './announce.js'
-import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import {
+  CALENDAR_BUSY_COLUMNS,
+  CALENDAR_CONNECTION_COLUMNS,
+  CALENDAR_IMPORT_COLUMNS,
+} from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -102,6 +106,16 @@ export const LIVE_SCHEMA = Object.freeze([
   Object.freeze({ table: 'shopping_lists', columns: SHOPPING_LIST_COLUMNS }),
   Object.freeze({ table: 'shopping_runs', columns: SHOPPING_RUN_COLUMNS }),
   Object.freeze({ table: 'shopping_items', columns: SHOPPING_ITEM_COLUMNS }),
+  // #101, arriving with `0038` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file. The fourth calendar table and the third the client reads: the import
+  // ledger, whose event id is the one calendar datum the schema retains, read
+  // by household so "already imported" can be drawn beside an event on every
+  // phone. It is also the first calendar table the client WRITES — an insert
+  // after `addChore`, under a policy pinning the row to the caller's own
+  // member row — which `grants.pglite.test.js` exercises and this list, being
+  // what the client reads, does not.
+  Object.freeze({ table: 'calendar_imports', columns: CALENDAR_IMPORT_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -493,6 +507,13 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // row exists because a deploy is a step recorded nowhere else, and one
   // withheld until after the deploy would leave the window it covers uncovered.
   'calendar-disconnect',
+  // #101. Lists a member's upcoming events for the week, transiently — the
+  // titles reach the phone and no table — so an event can be imported as a
+  // chore. Arrives with `0038` (the import ledger) AND with a deploy, `0011`'s
+  // pair shape: the paste clears the table row, the deploy clears this one,
+  // and neither clears the other. RED on purpose until `npm run
+  // deploy:function` ships it.
+  'calendar-events',
 ])
 
 /**

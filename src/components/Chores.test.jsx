@@ -2028,3 +2028,229 @@ describe('#305 — a chore that did not get done, on the Chores tab', () => {
     expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
   })
 })
+
+// #101 — importing a calendar event as a chore, on this tab.
+//
+// What this file can prove is what the section DRAWS and which handler a tap
+// reaches with what: that the control is absent without a connection, that a
+// free/busy-only connection gets the consent step and never a list, that
+// picking an event prefills the ONE form and marks it, and that Add then
+// reaches `onImportEvent` with the event id rather than `onAdd`. The two
+// writes App makes behind that handler — and their order — are App.test.jsx's.
+// Names are synthetic — see #19.
+describe('#101 — import from calendar', () => {
+  const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
+  const READONLY = 'https://www.googleapis.com/auth/calendar.readonly'
+  const narrow = { id: 'c1', member_id: 'm1', scope: FREEBUSY, connected_at: '2026-08-24T00:00:00Z' }
+  const widened = { ...narrow, scope: `${FREEBUSY} ${READONLY}` }
+  const timed = {
+    id: 'evt-1',
+    title: 'Placeholder Event',
+    start: '2026-09-10T17:00:00.000Z',
+    end: '2026-09-10T18:30:00.000Z',
+    allDay: false,
+    durationMinutes: 90,
+    dueOn: '2026-09-10',
+  }
+  const allDay = {
+    id: 'evt-2',
+    title: 'Placeholder Other Event',
+    start: '2026-09-12',
+    end: '2026-09-13',
+    allDay: true,
+    durationMinutes: null,
+    dueOn: '2026-09-12',
+  }
+
+  const importHandlers = (overrides = {}) => ({
+    onFetchCalendarEvents: vi.fn().mockResolvedValue({ ok: true, events: [timed, allDay] }),
+    onWidenCalendarConsent: vi.fn(),
+    onImportEvent: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  })
+
+  const importButton = () => screen.getByRole('button', { name: /import from calendar/i })
+  const openImport = () => clickAndSettle(importButton())
+  const useTimed = () => clickAndSettle(screen.getByRole('button', { name: /import placeholder event$/i }))
+  const useAllDay = () =>
+    clickAndSettle(screen.getByRole('button', { name: /import placeholder other event/i }))
+
+  it('mounts nothing without a connection — the tab is exactly the #34 surface', () => {
+    setup({ calendarConnection: null, calendarImports: [], ...importHandlers() })
+    expect(screen.queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('calendar-import')).not.toBeInTheDocument()
+  })
+
+  it('mounts nothing when the handlers are not wired, whatever the connection says', () => {
+    setup({ calendarConnection: widened, calendarImports: [] })
+    expect(screen.queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a free/busy-only connection gets the consent step and no list, and asks the function nothing', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: narrow, calendarImports: [], ...handlers })
+    await openImport()
+    expect(screen.getByTestId('import-consent')).toHaveTextContent(/read event titles/i)
+    expect(handlers.onFetchCalendarEvents).not.toHaveBeenCalled()
+    await clickAndSettle(screen.getByRole('button', { name: /allow reading events/i }))
+    expect(handlers.onWidenCalendarConsent).toHaveBeenCalledTimes(1)
+    // Nothing was written by asking: the confirm is a trip to Google.
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: "Not now" closes the consent step and leaves the button where it was', async () => {
+    setup({ calendarConnection: narrow, calendarImports: [], ...importHandlers() })
+    await openImport()
+    await clickAndSettle(screen.getByRole('button', { name: /not now/i }))
+    expect(screen.queryByTestId('import-consent')).not.toBeInTheDocument()
+    expect(importButton()).toBeInTheDocument()
+  })
+
+  it('AC 2: a widened connection asks the function on open and lists the events, transiently', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    expect(handlers.onFetchCalendarEvents).toHaveBeenCalledTimes(1)
+    const list = screen.getByTestId('calendar-import')
+    expect(within(list).getByText('Placeholder Event')).toBeInTheDocument()
+    expect(within(list).getByText('Placeholder Other Event')).toBeInTheDocument()
+    // The timed event says when and how long, in the household's zone; the
+    // all-day one says so.
+    expect(list).toHaveTextContent(/Thu, Sep 10 · 1:00 PM · 1h 30m/)
+    expect(list).toHaveTextContent(/Sat, Sep 12 · all day/)
+    // Closing forgets the list; reopening reads again rather than showing a
+    // week that may have moved on.
+    await clickAndSettle(within(list).getByRole('button', { name: /^close$/i }))
+    expect(screen.queryByText('Placeholder Event')).not.toBeInTheDocument()
+    await openImport()
+    expect(handlers.onFetchCalendarEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('AC 2: says so when the week is empty, and shows the function’s sentence when it refuses', async () => {
+    const handlers = importHandlers({
+      onFetchCalendarEvents: vi.fn().mockResolvedValue({ ok: true, events: [] }),
+    })
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    expect(screen.getByText(/nothing upcoming on your calendar this week/i)).toBeInTheDocument()
+
+    handlers.onFetchCalendarEvents.mockRejectedValue(
+      new Error('Could not reach Google. Try again in a moment.'),
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /read again/i }))
+    expect(screen.getByTestId('import-complaint')).toHaveTextContent(/could not reach google/i)
+    // A refusal that is not about scope does not turn into the consent step.
+    expect(screen.queryByTestId('import-consent')).not.toBeInTheDocument()
+  })
+
+  it('AC 1: the function’s own scope refusal turns into the consent step', async () => {
+    const refused = new Error('This calendar is connected for free/busy only.')
+    refused.needsScope = true
+    setup({
+      calendarConnection: widened,
+      calendarImports: [],
+      ...importHandlers({ onFetchCalendarEvents: vi.fn().mockRejectedValue(refused) }),
+    })
+    await openImport()
+    expect(screen.getByTestId('import-consent')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /allow reading events/i })).toBeInTheDocument()
+  })
+
+  it('AC 3: Use prefills the ONE form — title, minutes from the duration, due date — and marks it', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(screen.getByLabelText(/expected minutes/i)).toHaveValue(90)
+    expect(screen.getByLabelText(/^due$/i)).toHaveValue('2026-09-10')
+    expect(screen.getByTestId('import-source')).toHaveTextContent(/from your calendar · placeholder event/i)
+    // A one-time chore: the repeat control is gone while the form is an import.
+    expect(screen.queryByLabelText(/repeats/i)).not.toBeInTheDocument()
+    // Picking writes nothing.
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+    expect(base.onAdd).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: an all-day event prefills a BLANK minutes field, and Add refuses until the member says', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useAllDay()
+    expect(screen.getByLabelText(/expected minutes/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/^due$/i)).toHaveValue('2026-09-12')
+    await submitAdd()
+    // The data layer's own sentence, before any request.
+    expect(screen.getByRole('alert')).toHaveTextContent(/how many minutes/i)
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: Add on an imported form reaches onImportEvent with the fields AND the event id — never onAdd', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    // Editable before save: the member changes the minutes.
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '60' } })
+    await submitAdd()
+
+    expect(handlers.onImportEvent).toHaveBeenCalledTimes(1)
+    expect(handlers.onImportEvent).toHaveBeenCalledWith(
+      {
+        title: 'Placeholder Event',
+        expectedMinutes: '60',
+        dueOn: '2026-09-10',
+        repeatKind: 'none',
+        repeatWeekdays: [],
+        repeatMonthday: '',
+      },
+      'evt-1',
+    )
+    expect(base.onAdd).not.toHaveBeenCalled()
+    // The form and the mark reset after a successful write, like a typed add.
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('')
+    expect(screen.queryByTestId('import-source')).not.toBeInTheDocument()
+  })
+
+  it('AC 3: "Not from the calendar" keeps the typed fields and turns Add back into an ordinary add', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    await clickAndSettle(screen.getByRole('button', { name: /not from the calendar/i }))
+    expect(screen.queryByTestId('import-source')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    await submitAdd()
+    expect(base.onAdd).toHaveBeenCalledTimes(1)
+    expect(base.onAdd.mock.calls[0][0]).not.toHaveProperty('source')
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 5: an event the ledger already holds is marked and offers no Use', async () => {
+    setup({
+      calendarConnection: widened,
+      calendarImports: [
+        { id: 'i1', household_id: 'h1', member_id: 'm2', calendar_event_id: 'evt-1', chore_id: 'c9' },
+      ],
+      ...importHandlers(),
+    })
+    await openImport()
+    expect(screen.getByTestId('imported-evt-1')).toHaveTextContent(/already imported/i)
+    expect(
+      screen.queryByRole('button', { name: /import placeholder event$/i }),
+    ).not.toBeInTheDocument()
+    // POSITIVE CONTROL: the other event, not in the ledger, still offers Use.
+    expect(screen.getByRole('button', { name: /import placeholder other event/i })).toBeInTheDocument()
+  })
+
+  it('a failed import leaves the form as it was, so the member can retry or disown it', async () => {
+    const handlers = importHandlers({ onImportEvent: vi.fn().mockRejectedValue(new Error('refused')) })
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    await submitAdd()
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(screen.getByTestId('import-source')).toBeInTheDocument()
+  })
+})

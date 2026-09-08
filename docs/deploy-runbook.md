@@ -245,8 +245,9 @@ persists anything.
 
 ## 3. The Edge Functions
 
-**Five of them since #99** — `provision-member`, `calendar-connect`, `calendar-busy`,
-`extract-description` and `calendar-disconnect`. *(This said "four since #208" until 2026-09-08, and
+**Six of them since #101** — `provision-member`, `calendar-connect`, `calendar-busy`,
+`extract-description`, `calendar-disconnect` and `calendar-events`. *(This said "five since #99"
+for part of 2026-09-08, "four since #208" before that, and
 "three since #96" until 2026-09-07 — the count lives in
 `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
@@ -270,7 +271,16 @@ connected" fails when it is pressed and a member who wants out has no way to tak
 #99 treats its deploy as part of the story rather than as a later step: the exit existing in the repo
 and not on the platform is the state that story is written against. It needs **no secret of its
 own** — the three Supabase injects are enough, because Google's revocation endpoint takes the token
-alone, so unlike `extract-description` there is no §3c step behind it.
+alone, so unlike `extract-description` there is no §3c step behind it. Until `calendar-events` has,
+**Import from calendar** on the Chores tab opens, and a connected member with the widened scope reads
+the SDK's "Failed to send a request to the Edge Function" where the week's events should be — the
+same symptom as the function refusing, and `npm run check:live` is again what tells them apart. It
+needs the **same two Google secrets** `calendar-connect` and `calendar-busy` need (§3b), and nothing
+more; the widened scope it depends on is granted by the MEMBER at the consent step, not set here.
+**`calendar-events` was deployed on 2026-09-08 by #101** — *measured
+**64 of 65** immediately before the deploy (the table and publication rows
+already drained by `0038`'s apply) and **65 of 65**
+immediately after*.
 **`extract-description` was deployed and its key set on 2026-09-07 by #209** (§3c),
 so all four were live and the excused-red set empty — *measured 47 of 48 immediately before that
 deploy and 48 of 48 immediately after*. **`calendar-disconnect` was deployed on 2026-09-08 by #99** —
@@ -492,6 +502,20 @@ into every function, so a bare "not configured" would send you to check the wron
 and callable by a browser* — it does not and cannot answer *are its Google secrets set*, because a
 preflight carries no body and invokes nothing. The first real connection is the proof, and it is
 [#100](https://github.com/SailorDave17/Taskr/issues/100)'s job rather than this page's.
+
+**A second scope, asked for by the member and not set here — #101.** Event import needs
+`https://www.googleapis.com/auth/calendar.readonly` (free/busy cannot say what an event is called),
+and the app asks for it through **incremental consent** the first time a connected member opens
+*Import from calendar*: the same consent URL with `include_granted_scopes=true`, so Google adds it to
+the free/busy grant rather than replacing it, and `calendar-connect` stores whatever Google now
+grants. Nothing on this page changes for it — the same OAuth client, the same redirect URIs, the same
+two secrets. Two things are worth knowing and neither is measured yet, which is
+[#102](https://github.com/SailorDave17/Taskr/issues/102)'s job: `calendar.readonly` is a scope
+Google classes as **sensitive**, which in *Testing* mode a registered test user can grant with the
+ordinary consent screen and nothing to configure, and which would need the consent screen's scope
+list and a verification review the day the app left Testing; and the consent screen for the second
+ask lists BOTH scopes, the one already held and the new one, which is what "incremental" looks like
+to the person pressing Allow.
 
 ### The same client, as a sign-in — #304
 

@@ -129,6 +129,17 @@ const calendarApi = {
   // member reads about Google should be the one the app words rather than a
   // stub's — this file's claim is the WIRING.
   disconnectCalendar: vi.fn(),
+  // #101 — the three impure ones. `hasEventReadScope`, `eventChorePrefill`,
+  // `importedEventIds` and `startConnect` stay REAL for the standing reason —
+  // pure (or pure over an injected storage), own tests — so the consent URL
+  // these tests read is the one the app would send somebody to, and the
+  // prefill the form shows is the one the data layer computes. The fakes
+  // RECORD THEIR ARGUMENTS: `recordCalendarImport` is asserted with the chore
+  // id `addChore` returned, because a fake recording only the call could not
+  // tell a ledger row naming the chore from one naming nothing.
+  listCalendarImports: vi.fn(),
+  fetchCalendarEvents: vi.fn(),
+  recordCalendarImport: vi.fn(),
 }
 
 // Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
@@ -310,6 +321,11 @@ beforeEach(() => {
   calendarApi.listBusyWeeks.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
   calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
+  // #101 — nothing imported yet, which is the ordinary state; the import tests
+  // override this.
+  calendarApi.listCalendarImports.mockResolvedValue([])
+  calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [] })
+  calendarApi.recordCalendarImport.mockResolvedValue({ id: 'i1' })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -5353,5 +5369,234 @@ describe('#342 — the app updates itself when the household changes', () => {
     // Still the joined shell, still listening.
     expect(screen.getByRole('button', { name: 'Chores' })).toBeInTheDocument()
     expect(closeOf(0)).not.toHaveBeenCalled()
+  })
+})
+
+// #101 — importing a calendar event as a chore, at the level only App can
+// answer: the WIRING. Chores.test.jsx covers what the section DRAWS and which
+// handler a tap reaches; everything here is about what App does with that —
+// which read fills the "already imported" marks, which write the confirm
+// reaches and in what order, and what happens on the phone that loses the race.
+describe('importing a calendar event as a chore (#101)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
+  const READONLY = 'https://www.googleapis.com/auth/calendar.readonly'
+  const narrow = { id: 'c1', member_id: 'm1', scope: FREEBUSY, connected_at: '2026-08-24T00:00:00Z' }
+  const widened = { ...narrow, scope: `${FREEBUSY} ${READONLY}` }
+  const event = {
+    id: 'evt-1',
+    title: 'Placeholder Event',
+    start: '2026-09-10T17:00:00.000Z',
+    end: '2026-09-10T18:30:00.000Z',
+    allDay: false,
+    durationMinutes: 90,
+    dueOn: '2026-09-10',
+  }
+
+  let assign
+  let realLocation
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    assign = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', hash: '', assign },
+    })
+    globalThis.sessionStorage?.clear?.()
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([widened])
+    calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [event] })
+    choresApi.addChore.mockResolvedValue({ id: 'c-new', title: 'Placeholder Event' })
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+  })
+
+  const inChores = () => within(screen.getByRole('region', { name: /what needs doing/i }))
+  const openImport = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import from calendar/i })),
+    )
+  const pickEvent = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import placeholder event/i })),
+    )
+  const submitAdd = () =>
+    act(async () => void fireEvent.click(inChores().getByRole('button', { name: /add chore/i })))
+
+  it('reads the import ledger BY HOUSEHOLD on every refresh, like every other row', async () => {
+    await renderApp('Chores')
+    expect(calendarApi.listCalendarImports).toHaveBeenCalledWith('h1')
+  })
+
+  it('offers the import on the Chores tab to a member whose OWN calendar is connected', async () => {
+    await renderApp('Chores')
+    expect(inChores().getByRole('button', { name: /import from calendar/i })).toBeInTheDocument()
+  })
+
+  it('offers nothing when only a housemate is connected — their calendar is not this phone’s to read', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([{ ...widened, member_id: 'm2' }])
+    await renderApp('Chores')
+    expect(inChores().queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a free/busy-only connection gets the consent step, and Allow leaves for Google with the readonly scope ADDED', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([narrow])
+    await renderApp('Chores')
+    await openImport()
+    expect(inChores().getByTestId('import-consent')).toBeInTheDocument()
+    // Nothing was asked of the Edge Function: the row already says the scope
+    // is too narrow, and a call would only be refused.
+    expect(calendarApi.fetchCalendarEvents).not.toHaveBeenCalled()
+
+    await act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /allow reading events/i })),
+    )
+    expect(assign).toHaveBeenCalledTimes(1)
+    const url = new URL(assign.mock.calls[0][0])
+    // `startConnect` is REAL here, so this is the URL the app would send.
+    expect(url.searchParams.get('scope')).toBe(READONLY)
+    expect(url.searchParams.get('include_granted_scopes')).toBe('true')
+    expect(url.searchParams.get('prompt')).toBe('consent')
+    // The household on screen travels with the state, so the widened token
+    // lands on the connection the member was looking at (#161's rule).
+    expect(globalThis.sessionStorage.getItem('taskr.calendar.consent-household')).toBe('h1')
+  })
+
+  it('AC 2: opening the section asks the function for THIS household and THIS week, and lists what came back', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await waitFor(() => expect(calendarApi.fetchCalendarEvents).toHaveBeenCalledTimes(1))
+    const [call] = calendarApi.fetchCalendarEvents.mock.calls
+    expect(call[0].householdId).toBe('h1')
+    expect(call[0].periodStart).toBe(actualCapacity.periodStartFor(new Date(), household.timezone))
+    expect(await inChores().findByText('Placeholder Event')).toBeInTheDocument()
+    // Listing wrote nothing: no addChore, no ledger row.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(calendarApi.recordCalendarImport).not.toHaveBeenCalled()
+  })
+
+  it('AC 3 / AC 4: Use prefills the form, and Add writes the chore through addChore with source calendar, THEN the ledger row naming it', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+
+    // The prefill is the data layer's, shown in the form the member already knows.
+    expect(inChores().getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(inChores().getByLabelText(/expected minutes/i)).toHaveValue(90)
+    expect(inChores().getByLabelText(/^due$/i)).toHaveValue('2026-09-10')
+    expect(inChores().getByTestId('import-source')).toHaveTextContent(/from your calendar/i)
+    // Nothing written by picking.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+
+    // The member edits the minutes — editable before save is the criterion —
+    // and confirms with the ordinary Add.
+    fireEvent.change(inChores().getByLabelText(/expected minutes/i), { target: { value: '60' } })
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChore).toHaveBeenCalledWith({
+      title: 'Placeholder Event',
+      expectedMinutes: '60',
+      dueOn: '2026-09-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
+      source: 'calendar',
+      householdId: 'h1',
+    })
+    expect(calendarApi.recordCalendarImport).toHaveBeenCalledWith({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'evt-1',
+      choreId: 'c-new',
+    })
+    // ORDER: the chore first, then the row naming it — the ledger needs the id
+    // the write returned, and this is what makes the race resolve the way
+    // 0038's header says.
+    expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      calendarApi.recordCalendarImport.mock.invocationCallOrder[0],
+    )
+    // No second write path: addChores was never touched.
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    // And the screen re-read, like every other write.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('AC 5: already-imported events are marked from the ledger and offer no Use', async () => {
+    calendarApi.listCalendarImports.mockResolvedValue([
+      { id: 'i1', household_id: 'h1', member_id: 'm2', calendar_event_id: 'evt-1', chore_id: 'c9' },
+    ])
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    expect(inChores().getByTestId('imported-evt-1')).toHaveTextContent(/already imported/i)
+    expect(
+      inChores().queryByRole('button', { name: /import placeholder event/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('AC 5: on the phone that LOSES the race, the ledger’s refusal removes the chore just created and says so', async () => {
+    const refused = new Error('That event is already on the list as a chore.')
+    refused.alreadyImported = true
+    calendarApi.recordCalendarImport.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).toHaveBeenCalledWith('c-new')
+    expect(await inChores().findByText(/already on the list as a chore/i)).toBeInTheDocument()
+  })
+
+  it('a ledger failure for any OTHER reason leaves the chore standing — the household still wants it', async () => {
+    calendarApi.recordCalendarImport.mockRejectedValue(
+      new Error('recording the import: the network went away'),
+    )
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).not.toHaveBeenCalled()
+    expect(await inChores().findByText(/the network went away/i)).toBeInTheDocument()
+  })
+
+  it('a stale connection row: the function’s own scope refusal lands as the consent step, not as an outage', async () => {
+    const refused = new Error(
+      'This calendar is connected for free/busy only. Allow Taskr to read events to import one.',
+    )
+    refused.needsScope = true
+    calendarApi.fetchCalendarEvents.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    expect(await inChores().findByTestId('import-consent')).toBeInTheDocument()
+    expect(inChores().getByRole('button', { name: /allow reading events/i })).toBeInTheDocument()
   })
 })

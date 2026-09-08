@@ -1322,6 +1322,12 @@ describe('#19 — no real household name reaches version control', () => {
     // the scan looks for, and declared rather than lower-cased for the tab
     // labels' reason: a list called "Groceries" is what a household types,
     // and the case-insensitive uniqueness test needs the capitalised form.
+    // #101 — the calendar event titles the import fixtures carry, in the Edge
+    // Function's handler test, the component test and the App test. Declared
+    // rather than lower-cased for the chore titles' reason: a title is what a
+    // calendar shows, and the tests assert it reaches the chore form verbatim.
+    'Placeholder Event': 'a calendar event title in the #101 import fixtures',
+    'Placeholder Other Event': 'a second calendar event title in the #101 import fixtures',
     Groceries: 'a shopping list name in shopping.pglite.test.js — and the epic’s prefilled default, asserted by the #353 component and App tests',
     Hardware: 'a second shopping list name in shopping.pglite.test.js and the #353 tests',
     Milk: 'a shopping item name in shopping.pglite.test.js and the #353 tests',

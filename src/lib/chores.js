@@ -65,8 +65,15 @@ export const CHORE_COLUMNS =
  * records how the ASSIGNMENT was decided ('manual' | 'auto' | null). The two
  * vocabularies deliberately share no word, so a value read from the wrong column
  * is a wrong answer rather than a plausible one.
+ *
+ * `calendar` is #101's — a chore imported from a connected Google Calendar
+ * event, written through `addChore` like every other chore (`0038` widens the
+ * constraint the way `0031` widened `member_capacity.source`). The words are
+ * the same as the capacity column's on purpose, so the two provenance columns
+ * read as one idea; `chores.pglite.test.js` holds this list equal to what the
+ * constraint admits.
  */
-export const CHORE_SOURCES = Object.freeze(['manual', 'extraction'])
+export const CHORE_SOURCES = Object.freeze(['manual', 'extraction', 'calendar'])
 
 /** What a chore's origin is when nobody says otherwise. */
 export const DEFAULT_CHORE_SOURCE = 'manual'

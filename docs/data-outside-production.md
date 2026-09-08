@@ -384,6 +384,29 @@ reading false on its face, and what will then need re-reading is whether *transi
 is a claim this record is willing to make on a person's behalf, which is a different question from
 the one answered here.
 
+#### Re-read 2026-09-08 — control 3, at #101's pickup
+
+The trigger fired. #101 asks a connected member for `calendar.readonly` by incremental consent the
+first time they open *Import from calendar*, and the "narrowest scope that answers the question" row
+above is now false as written: the question changed. Free/busy answers *how busy is this week*;
+import asks *what is this event called*, and there is no narrower scope that answers it. So the row
+is re-read against the NEW question, and the verdict is the same shape as before — **met, narrowly,
+by construction**:
+
+| what control 3 asks | what #101 ships |
+|---|---|
+| the narrowest scope that answers the question | `calendar.readonly` (`GOOGLE_CALENDAR_READONLY_SCOPE`, `src/lib/calendar.js`). It answers *what is on my calendar* and cannot write. It is asked for **only when a member opens import**, and only then — a member who never imports never grants it, which is what makes the widening incremental rather than a wider initial ask |
+| the scope is the one that was *requested* | unchanged: `0011` stores what Google **granted**, and `hasEventReadScope` reads the widened grant off that row rather than remembering that it was asked for |
+| *transits but is not stored* — the claim the revisit note said would need re-reading | **Made, and made structural.** The `calendar-events` Edge Function reads the week's events and returns id, title, start, end and a local date to the phone, asking Google for exactly those fields (`fields=items(id,summary,start,end,status)`) and copying from a fixed set as a second wall; its test plants attendees, a location and a description in Google's payload and asserts none survives in the response, and records every write the fake client is offered and asserts none. The one datum that IS stored is the **event id**, in `calendar_imports` (`0038`), a table with no column for anything else, kept so a second import is refused. So the claim this record makes on a person's behalf is narrower than *transits but is not stored*: **a title transits; an id is stored; nothing else is either** |
+
+What this re-read does NOT settle, and hands to #102: whether the real incremental consent screen
+grants what `EVENT_READ_SCOPES` expects, and whether the second consent moment costs the friction the
+charter's kill condition prices. Both are observations only a real account can make.
+
+**Revisit control 3 when** a third scope is proposed, or when anything proposes STORING a field the
+`calendar-events` response carries — a title cached "for the list", a start time kept "for the
+chore's due date" — because the line this re-read holds is exactly there.
+
 ### Re-read 2026-09-04 — control 5 is superseded (#158)
 
 Recorded above as *"Still true, measured 2026-08-20"*, and as *"a control rather than an accident"*.
@@ -580,7 +603,7 @@ happened:
 |---|---|
 | Decision 1 | Vercel's exemption behaviour; **a household organised by somebody who is not the owner**; the membership half firing (#173); a legitimate preview viewer with no Vercel login; a policy-weakening migration; anything reaching the client RLS does not gate |
 | Decision 2 | **none, deliberately.** Its enforcement is executable and reddens on its own in CI, so it needs no date-based trigger; the two things that would change it — a name being added to the vocabulary, or the corpus being narrowed — are both diffs a reader sees. Stated rather than left blank, so an empty cell is not read as an oversight |
-| Decision 3, control 3 | #101 being picked up, which widens the scope to `calendar.readonly` |
+| Decision 3, control 3 | a third scope; anything proposing to STORE a field the `calendar-events` response carries (re-read at #101's pickup, 2026-09-08 — the widening itself is settled there) |
 | Decision 3, control 5 | visibility changing again, in either direction; or a check gaining the ability to read the tracker |
 | Decision 3, control 6 | a client-role grant proposed on `calendar_tokens`; a second provider; a credential of that class stored any other way |
 | Decision 4 | a second invitation channel; household names ceasing to be family names; anything added to a pre-redemption surface |

@@ -268,6 +268,25 @@ const CLIENT_OPERATIONS = [
     site: 'shopping.js readShopping()',
     sql: 'select id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id from public.shopping_items limit 0',
   },
+  // #101 — the import ledger, and the first calendar table with a CLIENT write.
+  // Read by household (`0038` grants `household_id`, the 0014 route), and
+  // inserted after `addChore` with the four columns the client knows; `id` and
+  // `imported_at` are the database's. No update and no delete — a ledger row
+  // has no editable content and leaves only with its chore —
+  // calendarImport.pglite.test.js asserts both refusals, this list's mirror
+  // image.
+  {
+    table: 'calendar_imports',
+    op: 'select',
+    site: 'calendar.js listCalendarImports()',
+    sql: 'select id, household_id, member_id, calendar_event_id, chore_id, imported_at from public.calendar_imports limit 0',
+  },
+  {
+    table: 'calendar_imports',
+    op: 'insert',
+    site: 'calendar.js recordCalendarImport()',
+    sql: "insert into public.calendar_imports (household_id, member_id, calendar_event_id, chore_id) select gen_random_uuid(), gen_random_uuid(), 'placeholder-event', gen_random_uuid() where false",
+  },
   // #368 — `shopping_items` 'delete' / 'shopping.js removeItem()' stood here
   // until `0034`. The privilege is gone (the remove is an RPC now), so the row
   // cannot stay: every entry in this list is a statement the client must be

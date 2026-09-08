@@ -28,9 +28,9 @@ combines the two halves of the latency axis that no single story could measure.
 
 ## The deployed-path latency is an ESTIMATE — AC 3
 
-> **Superseded 2026-09-08 by #209**, which deployed the endpoint and measured this leg. The section
+> **Superseded 2026-09-07 by #209**, which deployed the endpoint and measured this leg. The section
 > is kept as written because it is the record of how the verdict was actually taken, and because its
-> reasoning about the arithmetic turned out to be right. Read *"SETTLED 2026-09-08"* at the end of it
+> reasoning about the arithmetic turned out to be right. Read *"SETTLED 2026-09-07"* at the end of it
 > for the measurement.
 
 **Neither input story can print this number, and that is not a gap in either of them.** #205 timed a
@@ -38,7 +38,7 @@ phone to `provision-member`, a function that does nothing but refuse; #206 timed
 to the provider. The kill number is named on the *deployed path*, which is both legs inside one
 request — and no such request had been made when this verdict was taken, because the extraction
 endpoint (#208) did not exist yet. *(It does now — written 2026-09-07, the same day, and **deployed
-2026-09-08 by #209**, which timed it from the phone and settled this axis. Nothing between those two
+2026-09-07 by #209**, which timed it from the phone and settled this axis. Nothing between those two
 dates moved, because the figure could only be replaced by a measurement of the deployed endpoint.)*
 
 So the figure below is **computed from two measurements, not taken from one**, and the report labels
@@ -101,12 +101,12 @@ estimate with a measurement, and until it does, the latency axis carries `(est.)
 printed. Two directions of error are known and neither is measured here: that isolate will be larger
 than `provision-member` and may boot slower, and the correlation between the two legs is unknown.
 
-### SETTLED 2026-09-08 (#209) — the estimate held
+### SETTLED 2026-09-07 (#209) — the estimate held
 
 The endpoint was deployed and timed end to end from the same phone, on the deployed path, with 84
 real extraction calls over three passes. Full method, controls and caveats in
-`docs/hosting-decision.md`, section *"Measured 2026-09-08"*; raw rows in
-`docs/extraction-latency-2026-09-08.tsv`.
+`docs/hosting-decision.md`, section *"Measured 2026-09-07"*; raw rows in
+`docs/extraction-latency-2026-09-07.tsv`.
 
 | | estimated above | **measured** |
 |---|---|---|
@@ -506,7 +506,7 @@ this run does not contain the evidence to take it.
 | ambiguous refused | PASS | PASS | PASS |
 | overconfident | PASS | PASS | PASS |
 | due dates exact | — | PASS | PASS |
-| deployed p95 | — | — | ~~**PROVISIONAL** (estimate)~~ → **PASS on measurement** (#209, 2026-09-08) |
+| deployed p95 | — | — | ~~**PROVISIONAL** (estimate)~~ → **PASS on measurement** (#209, 2026-09-07) |
 | cost | — | — | PASS |
 | correction rate | **FAIL** | PASS | PASS, exactly on the ceiling |
 
@@ -562,9 +562,9 @@ issue is closed as not-planned by it.
 - **One run, one day, one household.** No figure here has a confidence interval, and the member
   sentences come from a household of two.
 - ~~**The deployed path is still an estimate.** #209 replaces it with a measurement.~~
-  **Settled 2026-09-08 by #209**, which deployed the endpoint and timed 84 real calls from the
+  **Settled 2026-09-07 by #209**, which deployed the endpoint and timed 84 real calls from the
   phone: p95 **1,692–1,762 ms** on a healthy link, **2,659 ms** pooled across a degraded one, against
-  the 2,626 ms estimate. See *"SETTLED 2026-09-08"* above. What replaced it is a narrower open
+  the 2,626 ms estimate. See *"SETTLED 2026-09-07"* above. What replaced it is a narrower open
   question rather than nothing: **the tail is unbounded** — one call of 84 took 16,787 ms with clean
   controls, past what the phone waits.
 - **The correction rate is measured on a review, not on the flow.** The member judged extractions

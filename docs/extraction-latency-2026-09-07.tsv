@@ -1,11 +1,17 @@
-# Taskr #209 - the EXTRACTION endpoint round trip measured from a phone, 2026-09-08.
+# Taskr #209 - the EXTRACTION endpoint round trip measured from a phone, 2026-09-07.
 #
 # Device      Samsung SM-S918U, Android 16, curl 8.15.0-DEV in `adb shell` over USB.
 #             No browser, so nothing here is attributable to one or to a service worker.
 # Function    extract-description, deployment v2, ezbr_sha256
 #             46499420bb93ab3e9988b20485db12a9e648eaaaa3600a496bc2cf86aa57787a,
 #             deployed 2026-09-08T01:47:25.642Z by this story.
-# Analysis    docs/hosting-decision.md, section "Measured 2026-09-08".
+# Analysis    docs/hosting-decision.md, section "Measured 2026-09-07".
+#
+# Dates      The story date is LOCAL (America/New_York, UTC-4), which is how every other entry
+#             in this repo is dated - #208 records 0036 as applied 2026-09-07 for a commit whose
+#             UTC instant is 2026-09-08T01:34Z. Every ts_utc below is UTC and therefore reads
+#             2026-09-08: the run started at 21:58 local. The two are the same evening and the
+#             mismatch is not an error to correct.
 #
 # #205 measured the same path with `provision-member`, which refuses at its first
 # authorization check - so it timed everything EXCEPT the endpoint own work and the

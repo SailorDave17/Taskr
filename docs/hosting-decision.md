@@ -329,7 +329,7 @@ owner's say-so that no roster action would land. A repeat should assume it can b
 `provision`, `reset` or `revoke` from any device ends a window, and nothing in the data would say so
 except a cold sample that looks warm.
 
-## Measured 2026-09-08 — the extraction endpoint's own round trip, from a phone
+## Measured 2026-09-07 — the extraction endpoint's own round trip, from a phone
 
 - Measured by: **#209**, on the owner's phone (Samsung SM-S918U, Android 16 — `curl` 8.15.0-DEV in
   `adb shell` over USB, so nothing is attributable to a browser or a service worker)
@@ -338,8 +338,13 @@ except a cold sample that looks warm.
   2026-09-08T01:47:25.642Z by this story
 - Samples: **252**, of which **84 are real extraction calls** — three passes of 28 cycles, each
   cycle three calls seconds apart
-- Raw data: **`docs/extraction-latency-2026-09-08.tsv`**, all 252 rows, so every figure below can be
+- Raw data: **`docs/extraction-latency-2026-09-07.tsv`**, all 252 rows, so every figure below can be
   recomputed rather than taken on trust
+- **On the date, because the raw rows appear to disagree with it**: this section is dated by the
+  LOCAL date, which is how every entry in this repo is dated — #208 records `0036` as applied
+  2026-09-07 for a commit whose UTC instant is `2026-09-08T01:34Z`. The run began at 21:58 local, so
+  every `ts_utc` in the dataset and every deployment timestamp quoted here reads `2026-09-08`. Same
+  evening; not an error to correct
 
 **This is the half #205 could not measure.** That story timed the deployed path with
 `provision-member`, which refuses at its first authorization check — so it measured the toll and

@@ -264,7 +264,7 @@ the Connect Google Calendar button on the capacity screen fails when it is press
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
 "Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
 and `npm run check:live` is what tells the two apart, since it probes the table and the function as
-separate rows. **`extract-description` was deployed and its key set on 2026-09-08 by #209** (§3c),
+separate rows. **`extract-description` was deployed and its key set on 2026-09-07 by #209** (§3c),
 so all four are live and the excused-red set is empty — *measured 47 of 48 immediately before that
 deploy and 48 of 48 immediately after*. Before it, the plain-language capture on the capacity screen
 reported that the service could not answer and handed the member the typed field, which is #210's
@@ -542,7 +542,7 @@ no Google account carries that address; they keep their PIN.
 
 ## 3c. The provider key, for the extraction endpoint
 
-> **Done 2026-09-08 by #209.** Deployment **v2**, `ezbr_sha256`
+> **Done 2026-09-07 by #209.** Deployment **v2**, `ezbr_sha256`
 > `46499420bb93ab3e9988b20485db12a9e648eaaaa3600a496bc2cf86aa57787a`, at
 > 2026-09-08T01:47:25.642Z; `ANTHROPIC_API_KEY` set at 01:49:03.859Z. The steps below are kept as
 > the procedure for the next project or the next rotation, with step 1's open measurement now
@@ -569,7 +569,7 @@ so a bare "not configured" would send you to check the wrong half.
    the handler imports the adapter and the grader's contract from `src/lib`, and the CLI walks
    relative imports from the entrypoint and uploads each file it reaches. #208 could only read that
    off the CLI's Go source at v2.116.0 and recorded it as **unmeasured**; **#209 measured it on
-   2026-09-08 and the reading was right.** The CLI printed each upload by repo-relative path and
+   2026-09-07 and the reading was right.** The CLI printed each upload by repo-relative path and
    there were five:
 
    ```
@@ -618,7 +618,7 @@ gateway's. The rate bound is `RATE_LIMIT` in the function's `handler.ts` — the
 numbers are written, pinned by `handler.test.js`, and deliberately not copied here — and a 429
 past it is the ledger working, not a fault.
 
-*Measured 2026-09-08 (#209), against a fixture household created through the seeded account and
+*Measured 2026-09-07 (#209), against a fixture household created through the seeded account and
 deleted afterwards with the absence read back:*
 
 | the call | answer |

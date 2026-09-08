@@ -15,13 +15,13 @@
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
-  EMPTY again as of 2026-09-08** — *measured **47 of 48** immediately before
+  EMPTY again as of 2026-09-07** — *measured **47 of 48** immediately before
   `npm run deploy:function` shipped `extract-description` in #209's own session and **48 of 48**
   immediately after*, the denominator unmoved because that row had existed since #210 listed the
   name. Its whole history is the #210 bullet in the excused-red table below, now closed. Every red,
   on any subject, is real.** Before that the set held ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes, WRITTEN by #208 on
-  2026-09-07 and DEPLOYED by #209 on 2026-09-08: *measured 2026-09-04 at 36 of 36 immediately before
+  2026-09-07 and DEPLOYED by #209 on 2026-09-07: *measured 2026-09-04 at 36 of 36 immediately before
   the name was listed and 36 of 37 immediately after*, in #210's own session, and *measured 47 of 48
   on both sides of
   `0036`'s apply* in #208's, that file adding no row the check has (its table is one no client
@@ -537,7 +537,7 @@
     **47 of 48** immediately before and
     **47 of 48** immediately after — the same figure on both sides BY
     CONSTRUCTION, because no client reads this table and the check has no row for it, the one red
-    on both sides being the excused `extract-description`, which #209 then drained on 2026-09-08; and
+    on both sides being the excused `extract-description`, which #209 then drained on 2026-09-07; and
     `probe:live-grants` **19 of 19 column rows, with the `extraction_calls` table control row MOVED** immediately before, the new
     `extraction_calls` control row reading *not there*, and **19 of 19, every table control row agreeing**
     immediately after. What this entry records is the access model:
@@ -563,7 +563,7 @@
       it probes what the client asks for. `probe:live-grants` is the instrument for the grant
       half: its control list gained an `extraction_calls: null` row, `calendar_tokens`' shape,
       red as *not there* until the apply. The deploy of the function that writes here was #209's,
-      on 2026-09-08, and its row is the drained excused red above — so this table had a working
+      on 2026-09-07, and its row is the drained excused red above — so this table had a working
       writer only from that date, a day after the table itself existed.
   - **`0035`** (#360) — `shopping_lists.archived_at`, `archive_shopping_list(list)` and
     `unarchive_shopping_list(list)`: put a list away so the picker stops drawing it, and bring it
@@ -870,7 +870,7 @@
   and **43 of 44***. They were written down here and in README's
   `check:live` cell in the same change that created them, for the reason the next bullet's history
   gives. The set is back to the one row below.
-- **#210 opened ONE row on 2026-09-04 and #209 DRAINED it on 2026-09-08 — the set is EMPTY again,
+- **#210 opened ONE row on 2026-09-04 and #209 DRAINED it on 2026-09-07 — the set is EMPTY again,
   and this is the longest any row here has stood: four days across five stories.** The
   plain-language capacity flow (`src/lib/capture.js`) invokes `extract-description` by name ahead of
   #208 writing it — owner decision at #210's pickup — and `LIVE_EDGE_FUNCTIONS` lists what the app
@@ -880,7 +880,7 @@
   `npm run deploy:function`, and nothing else could have. **#208 wrote the function on 2026-09-07**
   (`supabase/functions/extract-description`, with `0036` for its call ledger), moving the name from
   `PENDING_FUNCTIONS` into `FUNCTION_NAMES` in `scripts/deploy-function.mjs` — that list's own test
-  went red on the new directory, which is what it is for. **#209 ran the deploy on 2026-09-08**:
+  went red on the new directory, which is what it is for. **#209 ran the deploy on 2026-09-07**:
   *measured **47 of 48** immediately before and **48 of 48** immediately after*, the denominator
   unmoved, the one red naming exactly that function on the before side and no red at all on the
   after side. Deployment **v2**, `ezbr_sha256`
@@ -1272,7 +1272,7 @@
   session, **TWO at 34 of 36** with #96's `0030` unapplied and `calendar-busy` undeployed and
   **EMPTY at 36 of 36** when #100 took both actions, and **ONE at 36 of 37** when #210 listed
   `extract-description` ahead of its function existing — **EMPTY again at 48 of 48** when #209
-  deployed that function on 2026-09-08, which is the only action that could have cleared it.
+  deployed that function on 2026-09-07, which is the only action that could have cleared it.
   That row is the longest-lived of the lot: four days, across five stories, and the only one no
   paste could touch.
   **#250 is deliberately NOT an inversion either, and for the opposite reason to `0016`'s.**

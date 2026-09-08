@@ -10,11 +10,16 @@ import { MAX_EXPECTED_MINUTES, MIN_EXPECTED_MINUTES } from '../lib/chores.js'
 // knows about the batch panel, the extraction bet, or the database — it
 // renders the rows it is handed and reports edits to whoever owns them.
 //
-// A row is `{ key, title, minutes, dueOn, problem }`, all strings except
+// A row is `{ key, title, minutes, dueOn, problem, note? }`, all strings except
 // `problem`, which is the refusal sentence to show on that row or null. The
 // values are the FORM's strings, not normalized values — normalization happens
 // where the rows are confirmed, by the data layer's own validators, so this
 // list cannot end up enforcing a second copy of the rules.
+//
+// `note` (#213) is an optional sentence about where the row came from,
+// rendered above the fields in the quiet register. It is a STRING the owner
+// of the rows wrote, so this list still knows nothing about extraction — a
+// typed batch row has none, an extracted one says what was read.
 //
 // Per-row problems render with `role="alert"` and the error palette, matching
 // the single form's refusals: these are about WORK, which is the one thing the
@@ -24,6 +29,7 @@ function DraftRow({ row, position, busy, onChange, onRemove }) {
   return (
     <li className="chore chore--editing chore-draft" data-testid={`draft-${row.key}`}>
       <div className="stack">
+        {row.note ? <p className="chore-draft__note">{row.note}</p> : null}
         <label className="field">
           <span className="field__label">Chore</span>
           <input
@@ -87,6 +93,7 @@ DraftRow.propTypes = {
     minutes: PropTypes.string.isRequired,
     dueOn: PropTypes.string.isRequired,
     problem: PropTypes.string,
+    note: PropTypes.string,
   }).isRequired,
   position: PropTypes.number.isRequired,
   busy: PropTypes.bool,

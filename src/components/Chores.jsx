@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
 import PropTypes from 'prop-types'
+import CaptureShell from './CaptureShell.jsx'
 import ChoreDraftList from './ChoreDraftList.jsx'
+import { CAPTURE_OUTCOMES } from '../lib/capture.js'
 import {
   MAX_EXPECTED_MINUTES,
   MIN_EXPECTED_MINUTES,
@@ -61,6 +63,55 @@ import { excludedMemberIds, isExcluded } from '../lib/exclusions.js'
 // members — that grid is what #8 asked for, and it is a form, in the same window
 // the charter's bet exists to delete forms. `src/test/gate.test.js` enumerates
 // the routes as a check rather than leaving this paragraph to be believed.
+//
+// #213 PUTS A QUESTION IN FRONT OF THE FORM, AND CHANGES NOTHING BEHIND IT.
+//
+// The shared `CaptureShell` (#210 AC 8) wraps the single-chore form: a
+// description box asking the direct question #207's verdict found was the
+// only thing that collected anything from a real household — a blank
+// "describe your week" box collected nothing three times — and the form
+// underneath it as the shell's CHILDREN, the manual road in, on screen before,
+// during and after any description. A proposal renders as the #220 review
+// list (`ChoreDraftList`) inside the shell's proposal box, every row editable
+// and removable, and NOTHING is written until the member confirms it: the
+// confirm is `onAddMany` with `source: 'extraction'` on each row, the same
+// loop over `addChore` a typed batch takes (AC 9). The rows arrive with the
+// data layer's own complaints already on them (a chore with no date, a zero
+// duration, a title too long — `proposeChores` in capture.js), and confirm
+// re-runs the same validators, so a marked row cannot be written as it stands.
+//
+// `onPropose` is OPTIONAL, and that is AC 10 made structural, the way
+// Roster's `onPropose` is #210 AC 7's: a chore tab rendered without it is
+// exactly the #34 surface, every #34 test renders it that way, and the shell
+// does not mount at all. THE FORM IS STILL AN OPTION BESIDE THE PROMPT — the
+// owner's amendment at this story's pickup, 2026-09-07 — so a member who
+// never types a sentence adds a chore exactly as before, and the batch panel
+// (#220) stays where it was. A failure never REVEALS the form; it moves the
+// box out of the way and focuses the title field that was there throughout.
+
+/**
+ * Settle a batch write's per-row outcomes against the rows that were sent —
+ * #220 AC 5, shared since #213 by the batch panel and the proposal list.
+ *
+ * One outcome per submitted row, in order — addChores' contract. Saved rows
+ * are PRUNED, which is what makes re-confirming unable to duplicate them: the
+ * next confirm submits only what is still listed. A refused row keeps its
+ * place with the server's sentence on it. Pure, so one implementation serves
+ * two lists and its arithmetic is testable on its own.
+ */
+export function settleBatch(checked, outcomes) {
+  const remaining = []
+  let saved = 0
+  outcomes.forEach((o, i) => {
+    if (o?.ok) saved += 1
+    else remaining.push({ ...checked[i], problem: o?.message ?? 'not saved' })
+  })
+  const notice =
+    remaining.length === 0
+      ? null
+      : `${saved} of ${outcomes.length} saved — the rows still listed were not.`
+  return { remaining, saved, notice }
+}
 
 /**
  * Run the data layer's own validators and return the first complaint, or null.
@@ -1010,6 +1061,7 @@ export default function Chores({
   onAdd,
   onShowDone,
   onAddMany,
+  onPropose,
   onSave,
   onRemove,
   onComplete,
@@ -1045,6 +1097,16 @@ export default function Chores({
   // there is nothing to say.
   const [batchNotice, setBatchNotice] = useState(null)
   const draftKey = useRef(1)
+
+  // #213 — the rows a description proposed, held here (not in the shell)
+  // because they are EDITED in place and the shell knows nothing about what a
+  // proposal contains. Unwritten by construction until `confirmProposed`.
+  // `shellKey` remounts the shell to clear a settled or discarded proposal —
+  // the shell keeps its own result state and exposes no reset, and Roster
+  // closes its editor the same way.
+  const [proposed, setProposed] = useState([])
+  const [proposedNotice, setProposedNotice] = useState(null)
+  const [shellKey, setShellKey] = useState(0)
 
   function freshDraft() {
     return { key: `draft-${draftKey.current++}`, title: '', minutes: '', dueOn: '', problem: null }
@@ -1123,17 +1185,12 @@ export default function Chores({
         // rows are PRUNED from the drafts, which is what makes re-confirming
         // unable to duplicate them (AC 5): the next confirm submits only what
         // is still listed.
-        const remaining = []
-        let saved = 0
-        outcomes.forEach((o, i) => {
-          if (o?.ok) saved += 1
-          else remaining.push({ ...checked[i], problem: o?.message ?? 'not saved' })
-        })
+        const { remaining, notice } = settleBatch(checked, outcomes)
         if (remaining.length === 0) {
           cancelBatch()
         } else {
           setDrafts(remaining)
-          setBatchNotice(`${saved} of ${outcomes.length} saved — the rows still listed were not.`)
+          setBatchNotice(notice)
         }
       },
       // onAddMany routes through App's mutate(), which rethrows only when the
@@ -1144,6 +1201,164 @@ export default function Chores({
       () => {},
     )
   }
+
+  // ---- #213 — the proposal list ---------------------------------------------
+
+  const changeProposed = (key, patch) =>
+    setProposed((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch, problem: null } : r)))
+  // AC 9 — a removed row is gone from the list, so it is not in what confirm
+  // sends, and no placeholder is left where it was.
+  const removeProposed = (key) => setProposed((rows) => rows.filter((r) => r.key !== key))
+
+  function discardProposal() {
+    setProposed([])
+    setProposedNotice(null)
+    setShellKey((k) => k + 1)
+  }
+
+  function confirmProposed(e) {
+    e.preventDefault()
+    if (proposed.length === 0) {
+      setProposedNotice('nothing left to add — every row was removed.')
+      return
+    }
+    // AC 5, AC 7 — every row is checked BEFORE anything is written, with the
+    // same validators the batch panel and the single form call. A row that
+    // arrived marked and was never edited still carries a complaint here, so
+    // it cannot be confirmed as it stands; a row the member fixed passes.
+    let anyBad = false
+    const checked = proposed.map((row) => {
+      const problem = draftProblem(row)
+      if (problem) anyBad = true
+      return { ...row, problem }
+    })
+    setProposed(checked)
+    setProposedNotice(null)
+    if (anyBad) return
+
+    // AC 9 — each row goes through the same addChore path a typed chore uses,
+    // recorded with where it came from. `source` is the ONE thing this write
+    // adds to a typed batch's, and the data layer's `addChores` spreads the
+    // row into `addChore`, so it lands on the column #211 added.
+    onAddMany(
+      checked.map(({ title, minutes, dueOn }) => ({
+        title,
+        expectedMinutes: minutes,
+        dueOn,
+        source: 'extraction',
+      })),
+    ).then(
+      (outcomes) => {
+        const { remaining, notice } = settleBatch(checked, outcomes)
+        if (remaining.length === 0) {
+          discardProposal()
+        } else {
+          setProposed(remaining)
+          setProposedNotice(notice)
+        }
+      },
+      () => {},
+    )
+  }
+
+  // #213 — the single form is the manual road in, rendered ONCE and placed
+  // inside the shell when a proposer is wired (its children, on screen
+  // throughout) and bare when there is not, so the #34 surface is the same
+  // element either way.
+  const singleForm = (
+      <form
+        className="stack"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault()
+          const problem = validate({
+            title,
+            expectedMinutes: minutes,
+            dueOn,
+            repeatKind,
+            repeatWeekdays: repeatDays,
+            repeatMonthday,
+          })
+          if (problem) {
+            // AC 2: the refusal happens here, before onAdd is ever called, so a
+            // bad value never becomes a request.
+            setComplaint(problem)
+            return
+          }
+          setComplaint(null)
+          onAdd({
+            title,
+            expectedMinutes: minutes,
+            dueOn,
+            repeatKind,
+            repeatWeekdays: repeatDays,
+            repeatMonthday,
+          }).then(
+            () => {
+              setTitle('')
+              setMinutes('')
+              setDueOn('')
+              setRepeatKind('none')
+              setRepeatDays([])
+              setRepeatMonthday('')
+            },
+            () => {},
+          )
+        }}
+      >
+        <label className="field">
+          <span className="field__label">Chore</span>
+          <input
+            className="field__input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={80}
+            autoComplete="off"
+            placeholder="Dishes"
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Expected minutes</span>
+          <input
+            className="field__input"
+            type="number"
+            min={MIN_EXPECTED_MINUTES}
+            max={MAX_EXPECTED_MINUTES}
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            placeholder="20"
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Due</span>
+          <input
+            className="field__input"
+            type="date"
+            value={dueOn}
+            onChange={(e) => setDueOn(e.target.value)}
+          />
+        </label>
+        {/* #53's controls, now the shared component #54's edit form also
+            renders — one copy of the schedule vocabulary. */}
+        <RepeatControl
+          kind={repeatKind}
+          days={repeatDays}
+          monthday={repeatMonthday}
+          onKindChange={setRepeatKind}
+          onDaysChange={setRepeatDays}
+          onMonthdayChange={setRepeatMonthday}
+        />
+        {complaint ? (
+          <p className="error" role="alert">
+            {complaint}
+          </p>
+        ) : null}
+        <button className="button" type="submit" disabled={busy}>
+          Add chore
+        </button>
+      </form>
+    )
+
 
   const outstanding = chores.filter(isOutstanding)
   const done = chores.filter((c) => !isOutstanding(c))
@@ -1239,97 +1454,70 @@ export default function Chores({
         </p>
       ) : null}
 
-      <form
-        className="stack"
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault()
-          const problem = validate({
-            title,
-            expectedMinutes: minutes,
-            dueOn,
-            repeatKind,
-            repeatWeekdays: repeatDays,
-            repeatMonthday,
-          })
-          if (problem) {
-            // AC 2: the refusal happens here, before onAdd is ever called, so a
-            // bad value never becomes a request.
-            setComplaint(problem)
-            return
-          }
-          setComplaint(null)
-          onAdd({
-            title,
-            expectedMinutes: minutes,
-            dueOn,
-            repeatKind,
-            repeatWeekdays: repeatDays,
-            repeatMonthday,
-          }).then(
-            () => {
-              setTitle('')
-              setMinutes('')
-              setDueOn('')
-              setRepeatKind('none')
-              setRepeatDays([])
-              setRepeatMonthday('')
-            },
-            () => {},
-          )
-        }}
-      >
-        <label className="field">
-          <span className="field__label">Chore</span>
-          <input
-            className="field__input"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={80}
-            autoComplete="off"
-            placeholder="Dishes"
-          />
-        </label>
-        <label className="field">
-          <span className="field__label">Expected minutes</span>
-          <input
-            className="field__input"
-            type="number"
-            min={MIN_EXPECTED_MINUTES}
-            max={MAX_EXPECTED_MINUTES}
-            value={minutes}
-            onChange={(e) => setMinutes(e.target.value)}
-            placeholder="20"
-          />
-        </label>
-        <label className="field">
-          <span className="field__label">Due</span>
-          <input
-            className="field__input"
-            type="date"
-            value={dueOn}
-            onChange={(e) => setDueOn(e.target.value)}
-          />
-        </label>
-        {/* #53's controls, now the shared component #54's edit form also
-            renders — one copy of the schedule vocabulary. */}
-        <RepeatControl
-          kind={repeatKind}
-          days={repeatDays}
-          monthday={repeatMonthday}
-          onKindChange={setRepeatKind}
-          onDaysChange={setRepeatDays}
-          onMonthdayChange={setRepeatMonthday}
-        />
-        {complaint ? (
-          <p className="error" role="alert">
-            {complaint}
-          </p>
-        ) : null}
-        <button className="button" type="submit" disabled={busy}>
-          Add chore
-        </button>
-      </form>
+      {onPropose ? (
+        <CaptureShell
+          key={shellKey}
+          label="What needs doing this week?"
+          placeholder="Mow the lawn on Saturday, about 45 minutes. Dishes tonight, 20 minutes."
+          describeLabel="Work out the chores"
+          manualHint="Type them in below instead."
+          busy={busy}
+          onDescribe={async (text) => {
+            const result = await onPropose(text)
+            if (result?.outcome === CAPTURE_OUTCOMES.PROPOSAL) {
+              setProposed(result.rows)
+              setProposedNotice(null)
+            }
+            return result
+          }}
+          renderProposal={() => (
+            // The #220 review list, fed from proposals — AC 1, AC 2: one row
+            // per chore the description named, each editable and removable,
+            // nothing written until "Add these chores". Its own form, a
+            // SIBLING of the single form inside the shell's div, never a
+            // parent of it: the two writes are different confirms.
+            <form
+              className="chore-proposal"
+              noValidate
+              onSubmit={confirmProposed}
+              aria-label="Chores read from your description"
+            >
+              <p className="capture__figure">
+                {proposed.length === 1 ? 'One chore read' : `${proposed.length} chores read`} from
+                what you wrote. Check each one, then add them.
+              </p>
+              <ChoreDraftList
+                rows={proposed}
+                busy={busy}
+                onChange={changeProposed}
+                onRemove={removeProposed}
+              />
+              {proposedNotice ? (
+                <p className="card__note" role="status" data-testid="proposal-notice">
+                  {proposedNotice}
+                </p>
+              ) : null}
+              <div className="row">
+                <button className="button" type="submit" disabled={busy}>
+                  Add these chores
+                </button>
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  disabled={busy}
+                  onClick={discardProposal}
+                >
+                  Discard
+                </button>
+              </div>
+            </form>
+          )}
+        >
+          {singleForm}
+        </CaptureShell>
+      ) : (
+        singleForm
+      )}
 
       {/* #220 — the batch entry. An ADDITION behind its own control, never a
           replacement: the single form above is untouched and stays the default
@@ -1408,6 +1596,8 @@ Chores.propTypes = {
   error: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
   onAddMany: PropTypes.func.isRequired,
+  // #213 — optional: the tab without it is exactly the #34 surface (AC 10).
+  onPropose: PropTypes.func,
   onShowDone: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,

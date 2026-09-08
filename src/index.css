@@ -907,6 +907,30 @@ body {
   border-style: dashed;
 }
 
+/* #213 — what an extracted row was read from, above its fields: the same
+   quiet register as `.capture__derived`, because it is provenance and not a
+   problem. The problem, when there is one, is the red alert under the fields. */
+.chore-draft__note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* #213 — the proposal list inside the capture shell. The shell's proposal
+   box already draws the border; this only stacks the list, its notice and
+   the confirm row so a 360px phone costs height and never width. `width:
+   100%` because `.capture__proposal` aligns its children to the start, and a
+   form left at its content width would let a long draft row set the page
+   width. */
+.chore-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
 /* The row's account of its schedule — same dim ink as the due date, because a
    repeat is a fact about the chore, not a state to be alarmed by. */
 .chore__repeat {

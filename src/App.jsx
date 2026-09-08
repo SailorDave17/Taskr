@@ -48,7 +48,7 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
-import { extractCapacity } from './lib/capture.js'
+import { extractCapacity, extractChores } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -1238,6 +1238,28 @@ export default function App() {
   // nothing it cares about leaves it alone.
   const householdId = household?.id
   const myMemberId = me?.id
+  // #213 — ask the extraction endpoint what a chore description means. NOT
+  // through `mutate()`, for #210's reason: a proposal is a list on screen the
+  // member has not agreed to, so nothing is written, nothing re-reads, and
+  // `busy` stays off the rest of the tab. The write, if it comes, is
+  // `handleAddChores` above with `source: 'extraction'` on every row — the
+  // same loop over `addChore` a typed batch takes. Today is the household's
+  // (the same `localTodayIn` the tab's skip picker is handed), because a
+  // stated "tomorrow" resolves against the household's calendar and never
+  // the phone's; the speaker is the person typing, so "I'll do the bins"
+  // names somebody the endpoint can attribute. Declared here rather than
+  // beside the other chore handlers because it closes over `me`.
+  const myName = me?.display_name
+  const handleProposeChores = useCallback(
+    (text) =>
+      extractChores({
+        householdId,
+        text,
+        todayIso: household ? localTodayIn(household.timezone) : undefined,
+        speaker: myName,
+      }),
+    [householdId, household, myName],
+  )
   const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
   const myBusyWeek =
     myMemberId && periodStart ? busyWeekFor(busyWeeks, myMemberId, periodStart) : null
@@ -1593,6 +1615,7 @@ export default function App() {
           error={error}
           onAdd={handleAddChore}
           onAddMany={handleAddChores}
+          onPropose={handleProposeChores}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

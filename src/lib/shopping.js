@@ -47,10 +47,11 @@
 // `replaceShoppingItem` swaps into the list on screen. Every other write in
 // this module still goes through App's `mutate()` and re-reads. The cost of
 // the departure is stated where it bites: another phone's ticks appear on the
-// next arrival on the tab, which is what decision 3 (re-read on open, no
-// Realtime) already says about every other row on this surface. A REFUSED tick
-// is the one moment this phone knows its picture is stale, and falls back to
-// the full re-read.
+// next re-read — which, when this was written, meant the next arrival on the
+// tab under decision 3 (re-read on open, no Realtime), and since #342 reversed
+// that decision means the household channel's `shopping_items` event, a
+// background re-read within seconds. A REFUSED tick is the one moment this
+// phone knows its picture is stale, and falls back to the full re-read.
 
 import { getSupabase } from './supabase.js'
 
@@ -492,8 +493,11 @@ export async function readShopping(client, householdId) {
  *
  * The freshness that costs is stated rather than hidden: a run another phone
  * finished after this disclosure was opened is not here until it is opened
- * again — the same thing decision 3 (re-read on open, no Realtime) already says
- * about every other row on this surface, one level down.
+ * again. When this was written that was what decision 3 (re-read on open, no
+ * Realtime) said about every other row on this surface; #342 reversed decision
+ * 3 for the rows `refresh()` reads, and this read is deliberately NOT one of
+ * them, so the sentence stays true here alone — a `shopping_runs` change does
+ * re-read the open run, and the history waits to be opened again.
  *
  * Two reads and never an embed, for the reason the docblock at the head of this
  * file gives: a filter written against an embedded resource is applied to the

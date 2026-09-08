@@ -7,7 +7,7 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0036` are ALL applied to the live project (`0036` on 2026-09-07
+- Status: **`0001`–`0037` are ALL applied to the live project (`0037` on 2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical — see its entry below; `0036` on 2026-09-07
   in #208's own session, at md5 `d65fb95c299101c5ca9d3c6cc01b0584` (`6082 characters, 6 statements`), read back identical
   — see its entry below; `0035` on 2026-09-06 in #360's own
   session, at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back
@@ -15,7 +15,11 @@
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
-  EMPTY again as of 2026-09-08** — #99 adds
+  EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
+  opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
+  joining a Realtime channel the way a phone does, red on purpose until `0037` was applied in its
+  own session; its whole history is the #342 bullet in the excused-red table below. Before that the
+  set was EMPTY as of 2026-09-08 — #99 adds
   NO migration and one Edge Function, `calendar-disconnect`, so its row is a deploy's and never a
   paste's: *measured **48 of 49** immediately before `npm run deploy:function` and
   **49 of 49** immediately after* in #99's own session, the denominator having moved
@@ -534,6 +538,26 @@
       and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
       project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
       reddens the member-delete test, predicted 1.
+  - **`0037`** (#342) — the `supabase_realtime` publication gains the eleven tables the client
+    reads and now WATCHES: `households`, `members`, `chores`, `member_capacity`,
+    `chore_exclusions`, `calendar_connections`, `chore_repeat_exceptions`, `calendar_busy`,
+    `shopping_lists`, `shopping_runs`, `shopping_items` — every `LIVE_SCHEMA` table but
+    `member_split_seen`, which is self-scoped and written by the re-read itself. No grant, no
+    policy, no column moves; what changes is that a committed change to any of these is now SENT,
+    to each subscriber the table's policies admit. The list is derived in `src/lib/realtime.js`
+    and held equal to this file by `src/test/realtime.pglite.test.js`; the read-path consequences
+    are the *A subscription is a read path* section below. Applied
+    2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical;
+    *measured* `check:live` **51 of 62** immediately before and
+    **62 of 62** immediately after, the denominator having moved from 49 to
+    62 on the eleven publication rows, their floor and the live negative control on
+    `member_split_seen` — which passes only while the server REFUSES that table, and did on both
+    sides. *Measured before the apply, through the read-only catalog*: the live publication existed
+    with `puballtables = false` and held **no `public` table at all**, so every one of the eleven
+    rows was a real red rather than an inherited green, and the `for all tables` shape the
+    migration's header allows for is not this project's. What `probe:live-grants` sees of this
+    file: nothing, and correctly — it audits grants, and this grants nothing. The publication
+    catalog after the apply is the eleven tables above and nothing else, `puballtables` still false, read back through the same catalog query — and the `system` frame on a published table now reads `Subscribed to PostgreSQL`, `status: ok`, which is the positive answer the probe accepts.
   - **`0036`** (#208) — `extraction_calls`: the extraction endpoint's call ledger, one row per
     provider call, written as `service_role` by `supabase/functions/extract-description` BEFORE
     the provider is asked and counted over a rolling window to refuse a household past the bound
@@ -847,6 +871,23 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
+  One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
+  as the seeded account and reading the `system` frame the server sends after the join — never
+  the join itself, which the server acknowledges for any table name (*measured*, including one
+  that does not exist). Red from the moment `WATCHED_TABLES` listed them until `npm run
+  migrate:live` applied `0037`: *measured **51 of 62** immediately before
+  and **62 of 62** immediately after*, the denominator having moved from 49
+  to 62. The twelfth new row is a live NEGATIVE CONTROL on `member_split_seen`, the one table the
+  client reads and deliberately does not watch: it passes only while the server refuses that
+  table, so it is also the assertion that the self-scoped table stays unpublished, and it was
+  green on both sides. Written down here and in README's `check:live` cell in the same change
+  that created the rows, for the reason the #352 bullet below gives.
+
+  **What the first draft of the probe would have recorded here, kept because it is the finding.**
+  Resolving on the join's `SUBSCRIBED` read **61 of 62 green against an empty publication** — every
+  table row green and the negative control the one red. The control existed because the check
+  above it could not be trusted without one, and it is the only thing that said so.
 - **#99 opened ONE row on 2026-09-08 — a DEPLOY's row, not a paste's — and drained it in its own
   session.** `calendar-disconnect` is the Edge Function that deletes a member's token row, every
   derived busy row and the connection row, and asks Google to revoke the grant best-effort. It
@@ -1795,6 +1836,75 @@ a safe choice rather than a cheap one:
 That last point is not tidiness. Anonymous sessions expire after **30 days of inactivity** and the user
 comes back with a **new auth id**. A rarely-active family member would silently become a stranger to
 their own history if membership were keyed to the auth id, and it would not show up for months.
+
+## A subscription is a read path — #342, 2026-09-08
+
+Everything above describes what a phone can **ask for**. Since #342 a phone also **listens**: it
+holds one Supabase Realtime channel per household, subscribed to `postgres_changes` on the eleven
+tables `refresh()` reads (`WATCHED_TABLES` in `src/lib/realtime.js`, derived from `LIVE_SCHEMA`;
+`0037` puts the same eleven in the `supabase_realtime` publication and
+`src/test/realtime.pglite.test.js` holds the two lists equal). A change delivered over that channel
+is not shown to anyone — the phone re-reads through the grants and policies above, exactly as it
+would after its own write — but the *delivery* is itself a read, and this section says what
+governs it. Read off `apply_rls.sql` and `subscription_check_filters.sql` in `supabase/realtime`
+on 2026-09-08, not assumed.
+
+- **INSERT and UPDATE are policy-checked per subscriber.** For every change, Realtime sets the
+  subscriber's role and JWT claims and asks whether that role can `select` the row by its primary
+  key; only subscribers whose policies say yes receive it, and a column the role lacks column-level
+  SELECT on is stripped from what they receive. So a member hears about the rows a reload would
+  show them and no others, and a channel filtered to the wrong household — by mistake or on
+  purpose — is a wasted message, not a leak. This is the premise #342 was filed on, and it holds
+  for these two verbs.
+- **A filter is allowed only on a column the role may SELECT.** The join is refused with `invalid
+  column for filter` otherwise. That is why the filter column is taken from each table's own
+  client column list rather than from the schema: `household_id=eq.<id>` on `members`, `chores`
+  and the three `shopping_*` tables; `member_id=in.(<roster>)` on `member_capacity`,
+  `chore_exclusions`, `calendar_connections` and `calendar_busy`, the tables whose grants withhold
+  `household_id` (`0005`, `0010`, `0011`, `0030`); `id=eq.<id>` on `households`; and **no filter** on
+  `chore_repeat_exceptions`, whose client columns are a chore id and a date (`0025`) — its policies
+  are its only scope, and that is sufficient because of the first bullet.
+- **DELETE is policy-checked for nobody, and that is the platform's rule.** There is no row left to
+  evaluate a policy against, so Realtime applies no RLS to a delete, and by default the old record
+  carries **only the primary key**. Two consequences, and the design follows from both:
+  - a channel filtered on `household_id` or `member_id` **never hears a delete at all** — the
+    column it filters on is absent from what a delete carries — so a phone would keep showing a
+    chore another phone removed until its next visibility read;
+  - the way to make the filter match, `alter table … replica identity full`, would send the
+    deleted row's **every column** to any authenticated subscriber whose filter matched, with no
+    policy in the way, which is a leak of exactly the content the policies protect.
+
+  So `0037` sets no replica identity (asserted in `realtime.pglite.test.js`), and each scoped table
+  carries a second binding, **`DELETE` with no filter**. What that binding delivers is the deleted
+  row's id and nothing else, to every subscriber of that table under `authenticated` — across
+  households, on a project holding several. What the phone does with it is re-read through its own
+  policies. A uuid of a row that no longer exists is what is disclosed, and it is disclosed to
+  signed-in members of *some* household on this project; nothing about the row, the household or the
+  member travels with it. `households` needs no second binding: its filter is the primary key, the
+  one column a delete always carries.
+- **The subscriber is the signed-in member.** `supabase-js` forwards every auth state change to
+  `realtime.setAuth`, so the role the server checks policies for is the one holding the session,
+  never `anon` — and `anon` holds nothing in `public` since `0017`, so an unsigned socket would be
+  refused at the join.
+- **What `check:live` sees of this, and which frame it reads.** A channel that never receives an
+  event is indistinguishable from one nothing happened on, so the instrument is the subscription
+  itself: `npm run check:live` joins a channel on each watched table as the seeded account and
+  reads the server's answer. **The answer is not the join.** *Measured 2026-09-08 against the live
+  project with its publication empty*: the server acknowledges a join on **any** table name —
+  `chores`, `member_split_seen` and `taskr_no_such_table_342` all answered `phx_reply ok` and
+  reported `SUBSCRIBED` — and only then sends a `system` frame for the `postgres_changes`
+  extension: `status: error` with `Unable to subscribe to changes with given parameters …`, naming
+  the table, or `status: ok`. A first draft of the probe resolved on the join and read **61 of 62
+  green with nothing published**, its own negative control the one red; the control is what caught
+  it, and the probe now reads the `system` frame and reports a join followed by silence as *no
+  evidence*, never as a pass. One row per table, red on purpose until `0037` is applied, plus the
+  live negative control on `member_split_seen`, the one table the client reads and does not watch,
+  which passes only while the server *refuses* it — so it is also the assertion that the
+  self-scoped table stays unpublished. Joining reads no row; the server records the subscription
+  in its own `realtime` schema and drops it when the channel is removed.
+
+The cost side — the Free plan's 200 connections and 2,000,000 messages a month against a household
+of ten phones, and the kill condition — is in `docs/hosting-decision.md`.
 
 ## How the rules are enforced
 

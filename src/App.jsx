@@ -48,7 +48,7 @@ import {
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
-import { extractCapacity } from './lib/capture.js'
+import { extractCapacity, extractChores } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -61,11 +61,13 @@ import {
   busyWeekFor,
   completeConnect,
   connectionFor,
+  disconnectCalendar,
   fetchBusyWeek,
   isBusyWeekStale,
   listBusyWeeks,
   listCalendarConnections,
   readConsentReturn,
+  revokeNoteFor,
   startConnect,
 } from './lib/calendar.js'
 import {
@@ -183,6 +185,13 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #99 AC 4 — the one thing a disconnect can leave unsaid: Taskr let go and
+  // could not tell whether Google did. Held here rather than in the roster row
+  // because the row it belongs to has just changed shape — the connection is
+  // gone by the time this is drawn, so state inside `CalendarControl` would
+  // have to survive the very re-render the disconnect causes. Null on every
+  // other outcome; `revokeNoteFor` in calendar.js owns which outcome that is.
+  const [calendarRevokeNote, setCalendarRevokeNote] = useState(null)
   // #96 — this week's calendar-derived busy minutes, one row per member who has
   // one. Server state read through the same refresh as everything else, and the
   // rows carry nothing out of anybody's calendar: `0030`'s column list is the
@@ -796,8 +805,41 @@ export default function App() {
   // setting, whereas one who presses it reads the sentence that names the
   // variable. #95 AC 1 requires the action to be shown to a real-email member,
   // and says nothing about the app being configured.
+  // #99 — the way back out, and unlike Connect above it DOES go through
+  // `mutate()`: three rows are deleted server-side and the screen has to re-read
+  // to show it. That is the whole of AC 2 — `refresh()` re-reads
+  // `calendar_connections` and `calendar_busy`, so the Connect action returns
+  // and the suggestion goes with the rows it was derived from. Nothing is
+  // patched locally, for the reason every other write here re-reads: what the
+  // next device to load will see is exactly what this one now shows.
+  const handleDisconnectCalendar = useCallback(async () => {
+    setCalendarRevokeNote(null)
+    const result = await mutate(() => disconnectCalendar({ householdId: household?.id }))
+    // Set AFTER the refresh, so the sentence lands on the screen the disconnect
+    // produced rather than on the one it replaced. A failed disconnect throws
+    // out of `mutate()` before reaching here, which is correct: there is nothing
+    // to say about Google when Taskr has not let go.
+    setCalendarRevokeNote(revokeNoteFor(result))
+    // The last derived figure's complaint is about a calendar this member no
+    // longer has, so it goes with it — a sentence saying "that calendar
+    // connection is no longer valid, connect it again" under a row with no
+    // calendar is true of nothing.
+    setBusyFetchComplaint(null)
+    // #96's and #98's once-per-session guards, cleared. Forgetting what was read
+    // includes forgetting that it was asked for: without this, connecting again
+    // in the same session would find the key already present and fetch nothing,
+    // so the member would sit looking at a connected calendar with no figure
+    // until they reloaded. Every key in both sets is this member's own by
+    // construction — both effects build it from `myMemberId`.
+    askedForBusy.current.clear()
+    refreshedBusy.current.clear()
+    return result
+  }, [mutate, household])
   const handleConnectCalendar = useCallback(() => {
     setError(null)
+    // A fresh attempt clears the note the last disconnect left: it describes a
+    // connection that is being replaced.
+    setCalendarRevokeNote(null)
     try {
       // #161 — the household THIS SCREEN IS SHOWING travels with the consent
       // state, so the connection lands where the member was standing when they
@@ -1238,6 +1280,28 @@ export default function App() {
   // nothing it cares about leaves it alone.
   const householdId = household?.id
   const myMemberId = me?.id
+  // #213 — ask the extraction endpoint what a chore description means. NOT
+  // through `mutate()`, for #210's reason: a proposal is a list on screen the
+  // member has not agreed to, so nothing is written, nothing re-reads, and
+  // `busy` stays off the rest of the tab. The write, if it comes, is
+  // `handleAddChores` above with `source: 'extraction'` on every row — the
+  // same loop over `addChore` a typed batch takes. Today is the household's
+  // (the same `localTodayIn` the tab's skip picker is handed), because a
+  // stated "tomorrow" resolves against the household's calendar and never
+  // the phone's; the speaker is the person typing, so "I'll do the bins"
+  // names somebody the endpoint can attribute. Declared here rather than
+  // beside the other chore handlers because it closes over `me`.
+  const myName = me?.display_name
+  const handleProposeChores = useCallback(
+    (text) =>
+      extractChores({
+        householdId,
+        text,
+        todayIso: household ? localTodayIn(household.timezone) : undefined,
+        speaker: myName,
+      }),
+    [householdId, household, myName],
+  )
   const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
   const myBusyWeek =
     myMemberId && periodStart ? busyWeekFor(busyWeeks, myMemberId, periodStart) : null
@@ -1567,6 +1631,8 @@ export default function App() {
           onProposeCapacity={handleProposeCapacity}
           connections={connections}
           onConnectCalendar={handleConnectCalendar}
+          onDisconnectCalendar={handleDisconnectCalendar}
+          calendarRevokeNote={calendarRevokeNote}
           busyWeeks={busyWeeks}
           // The READ complaint only reaches a member who has connected a
           // calendar (owner decision, 2026-09-04, at the second review pass): a
@@ -1593,6 +1659,7 @@ export default function App() {
           error={error}
           onAdd={handleAddChore}
           onAddMany={handleAddChores}
+          onPropose={handleProposeChores}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

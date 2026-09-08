@@ -906,7 +906,11 @@ describe('#95 AC 1 — who is offered a calendar connection', () => {
   // spare is what keeps it green. Giving the housemate an address leaves `isMe`
   // as the only thing that can be doing the work.
   const housemateWithEmail = { ...roster[1], email: 'placeholder.two@example.test' }
-  const connectHandlers = { onConnectCalendar: vi.fn() }
+  // `onDisconnectCalendar` is required by `CalendarControl` since #99 — an exit
+  // with no handler behind it is the state that story exists to prevent, so the
+  // prop is required rather than optional and every render of this control
+  // supplies one.
+  const connectHandlers = { onConnectCalendar: vi.fn(), onDisconnectCalendar: vi.fn() }
 
   const renderRoster = (props) =>
     setup({
@@ -1010,6 +1014,7 @@ describe('#95 AC 5 — a connected member sees so on reload', () => {
       me: withEmail,
       connections: [connection],
       onConnectCalendar: vi.fn(),
+      onDisconnectCalendar: vi.fn(),
     })
     const row = rowFor('Placeholder One')
     expect(within(row).getByText(/calendar connected/i)).toBeInTheDocument()
@@ -1028,12 +1033,166 @@ describe('#95 AC 5 — a connected member sees so on reload', () => {
       me: withEmail,
       connections: [{ ...connection, member_id: 'm2' }],
       onConnectCalendar: vi.fn(),
+      onDisconnectCalendar: vi.fn(),
     })
     expect(
       within(rowFor('Placeholder One')).getByRole('button', {
         name: /connect google calendar/i,
       }),
     ).toBeInTheDocument()
+  })
+})
+
+// #99 — the way back out, beside the sentence that says there is something to
+// get out of.
+//
+// What this file cannot see: whether the rows are actually deleted. That is
+// supabase/functions/calendar-disconnect/handler.test.js, which asserts the
+// three deletions and their order against a fake client. This is the control —
+// who is offered it, how many taps it takes, and what is said afterwards.
+describe('#99 — disconnecting a calendar', () => {
+  const withEmail = { ...roster[0], email: 'placeholder.one@example.test' }
+  const housemateWithEmail = { ...roster[1], email: 'placeholder.two@example.test' }
+  const connection = {
+    id: 'conn-1',
+    member_id: 'm1',
+    scope: 'https://www.googleapis.com/auth/calendar.freebusy',
+    connected_at: '2026-08-24T10:00:00Z',
+  }
+
+  const renderConnected = (props = {}) =>
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: withEmail,
+      connections: [connection],
+      onConnectCalendar: vi.fn(),
+      onDisconnectCalendar: vi.fn().mockResolvedValue({ ok: true, revoked: true }),
+      ...props,
+    })
+
+  const disconnectIn = (row) => within(row).getByRole('button', { name: /^disconnect$/i })
+
+  it('offers Disconnect beside "Calendar connected", on the member’s own row', () => {
+    // The charter's trust half: an input a member cannot switch off erodes
+    // exactly the trust the connection is asking for, so "Calendar connected"
+    // must not be a state with no exit next to it.
+    renderConnected()
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(disconnectIn(row)).toBeInTheDocument()
+  })
+
+  it('does NOT offer it on a housemate’s row, even one who could connect', () => {
+    // The mirror of #95 AC 1's routing, and the housemate has a real address on
+    // purpose: with `roster[1]`'s missing email the absence would be satisfied
+    // by the real-email check and `isMe` would never be exercised — the exact
+    // spare-guard fault a mutation pass caught on #95.
+    renderConnected({ connections: [connection, { ...connection, id: 'c2', member_id: 'm2' }] })
+    expect(
+      within(rowFor('Placeholder Two')).queryByRole('button', { name: /^disconnect$/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: that same housemate IS offered it on their own device', () => {
+    // Which makes the absence above a fact about WHOSE row it is rather than a
+    // fact about that person or that fixture.
+    setup({
+      members: [withEmail, housemateWithEmail],
+      me: housemateWithEmail,
+      connections: [{ ...connection, id: 'c2', member_id: 'm2' }],
+      onConnectCalendar: vi.fn(),
+      onDisconnectCalendar: vi.fn().mockResolvedValue({ ok: true, revoked: true }),
+    })
+    expect(disconnectIn(rowFor('Placeholder Two'))).toBeInTheDocument()
+  })
+
+  it('is absent for a member who has not connected one — there is nothing to disconnect', () => {
+    renderConnected({ connections: [] })
+    const row = rowFor('Placeholder One')
+    expect(within(row).queryByRole('button', { name: /^disconnect$/i })).not.toBeInTheDocument()
+    expect(
+      within(row).getByRole('button', { name: /connect google calendar/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('takes TWO taps, and the first one writes nothing', async () => {
+    // Owner decision at pickup, 2026-09-08: the idiom Remove-a-member,
+    // Remove-a-chore and the second sign-out already use on this screen. Not
+    // because disconnecting is dangerous but because it is irreversible in one
+    // direction — every derived figure goes, and getting them back is a fresh
+    // consent at Google.
+    const onDisconnectCalendar = vi.fn().mockResolvedValue({ ok: true, revoked: true })
+    renderConnected({ onDisconnectCalendar })
+    await clickAndSettle(disconnectIn(rowFor('Placeholder One')))
+    expect(onDisconnectCalendar).not.toHaveBeenCalled()
+
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByRole('button', { name: /disconnect google calendar\?/i })).toBeTruthy()
+    await clickAndSettle(
+      within(row).getByRole('button', { name: /disconnect google calendar\?/i }),
+    )
+    expect(onDisconnectCalendar).toHaveBeenCalledTimes(1)
+  })
+
+  it('can be backed out of with Keep, and writes nothing on the way', async () => {
+    const onDisconnectCalendar = vi.fn().mockResolvedValue({ ok: true, revoked: true })
+    renderConnected({ onDisconnectCalendar })
+    await clickAndSettle(disconnectIn(rowFor('Placeholder One')))
+    await clickAndSettle(within(rowFor('Placeholder One')).getByRole('button', { name: /^keep$/i }))
+    expect(onDisconnectCalendar).not.toHaveBeenCalled()
+    // Back to the one-tap state, so the exit is still there to take.
+    expect(disconnectIn(rowFor('Placeholder One'))).toBeInTheDocument()
+  })
+
+  it('does not let the rejection escape as an unhandled promise', async () => {
+    // `onDisconnectCalendar` routes through App's `mutate()`, which RETHROWS
+    // after recording the message. A bare call in the handler would escape, and
+    // the Remove arms in this file and in Chores.jsx take the same two-arm
+    // shape for exactly this reason.
+    const onDisconnectCalendar = vi.fn().mockRejectedValue(new Error('nope'))
+    renderConnected({ onDisconnectCalendar })
+    await clickAndSettle(disconnectIn(rowFor('Placeholder One')))
+    await clickAndSettle(
+      within(rowFor('Placeholder One')).getByRole('button', { name: /disconnect google calendar\?/i }),
+    )
+    expect(onDisconnectCalendar).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4 — draws the revoke note where a DISCONNECTED member can see it', () => {
+    // The note exists only after a disconnect has succeeded, at which point the
+    // connection row is gone and this control is rendering its Connect arm. A
+    // note that lived inside the connected branch could never be seen, which is
+    // why this fixture has NO connection.
+    renderConnected({
+      connections: [],
+      calendarRevokeNote: 'Taskr has forgotten this calendar. Google may still list Taskr.',
+    })
+    expect(within(rowFor('Placeholder One')).getByTestId('calendar-note')).toHaveTextContent(
+      /google may still list taskr/i,
+    )
+  })
+
+  it('says nothing when there is nothing to add', () => {
+    renderConnected({ connections: [] })
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('shows the note on the member’s OWN row and nobody else’s', () => {
+    // It reports what a call THIS device made came back with, and a housemate's
+    // phone learnt nothing about it.
+    //
+    // WHAT MAKES THIS TRUE is `CalendarControl`'s own `isMe` gate and not a
+    // second test beside the prop — a first draft had both, and a mutation
+    // pass measured the second one as reddening NOTHING, which is the spare
+    // guard this file already records costing #95 a silent hole. So this
+    // asserts the consequence and the `isMe` tests above are what defend it.
+    renderConnected({
+      connections: [],
+      calendarRevokeNote: 'Taskr has forgotten this calendar. Google may still list Taskr.',
+    })
+    expect(
+      within(rowFor('Placeholder Two')).queryByTestId('calendar-note'),
+    ).not.toBeInTheDocument()
   })
 })
 

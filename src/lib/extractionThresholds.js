@@ -69,6 +69,20 @@ const measured = (value, outOf) => ({ value, outOf })
 const pending = (why) => ({ pending: why })
 
 /**
+ * A figure that was COMPUTED FROM measurements rather than taken from one —
+ * #207 AC 3, which requires the deployed-path p95 to be "labelled an estimate
+ * rather than a measurement".
+ *
+ * This is a third fact, orthogonal to the figure/pending pair above: those say
+ * whether there is a number, this says how it was arrived at. A reading carries
+ * `estimate` as the reason it is one, so the row can print it and the verdict
+ * can call a pass over it PROVISIONAL — an estimate that clears a kill number
+ * is not the same claim as a measurement that clears it, and the difference is
+ * exactly what a proceed decision must not lose.
+ */
+const estimated = (value, why, outOf) => ({ value, outOf, estimate: why })
+
+/**
  * A figure is a number or it is absent — and `0` is a MEASUREMENT. `!value`
  * would read a zero-millisecond p95 and a missing one as the same thing, which
  * is the exact confusion this story exists to stop.
@@ -131,8 +145,19 @@ export const CLIENT_WAIT_MS = DEPLOYED_LATENCY_BUDGET_MS * 2
  * and their `all` threshold is the same number because capacity contributes no
  * applicable item to the overall denominator (asserted, not assumed).
  *
- * Latency, cost and correction rate are named at the run level and have no
- * per-kind meaning: one provider call serves whichever kind it was handed.
+ * Latency and cost are named at the run level and have no per-kind meaning:
+ * one provider call serves whichever kind it was handed, at one price.
+ *
+ * THE CORRECTION RATE IS NOT LIKE THEM, and this comment said it was until
+ * #207 measured it. Its unit is a FIGURE the member had to deal with, and every
+ * figure belongs to exactly one kind — so the rate decomposes cleanly, and
+ * *measured 2026-09-07* the two halves came apart: capacity 33.3% against
+ * chores 29.6%, on either side of the kill number. A run-level-only rate would
+ * have reported one number over both and hidden the split the epic exists to
+ * express. The per-kind threshold is the owner's own number unchanged, because
+ * their stated rule is "the same RATE applied to each half" and 30% is already
+ * a rate — the halving that rounds toward strictness applies to counts, and
+ * there are no counts here.
  */
 export const KILL_CONDITIONS = Object.freeze([
   Object.freeze({
@@ -198,7 +223,23 @@ export const KILL_CONDITIONS = Object.freeze([
         isFigure(providerCallP95Ms) ? null : 'the provider call (#206)',
       ].filter(Boolean)
       if (absent.length) return pending(`needs ${absent.join(' and ')}`)
-      return measured(transportP95Ms + providerCallP95Ms)
+      // THE SUM OF TWO p95s IS NOT THE p95 OF THE SUM, and saying so is #207
+      // AC 3's whole point: "summing two p95 figures does not produce the p95
+      // of the sum and claiming otherwise would put a false arithmetic claim
+      // inside the artefact the whole block is judged by".
+      //
+      // Under independence the sum OVERSTATES, because both legs landing in
+      // their own slowest 5% at the same moment is rarer than one leg doing it
+      // — so it is the conservative direction, which is the right way for a
+      // kill number to be wrong. Under positive correlation it can understate;
+      // nothing here measures the correlation, and until the extraction
+      // endpoint exists nothing can, because the two legs have never been in
+      // the same request. That is why this is an estimate and stays one until
+      // #209 times the deployed endpoint end to end.
+      return estimated(
+        transportP95Ms + providerCallP95Ms,
+        'transport p95 + provider p95; the sum of two p95s is not the p95 of the sum',
+      )
     },
   }),
   Object.freeze({
@@ -219,21 +260,32 @@ export const KILL_CONDITIONS = Object.freeze([
     label: 'correction rate',
     direction: 'atMost',
     severity: SEVERITY.KILLS,
-    thresholds: Object.freeze({ all: 0.3 }),
+    thresholds: Object.freeze({ capacity: 0.3, chores: 0.3, all: 0.3 }),
     render: (value) => `${(value * 100).toFixed(1)}%`,
     renderThreshold: (threshold) => `<= ${(threshold * 100).toFixed(0)}%`,
     // The one kill number no corpus can reach: it counts how often a real member
-    // fixes a figure the extraction proposed, so it needs the capture flow in
-    // production. It is carried here anyway, and prints "not measured" until
-    // then, because an axis silently missing from a report reads exactly like an
-    // axis that passed. (#204 AC 1 names six thresholds and omits this one; epic
-    // #217 names it as one of the five. Owner decision at pickup, 2026-08-30:
-    // carry it, so the report is the one place all five live and #207 reads a
-    // complete sheet rather than assembling one from two documents.)
-    measure: (figures) =>
-      isFigure(figures.correctionRate)
-        ? measured(figures.correctionRate)
-        : pending('needs the capture flow in production'),
+    // fixes a figure the extraction proposed, so its ground truth is a person's
+    // judgement rather than an expected value anybody wrote down. It is carried
+    // here and prints "not measured" until there is one, because an axis
+    // silently missing from a report reads exactly like an axis that passed.
+    // (#204 AC 1 names six thresholds and omits this one; epic #217 names it as
+    // one of the five. Owner decision at pickup, 2026-08-30: carry it, so the
+    // report is the one place all five live.)
+    //
+    // #207 measured it from a REVIEW — a member scoring extractions of sentences
+    // they wrote — which is not the same instrument as the capture flow in
+    // production, and is weaker: nobody has yet corrected a figure with the
+    // confirm form in front of them. The figure is real and the caveat travels
+    // with it in `docs/extraction-verdict.md`.
+    //
+    // A bare number is read as the run-level rate and leaves the per-kind rows
+    // unmeasured, rather than quietly reporting the overall figure at both —
+    // which would report capacity's verdict using chores' evidence.
+    measure: (figures, scope) => {
+      const rate = figures.correctionRate
+      const value = rate !== null && typeof rate === 'object' ? rate[scope] : scope === 'all' ? rate : undefined
+      return isFigure(value) ? measured(value) : pending('needs a scored member-sentence run (#207)')
+    },
   }),
 ])
 
@@ -255,9 +307,17 @@ export function killConditionRows(figures, scope) {
     if (reading.pending !== undefined) {
       return { axis, scope, threshold, verdict: VERDICTS.NOT_MEASURED, pending: reading.pending }
     }
-    const { value, outOf } = reading
+    const { value, outOf, estimate } = reading
     const meets = axis.direction === 'atLeast' ? value >= threshold : value <= threshold
-    return { axis, scope, threshold, value, outOf, verdict: meets ? VERDICTS.PASS : VERDICTS.FAIL }
+    return {
+      axis,
+      scope,
+      threshold,
+      value,
+      outOf,
+      estimate,
+      verdict: meets ? VERDICTS.PASS : VERDICTS.FAIL,
+    }
   })
 }
 
@@ -273,10 +333,19 @@ export function verdictOf(rows) {
   const kills = failing.filter((row) => row.axis.severity === SEVERITY.KILLS)
   const narrows = failing.filter((row) => row.axis.severity === SEVERITY.NARROWS)
   const notMeasured = rows.filter((row) => row.verdict === VERDICTS.NOT_MEASURED)
+  // An axis that CLEARS its threshold on an estimate is reported separately
+  // from one that clears it on a measurement — #207 AC 3 requires the verdict
+  // to say "cleared, provisionally cleared pending the deployed endpoint, or
+  // failed", which is three outcomes where `verdict` alone offers two. A FAIL
+  // on an estimate is not provisional in the same way: the conservative
+  // direction of the arithmetic means a failing estimate is the weaker claim,
+  // and it is reported as a fail with its estimate note attached.
+  const provisional = rows.filter((row) => row.verdict === VERDICTS.PASS && row.estimate !== undefined)
   return {
     kills,
     narrows,
     notMeasured,
+    provisional,
     // `complete` is reported separately from the verdict rather than folded into
     // it: "every axis passed" and "every axis anyone has measured passed" are
     // different claims, and the second is the one a stop/proceed call must not

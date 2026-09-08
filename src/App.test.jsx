@@ -67,6 +67,9 @@ const choresApi = {
 // the roster renders from.
 const captureApi = {
   extractCapacity: vi.fn(),
+  // #213 — the chore half, stubbed for the same reason: `proposeChores` is
+  // pure and has its own tests; what App owes is the WIRING.
+  extractChores: vi.fn(),
 }
 
 const capacityApi = {
@@ -121,6 +124,11 @@ const calendarApi = {
   // rule AC 1's trigger is built out of.
   listBusyWeeks: vi.fn(),
   fetchBusyWeek: vi.fn(),
+  // #99 — the impure one. `revokeNoteFor` stays REAL (importActual below) for
+  // the standing reason: it is pure, it has its own tests, and the sentence a
+  // member reads about Google should be the one the app words rather than a
+  // stub's — this file's claim is the WIRING.
+  disconnectCalendar: vi.fn(),
 }
 
 // Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
@@ -281,6 +289,7 @@ beforeEach(() => {
   calendarApi.completeConnect.mockResolvedValue({ ok: true })
   calendarApi.listBusyWeeks.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
+  calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -3811,6 +3820,230 @@ describe('busy figure refreshes itself on app open (#98)', () => {
 // is not a mutation — nothing re-reads and nothing is written until a submit;
 // and that the one submit carries the source through the same setCapacity a
 // typed figure uses, once, followed by the same re-assignment and re-read.
+// #99 — disconnecting, from App.
+//
+// The DELETIONS are the Edge Function's and are proven against a fake client in
+// supabase/functions/calendar-disconnect/handler.test.js; the CONTROL is the
+// roster's and is proven in Roster.test.jsx. What is left, and what this file
+// owes, is the wiring: which household travels with the call, that the screen
+// re-reads the server rather than patching itself, and what a member is told
+// afterwards.
+describe('disconnecting a calendar (#99)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = {
+    id: 'c1',
+    member_id: 'm1',
+    scope: 'freebusy',
+    connected_at: '2026-08-24T00:00:00Z',
+  }
+  /** This week, by the app's own arithmetic in the household's zone. */
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const busyRow = () => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 320,
+    event_count: 6,
+    // NOW, so the row is never stale — #98's refresh trigger keys on age, and a
+    // fixture that aged across the bound mid-run would add a fetch this block
+    // says nothing about. The same reason #96's fixture reads the clock.
+    computed_at: new Date().toISOString(),
+  })
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    calendarApi.listBusyWeeks.mockResolvedValue([busyRow()])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  /**
+   * What the SERVER says once the three rows are gone.
+   *
+   * The point of driving it this way rather than asserting on local state: AC 2
+   * says the connect action returns when the capacity screen RE-RENDERS, and the
+   * only honest way to produce that is to change what the reads answer and let
+   * `mutate()`'s refresh find it — which is what the running app does.
+   */
+  const serverForgets = () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+  }
+
+  /** Both taps of the house confirm idiom. */
+  const disconnect = async () => {
+    await act(
+      async () => void fireEvent.click(inRoster().getByRole('button', { name: /^disconnect$/i })),
+    )
+    await act(
+      async () =>
+        void fireEvent.click(
+          inRoster().getByRole('button', { name: /disconnect google calendar\?/i }),
+        ),
+    )
+  }
+
+  it('AC 1: names the household on screen, and nothing about who', async () => {
+    // The function acts on the CALLER'S own member row, so a member id here
+    // would be a value the server must ignore — `completeConnect` and
+    // `fetchBusyWeek` send none for the same reason.
+    await renderApp('Who')
+    await disconnect()
+    expect(calendarApi.disconnectCalendar).toHaveBeenCalledTimes(1)
+    expect(calendarApi.disconnectCalendar).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('AC 2: the connect action returns and the suggestion goes with the rows', async () => {
+    await renderApp('Who')
+    // The before state, so the after state is a CHANGE rather than an
+    // arrangement that could never have shown either one.
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+
+    serverForgets()
+    await disconnect()
+
+    expect(
+      inRoster().getByRole('button', { name: /connect google calendar/i }),
+    ).toBeInTheDocument()
+    expect(inRoster().queryByText(/calendar connected/i)).not.toBeInTheDocument()
+    expect(inRoster().queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 2: re-reads the server rather than patching what is on screen', async () => {
+    // `mutate()`'s refresh is what produces the state above. Asserting the
+    // re-read is what separates "the screen changed" from "the screen changed
+    // because the server said so" — a locally patched roster would satisfy
+    // every assertion in the test above and show a connected calendar again on
+    // the next reload.
+    await renderApp('Who')
+    const readsBefore = calendarApi.listCalendarConnections.mock.calls.length
+    serverForgets()
+    await disconnect()
+    expect(calendarApi.listCalendarConnections.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('AC 3: the confirmed capacity row is not touched, and the week still reads from it', async () => {
+    // An accepted figure is the member's own whatever produced it. The write
+    // path this story owns can only delete calendar rows, so the assertion is
+    // that a `calendar`-sourced override outlives the disconnect on screen —
+    // and that nothing in App reached for the capacity writers.
+    capacityApi.listCapacity.mockResolvedValue([
+      { id: 'cap1', member_id: 'm1', period_start: week(), minutes: 90, source: 'calendar' },
+    ])
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 90 min')
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent(/set from calendar/i)
+    expect(capacityApi.clearCapacity).not.toHaveBeenCalled()
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: says so when Google could not confirm the revocation', async () => {
+    calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: false })
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    // The sentence is `revokeNoteFor`'s, left REAL in this file's mock, so this
+    // is the wording a member would actually read.
+    expect(inRoster().getByTestId('calendar-note')).toHaveTextContent(/google may still list/i)
+  })
+
+  it('AC 4: says nothing when Google accepted it', async () => {
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: says nothing when there was no credential to revoke', async () => {
+    // `null` is not `false`. A member who never had a grant outstanding must
+    // not be told Google may still hold one.
+    calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: null })
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('a refused disconnect shows the function’s sentence and leaves the connection alone', async () => {
+    calendarApi.disconnectCalendar.mockRejectedValue(
+      new Error('Could not finish disconnecting that calendar. Part of it was removed.'),
+    )
+    await renderApp('Who')
+    await disconnect()
+    expect(screen.getByRole('alert')).toHaveTextContent(/Part of it was removed/)
+    // Still connected, because the reads still say so — and still offering the
+    // control, which is the repair the sentence asks for.
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('clears the calendar complaint, which now describes a calendar the member does not have', async () => {
+    // #99's review, test-vacuity: `setBusyFetchComplaint(null)` in
+    // `handleDisconnectCalendar` was defended by nothing, because every other
+    // case in this block mocks `fetchBusyWeek` resolved and a complaint can
+    // only arise when it REJECTS. So the sentence a member is left looking at
+    // is the thing to arrange first.
+    //
+    // The sentence itself is the Edge Function's own, read off the failure by
+    // `fetchBusyWeek` — "no longer valid. Connect it again." under a row with
+    // no calendar at all is true of nothing.
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    calendarApi.fetchBusyWeek.mockRejectedValue(
+      new Error('That calendar connection is no longer valid. Connect it again.'),
+    )
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/no longer valid/i),
+    )
+
+    serverForgets()
+    await disconnect()
+
+    expect(screen.queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+
+  it('lets a member connect again in the same session and still get a figure', async () => {
+    // #96's trigger is once per (member, week) PER SESSION, and #98's refresh
+    // keeps a second such set. Neither knew about a disconnect until this
+    // story: without clearing them, re-connecting would find the key already
+    // present, fetch nothing, and leave the member looking at a connected
+    // calendar with no figure until they reloaded. Forgetting what was read
+    // includes forgetting that it was asked for.
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    await disconnect()
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+
+    // The calendar comes back — a second consent, landing on the next read.
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(2))
+  })
+})
+
 describe('capacity — described in plain language (#210)', () => {
   const household = {
     id: 'h1',
@@ -3965,6 +4198,125 @@ describe('capacity — described in plain language (#210)', () => {
     await openTheWeekEditor()
     await describeWeek('I have three hours this week')
     expect(screen.getByTestId('proposal-m1')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+// #213 — the chore capture flow, wired. What App owes, as for #210: that a
+// description reaches lib/capture.js with the household ON SCREEN, today on
+// the household's calendar and the person typing (and NOT the Supabase
+// client); that asking is not a mutation — nothing re-reads and nothing is
+// written; and that confirming goes through the same addChores a typed batch
+// uses, with the household on screen and `source: 'extraction'` on every row,
+// followed by the same re-read.
+describe('chores — described in plain language (#213)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const chore = { id: 'c1', household_id: 'h1', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10' }
+  const PROPOSAL = {
+    outcome: 'proposal',
+    rows: [
+      {
+        key: 'proposed-1',
+        title: 'mow the grass',
+        minutes: '45',
+        dueOn: '2026-08-29',
+        problem: null,
+        note: 'Read as “mow the grass”, 45 min, due “Saturday”.',
+        derivedFrom: { title: 'mow the grass', expectedMinutes: 45, dueDate: 'Saturday', repeat: null, assignee: null },
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me])
+    choresApi.listChores.mockResolvedValue([chore])
+    captureApi.extractChores.mockResolvedValue(PROPOSAL)
+  })
+
+  const onTheChores = async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+  }
+
+  const describeChores = async (text) => {
+    fireEvent.change(screen.getByLabelText(/what needs doing this week/i), { target: { value: text } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /work out the chores/i })))
+  }
+
+  it('asks through lib/capture.js with the household on screen, today on its calendar and the person typing — and writes nothing', async () => {
+    await onTheChores()
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(captureApi.extractChores).toHaveBeenCalledTimes(1)
+    expect(captureApi.extractChores).toHaveBeenCalledWith({
+      householdId: 'h1',
+      text: 'takes about 45 min to mow the grass',
+      // Today in America/New_York, as `localTodayIn` says it — the same call
+      // the tab's skip picker is handed, never the phone's zone.
+      todayIso: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      speaker: 'Placeholder One',
+    })
+    // The proposal is on screen, editable, and NOTHING has been written or
+    // re-read: a proposal is not a mutation.
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(choresApi.listChores.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('confirming goes through addChores with the household on screen and source extraction on every row, then re-reads', async () => {
+    choresApi.addChores.mockResolvedValue([{ ok: true, chore: { id: 'n1' } }])
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add these chores/i })))
+
+    expect(choresApi.addChores).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChores).toHaveBeenCalledWith(
+      [{ title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' }],
+      { householdId: household.id },
+    )
+    await waitFor(() => expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(choresApi.addChores.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+    // Everything landed, so the list is gone.
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 6: when the endpoint fails, the typed form is the road in, and it is the SAME add path', async () => {
+    captureApi.extractChores.mockResolvedValue({ outcome: 'failed', sentence: 'The extraction service could not answer.' })
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(screen.getByTestId('capture-failure')).toHaveTextContent(/could not answer/)
+    expect(screen.getByLabelText(/^chore$/i)).toHaveFocus()
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+    expect(choresApi.addChore).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Dishes', expectedMinutes: '20', dueOn: '2026-08-10', householdId: 'h1' }),
+    )
+  })
+
+  it('the proposer never touches the Supabase client from App — it goes through lib/capture.js', async () => {
+    // getSupabase throws in this file's mock, so the flow completing to a
+    // proposal on screen is the assertion — #210's shape.
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

@@ -462,6 +462,24 @@ body {
   opacity: 0.75;
 }
 
+/* What a disconnect could not vouch for — story #99.
+
+   Its own block under the control, because it is a sentence rather than a label
+   and at 360px it wraps to two or three lines: sharing the line with
+   "Connect Google Calendar" would push that button off the row it belongs to.
+
+   Not the `.error` palette, deliberately, and this is the whole judgement in the
+   rule. Nothing went wrong: the member asked Taskr to forget a calendar and it
+   did. What the sentence adds is that the OTHER side of the connection may not
+   have, which is information rather than a fault — the same call
+   `.shell__notice` makes about the catch-up pass, and the opposite of what a red
+   strip would say. */
+.member__calendar-note {
+  display: block;
+  margin-top: 0.25rem;
+  line-height: 1.5;
+}
+
 /* This week's capacity — story #46.
 
    Sits directly under the baseline rather than replacing it: the override is
@@ -905,6 +923,30 @@ body {
 
 .chore-draft {
   border-style: dashed;
+}
+
+/* #213 — what an extracted row was read from, above its fields: the same
+   quiet register as `.capture__derived`, because it is provenance and not a
+   problem. The problem, when there is one, is the red alert under the fields. */
+.chore-draft__note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* #213 — the proposal list inside the capture shell. The shell's proposal
+   box already draws the border; this only stacks the list, its notice and
+   the confirm row so a 360px phone costs height and never width. `width:
+   100%` because `.capture__proposal` aligns its children to the start, and a
+   form left at its content width would let a long draft row set the page
+   width. */
+.chore-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
 }
 
 /* The row's account of its schedule — same dim ink as the due date, because a

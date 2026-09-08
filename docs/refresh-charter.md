@@ -234,6 +234,46 @@ raised this as an open question on #34 rather than deciding it, and the owner to
   a 2-day platform decision that was already taken; #56 closed superseded 2026-08-27, #208 is the
   live endpoint story.)*
 
+### The verdict — 2026-09-07, owner decision (#207)
+
+**NARROW.** The bet is neither killed nor taken whole. Full evidence and every figure in
+[`extraction-verdict.md`](extraction-verdict.md); this is the decision, recorded here because the
+charter is where the bet was made.
+
+- **Chore capture PROCEEDS**, on `claude-haiku-4-5`, subject to three conditions: the contract gains
+  **recurrence** and **assignee**; the capture surface renders `expectedMinutes: 0` as an **empty
+  field** rather than a zero; and the surface **asks a direct question** rather than offering a free
+  text box.
+- **Capacity capture HOLDS** — not proceed, not stop. Its correction rate failed at 33.3%, but on
+  **one correction out of three figures**, which settles nothing in either direction.
+
+**Every kill number the corpus measures cleared** on both configurations — accuracy, refusals,
+overconfidence, due dates, cost — and the deployed-path p95 clears on Haiku as an *estimate*
+(2,626 ms of a 3,000 ms budget; `claude-opus-5` at effort low fails it at every condition measured).
+**The one axis that failed is capacity's correction rate, the axis measured against sentences a real
+household member wrote rather than against a corpus written for the extractor.** It reads 33.3% —
+**one correction out of three figures**, a denominator far too small to settle a kill number in
+either direction, which is exactly why capacity holds rather than stopping. The run-level rate is
+9 of 30, landing **exactly on the 30% ceiling** and passing by nothing at all.
+
+Three things the measurement established that no score expresses, and they are why the verdict is a
+narrow rather than a pass or a stop:
+
+1. **Members describe recurring chores by cadence and one-off chores by duration** — twelve of twelve
+   and four of four, both unprompted. The contract asks only for duration and has nowhere to put a
+   recurrence, though the schema has carried `repeat_kind` since migration `0012`.
+2. **Capacity language exists but is never volunteered.** Asked three times for a description of
+   available time, the owner wrote 25 chore sentences and none about capacity; asked a direct
+   question, they answered immediately and in numbers. A blank "describe your week" box would have
+   collected nothing.
+3. **The contract cannot say who is speaking.** The one successful capacity extraction returned the
+   person as `I`. Attaching the prompting question to the answer was tested and **changed nothing** —
+   the missing field is the speaker, not the question.
+
+This does not disturb the fallback rule above. The manual path exists and works, #52 measured it
+reaching a fair split in one sitting, and the owner recorded there that it **meets ambition 2** — so
+the bet remains an accelerator and a stop verdict would have cost speed rather than the product.
+
 Everything outside that path is deliberately boring, proven technology (owner directive: selectively
 bleeding-edge, one bet).
 
@@ -578,6 +618,12 @@ half turns out not to be worth its days.
 - **Leaving does not revoke the Google grant**, because #99 owns the revoke. The screen says so
   plainly and names it; the alternative coupled an irreversible household action to a calendar
   story's schedule.
+  *(#99 shipped 2026-09-08 and this
+  bullet still holds as written — the two are different acts, and
+  the sentence naming #99 is now naming something that exists rather than something planned.
+  Disconnect asks Google to revoke; LEAVING a household still does not, so a member who wants the
+  grant gone presses Disconnect before they leave. #99's revoke is best-effort besides, so even that
+  act can leave Google holding a grant it says so on screen.)*
 
 **What is not decided here.** How the client scopes a read to one household is deliberately left to a
 measurement story — `members` and `chores` both withhold `household_id` from the client select

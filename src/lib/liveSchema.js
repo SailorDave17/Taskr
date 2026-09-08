@@ -473,11 +473,26 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   'calendar-busy',
   // #210. Invoked by the capacity capture flow (src/lib/capture.js) AHEAD of
   // the function existing — owner decision at pickup, 2026-09-04 — so this
-  // reads NOT DEPLOYED until #208 writes it and #209 deploys it. That red is
-  // the honest state, and it is written down in docs/access-model.md's
-  // excused-red set. `scripts/deploy-function.mjs` lists it as PENDING so a
-  // bare deploy does not try to ship a directory that is not there.
+  // read NOT DEPLOYED with no directory behind it, and `scripts/deploy-function.mjs`
+  // listed it as PENDING so a bare deploy did not try to ship a directory that
+  // was not there. #208 wrote the function (supabase/functions/extract-description)
+  // and moved the name into that script's deployable list; #209 deployed it on
+  // 2026-09-07, so this probe is green and docs/access-model.md's excused-red
+  // set is empty again. What the probe still cannot see is whether the
+  // function's provider secret is set — a preflight carries no body and invokes
+  // nothing, so this row reads the same either way, and what settles it is a
+  // POST with a real session (docs/deploy-runbook.md section 3c). The secret is
+  // deliberately not named here: this file is under `src/`, and gate.test.js
+  // refuses that spelling anywhere the bundler reads.
   'extract-description',
+  // #99. The way back out of #95's connection, and the third function arriving
+  // with no migration that mentions it — `0011` and `0030` created the tables it
+  // deletes from, so both reaching the project says nothing about whether this
+  // is there. RED on purpose until `npm run deploy:function` ships it, exactly
+  // as `calendar-busy` was for #96 and `extract-description` was for #210: the
+  // row exists because a deploy is a step recorded nowhere else, and one
+  // withheld until after the deploy would leave the window it covers uncovered.
+  'calendar-disconnect',
 ])
 
 /**

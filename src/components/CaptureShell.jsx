@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
-import { CAPTURE_OUTCOMES } from '../lib/capture.js'
+import { CAPTURE_OUTCOMES, sentenceOf } from '../lib/capture.js'
 
 // The shared capture shell — story #210 AC 8.
 //
@@ -155,7 +155,7 @@ export default function CaptureShell({
       {swapped ? (
         <div className="capture__failure" data-testid="capture-failure">
           <p className="capture__outcome" role="status">
-            {result.sentence} {manualHint}
+            {sentenceOf(result.sentence)} {manualHint}
           </p>
           <button className="button button--link" type="button" disabled={disabled} onClick={retry}>
             {retryLabel}

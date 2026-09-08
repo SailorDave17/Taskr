@@ -483,11 +483,13 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   it('and service_role reaches only what the Edge Functions need', async () => {
     // Not an audit of every role, which would be a list nobody maintains. This
     // is the one role that bypasses row-level security, so a privilege it holds
-    // is a privilege with nothing else behind it. 0008, 0011 and — since #96 —
-    // 0030 are the only files that grant it anything; this asserts they still
-    // are. Every table on this list is one an Edge Function writes and no client
-    // can, which is why the list is short and why each addition to it is a
-    // decision rather than bookkeeping.
+    // is a privilege with nothing else behind it. 0008, 0011, 0030 and — since
+    // #208 — 0036 are the only files that grant it anything; this asserts they
+    // still are. Every table on this list is one an Edge Function writes and no
+    // client can, which is why the list is short and why each addition to it is
+    // a decision rather than bookkeeping. `extraction_calls` is the first with
+    // fewer than four letters: the function reads the window and appends to
+    // it, and holds neither UPDATE nor DELETE because it does neither.
     const { rows } = await db.query(
       `select table_name, string_agg(distinct privilege_type, ',' order by privilege_type) as privs
         from information_schema.table_privileges
@@ -499,6 +501,7 @@ describe('#91 — the client privileges come from a migration, not from a defaul
       { table_name: 'calendar_busy', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_connections', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_tokens', privs: 'DELETE,INSERT,SELECT,UPDATE' },
+      { table_name: 'extraction_calls', privs: 'INSERT,SELECT' },
     ])
 
     const { rows: memberColumns } = await db.query(

@@ -539,5 +539,8 @@ describe('reconcileTableAcls is the control on the role a revoke could hit by mi
     const covered = MEASURED_TABLE_ACLS.map((entry) => entry.table)
     for (const table of LIVE_TABLES) expect(covered).toContain(table)
     expect(covered).toContain('calendar_tokens')
+    // #208 — the second table the client cannot name, and the same reasoning.
+    expect(covered).toContain('extraction_calls')
+    expect(LIVE_TABLES).not.toContain('extraction_calls')
   })
 })

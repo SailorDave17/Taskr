@@ -16,9 +16,9 @@
 // `kind` is present because the app knows which flow it is in: a capacity
 // update and a chore capture are two different screens, not one guess.
 //
-//     ({ kind: 'capacity', text }) => { kind: 'capacity', minutesByPerson: {...} }
-//     ({ kind: 'chores',   text }) => { kind: 'chores', chores: [{ title, expectedMinutes, dueDate? }] }
-//     (anything)                   => { kind: 'refusal', reason: '...' }
+//     ({ kind: 'capacity', text, speaker? }) => { kind: 'capacity', minutesByPerson: {...} }
+//     ({ kind: 'chores',   text, speaker? }) => { kind: 'chores', chores: [{ title, expectedMinutes, dueDate?, repeat?, assignee? }] }
+//     (anything)                             => { kind: 'refusal', reason: '...' }
 //
 // `dueDate` (#202) is the date AS THE DESCRIPTION STATES IT — 'Tuesday',
 // 'tomorrow', 'the 12th of september', '2026-09-18' — or absent/null where the
@@ -28,6 +28,15 @@
 // failure mode — an invented fact — inside the field that exists to avoid one.
 // The grader normalises the stated form against the item's reference date and
 // compares the result to the corpus's hand-computed expectation.
+//
+// `speaker`, `repeat` and `assignee` arrived with #208, after #207 measured
+// what the two-field chore row and the unattributed capacity map could not
+// carry against real sentences (docs/extraction-verdict.md, "three contract
+// gaps"). All three are OPTIONAL and this grader scores none of them: `repeat`
+// and `assignee` are copied as stated like `dueDate`, and `entitiesOf` refuses
+// only a value of the wrong TYPE, so a chores answer carrying them is graded on
+// exactly what it was graded on before and #206's figures stand. The endpoint
+// (supabase/functions/extract-description) is what reads them.
 //
 // The oracle control below needs to recognise which item it was handed, and it
 // does so by KEYING ON THE TEXT rather than by being passed an id. That is why
@@ -116,6 +125,14 @@ export function entitiesOf(answer, expectedKind) {
     // string boundary dueDates.js exists to hold.
     if (chore.dueDate !== undefined && chore.dueDate !== null && typeof chore.dueDate !== 'string') {
       return null
+    }
+    // #208: the two stated-form fields the widening added get the SAME type
+    // rule and no more — the shape is the contract, and this grader scores
+    // neither value.
+    for (const field of ['repeat', 'assignee']) {
+      if (chore[field] !== undefined && chore[field] !== null && typeof chore[field] !== 'string') {
+        return null
+      }
     }
     const key = normalizeEntity(chore.title ?? '')
     if (!key || entities.has(key)) return null

@@ -84,6 +84,13 @@ import {
   rpcArgNames,
   rpcProbeArgs,
 } from '../lib/liveSchema.js'
+import {
+  REALTIME_PUBLICATION,
+  UNWATCHED_TABLES,
+  WATCHED_TABLE_NAMES,
+  describePublicationError,
+  probePublication,
+} from '../lib/realtime.js'
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
@@ -301,6 +308,11 @@ describe('#250 — the seeded test account still works, said out loud', () => {
 // #246 exists because this file used to leave one permanent auth user per run;
 // now the residue is zero users and zero sessions.
 afterAll(async () => {
+  // #342 — every publication probe removes its own channel; this is the
+  // belt, so a probe that died mid-join cannot leave a socket holding the
+  // process open after the last row is printed.
+  await supabase.removeAllChannels()
+  supabase.realtime.disconnect()
   await supabase.auth.signOut({ scope: 'local' })
 })
 
@@ -588,6 +600,58 @@ describe('#115 AC 5 - POSITIVE CONTROL: the Edge Function check can actually fai
     const line = describeEdgeFunctionError(absent, probe)
     expect(line, 'the gateway answered as though this function exists').toContain('NOT DEPLOYED')
     expect(line).toContain(absent)
+  })
+})
+
+describe('#342 — the live project PUBLISHES every table this app watches for changes', () => {
+  // The gap this closes: a Realtime channel that never receives an event is
+  // indistinguishable from one nothing happened on (cairn:
+  // `an-absent-result-reads-as-a-clean-one`). Every probe above asks whether
+  // a table can be READ; none asks whether a change to it is ever SENT, and the
+  // `supabase_realtime` publication is filled by a migration paste recorded
+  // nowhere else — exactly the shape #78 exists for. So this joins a channel
+  // on each watched table the way a phone does and reads the server's answer:
+  // a table outside the publication is refused at the join, with a message
+  // naming it. RED on purpose, one row per table, until `0037` is applied.
+  //
+  // Read-only, like everything else here: joining a channel inserts nothing
+  // into any household's table (the server records the subscription in its own
+  // `realtime` schema and drops it when the channel is removed), and no event
+  // is awaited — the JOIN is the question, and it is answered whether or not
+  // anything ever changes.
+  it('has tables to check, so an empty pass is impossible', () => {
+    expect(WATCHED_TABLE_NAMES.length).toBeGreaterThanOrEqual(11)
+    expect(WATCHED_TABLE_NAMES).toContain('chores')
+  })
+
+  // One test per table, so a failure names it in the run output.
+  for (const table of WATCHED_TABLE_NAMES) {
+    it(`${table} is in ${REALTIME_PUBLICATION}, so a change to it reaches a phone`, async () => {
+      requireSession()
+      const probe = await probePublication(supabase, table)
+      const line = describePublicationError(table, probe)
+      // Thrown rather than diffed, for #250's reason: the summary line is where
+      // a reader looks, and vitest truncates a diffed string at ~40 characters.
+      if (line) throw new Error(line)
+    })
+  }
+})
+
+describe('#342 AC 6 — POSITIVE CONTROL: the publication check can actually fail', () => {
+  it('reports the one table the client reads and deliberately does NOT watch as unpublished', async () => {
+    // Live rather than synthetic, matching the table, RPC and Edge Function
+    // controls: this proves the join really reaches the server and that the
+    // server really refuses a table outside the publication. The subject is
+    // `member_split_seen`, which `0037` leaves out on purpose — so this row is
+    // ALSO the assertion that the self-scoped table stays unpublished, and a
+    // later migration that adds it (or a dashboard toggle) turns this red.
+    requireSession()
+    const [table] = Object.keys(UNWATCHED_TABLES)
+    expect(table).toBe('member_split_seen')
+    const probe = await probePublication(supabase, table)
+    const line = describePublicationError(table, probe)
+    expect(line, `${table} joined as though it were published`).toContain('NOT PUBLISHED')
+    expect(line).toContain(table)
   })
 })
 

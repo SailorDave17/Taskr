@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildInfo } from './buildInfo.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
+import { attachVisibilityRefresh, createReadQueue, subscribeToHousehold } from './lib/realtime.js'
 import {
   addMember,
   createHousehold,
@@ -58,15 +59,20 @@ import {
   writeSplitSeen,
 } from './lib/announce.js'
 import {
+  GOOGLE_CALENDAR_READONLY_SCOPE,
   busyWeekFor,
   completeConnect,
   connectionFor,
   disconnectCalendar,
   fetchBusyWeek,
+  fetchCalendarEvents,
   isBusyWeekStale,
+  isRealEmailMember,
   listBusyWeeks,
   listCalendarConnections,
+  listCalendarImports,
   readConsentReturn,
+  recordCalendarImport,
   revokeNoteFor,
   startConnect,
 } from './lib/calendar.js'
@@ -185,6 +191,12 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #101 — which calendar events this household has already imported, as the
+  // ledger rows `0038` keeps: an event id and the chore it became, per row, and
+  // nothing out of anybody's calendar. Server state through the same refresh,
+  // read by household, so a second phone's import shows as "already imported"
+  // on this one at the next read.
+  const [calendarImports, setCalendarImports] = useState([])
   // #99 AC 4 — the one thing a disconnect can leave unsaid: Taskr let go and
   // could not tell whether Google did. Held here rather than in the roster row
   // because the row it belongs to has just changed shape — the connection is
@@ -348,6 +360,11 @@ export default function App() {
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
     setConnections(found ? await listCalendarConnections(memberIds) : [])
+    // #101 — the import ledger, read like every other row here and BY
+    // HOUSEHOLD rather than by the member set: a row whose importer has since
+    // left the household (`member_id` null) is still an import the list must
+    // refuse a second time, and a member-scoped read would drop it.
+    setCalendarImports(found ? await listCalendarImports(found.id) : [])
     // #96 — the derived figures, read like every other row here. Its OWN
     // try/catch, and that is not decoration: `0030` is unapplied on the live
     // project until somebody pastes it, and an unguarded read of a missing
@@ -466,6 +483,19 @@ export default function App() {
     return found
   }, [])
 
+  // #342 — EVERY read goes through one queue: one in flight at a time, and a
+  // request that lands while one is running schedules exactly one more. Until
+  // this story `refresh()` had one caller class — this device's own writes —
+  // and two writes never overlapped. Now a write's own re-read, the Realtime
+  // echo of that write arriving a moment later, and a focus event can all ask
+  // within the same second, and without the queue each would run the full
+  // eleven-round-trip read concurrently. The queue is what AC 5 names: an
+  // own write followed by its echo is two reads, not three, and any number of
+  // echoes during one read is still two. `refresh` itself is unchanged; this
+  // is the only place it is called.
+  const reads = useMemo(() => createReadQueue(refresh), [refresh])
+  const requestRefresh = useCallback(() => reads.request(), [reads])
+
   useEffect(() => {
     let cancelled = false
 
@@ -577,7 +607,7 @@ export default function App() {
           catchUpComplaint = err.message
         }
 
-        const found = await refresh()
+        const found = await requestRefresh()
         if (!cancelled) {
           // #154 — the entry decision has ONE implementation, beside the screen
           // it picks, and its three branches are proven in Onboarding.test.jsx.
@@ -603,7 +633,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [refresh])
+  }, [requestRefresh])
 
   /**
    * Run a mutation, then re-read from the server rather than patching local
@@ -617,7 +647,7 @@ export default function App() {
       setError(null)
       try {
         const result = await action()
-        const found = await refresh()
+        const found = await requestRefresh()
         setStatus(found ? 'joined' : 'onboarding')
         return result
       } catch (err) {
@@ -627,7 +657,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [refresh],
+    [requestRefresh],
   )
 
   // #154 — ONE step, and the account is no longer part of it. Until this story
@@ -666,7 +696,7 @@ export default function App() {
       try {
         const result = await signUpOrganizer(credentials)
         if (result.session) {
-          const found = await refresh()
+          const found = await requestRefresh()
           setStatus(found ? 'joined' : 'onboarding')
         }
         return result
@@ -677,7 +707,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [refresh],
+    [requestRefresh],
   )
   const handleSignIn = useCallback(
     (credentials) => {
@@ -1112,14 +1142,14 @@ export default function App() {
     (runId) =>
       mutate(() => finishRun(shoppingClient(), runId)).catch(async (err) => {
         try {
-          const found = await refresh()
+          const found = await requestRefresh()
           setStatus(found ? 'joined' : 'onboarding')
         } catch {
           // Deliberately swallowed — see above.
         }
         throw err
       }),
-    [mutate, refresh],
+    [mutate, requestRefresh],
   )
 
   // #359 — the history read, and the ONE read on this screen that `refresh()`
@@ -1164,10 +1194,12 @@ export default function App() {
   // stamped row, so no migration was needed to get it.
   //
   // What the departure costs, stated rather than hidden: another phone's ticks
-  // are not picked up by this one until the next arrival on the tab. That is
-  // exactly what the epic's decision 3 — re-read on open, no Realtime — already
-  // says about every other row on this surface, so the tick is now consistent
-  // with the tab rather than with `mutate()`.
+  // are not picked up by this one until the next re-read. When this was
+  // written that meant the next arrival on the tab, which is what the epic's
+  // decision 3 — re-read on open, no Realtime — said about every other row on
+  // this surface; since #342 reversed decision 3, the other phone's tick is a
+  // `shopping_items` change on the household channel and arrives as a
+  // background re-read within seconds. The tick itself still does not re-read.
   //
   // The refusal path IS the full re-read, and it is not a consolation prize: a
   // refusal ("item already bought") is the one moment this phone knows its
@@ -1190,7 +1222,7 @@ export default function App() {
       } catch (err) {
         setError(err.message)
         try {
-          const found = await refresh()
+          const found = await requestRefresh()
           setStatus(found ? 'joined' : 'onboarding')
         } catch {
           // Deliberately swallowed. The refusal above is the sentence that
@@ -1202,7 +1234,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [refresh],
+    [requestRefresh],
   )
   const handlePurchaseShoppingItem = useCallback(
     (itemId) => tickItem(() => purchaseItem(shoppingClient(), itemId)),
@@ -1302,7 +1334,71 @@ export default function App() {
       }),
     [householdId, household, myName],
   )
-  const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
+  const myConnection = myMemberId ? connectionFor(connections, myMemberId) : null
+  const isConnected = Boolean(myConnection)
+
+  // #101 — the three handlers behind "Import from calendar" on the Chores tab.
+  //
+  // Listing is NOT routed through `mutate()`, for #210's reason: nothing is
+  // written by reading a week of events, so there is no change to re-read and
+  // no `busy` to set over the tab — the import section carries its own pending
+  // state. The household and the week are the ones THIS SCREEN is showing
+  // (#159's rule); who it is about is `auth.uid()` off the JWT, so the body
+  // names no member and there is no version of this call that reads a
+  // housemate's calendar.
+  const handleFetchCalendarEvents = useCallback(
+    () => fetchCalendarEvents({ householdId, periodStart }),
+    [householdId, periodStart],
+  )
+  // The incremental consent — AC 1. The SAME flow `handleConnectCalendar`
+  // starts, with the wider scope named: same state token, same household in
+  // storage, same return through `completeConnect`, so `calendar-connect`
+  // upserts the token and the connection row with what Google now grants and
+  // the import section reads the widened scope off the row. Not through
+  // `mutate()` either — the browser leaves for Google and the write happens
+  // in the Edge Function when it comes back.
+  const handleWidenCalendarConsent = useCallback(() => {
+    setError(null)
+    setCalendarRevokeNote(null)
+    try {
+      globalThis.location.assign(
+        startConnect({ householdId: household?.id, scope: GOOGLE_CALENDAR_READONLY_SCOPE }),
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [household])
+  // The import itself — AC 3, AC 4, AC 5. ONE `mutate()`, TWO writes, in this
+  // order: the chore through the same `addChore` a typed chore uses, with
+  // `source: 'calendar'` the one thing this adds to a typed call; then the
+  // ledger row naming the event id and the chore it became. The order is the
+  // whole of how two phones importing the same event in the same second
+  // resolve — `0038`'s unique constraint refuses the SECOND ledger insert, and
+  // that refusal alone (`alreadyImported`, never a network failure) removes the
+  // chore this device just created, because a chore that landed with a ledger
+  // row that could not be written for any other reason is one the household
+  // still wants. The refusal's sentence then reaches the error strip through
+  // `mutate()` like any other refused write, which is AC 5's "shown as already
+  // imported" on the phone that lost.
+  const handleImportEvent = useCallback(
+    (chore, calendarEventId) =>
+      mutate(async () => {
+        const saved = await addChore({ ...chore, source: 'calendar', householdId: household?.id })
+        try {
+          await recordCalendarImport({
+            householdId: household?.id,
+            memberId: myMemberId,
+            calendarEventId,
+            choreId: saved?.id,
+          })
+        } catch (err) {
+          if (err?.alreadyImported && saved?.id) await removeChore(saved.id)
+          throw err
+        }
+        return saved
+      }),
+    [mutate, household, myMemberId],
+  )
   const myBusyWeek =
     myMemberId && periodStart ? busyWeekFor(busyWeeks, myMemberId, periodStart) : null
   const hasBusyRow = Boolean(myBusyWeek)
@@ -1315,6 +1411,51 @@ export default function App() {
   // name the household without the effect re-running on every refresh.
   const memberIdsKey = members.map((m) => m.id).join(',')
   const memberIds = useMemo(() => (memberIdsKey ? memberIdsKey.split(',') : []), [memberIdsKey])
+
+  // #342 — a read nobody pressed a button for. Through the same queue as every
+  // other read, so it coalesces with a write's own re-read; its failure lands
+  // on the error strip rather than being swallowed (a red nobody can see is how
+  // a fault stays unfound) and rather than being thrown, since nothing is
+  // awaiting it. `busy` is deliberately NOT set: a re-read another phone caused
+  // must not grey out the controls under this person's thumb.
+  const readInBackground = useCallback(() => {
+    requestRefresh().catch((err) => setError(err.message))
+  }, [requestRefresh])
+
+  // #342 AC 1 — the phone that was in a pocket. When the tab becomes visible
+  // again or the window regains focus, re-read — debounced inside the helper,
+  // so the pair of events a return to the tab fires is one read. Only while
+  // JOINED: a person on the sign-in screen has nothing to re-read, and the
+  // onboarding screens make their own reads.
+  useEffect(() => {
+    if (status !== 'joined') return undefined
+    return attachVisibilityRefresh(readInBackground)
+  }, [status, readInBackground])
+
+  // #342 AC 2 and AC 3 — the phone on the counter. One Realtime channel for
+  // the household on screen, filtered to it on the server; every change it
+  // lets through is a re-read, and a re-join after a drop is a re-read too,
+  // because that is the catch-up for whatever was missed while the socket was
+  // down. Keyed on the household ID and the roster's ids (the member-scoped
+  // tables are filtered by them), never on the objects `refresh()` replaces
+  // every time — the same lesson the busy-week effect below records. Closed by
+  // the cleanup on sign-out (status leaves `joined`) and on a household switch
+  // (`householdId` changes), which is the whole of "opened on join and closed
+  // on sign-out or household switch".
+  useEffect(() => {
+    // The household id alone decides it: `refresh()` sets it and `joined`
+    // together, and a sign-out clears it in the same read that leaves `joined`.
+    if (!householdId) return undefined
+    const live = subscribeToHousehold({
+      householdId,
+      memberIds,
+      onChange: readInBackground,
+      onReconnect: readInBackground,
+    })
+    return () => {
+      live.close()
+    }
+  }, [householdId, memberIds, readInBackground])
 
   // What happens AFTER either trigger decides to ask — one function, because
   // #96's first read and #98's refresh differ only in WHEN, and two copies of
@@ -1660,6 +1801,15 @@ export default function App() {
           onAdd={handleAddChore}
           onAddMany={handleAddChores}
           onPropose={handleProposeChores}
+          // #101 — the import control mounts for the signed-in member's OWN
+          // connection only, and only where they could have consented at all
+          // (a real address; the PIN discriminator `0007` established). A
+          // housemate's connection is not this phone's to import from.
+          calendarConnection={me && isRealEmailMember(me) ? myConnection : null}
+          calendarImports={calendarImports}
+          onFetchCalendarEvents={handleFetchCalendarEvents}
+          onWidenCalendarConsent={handleWidenCalendarConsent}
+          onImportEvent={handleImportEvent}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

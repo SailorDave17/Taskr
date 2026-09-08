@@ -129,6 +129,17 @@ const calendarApi = {
   // member reads about Google should be the one the app words rather than a
   // stub's — this file's claim is the WIRING.
   disconnectCalendar: vi.fn(),
+  // #101 — the three impure ones. `hasEventReadScope`, `eventChorePrefill`,
+  // `importedEventIds` and `startConnect` stay REAL for the standing reason —
+  // pure (or pure over an injected storage), own tests — so the consent URL
+  // these tests read is the one the app would send somebody to, and the
+  // prefill the form shows is the one the data layer computes. The fakes
+  // RECORD THEIR ARGUMENTS: `recordCalendarImport` is asserted with the chore
+  // id `addChore` returned, because a fake recording only the call could not
+  // tell a ledger row naming the chore from one naming nothing.
+  listCalendarImports: vi.fn(),
+  fetchCalendarEvents: vi.fn(),
+  recordCalendarImport: vi.fn(),
 }
 
 // Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
@@ -243,6 +254,26 @@ vi.mock('./lib/shopping.js', async () => {
   return { ...actual, ...shoppingApi }
 })
 
+// #342 — only the IMPURE half is stubbed: `subscribeToHousehold` opens a
+// websocket. `attachVisibilityRefresh` and `createReadQueue` stay REAL
+// (importActual below) — pure over the DOM and over promises, with their own
+// tests in `realtime.test.js` — because what App owes here is the WIRING: when
+// the channel opens and closes, what household and roster it is handed, and
+// that a change, a re-join or a focus event is a read through the same queue
+// as a write. The fake RECORDS ITS ARGUMENTS and hands back a `close` the
+// tests can see, for the standing reason (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`): a fake that only
+// recorded the call could not tell a channel on the household on screen from
+// one on the first household by name, nor a channel closed on sign-out from
+// one left open.
+const realtimeApi = {
+  subscribeToHousehold: vi.fn(),
+}
+vi.mock('./lib/realtime.js', async () => {
+  const actual = await vi.importActual('./lib/realtime.js')
+  return { ...actual, ...realtimeApi }
+})
+
 const { default: App } = await import('./App.jsx')
 
 // The REAL pure halves, for building #50's expected snapshot the same way
@@ -290,6 +321,11 @@ beforeEach(() => {
   calendarApi.listBusyWeeks.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
   calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
+  // #101 — nothing imported yet, which is the ordinary state; the import tests
+  // override this.
+  calendarApi.listCalendarImports.mockResolvedValue([])
+  calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [] })
+  calendarApi.recordCalendarImport.mockResolvedValue({ id: 'i1' })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -342,6 +378,10 @@ beforeEach(() => {
     needsConfirmation: false,
   })
   api.signOut.mockResolvedValue(undefined)
+  // #342 — a channel that opens and can be closed, and nothing arrives on it
+  // unless a test pushes something through the handlers it recorded.
+  realtimeApi.subscribeToHousehold.mockReset()
+  realtimeApi.subscribeToHousehold.mockImplementation(() => ({ close: vi.fn() }))
 })
 
 afterEach(() => {
@@ -5116,5 +5156,447 @@ describe('#360 — archiving a list, from App', () => {
     expect(within(shop()).queryByText(/no shopping list yet/i)).not.toBeInTheDocument()
     expect(within(shop()).getByText(/every list is put away/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+  })
+})
+
+// #342 — the REAL debounce constant, through the same importActual the mock
+// spreads, so the wait below is the app's and not a number copied here.
+const actualRealtime = await vi.importActual('./lib/realtime.js')
+
+describe('#342 — the app updates itself when the household changes', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 90, claimed_by: null },
+  ]
+  const chore = {
+    id: 'c1',
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue(roster)
+    choresApi.listChores.mockResolvedValue([chore])
+    // jsdom reports the page as visible only when told to; the handler reads
+    // this property, so it is pinned per test and removed after.
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+  afterEach(() => {
+    delete document.visibilityState
+  })
+
+  /** The arguments of the most recent channel App opened. */
+  const channel = () => realtimeApi.subscribeToHousehold.mock.calls.at(-1)[0]
+  /** The `close` of the n-th channel App opened. */
+  const closeOf = (n) => realtimeApi.subscribeToHousehold.mock.results[n].value.close
+  /** How many full reads have run — `currentHousehold` is `refresh()`'s first call. */
+  const reads = () => api.currentHousehold.mock.calls.length
+  const joined = () => screen.findByRole('button', { name: 'Chores' })
+  const pause = (ms) => act(async () => void (await new Promise((r) => setTimeout(r, ms))))
+
+  it('AC 2: opens ONE channel on the household on screen, scoped by its roster, once joined', async () => {
+    await renderApp()
+    await joined()
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    // The household and the member ids travel — the server filters on them.
+    expect(channel()).toMatchObject({ householdId: 'h1', memberIds: ['m1', 'm2'] })
+    expect(typeof channel().onChange).toBe('function')
+    expect(typeof channel().onReconnect).toBe('function')
+  })
+
+  it('opens no channel for a person who is signed out, nor for one with no household yet', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(realtimeApi.subscribeToHousehold).not.toHaveBeenCalled()
+    cleanup()
+    api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+    api.currentHousehold.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+    expect(realtimeApi.subscribeToHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: a change another phone made is a full re-read, with nobody pressing anything', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    const chorReadsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    // The whole of refresh(), not a patch from the payload: the chores were
+    // re-read too, and the payload carried none of them.
+    await waitFor(() => expect(choresApi.listChores.mock.calls.length).toBe(chorReadsBefore + 1))
+  })
+
+  it('AC 3: a re-join after a drop is a re-read — the catch-up for what was missed', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => void channel().onReconnect())
+    await waitFor(() => expect(reads()).toBe(before + 1))
+  })
+
+  it('AC 5: an own write followed by its echoes is TWO reads, never one per echo', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+    // Hold the write's own re-read open, so the echoes land while it is in flight.
+    let release
+    api.currentHousehold.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(household)
+        }),
+    )
+    const before = reads()
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    // Three echoes — the insert on `chores`, say, seen through three bindings
+    // or three phones' worth of the same second — while the write's read runs.
+    await act(async () => {
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+    })
+    // Nothing ran concurrently with the read in flight.
+    expect(reads()).toBe(before + 1)
+    await act(async () => void release())
+    // Exactly one more, for all three.
+    await waitFor(() => expect(reads()).toBe(before + 2))
+    await pause(30)
+    expect(reads()).toBe(before + 2)
+  })
+
+  it('AC 5: an echo that lands AFTER the write has re-read is a read of its own', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 2))
+  })
+
+  it('AC 1: the tab coming back is ONE read, however many focus events it fires', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+      window.dispatchEvent(new Event('focus'))
+    })
+    // Debounced: nothing has run yet.
+    expect(reads()).toBe(before)
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    await pause(actualRealtime.REFRESH_DEBOUNCE_MS * 2)
+    expect(reads()).toBe(before + 1)
+  })
+
+  it('AC 1: a focus event on the sign-in screen reads nothing', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+    })
+    await pause(actualRealtime.REFRESH_DEBOUNCE_MS * 2)
+    expect(api.currentHousehold).not.toHaveBeenCalled()
+  })
+
+  it('closes the channel on sign-out, and opens none for the screen that follows', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    const close = closeOf(0)
+    expect(close).not.toHaveBeenCalled()
+    // After the sign-out the server has no household for nobody.
+    api.currentHousehold.mockResolvedValue(null)
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+  })
+
+  it('a household switch closes the old channel and opens one on the new household', async () => {
+    await renderApp()
+    await joined()
+    const close = closeOf(0)
+    // There is no switcher yet (#253); what `currentHousehold()` returns IS the
+    // seam it will replace, so the switch is the read coming back different.
+    api.currentHousehold.mockResolvedValue({ ...household, id: 'h2' })
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'households' }))
+    await waitFor(() => expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(2))
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(channel()).toMatchObject({ householdId: 'h2', memberIds: ['m1', 'm2'] })
+  })
+
+  it('a roster change re-scopes the channel to the new member set, and a re-read that changes nothing does not', async () => {
+    await renderApp()
+    await joined()
+    // A re-read returning the same ids: refresh() hands back new objects, and
+    // the channel must not be torn down for them.
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(2))
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    expect(closeOf(0)).not.toHaveBeenCalled()
+    // A member joins on another phone.
+    api.listMembers.mockResolvedValue([
+      ...roster,
+      { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null },
+    ])
+    await act(async () => void channel().onChange({ eventType: 'INSERT', table: 'members' }))
+    await waitFor(() => expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(2))
+    expect(closeOf(0)).toHaveBeenCalledTimes(1)
+    expect(channel().memberIds).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('a failed background read lands on the error strip and takes nothing else down', async () => {
+    await renderApp()
+    await joined()
+    api.currentHousehold.mockRejectedValueOnce(new Error('the network went away for a moment'))
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    expect(await screen.findByText(/the network went away for a moment/)).toBeInTheDocument()
+    // Still the joined shell, still listening.
+    expect(screen.getByRole('button', { name: 'Chores' })).toBeInTheDocument()
+    expect(closeOf(0)).not.toHaveBeenCalled()
+  })
+})
+
+// #101 — importing a calendar event as a chore, at the level only App can
+// answer: the WIRING. Chores.test.jsx covers what the section DRAWS and which
+// handler a tap reaches; everything here is about what App does with that —
+// which read fills the "already imported" marks, which write the confirm
+// reaches and in what order, and what happens on the phone that loses the race.
+describe('importing a calendar event as a chore (#101)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
+  const READONLY = 'https://www.googleapis.com/auth/calendar.readonly'
+  const narrow = { id: 'c1', member_id: 'm1', scope: FREEBUSY, connected_at: '2026-08-24T00:00:00Z' }
+  const widened = { ...narrow, scope: `${FREEBUSY} ${READONLY}` }
+  const event = {
+    id: 'evt-1',
+    title: 'Placeholder Event',
+    start: '2026-09-10T17:00:00.000Z',
+    end: '2026-09-10T18:30:00.000Z',
+    allDay: false,
+    durationMinutes: 90,
+    dueOn: '2026-09-10',
+  }
+
+  let assign
+  let realLocation
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    assign = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', hash: '', assign },
+    })
+    globalThis.sessionStorage?.clear?.()
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([widened])
+    calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [event] })
+    choresApi.addChore.mockResolvedValue({ id: 'c-new', title: 'Placeholder Event' })
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+  })
+
+  const inChores = () => within(screen.getByRole('region', { name: /what needs doing/i }))
+  const openImport = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import from calendar/i })),
+    )
+  const pickEvent = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import placeholder event/i })),
+    )
+  const submitAdd = () =>
+    act(async () => void fireEvent.click(inChores().getByRole('button', { name: /add chore/i })))
+
+  it('reads the import ledger BY HOUSEHOLD on every refresh, like every other row', async () => {
+    await renderApp('Chores')
+    expect(calendarApi.listCalendarImports).toHaveBeenCalledWith('h1')
+  })
+
+  it('offers the import on the Chores tab to a member whose OWN calendar is connected', async () => {
+    await renderApp('Chores')
+    expect(inChores().getByRole('button', { name: /import from calendar/i })).toBeInTheDocument()
+  })
+
+  it('offers nothing when only a housemate is connected — their calendar is not this phone’s to read', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([{ ...widened, member_id: 'm2' }])
+    await renderApp('Chores')
+    expect(inChores().queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a free/busy-only connection gets the consent step, and Allow leaves for Google with the readonly scope ADDED', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([narrow])
+    await renderApp('Chores')
+    await openImport()
+    expect(inChores().getByTestId('import-consent')).toBeInTheDocument()
+    // Nothing was asked of the Edge Function: the row already says the scope
+    // is too narrow, and a call would only be refused.
+    expect(calendarApi.fetchCalendarEvents).not.toHaveBeenCalled()
+
+    await act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /allow reading events/i })),
+    )
+    expect(assign).toHaveBeenCalledTimes(1)
+    const url = new URL(assign.mock.calls[0][0])
+    // `startConnect` is REAL here, so this is the URL the app would send.
+    expect(url.searchParams.get('scope')).toBe(READONLY)
+    expect(url.searchParams.get('include_granted_scopes')).toBe('true')
+    expect(url.searchParams.get('prompt')).toBe('consent')
+    // The household on screen travels with the state, so the widened token
+    // lands on the connection the member was looking at (#161's rule).
+    expect(globalThis.sessionStorage.getItem('taskr.calendar.consent-household')).toBe('h1')
+  })
+
+  it('AC 2: opening the section asks the function for THIS household and THIS week, and lists what came back', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await waitFor(() => expect(calendarApi.fetchCalendarEvents).toHaveBeenCalledTimes(1))
+    const [call] = calendarApi.fetchCalendarEvents.mock.calls
+    expect(call[0].householdId).toBe('h1')
+    expect(call[0].periodStart).toBe(actualCapacity.periodStartFor(new Date(), household.timezone))
+    expect(await inChores().findByText('Placeholder Event')).toBeInTheDocument()
+    // Listing wrote nothing: no addChore, no ledger row.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(calendarApi.recordCalendarImport).not.toHaveBeenCalled()
+  })
+
+  it('AC 3 / AC 4: Use prefills the form, and Add writes the chore through addChore with source calendar, THEN the ledger row naming it', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+
+    // The prefill is the data layer's, shown in the form the member already knows.
+    expect(inChores().getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(inChores().getByLabelText(/expected minutes/i)).toHaveValue(90)
+    expect(inChores().getByLabelText(/^due$/i)).toHaveValue('2026-09-10')
+    expect(inChores().getByTestId('import-source')).toHaveTextContent(/from your calendar/i)
+    // Nothing written by picking.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+
+    // The member edits the minutes — editable before save is the criterion —
+    // and confirms with the ordinary Add.
+    fireEvent.change(inChores().getByLabelText(/expected minutes/i), { target: { value: '60' } })
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChore).toHaveBeenCalledWith({
+      title: 'Placeholder Event',
+      expectedMinutes: '60',
+      dueOn: '2026-09-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
+      source: 'calendar',
+      householdId: 'h1',
+    })
+    expect(calendarApi.recordCalendarImport).toHaveBeenCalledWith({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'evt-1',
+      choreId: 'c-new',
+    })
+    // ORDER: the chore first, then the row naming it — the ledger needs the id
+    // the write returned, and this is what makes the race resolve the way
+    // 0038's header says.
+    expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      calendarApi.recordCalendarImport.mock.invocationCallOrder[0],
+    )
+    // No second write path: addChores was never touched.
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    // And the screen re-read, like every other write.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('AC 5: already-imported events are marked from the ledger and offer no Use', async () => {
+    calendarApi.listCalendarImports.mockResolvedValue([
+      { id: 'i1', household_id: 'h1', member_id: 'm2', calendar_event_id: 'evt-1', chore_id: 'c9' },
+    ])
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    expect(inChores().getByTestId('imported-evt-1')).toHaveTextContent(/already imported/i)
+    expect(
+      inChores().queryByRole('button', { name: /import placeholder event/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('AC 5: on the phone that LOSES the race, the ledger’s refusal removes the chore just created and says so', async () => {
+    const refused = new Error('That event is already on the list as a chore.')
+    refused.alreadyImported = true
+    calendarApi.recordCalendarImport.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).toHaveBeenCalledWith('c-new')
+    expect(await inChores().findByText(/already on the list as a chore/i)).toBeInTheDocument()
+  })
+
+  it('a ledger failure for any OTHER reason leaves the chore standing — the household still wants it', async () => {
+    calendarApi.recordCalendarImport.mockRejectedValue(
+      new Error('recording the import: the network went away'),
+    )
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).not.toHaveBeenCalled()
+    expect(await inChores().findByText(/the network went away/i)).toBeInTheDocument()
+  })
+
+  it('a stale connection row: the function’s own scope refusal lands as the consent step, not as an outage', async () => {
+    const refused = new Error(
+      'This calendar is connected for free/busy only. Allow Taskr to read events to import one.',
+    )
+    refused.needsScope = true
+    calendarApi.fetchCalendarEvents.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    expect(await inChores().findByTestId('import-consent')).toBeInTheDocument()
+    expect(inChores().getByRole('button', { name: /allow reading events/i })).toBeInTheDocument()
   })
 })

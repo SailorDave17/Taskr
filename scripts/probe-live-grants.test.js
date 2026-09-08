@@ -153,6 +153,11 @@ describe('what it asks for — AC 3', () => {
       'shopping_lists',
       'shopping_runs',
       'shopping_items',
+      // #101 — the import ledger, in the same change that adds it to
+      // LIVE_SCHEMA. What `authenticated` holds on it is decided in `0038`
+      // (select and insert, both by column) and asserted in
+      // `MEASURED_TABLE_ACLS` as an absence at table level.
+      'calendar_imports',
     ])
   })
 

@@ -355,9 +355,14 @@ export function reduceBusy(
  * revoked connection is the member's problem to re-connect, an unreachable
  * endpoint is nobody's, and a single generic sentence sends whoever is holding
  * the phone to the wrong place. AC 5 renders these next to the last figure.
+ *
+ * EXPORTED since #101: `calendar-events/handler.ts` spends the same stored
+ * token against a different Google endpoint and imports this rather than
+ * carrying a second copy of the exchange and its four sentences. Only `fetch`
+ * is read off `deps`, which the type says.
  */
-async function accessTokenFor(
-  deps: CalendarBusyDeps,
+export async function accessTokenFor(
+  deps: Pick<CalendarBusyDeps, 'fetch'>,
   { refreshToken, clientId, clientSecret }: Record<string, string>,
 ): Promise<{ ok: true; accessToken: string } | { ok: false; message: string; status: number }> {
   let response: Response

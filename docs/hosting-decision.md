@@ -459,6 +459,63 @@ read back as `1` to prove the restore. Pin adb to the USB serial before doing th
 advertises itself over wireless debugging, that transport is the one that dies with the radio, and a
 bare `adb` refuses with *"more than one device/emulator"* while both are listed.
 
+## Realtime on the Free plan — #342, 2026-09-08
+
+#342 opens **one Supabase Realtime channel per phone**, subscribed to `postgres_changes` on the
+eleven tables the client reads (`WATCHED_TABLE_NAMES` in `src/lib/realtime.js`), so a change one
+phone makes reaches the others without a reload. Realtime is metered separately from the database,
+and these are the numbers a household of **≤10 phones** is designed against — read off
+`supabase.com/docs/guides/realtime/quotas` and `…/manage-your-usage/realtime-messages` on
+2026-09-08, not from memory.
+
+| Realtime quota | Free | Pro |
+|---|---|---|
+| Peak concurrent connections | **200** | 500 |
+| Messages per month | **2,000,000** | 5,000,000 |
+| Messages per second | 100 | 500 |
+| Channel joins per second | 100 | 500 |
+| Postgres Changes payload | 1,024 KB | 1,024 KB |
+
+**What a message is.** "Each database change counts as one message per client that listens to the
+event." Heartbeats and joins are not listed as counted; the page does not say so in as many words,
+and that is stated here as the one soft number rather than assumed away.
+
+**Connections.** One websocket per open app, joined or not-yet-joined alike (the channel opens on
+join and closes on sign-out). Ten phones is 10 of 200. The household this app is built for could
+run **twenty** such households before the connection ceiling, and a PWA left open on a counter
+counts as one all day.
+
+**Messages, the arithmetic.** A change is delivered once per *listening* phone, after the server has
+run each table's RLS for that subscriber — so the count is (events per write) × (phones listening).
+The writes here are small: a Done press is one `chores` UPDATE; adding a chore one INSERT; the
+biggest single write is a re-balance, which is one `chores` UPDATE **per chore it moves**
+(`apply_assignments`, `0018`). Taking a deliberately heavy week — **100 writes a day**, averaging
+**3 events each** (a re-balance moving a dozen chores now and then, most writes one row), heard by
+**10 phones** — is 100 × 3 × 10 = **3,000 messages a day, ~90,000 a month**, against 2,000,000:
+**4.5 %** of the Free quota, which is ~22 such households. Doubling every assumption at once (200
+writes, 6 events, 20 phones) is 720,000 a month, still under the ceiling with room; the number that
+breaks it is phones, since the count is linear in listeners and a household does not have more than
+ten of them.
+
+**The unfiltered DELETE bindings do not change the arithmetic in kind.** A delete is broadcast to
+every authenticated subscriber of that table (the platform applies no RLS to a delete and a
+default-identity old record carries only the primary key — `0037`'s header and
+`docs/access-model.md` carry why), so on a project holding several households a delete in one is a
+message to the phones of all of them. Deletes here are rare (a removed chore, a cleared override, a
+removed member) and a message is one id; at the two-or-three-household scale this project runs, it
+is noise on the figure above rather than a term in it.
+
+**Kill condition, so the arithmetic can be found wrong rather than believed.** The dashboard's
+Realtime usage page (Project → Settings → Usage → Realtime) is the instrument; nothing in the repo
+can read it. If **monthly messages exceed 400,000** (20 % of the quota, four times the heavy-week
+estimate) for the household this app serves, or **peak connections exceed 30** with fewer than ten
+phones, the estimate above is wrong in a way the design has to answer: the first remedy is
+narrowing what is watched (a table that changes often and matters little, `calendar_busy`'s hourly
+rows for instance, leaves `WATCHED_TABLES` by joining `UNWATCHED_TABLES` with a reason); the second
+is Broadcast, which the platform recommends past ~3,000 subscribers on one change and which this
+household is nowhere near. Nothing here needs the Pro plan, and nothing here is pg_cron: the
+subscription is a client holding a socket open, and a paused project simply has no listeners.
+
 ## What is not done
 
 *(The 2026-08-04 record. Done 2026-08-05 — both accounts exist and the app has deployed against

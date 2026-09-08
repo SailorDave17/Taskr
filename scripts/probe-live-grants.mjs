@@ -521,6 +521,13 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // is what this control exists to report.
   Object.freeze({ table: 'calendar_busy', authenticated: null }),
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
+  // #101, arriving with `0038` — the import ledger, and the first calendar
+  // table the CLIENT writes: select and insert are both granted BY COLUMN, so
+  // the table-level reading is an absence like the two rows above it, and a
+  // letter appearing here for `authenticated` would mean a later migration
+  // granted a whole-row privilege nobody decided on. Red as *not there* until
+  // the apply, the same way `extraction_calls` was for `0036`.
+  Object.freeze({ table: 'calendar_imports', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
   // The three below moved with `0019` (#227), and it has been APPLIED —

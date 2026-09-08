@@ -277,8 +277,20 @@ describe('extractCapacity — the impure half, with the transport injected (AC 2
       householdId: 'h1',
       kind: 'capacity',
       text: 'Sam only has half an hour this week.',
+      // #208 — the ROW's name, so the endpoint can tell the model who "I" is.
+      // The row, not the caller: an organizer can type on another member's
+      // row, and `proposeCapacity`'s first rule attributes by this name.
+      speaker: 'Sam',
     })
     expect(options.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('sends no speaker for a row with no name, rather than an empty one', async () => {
+    // The endpoint refuses nothing for an absent speaker and names nobody;
+    // an empty string would be a speaker line with nothing after it.
+    invoke.mockResolvedValue({ data: ONE_PERSON, error: null })
+    await extractCapacity({ ...input, member: { id: 'm9' } })
+    expect(invoke.mock.calls[0][1].body).not.toHaveProperty('speaker')
   })
 
   it('FAILURE 1 — the function refuses: its own sentence, not the SDK’s', async () => {

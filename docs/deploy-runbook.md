@@ -245,7 +245,10 @@ persists anything.
 
 ## 3. The Edge Functions
 
-**Three of them since #96** — `provision-member`, `calendar-connect` and `calendar-busy`.
+**Four of them since #208** — `provision-member`, `calendar-connect`, `calendar-busy` and
+`extract-description`. *(This said "three since #96" until 2026-09-07 — the count lives in
+`scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
+disagree, the script is right.)*
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you
@@ -261,7 +264,10 @@ the Connect Google Calendar button on the capacity screen fails when it is press
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
 "Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
 and `npm run check:live` is what tells the two apart, since it probes the table and the function as
-separate rows.
+separate rows. Until `extract-description` has — and until its provider key is set, §3c — the
+plain-language capture on the capacity screen reports that the service could not answer and hands
+the member the typed field, which is #210's fallback working as designed; `check:live` reads the
+function's row as NOT DEPLOYED, the one excused red since #210.
 
 **A source change to an Edge Function needs a deploy of its own, and `npm run check:deployed`
 reports when one is owed.** Merging does not deploy a function, and neither does pasting a migration —
@@ -361,7 +367,8 @@ needs two secrets Supabase does not inject, because they belong to Google rather
 project: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Section 3b is where they come from, and the
 function refuses by name when they are missing rather than saying a bare "not configured" — because
 the three Supabase ones are always there, so an unqualified message would send you to check the
-wrong half.
+wrong half. `extract-description` (#208) needs a third, `ANTHROPIC_API_KEY`, for the same reason
+and with the same refusal-by-name; section 3c is where it is set.
 
 **Then prove it, because from the app's side the failure is silent and ambiguous.** A deploy that never
 happened, and one that went to a different project, leave the app failing in exactly the same way:
@@ -530,6 +537,68 @@ the same convention as #150.
 same auth user — Supabase links identities on a matching verified email — so the roster is
 untouched. A member on a synthetic `<id>@taskr.invalid` address can never sign in this way, because
 no Google account carries that address; they keep their PIN.
+
+## 3c. The provider key, for the extraction endpoint
+
+Owner-only, and the step #209 exists for. `extract-description` (#208) asks a model through the
+adapter `src/lib/extractionAdapter.js` wrote for the graded corpus, and the credential it needs is
+an Anthropic API key — the same `ANTHROPIC_API_KEY` the corpus runner reads from its environment,
+which lives in `.env.local` on this machine and **nowhere a phone can reach**. Until it is set, the
+deployed function refuses every call with *"This function is not configured: ANTHROPIC_API_KEY is
+not set."*, naming it for section 3's reason: Supabase injects its own three into every function,
+so a bare "not configured" would send you to check the wrong half.
+
+1. Deploy the function — `npm run deploy:function -- extract-description`, or the bare form, which
+   ships all four. The deploy is the first that carries files from OUTSIDE `supabase/functions/`:
+   the handler imports the adapter and the grader's contract from `src/lib`, and the CLI walks
+   relative imports from the entrypoint and uploads each file it reaches (read off the CLI source
+   at v2.116.0; #209 is where that reading is measured). If the deploy refuses a path under
+   `src/`, that reading was wrong and the repair is a `_shared/` copy held byte-identical by a
+   test — not a hand-maintained second prompt.
+2. Set the secret (not `.env.local`, which is for values the browser is allowed to see). **Never
+   type the value into the command**: an Anthropic key is ~108 characters, the full line would be
+   roughly double the ~90-character command that wrapped and ran as two commands here on
+   2026-08-20, and a value typed inline lands in shell history and in any transcript. The form
+   cairn's `google-oauth-client-secret-rotation` measured — copy the key, then in PowerShell:
+
+   ```
+   $s = Get-Clipboard; npx supabase secrets set ANTHROPIC_API_KEY=$s --project-ref <project ref>
+   ```
+
+   The value begins `sk-ant-`. It has **no publishable sibling** — no Anthropic credential belongs
+   in a `VITE_` variable under any name, and `src/lib/keyShape.js` refuses the build if one is
+   pasted there, naming console.anthropic.com as the place to rotate it. **Prove it without a
+   session and without the value**: `npx supabase secrets list --project-ref <project ref>` prints
+   each secret's name, a SHA-256 digest and `updated_at`, so the row's presence and its timestamp
+   are the proof that the set landed — what it cannot prove is that the function reads it, which
+   is the POST below.
+3. `0036`, the call ledger the function's first act after resolving the caller is to count and
+   append to, **was applied by #208 on 2026-09-07** in that story's own session (its entry in
+   `docs/access-model.md` carries both readings). On a fresh project it is one more file in the
+   ordinary `npm run migrate:live` sequence; without it every call is refused with *"Could not
+   read the call ledger."* rather than answered.
+
+**What proves it, and what does not.** `npm run check:live` answers *is the function deployed and
+callable by a browser* and cannot answer *is its key set* — a preflight carries no body and invokes
+nothing. The probe that does, with no member and no provider spend: a POST with a real session, a
+household the caller is in, a defined `kind` and any text reaches the key check only after the
+member check, so a **500 naming `ANTHROPIC_API_KEY`** proves the deploy and the auth path and says
+the secret is missing, and a **200 carrying the contract shape** proves all three. A 403 from a
+household the caller is NOT in is the control that the refusal is the function's own and not the
+gateway's. The rate bound is `RATE_LIMIT` in the function's `handler.ts` — the one place the two
+numbers are written, pinned by `handler.test.js`, and deliberately not copied here — and a 429
+past it is the ledger working, not a fault.
+
+**One thing `npm run check:deployed` could not see until #208, and can now.** This is the first
+function whose bundle carries files from outside its own directory — the adapter, the grader's
+contract and the date rules under `src/lib` — and that check used to compare the deploy against
+the last commit touching `supabase/functions/<name>` alone, so a prompt edit that merged with no
+redeploy read as current: production serving the old prompt, `check:live` green (a preflight
+cannot see a prompt), and the instrument built for exactly that omission (#222) agreeing. Since
+#208 it walks the entrypoint's relative imports the way the CLI's upload walker does and compares
+against the last commit touching ANY file the bundle carries. Under either outcome of step 1's
+measurement — a `src/lib` import or a `_shared/` copy — the files are outside the function's
+directory, which is why the walk and not a wider directory glob.
 
 ## 4. Verifying AC 1 and AC 2
 

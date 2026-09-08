@@ -181,6 +181,40 @@ The cost row is filled in here by hand from the transcript; the runner still pri
 is a real gap between this document and the instrument, recorded rather than papered over — see
 below.
 
+## The widened prompt, graded once — #208, 2026-09-07
+
+#207's verdict left `claude-haiku-4-5` standing and named three gaps the contract could not carry
+(recurrence, assignee, who is speaking); #208 widened the prompt for all three by owner decision at
+pickup. That made the deployed prompt one **no corpus run had graded** — the review fan-out on #208
+escalated it, and the owner chose to grade it before #209 deploys rather than let #214's production
+proof stand in. Haiku only, since it is the only configuration production runs:
+
+    npm run extraction:run -- --transcript docs/extraction-run-2026-09-07.transcript.json
+
+| `claude-haiku-4-5` | 2026-08-31 (prompt `3b5bce805746`, #206) | **2026-09-07 (prompt `5fbe8a5a450d`, widened)** |
+|---|---|---|
+| within tolerance, all | 43 of 50 (86.0%) | **45 of 50 (90.0%)** |
+| within tolerance, capacity / chores | 20 / 23 of 25 | **22 / 23 of 25** |
+| ambiguous refused | 10 of 10 | **9 of 10** — one ambiguous chore answered, still >= 7 |
+| overconfident | 0 of 10 | **0 of 10** |
+| due dates exact | 21 of 25 (84.0%), 1 invented | **20 of 25 (80.0%), 2 invented** |
+| unparseable | 0 | **1** |
+| provider p50 / p95 | — / 1659 ms | **1023 / 1506 ms** over 60 calls |
+
+**Every axis with a figure passes, and nothing here is a difference.** Two up on tolerance, one down
+on refusals, one down on dates, one more invented date, one unparseable answer: each is inside the
+noise of a 60-item corpus graded once, which is the rule this document set for itself when the two
+configurations were two apart. What the run establishes is narrower and is exactly what was asked:
+**the prompt production runs has a corpus figure, and it is not worse than the one the verdict was
+taken on.** The one thing to keep an eye on is *invented dates* — 1 to 2 — because that is the
+trust-destroying direction and the widening added two more copy-as-stated fields beside `dueDate`;
+a second run would say whether it is noise.
+
+The transcript is keyed on the user message, which the widening leaves byte-identical for an input
+with no speaker, so the two files replay through the same grader. The system prompt's fingerprint
+differs between them — that is the whole point of the second file, and why the first one's figures
+are not re-read as this prompt's.
+
 ## What this run does not settle
 
 - **The deployed path.** Every latency figure here is provider-only. #205 measures the round trip

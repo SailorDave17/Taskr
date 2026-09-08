@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { FUNCTION_NAMES } from './deploy-function.mjs'
 import { TOKEN_PAGE } from './management-api.mjs'
 import {
+  bundleFilesOf,
   deploymentVerdict,
   functionsToCheck,
   functionsUrl,
@@ -129,6 +130,80 @@ describe('an absent answer never reads as a clean one', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.functions).toBeNull()
+  })
+})
+
+describe('#208 — the source a deploy is compared against is the BUNDLE, not the directory', () => {
+  // A fake filesystem shaped like `extract-description`: the entrypoint imports
+  // the handler, the handler imports two files under `src/lib`, and one of
+  // those imports a third. None of the `src/lib` files is under the function's
+  // directory, which is the whole blindness this closes.
+  const FILES = {
+    'supabase/functions/fn/index.ts':
+      "import { createClient } from 'npm:@supabase/supabase-js@2'\nimport { createHandler } from './handler.ts'\n",
+    'supabase/functions/fn/handler.ts':
+      "import { DEPLOYED_CONFIG, attemptExtraction } from '../../../src/lib/extractionAdapter.js'\n" +
+      "import { INPUT_KINDS } from '../../../src/lib/extraction.js'\n" +
+      "import type { Thing } from './types.ts'\n",
+    'src/lib/extractionAdapter.js': '// no imports\n',
+    'src/lib/extraction.js': "import { normalizeDueDate } from './dueDates.js'\n",
+    'src/lib/dueDates.js': '// leaf\n',
+    'supabase/functions/fn/types.ts': 'export type Thing = string\n',
+  }
+  const readFile = (path) => {
+    if (!(path in FILES)) throw new Error(`ENOENT ${path}`)
+    return FILES[path]
+  }
+
+  it('walks relative imports from the entrypoint and reaches files outside the directory', () => {
+    const files = bundleFilesOf('fn', readFile)
+    expect(files).toContain('supabase/functions/fn/index.ts')
+    expect(files).toContain('supabase/functions/fn/handler.ts')
+    expect(files).toContain('src/lib/extractionAdapter.js')
+    expect(files).toContain('src/lib/extraction.js')
+    // Transitive: reached through extraction.js, not named by the handler.
+    expect(files).toContain('src/lib/dueDates.js')
+    expect(files).toContain('supabase/functions/fn/types.ts')
+  })
+
+  it('follows only ./ and ../ specifiers with an extension — npm: and bare names are the platform’s', () => {
+    const files = bundleFilesOf('fn', readFile)
+    expect(files.some((f) => f.includes('npm:'))).toBe(false)
+    expect(files.some((f) => f.includes('supabase-js'))).toBe(false)
+  })
+
+  it('visits each file once, so a cycle terminates', () => {
+    const cyclic = {
+      'supabase/functions/loop/index.ts': "import './a.ts'\n",
+      'supabase/functions/loop/a.ts': "import './b.ts'\n",
+      'supabase/functions/loop/b.ts': "import './a.ts'\n",
+    }
+    const files = bundleFilesOf('loop', (p) => cyclic[p] ?? (() => { throw new Error('ENOENT') })())
+    expect(files.sort()).toEqual(Object.keys(cyclic).sort())
+  })
+
+  it('keeps a specifier it cannot read rather than dropping it', () => {
+    // A file that does not exist contributes nothing to `git log`, and a
+    // dropped file is the silent half this walker exists to close.
+    const files = bundleFilesOf('fn', (p) => (p === 'src/lib/dueDates.js' ? readFile('src/lib/extraction.js') : readFile(p)))
+    expect(files).toContain('src/lib/dueDates.js')
+  })
+
+  it('POSITIVE CONTROL: on the real tree, extract-description’s bundle carries the adapter', () => {
+    // The case that motivated this: a prompt edit under src/lib is a commit to
+    // this function's source. Read off disk, so a rename of the adapter or the
+    // import reddens here rather than silently narrowing the comparison.
+    const files = bundleFilesOf('extract-description')
+    expect(files).toContain('src/lib/extractionAdapter.js')
+    expect(files).toContain('src/lib/extraction.js')
+    expect(files).toContain('src/lib/dueDates.js')
+  })
+
+  it('and the other three functions carry nothing outside their own directory', () => {
+    for (const name of ['provision-member', 'calendar-connect', 'calendar-busy']) {
+      const outside = bundleFilesOf(name).filter((f) => !f.startsWith(`supabase/functions/${name}/`))
+      expect(outside, name).toEqual([])
+    }
   })
 })
 

@@ -270,7 +270,33 @@ export async function recordLive(configs, { apiKey, fetchImpl } = {}) {
 const USAGE =
   'Usage:\n' +
   '  npm run extraction:run -- --transcript <file>   grade a recorded transcript (no network, no key)\n' +
-  '  npm run extraction:run -- --record <file>       grade live and write the transcript (needs ANTHROPIC_API_KEY)'
+  '  npm run extraction:run -- --record <file>       grade live and write the transcript (needs ANTHROPIC_API_KEY)\n' +
+  '                            [--model <model>]     record ONE of the default configurations rather than both'
+
+/**
+ * Which configurations a live run records — #208.
+ *
+ * Both by default, which is what #206 did. `--model <model>` narrows it to the
+ * default configuration carrying that model, and REFUSES a model no default
+ * carries rather than recording nothing: a run that wrote an empty transcript
+ * and printed no rows would read as a quiet success. Added when #207's verdict
+ * left one configuration standing and the widened prompt (#208) needed grading
+ * on that one alone — spending the other's calls would have been spend the
+ * owner had not authorised.
+ */
+export function configsFor(argv, defaults = DEFAULT_CONFIGS) {
+  const at = argv.indexOf('--model')
+  if (at === -1) return [...defaults]
+  const model = argv[at + 1]
+  const chosen = defaults.filter((config) => config.model === model)
+  if (!model || chosen.length === 0) {
+    throw new Refusal(
+      `--model ${model ?? '(missing)'}: no default configuration carries that model.\n` +
+        `Known models: ${defaults.map((config) => config.model).join(', ')}`,
+    )
+  }
+  return chosen
+}
 
 export async function main(argv, env = process.env) {
   const transcriptAt = argv.indexOf('--transcript')
@@ -288,6 +314,13 @@ export async function main(argv, env = process.env) {
   if (recordAt !== -1) {
     const path = argv[recordAt + 1]
     if (!path) throw new Refusal(USAGE)
+    // Resolved BEFORE the key is looked at, so a bad `--model` is refused with
+    // no credential in hand and no network possible — and so the test of that
+    // refusal can run with no key at all. Measured the other way round
+    // (2026-09-07): with the key check first and the model filter mutated to
+    // a no-op, the refusal test reached the real provider with a fixture key,
+    // was answered 401 sixty times, and wrote a transcript into the tree.
+    const configs = configsFor(argv)
     const apiKey = env.ANTHROPIC_API_KEY
     if (!apiKey) {
       throw new Refusal(
@@ -300,7 +333,7 @@ export async function main(argv, env = process.env) {
           '  npm run extraction:run -- --transcript <file>',
       )
     }
-    const { results, transcript } = await recordLive(DEFAULT_CONFIGS, { apiKey })
+    const { results, transcript } = await recordLive(configs, { apiKey })
     writeFileSync(path, `${JSON.stringify(transcript, null, 2)}\n`)
     console.log(`transcript written to ${path}\n`)
     for (const line of runReportLines(results)) console.log(line)

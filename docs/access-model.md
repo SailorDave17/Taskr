@@ -7,16 +7,21 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0035` are ALL applied to the live project (`0035` on 2026-09-06 in #360's own
+- Status: **`0001`–`0036` are ALL applied to the live project (`0036` on 2026-09-07
+  in #208's own session, at md5 `d65fb95c299101c5ca9d3c6cc01b0584` (`6082 characters, 6 statements`), read back identical
+  — see its entry below; `0035` on 2026-09-06 in #360's own
   session, at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and the expected-red set holds ONE
-  row — `extract-description`, the Edge Function #210's capture flow invokes ahead of #208 writing
-  it, red at the gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
+  row — `extract-description`, the Edge Function #210's capture flow invokes, WRITTEN by #208 on
+  2026-09-07 (`supabase/functions/extract-description`, deployable by name now) and red at the
+  gateway until #209 deploys it: *measured 2026-09-04 at 36 of 36 immediately before
   the name was listed and 36 of 37 immediately after*, in #210's own session (see the #210 bullet
-  under *What is not done*).** Before #210, the set was EMPTY — *measured 2026-09-04 at 36 of 36*
+  under *What is not done*), and *measured 47 of 48 on both sides of
+  `0036`'s apply* in #208's, that file adding no row the check has (its table is one no client
+  reads).** Before #210, the set was EMPTY — *measured 2026-09-04 at 36 of 36*
   in #100's session, after `0030` was applied and `calendar-busy` deployed there (34 of 36
   immediately before, exactly #96's two rows red; see the `0030` entry below). Up to `0029`, and at
   the moment `0029` landed, that set was EMPTY too —
@@ -520,6 +525,41 @@
       and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
       project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
       reddens the member-delete test, predicted 1.
+  - **`0036`** (#208) — `extraction_calls`: the extraction endpoint's call ledger, one row per
+    provider call, written as `service_role` by `supabase/functions/extract-description` BEFORE
+    the provider is asked and counted over a rolling window to refuse a household past the bound
+    (`RATE_LIMIT` in that function's `handler.ts`, the one place the constant is written). Applied
+    2026-09-07 in #208's own session; *measured* `check:live`
+    **47 of 48** immediately before and
+    **47 of 48** immediately after — the same figure on both sides BY
+    CONSTRUCTION, because no client reads this table and the check has no row for it, the one red
+    on both sides being the excused `extract-description` until #209 deploys the function; and
+    `probe:live-grants` **19 of 19 column rows, with the `extraction_calls` table control row MOVED** immediately before, the new
+    `extraction_calls` control row reading *not there*, and **19 of 19, every table control row agreeing**
+    immediately after. What this entry records is the access model:
+    - **No client can NAME it.** `0011`'s device for `calendar_tokens`, and for `0011`'s reason:
+      nothing here is shown on a screen, so the table gets no column list a client may read part
+      of — `revoke all … from authenticated, anon, public`, row-level security ON with no policy
+      at all, and `service_role` granted SELECT and INSERT and nothing more, the two verbs the
+      function uses. A grant added by accident later still reaches no row; two independent
+      mistakes would be needed rather than one. `src/test/extraction-calls.pglite.test.js` asserts
+      each half, and `grants.pglite.test.js`'s audit of every `service_role` table carries the
+      first two-letter row.
+    - **Why a table, and not a counter in the function's memory.** An isolate's `Map` is one
+      count PER ISOLATE, reset on every cold start — and #205 measured cold starts between one tap
+      and the next — so a bound held that way is green in every test this repo can write and
+      holds nothing a bill would notice. Owner decision at #208's pickup, 2026-09-07: the count is
+      durable, so the bound is one bound. The row is written before the call rather than after,
+      so an attempt the provider refuses or times out on still spent the window.
+    - **The composite foreign key is `0010`'s**: `(member_id, household_id)` references
+      `members (id, household_id)`, so a row pairing one family's person with another family's id
+      cannot exist. `on delete cascade` means a removed member takes their rows with them, which
+      loosens that household's bound by however many calls they made this hour and nothing else.
+    - **Which instrument sees which half.** `check:live` sees NONE of this file and never will —
+      it probes what the client asks for. `probe:live-grants` is the instrument for the grant
+      half: its control list gained an `extraction_calls: null` row, `calendar_tokens`' shape,
+      red as *not there* until the apply. The deploy of the function that writes here is #209's,
+      and its row is the standing excused red above.
   - **`0035`** (#360) — `shopping_lists.archived_at`, `archive_shopping_list(list)` and
     `unarchive_shopping_list(list)`: put a list away so the picker stops drawing it, and bring it
     back, without deleting a row. Applied 2026-09-06 in #360's own session;
@@ -831,10 +871,13 @@
   #210's pickup — and `LIVE_EDGE_FUNCTIONS` lists what the app invokes, so the probe answers NOT
   DEPLOYED: *measured 2026-09-04 at 36 of 36 immediately before the name was listed and 36 of 37
   immediately after*, in #210's own session, the one red naming exactly that function. Not a
-  migration's row and not a paste's: the action that clears it is `npm run deploy:function` once
-  the directory exists, and until then a bare deploy skips the name (`PENDING_FUNCTIONS` in
-  `scripts/deploy-function.mjs`, whose test refuses the entry the day the directory appears). Every
-  other red, on any subject, is real.
+  migration's row and not a paste's: the action that clears it is `npm run deploy:function`. **#208
+  wrote the function on 2026-09-07** (`supabase/functions/extract-description`, with `0036` for its
+  call ledger), so the directory exists, the name has moved from `PENDING_FUNCTIONS` into
+  `FUNCTION_NAMES` in `scripts/deploy-function.mjs` — that list's own test went red on the new
+  directory, which is what it is for — and a bare `npm run deploy:function` now ships it. Until
+  #209 runs that deploy and sets `ANTHROPIC_API_KEY` as a function secret (docs/deploy-runbook.md
+  §3c), the row stays red and stays excused. Every other red, on any subject, is real.
 - **Before #210 the set was EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
   `calendar_busy` table probe on `0030`'s apply, and the `calendar-busy` Edge Function probe on
   its deploy, each on its own action and neither on the other's — *measured 2026-09-04 at 34 of

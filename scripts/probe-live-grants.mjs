@@ -542,6 +542,16 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // exists to report.
   Object.freeze({ table: 'chore_repeat_exceptions', authenticated: null }),
   Object.freeze({ table: 'chores', authenticated: 'd' }),
+  // #208, arriving with `0036` — the extraction endpoint's call ledger, which
+  // no client can name: `calendar_tokens`' shape exactly, and RED until the
+  // file is applied (the reconciler reports a table that is not there apart
+  // from one carrying no grant). The client holds nothing here and never will;
+  // the function reads and appends as service_role. A table-level letter
+  // appearing for `authenticated` would mean a later migration widened a
+  // write model that has exactly one writer, which is what this control
+  // reports. Like `calendar_tokens`, deliberately absent from `LIVE_SCHEMA`
+  // and present here.
+  Object.freeze({ table: 'extraction_calls', authenticated: null }),
   Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
   // #50, arriving with `0020`, which revokes wholesale and grants by column —

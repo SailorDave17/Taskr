@@ -55,25 +55,32 @@ export const FUNCTION_NAMES = Object.freeze([
   // table this function is the only writer of, and neither action does anything
   // useful without the other.
   'calendar-busy',
+  // #208. The extraction endpoint, and the first function here whose deploy
+  // (#209) needs a secret Supabase does not inject: `ANTHROPIC_API_KEY`. The
+  // function refuses by name when it is missing, and docs/deploy-runbook.md
+  // section 3c is where it is set. Deploying it is also the other half of
+  // `0036`, which creates the call ledger the function's rate bound counts in.
+  'extract-description',
 ])
 
 /**
- * Functions the CLIENT already invokes that the tree does not carry yet — #210.
+ * Functions the CLIENT already invokes that the tree does not carry yet.
  *
- * The capacity capture flow calls `extract-description` (`src/lib/capture.js`)
- * ahead of #208 writing the function, by owner decision at that story's
- * pickup (2026-09-04). `LIVE_EDGE_FUNCTIONS` lists what the app invokes, so it
- * carries the name and `check:live` reads one honest red until #209 deploys
- * it. THIS list is what keeps that red from becoming a failed deploy: a bare
- * `npm run deploy:function` deploys `FUNCTION_NAMES` and not these, and naming
- * one on the command line is refused with a sentence that says why.
+ * EMPTY since #208, and kept rather than deleted because the mechanism is the
+ * keeper: #210 wired the capacity capture flow to `extract-description` ahead
+ * of #208 writing it (owner decision, 2026-09-04), and this list is what let
+ * `LIVE_EDGE_FUNCTIONS` carry the name — so `check:live` read one honest red —
+ * without a bare `npm run deploy:function` trying to ship a directory that
+ * was not there. The next story that names a function before writing it puts
+ * the name here.
  *
  * SELF-EXPIRING. `deploy-function.test.js` refuses an entry here whose
- * directory EXISTS, so the day #208 lands `supabase/functions/extract-description/`
- * the suite reddens until the name moves up into `FUNCTION_NAMES` — the
- * exemption cannot outlive the gap it was written for.
+ * directory EXISTS, so the day the function lands the suite reddens until the
+ * name moves up into `FUNCTION_NAMES` — the exemption cannot outlive the gap it
+ * was written for. That is exactly how #208's landing was announced: the test
+ * went red on the new directory, and the name moved.
  */
-export const PENDING_FUNCTIONS = Object.freeze(['extract-description'])
+export const PENDING_FUNCTIONS = Object.freeze([])
 
 /**
  * Which functions this invocation should deploy.
@@ -94,7 +101,8 @@ export function functionsToDeploy(argv, known = FUNCTION_NAMES, pending = PENDIN
   if (notYet.length) {
     throw new Error(
       `${notYet.join(', ')}: named by the client but not in this tree yet — ` +
-        'the endpoint is #208 and its deploy is #209. Nothing to deploy.',
+        'see PENDING_FUNCTIONS in scripts/deploy-function.mjs for the story that writes it. ' +
+        'Nothing to deploy.',
     )
   }
 

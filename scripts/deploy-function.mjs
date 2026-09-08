@@ -69,6 +69,13 @@ export const FUNCTION_NAMES = Object.freeze([
   // endpoint takes the token alone, and an exit must not be narrower than the
   // way in.
   'calendar-disconnect',
+  // #101. The event list behind "Import from calendar": spends the stored
+  // token against Google's events endpoint and returns the week's upcoming
+  // events to the phone, writing nothing. Needs the same two Google secrets
+  // `calendar-connect` and `calendar-busy` need, and imports the token
+  // exchange from `calendar-busy/handler.ts` — so `check:deployed` walks that
+  // import and reads a change to either file as this function going stale.
+  'calendar-events',
 ])
 
 /**

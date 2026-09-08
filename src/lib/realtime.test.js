@@ -91,6 +91,10 @@ describe('#342 — the watched list is derived from what the client reads', () =
       shopping_lists: 'household',
       shopping_runs: 'household',
       shopping_items: 'household',
+      // #101 — the import ledger is read BY HOUSEHOLD (`0038` grants
+      // `household_id`, the shopping tables' route), so its changes are filtered
+      // the same way and a delete carries only the id like every other table.
+      calendar_imports: 'household',
     })
   })
 })

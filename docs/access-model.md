@@ -7,7 +7,13 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0037` are ALL applied to the live project (`0037` on 2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical — see its entry below; `0036` on 2026-09-07
+- Status: **`0001`–`0038` are ALL applied to the live project (`0038` on 2026-09-08 in #101's own
+  session, at md5 `04584d87e7b84da232a1eec74a200eea` (`17096 characters, 15 statements`), read back identical — see its
+  entry below, and the `calendar-events` Edge Function it pairs with was deployed the same session,
+  *measured* `check:live` **62 of 65** immediately before the apply,
+  **64 of 65** after it and **65 of 65**
+  after the deploy, the denominator having moved from 62 to 65 on the table row, its publication row
+  and the function row; `0037` on 2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical — see its entry below; `0036` on 2026-09-07
   in #208's own session, at md5 `d65fb95c299101c5ca9d3c6cc01b0584` (`6082 characters, 6 statements`), read back identical
   — see its entry below; `0035` on 2026-09-06 in #360's own
   session, at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back
@@ -538,6 +544,72 @@
       and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
       project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
       reddens the member-delete test, predicted 1.
+  - **`0038`** (#101) — `chores_source_known` admits `calendar`, and `calendar_imports`, the import
+    ledger: one row per calendar event imported as a chore — household, importer, the Google event
+    id and the chore it became. Applied 2026-09-08 in #101's own session, before the merge (`0020`'s
+    safe order), at md5 `04584d87e7b84da232a1eec74a200eea` (`17096 characters, 15 statements`), read back identical —
+    **applied twice**, `0034`'s shape for a gentler reason: the first apply (md5
+    `3672dec4c67d997cb0f59c04e1eaa575`, 16374 characters) was followed by a header-only edit
+    correcting the `service_role` sentence below against what the live ACL had just shown, and the
+    file was re-applied so the md5 on record is the committed file's; nothing but comments moved
+    between the two, and the re-run is the idempotency `calendarImport.pglite.test.js` asserts;
+    *measured* `check:live` **62 of 65** immediately before and
+    **64 of 65** immediately after, the one remaining red the
+    `calendar-events` function until `npm run deploy:function` shipped it the same session
+    (**65 of 65**); `probe:live-grants`
+    **the `calendar_imports` table control row MOVED (*not there*) and every other row agreeing** before, the new `calendar_imports` control row
+    reading *not there*, and **19 of 19 agree, negative control included** after; and the read-only
+    catalog query for the half no probe can see: `chores_source_known` at
+    **`manual, extraction`** before the apply and **`manual, extraction, calendar`**
+    after. What this entry records is the access model:
+    - **The event id is the ONLY calendar datum the schema retains, and this table is where.** Titles
+      transit the `calendar-events` Edge Function per request and reach the phone; there is no column
+      here or anywhere that could hold one, an attendee, a location or a time, and the function's
+      test records every write its fake client is offered and asserts none. `0030`'s rule, applied
+      again: a rule written as an absent column cannot be broken without a migration somebody reviews.
+      The id is kept for one reason — so a second import of the same event is refused
+      (`calendar_imports_one_per_event`, **unique per household**, owner decision 2026-09-08: a
+      shared event is one chore per household, and the second housemate sees *already imported*).
+    - **The first calendar table the CLIENT writes.** `calendar_tokens`, `calendar_connections` and
+      `calendar_busy` are `service_role`-only because each holds or derives from a credential; this
+      holds an id the member was just shown on their own phone beside a chore they just created. So
+      `authenticated` holds INSERT by column (`household_id, member_id, calendar_event_id, chore_id`)
+      under `calendar_imports_insert_own_row`, which pins the row to the caller's OWN member row in a
+      household they belong to — a member cannot record an import as a housemate, and a row with no
+      importer is refused, because null there MEANS "the importer has since left" — and SELECT on
+      every column, `household_id` included (the `0014` route the shopping tables take, because the
+      read is by household: an import whose member left must still be refused a second time). No
+      UPDATE and no DELETE grant. The file grants `service_role` nothing, since no function
+      touches the table — and the live project hands it `arwdDxtm` anyway, through the inherited
+      default privileges that give that role full DML on every table in `public` here
+      (*measured 2026-09-08*, the same reading on `chore_exclusions`, `households` and every other
+      row of `probe:live-grants`' whole-schema list), where the pglite harness's default gives it
+      no DML at all. Unused rather than dangerous, and recorded so the ACL is not read as this
+      file's statement. `calendarImport.pglite.test.js` asserts each half of what the FILE grants,
+      and `grants.pglite.test.js` drives the two client operations.
+    - **Two writes, two statements, and why this is not a transaction.** The client creates the chore
+      through `addChore` — #101 AC 3 forbids a second write path, and an RPC inserting into `chores`
+      would be one — and then records the import. The unique constraint serialises two phones
+      importing the same event in the same second: the second ledger insert is refused `23505`, and
+      the client removes the chore it just created on THAT refusal and no other. The window between
+      the two statements is one round trip wide and its cost is a duplicate the losing phone's
+      refusal reports rather than hides.
+    - **What a removed member and a disconnect leave.** `member_id` is nullable with `on delete set
+      null (member_id)` — the column-list form `0032`'s correction records, so the scoping column
+      survives — and the row stays: the chore is the household's, so the record that it was imported
+      is too (the charter's leave/close decision). `calendar-disconnect` does NOT delete from this
+      table (owner decision 2026-09-08): the chore survives a disconnect, so its ledger row survives
+      with it and a reconnect cannot import the same event twice. The chore FK cascades — removing the
+      chore is the household saying the import was wrong, and after it the event may be imported again.
+    - **`chores` gained no column.** The provenance is the WORD: `chores_source_known` is dropped and
+      re-added at three values, `0031`'s shape for `0031`'s reason (an `if not exists` guard would read
+      the old constraint as present), and the imported chore is written with `source: 'calendar'`
+      through the same `addChore`. #101 was filed saying the table had no provenance column and #68
+      was open; `0023` had given it one, and this widens it exactly as `0023`'s comment said an import
+      would.
+    - **The publication gains the table**, with `0037`'s guarded shape, so a second phone's import
+      moves this phone's *already imported* marks without a reload. `WATCHED_TABLES` derives it from
+      `LIVE_SCHEMA` and `realtime.pglite.test.js` holds the publication equal — twelve tables now.
   - **`0037`** (#342) — the `supabase_realtime` publication gains the eleven tables the client
     reads and now WATCHES: `households`, `members`, `chores`, `member_capacity`,
     `chore_exclusions`, `calendar_connections`, `chore_repeat_exceptions`, `calendar_busy`,
@@ -1840,10 +1912,11 @@ their own history if membership were keyed to the auth id, and it would not show
 ## A subscription is a read path — #342, 2026-09-08
 
 Everything above describes what a phone can **ask for**. Since #342 a phone also **listens**: it
-holds one Supabase Realtime channel per household, subscribed to `postgres_changes` on the eleven
-tables `refresh()` reads (`WATCHED_TABLES` in `src/lib/realtime.js`, derived from `LIVE_SCHEMA`;
-`0037` puts the same eleven in the `supabase_realtime` publication and
-`src/test/realtime.pglite.test.js` holds the two lists equal). A change delivered over that channel
+holds one Supabase Realtime channel per household, subscribed to `postgres_changes` on the tables
+`refresh()` reads (`WATCHED_TABLES` in `src/lib/realtime.js`, derived from `LIVE_SCHEMA`;
+`0037` put the first eleven in the `supabase_realtime` publication, `0038` added
+`calendar_imports` as the twelfth, and `src/test/realtime.pglite.test.js` holds the two lists
+equal). A change delivered over that channel
 is not shown to anyone — the phone re-reads through the grants and policies above, exactly as it
 would after its own write — but the *delivery* is itself a read, and this section says what
 governs it. Read off `apply_rls.sql` and `subscription_check_filters.sql` in `supabase/realtime`
@@ -1858,8 +1931,8 @@ on 2026-09-08, not assumed.
   for these two verbs.
 - **A filter is allowed only on a column the role may SELECT.** The join is refused with `invalid
   column for filter` otherwise. That is why the filter column is taken from each table's own
-  client column list rather than from the schema: `household_id=eq.<id>` on `members`, `chores`
-  and the three `shopping_*` tables; `member_id=in.(<roster>)` on `member_capacity`,
+  client column list rather than from the schema: `household_id=eq.<id>` on `members`, `chores`,
+  the three `shopping_*` tables and (since `0038`) `calendar_imports`; `member_id=in.(<roster>)` on `member_capacity`,
   `chore_exclusions`, `calendar_connections` and `calendar_busy`, the tables whose grants withhold
   `household_id` (`0005`, `0010`, `0011`, `0030`); `id=eq.<id>` on `households`; and **no filter** on
   `chore_repeat_exceptions`, whose client columns are a chore id and a date (`0025`) — its policies

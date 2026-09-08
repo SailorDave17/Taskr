@@ -949,6 +949,65 @@ body {
   min-width: 0;
 }
 
+/* #101 — importing a calendar event as a chore. A section under the chore form
+   in `.chore-batch`'s shape (a column, its own top margin), because it is the
+   same kind of thing: an addition behind its own control that prefills the
+   form above it and writes nothing of its own. The event list is a plain
+   column of rows — title, when, duration and one control — that cost height
+   and never width at 360px, which is the whole of the phone rule here. */
+.chore-import {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.chore-import__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chore-import__event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+}
+
+.chore-import__title {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* When the event is, in the same quiet register as `.chore__due`: it is the
+   event's time, not the chore's, and the chore's due date is what the form
+   shows once the event is picked. */
+.chore-import__when {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Already imported" stands where the Use control would be, in the dim ink a
+   settled state reads in — nothing is wrong, and nothing is offered. */
+.chore-import__done {
+  color: var(--ink-dim);
+}
+
+/* Where the figure in the form came from — `.member__week-source`'s reason:
+   a sentence about the chore the member is about to add, under the fields and
+   above Add, in the same quiet register as the readouts. */
+.chore-import__source {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
 /* The row's account of its schedule — same dim ink as the due date, because a
    repeat is a fact about the chore, not a state to be alarmed by. */
 .chore__repeat {

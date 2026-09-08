@@ -59,15 +59,20 @@ import {
   writeSplitSeen,
 } from './lib/announce.js'
 import {
+  GOOGLE_CALENDAR_READONLY_SCOPE,
   busyWeekFor,
   completeConnect,
   connectionFor,
   disconnectCalendar,
   fetchBusyWeek,
+  fetchCalendarEvents,
   isBusyWeekStale,
+  isRealEmailMember,
   listBusyWeeks,
   listCalendarConnections,
+  listCalendarImports,
   readConsentReturn,
+  recordCalendarImport,
   revokeNoteFor,
   startConnect,
 } from './lib/calendar.js'
@@ -186,6 +191,12 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #101 — which calendar events this household has already imported, as the
+  // ledger rows `0038` keeps: an event id and the chore it became, per row, and
+  // nothing out of anybody's calendar. Server state through the same refresh,
+  // read by household, so a second phone's import shows as "already imported"
+  // on this one at the next read.
+  const [calendarImports, setCalendarImports] = useState([])
   // #99 AC 4 — the one thing a disconnect can leave unsaid: Taskr let go and
   // could not tell whether Google did. Held here rather than in the roster row
   // because the row it belongs to has just changed shape — the connection is
@@ -349,6 +360,11 @@ export default function App() {
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
     setConnections(found ? await listCalendarConnections(memberIds) : [])
+    // #101 — the import ledger, read like every other row here and BY
+    // HOUSEHOLD rather than by the member set: a row whose importer has since
+    // left the household (`member_id` null) is still an import the list must
+    // refuse a second time, and a member-scoped read would drop it.
+    setCalendarImports(found ? await listCalendarImports(found.id) : [])
     // #96 — the derived figures, read like every other row here. Its OWN
     // try/catch, and that is not decoration: `0030` is unapplied on the live
     // project until somebody pastes it, and an unguarded read of a missing
@@ -1318,7 +1334,71 @@ export default function App() {
       }),
     [householdId, household, myName],
   )
-  const isConnected = Boolean(myMemberId && connectionFor(connections, myMemberId))
+  const myConnection = myMemberId ? connectionFor(connections, myMemberId) : null
+  const isConnected = Boolean(myConnection)
+
+  // #101 — the three handlers behind "Import from calendar" on the Chores tab.
+  //
+  // Listing is NOT routed through `mutate()`, for #210's reason: nothing is
+  // written by reading a week of events, so there is no change to re-read and
+  // no `busy` to set over the tab — the import section carries its own pending
+  // state. The household and the week are the ones THIS SCREEN is showing
+  // (#159's rule); who it is about is `auth.uid()` off the JWT, so the body
+  // names no member and there is no version of this call that reads a
+  // housemate's calendar.
+  const handleFetchCalendarEvents = useCallback(
+    () => fetchCalendarEvents({ householdId, periodStart }),
+    [householdId, periodStart],
+  )
+  // The incremental consent — AC 1. The SAME flow `handleConnectCalendar`
+  // starts, with the wider scope named: same state token, same household in
+  // storage, same return through `completeConnect`, so `calendar-connect`
+  // upserts the token and the connection row with what Google now grants and
+  // the import section reads the widened scope off the row. Not through
+  // `mutate()` either — the browser leaves for Google and the write happens
+  // in the Edge Function when it comes back.
+  const handleWidenCalendarConsent = useCallback(() => {
+    setError(null)
+    setCalendarRevokeNote(null)
+    try {
+      globalThis.location.assign(
+        startConnect({ householdId: household?.id, scope: GOOGLE_CALENDAR_READONLY_SCOPE }),
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [household])
+  // The import itself — AC 3, AC 4, AC 5. ONE `mutate()`, TWO writes, in this
+  // order: the chore through the same `addChore` a typed chore uses, with
+  // `source: 'calendar'` the one thing this adds to a typed call; then the
+  // ledger row naming the event id and the chore it became. The order is the
+  // whole of how two phones importing the same event in the same second
+  // resolve — `0038`'s unique constraint refuses the SECOND ledger insert, and
+  // that refusal alone (`alreadyImported`, never a network failure) removes the
+  // chore this device just created, because a chore that landed with a ledger
+  // row that could not be written for any other reason is one the household
+  // still wants. The refusal's sentence then reaches the error strip through
+  // `mutate()` like any other refused write, which is AC 5's "shown as already
+  // imported" on the phone that lost.
+  const handleImportEvent = useCallback(
+    (chore, calendarEventId) =>
+      mutate(async () => {
+        const saved = await addChore({ ...chore, source: 'calendar', householdId: household?.id })
+        try {
+          await recordCalendarImport({
+            householdId: household?.id,
+            memberId: myMemberId,
+            calendarEventId,
+            choreId: saved?.id,
+          })
+        } catch (err) {
+          if (err?.alreadyImported && saved?.id) await removeChore(saved.id)
+          throw err
+        }
+        return saved
+      }),
+    [mutate, household, myMemberId],
+  )
   const myBusyWeek =
     myMemberId && periodStart ? busyWeekFor(busyWeeks, myMemberId, periodStart) : null
   const hasBusyRow = Boolean(myBusyWeek)
@@ -1721,6 +1801,15 @@ export default function App() {
           onAdd={handleAddChore}
           onAddMany={handleAddChores}
           onPropose={handleProposeChores}
+          // #101 — the import control mounts for the signed-in member's OWN
+          // connection only, and only where they could have consented at all
+          // (a real address; the PIN discriminator `0007` established). A
+          // housemate's connection is not this phone's to import from.
+          calendarConnection={me && isRealEmailMember(me) ? myConnection : null}
+          calendarImports={calendarImports}
+          onFetchCalendarEvents={handleFetchCalendarEvents}
+          onWidenCalendarConsent={handleWidenCalendarConsent}
+          onImportEvent={handleImportEvent}
           onSave={handleSaveChore}
           onRemove={handleRemoveChore}
           onComplete={handleCompleteChore}

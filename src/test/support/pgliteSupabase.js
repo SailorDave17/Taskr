@@ -124,6 +124,7 @@ export const MIGRATIONS = [
   '0035_archive_shopping_list.sql',
   '0036_extraction_calls.sql',
   '0037_realtime_publication.sql',
+  '0038_calendar_event_import.sql',
 ]
 
 export function migrationSql(name) {

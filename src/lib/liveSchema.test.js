@@ -2,7 +2,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import {
+  CALENDAR_BUSY_COLUMNS,
+  CALENDAR_CONNECTION_COLUMNS,
+  CALENDAR_IMPORT_COLUMNS,
+} from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
@@ -124,16 +128,17 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the ten tables the app still reads', () => {
+  it('covers the eleven tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
     // fifth — to six with #95's `calendar_connections`, to seven with #96's
-    // `calendar_busy`, and to ten with #352's three shopping tables. Every edit
-    // is stated, because a required-set that changes size silently is exactly
-    // how somebody quietly weakens a check. (`member_split_seen` and
-    // `chore_repeat_exceptions` are read too and are asserted by the two
-    // directional tests above; this list is the one that has to be edited by
-    // hand, and it has lagged the set before.)
+    // `calendar_busy`, to ten with #352's three shopping tables, and to eleven
+    // with #101's `calendar_imports`. Every edit is stated, because a
+    // required-set that changes size silently is exactly how somebody quietly
+    // weakens a check. (`member_split_seen` and `chore_repeat_exceptions` are
+    // read too and are asserted by the two directional tests above; this list
+    // is the one that has to be edited by hand, and it has lagged the set
+    // before.)
     for (const table of [
       'households',
       'members',
@@ -145,6 +150,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'shopping_lists',
       'shopping_runs',
       'shopping_items',
+      'calendar_imports',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
@@ -180,6 +186,8 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.chore_exclusions).toBe(EXCLUSION_COLUMNS)
     expect(byTable.calendar_connections).toBe(CALENDAR_CONNECTION_COLUMNS)
     expect(byTable.calendar_busy).toBe(CALENDAR_BUSY_COLUMNS)
+    // #101 — the ledger, read by household (its list carries `household_id`).
+    expect(byTable.calendar_imports).toBe(CALENDAR_IMPORT_COLUMNS)
     // #352 — three tables, three constants, one module.
     expect(byTable.shopping_lists).toBe(SHOPPING_LIST_COLUMNS)
     expect(byTable.shopping_runs).toBe(SHOPPING_RUN_COLUMNS)

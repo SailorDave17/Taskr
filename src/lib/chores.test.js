@@ -195,7 +195,9 @@ describe('the readable column list', () => {
     const columns = CHORE_COLUMNS.split(',').map((c) => c.trim())
     expect(columns).toContain('source')
     expect(columns).toContain('assigned_source')
-    expect(CHORE_SOURCES).toEqual(['manual', 'extraction'])
+    // 'calendar' since #101 (`0038`), the same third word `member_capacity`
+    // learnt in `0031`, so the two provenance columns keep one vocabulary.
+    expect(CHORE_SOURCES).toEqual(['manual', 'extraction', 'calendar'])
     expect(CHORE_SOURCES).not.toContain('auto')
     expect(DEFAULT_CHORE_SOURCE).toBe('manual')
   })
@@ -721,6 +723,71 @@ describe('#305 AC 4 — a missed chore counts toward neither the outstanding tot
     const rows = [out('a', 20, 'm1'), done('m', 60, 'm1'), done('d', 30, 'm1')]
     const picture = assess({ members: [{ id: 'm1', capacityMinutes: 200 }], chores: toAllocatorChores(rows) })
     expect(picture.load.find((entry) => entry.memberId === 'm1').doneMinutes).toBe(90)
+  })
+})
+
+// #101 AC 6 — "when #36's committed-minutes derivation runs for the week, the
+// imported chore's minutes count exactly as a typed one-time chore's do".
+//
+// #36's derivation moved to the Split surface at #47 and is `assess` over
+// `toAllocatorChores` now (the note at the foot of chores.js records the move).
+// So the claim is made where the derivation lives: two rows identical in every
+// column but `source`, and the allocator's picture of them identical too. The
+// mutation that would redden this is a `source` clause in `toAllocatorChores` —
+// which is exactly the clause nobody should ever add, because provenance is
+// never privilege and an imported hour is an hour.
+describe('#101 AC 6 — an imported chore counts exactly as a typed one', () => {
+  const row = (id, source, extra = {}) => ({
+    id,
+    expected_minutes: 45,
+    assigned_member_id: 'm1',
+    completed_at: null,
+    missed_at: null,
+    actual_minutes: null,
+    repeat_kind: 'none',
+    source,
+    ...extra,
+  })
+
+  it('normalises to the same allocator row, whatever the source says', () => {
+    const [typed] = toAllocatorChores([row('t', 'manual')])
+    const [imported] = toAllocatorChores([row('i', 'calendar')])
+    expect({ ...imported, id: 't' }).toEqual(typed)
+    // And the allocator row carries no provenance at all — there is nothing
+    // downstream that COULD treat the two differently.
+    expect(Object.keys(typed)).not.toContain('source')
+  })
+
+  it('reaches the same open, done and assigned minutes on the Split', () => {
+    const typedPicture = assess({
+      members: [{ id: 'm1', capacityMinutes: 300 }],
+      chores: toAllocatorChores([row('a', 'manual'), row('b', 'manual', { expected_minutes: 30 })]),
+    })
+    const importedPicture = assess({
+      members: [{ id: 'm1', capacityMinutes: 300 }],
+      chores: toAllocatorChores([row('a', 'calendar'), row('b', 'manual', { expected_minutes: 30 })]),
+    })
+    const typed = typedPicture.load.find((entry) => entry.memberId === 'm1')
+    const imported = importedPicture.load.find((entry) => entry.memberId === 'm1')
+    expect(imported.openMinutes).toBe(75)
+    expect(imported.openMinutes).toBe(typed.openMinutes)
+    expect(imported.assignedMinutes).toBe(typed.assignedMinutes)
+    expect(imported.doneMinutes).toBe(typed.doneMinutes)
+  })
+
+  it('and the outstanding total counts it like any other row', () => {
+    expect(outstandingMinutes([row('a', 'calendar'), row('b', 'manual')])).toBe(90)
+    // POSITIVE CONTROL: the total does move on something — a completion drops
+    // the imported row out, so the assertion above is not a constant.
+    expect(
+      outstandingMinutes([row('a', 'calendar', { completed_at: '2026-09-10T10:00:00Z' }), row('b', 'manual')]),
+    ).toBe(45)
+  })
+
+  it('is a word the constraint admits, so the write path a typed chore takes accepts it', () => {
+    // The client-side half of the vocabulary; chores.pglite.test.js holds the
+    // constant equal to what `chores_source_known` admits after `0038`.
+    expect(CHORE_SOURCES).toContain('calendar')
   })
 })
 

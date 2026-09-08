@@ -24,6 +24,7 @@ import {
   isCompleted,
   isMissed,
   isOutstanding,
+  isOverdue,
   normalizeActualMinutes,
   normalizeDueDate,
   normalizeExpectedMinutes,
@@ -834,12 +835,32 @@ export function ChoreRow({
     )
   }
 
+  // #345 — the row's date has passed. Computed once here and used twice below,
+  // so the class and the word can never disagree about the same row.
+  const overdue = isOverdue(chore, todayIso, chores)
+
   return (
     // #305 — a missed row carries a modifier so the Done surface can dim it
     // without striking it through: a strike says finished, and this was not.
-    <li className={isMissed(chore) ? 'chore chore--missed' : 'chore'}>
+    // #345 adds a second, independent modifier: the two never coincide (an
+    // overdue row is by definition outstanding), but they are separate facts
+    // and the class list says so rather than nesting one inside the other.
+    <li className={`chore${isMissed(chore) ? ' chore--missed' : ''}${overdue ? ' chore--overdue' : ''}`}>
       <div className="chore__identity">
-        <span className="chore__title">{chore.title}</span>
+        <span className="chore__identity-line">
+          <span className="chore__title">{chore.title}</span>
+          {/* #345 — the word, so colour is never the only carrier: a member
+              who cannot separate the tint from the ink beside it still reads
+              "overdue". BESIDE THE TITLE rather than beside the date it is
+              about, which is where it started: measured at 360×800 in a real
+              browser it wrapped the cost line to two, taking the row from
+              282px to 302px and stranding a separator dot at the end of the
+              first line. Gluing the dot to the word changed nothing — the
+              wrap point is intrinsic at that width — so the fix is the
+              position, not the punctuation. Here it also lands where a scan
+              starts. */}
+          {overdue ? <span className="chore__overdue">overdue</span> : null}
+        </span>
         <span className="chore__cost">
           {chore.expected_minutes} min
           <span className="chore__cost-human"> ({formatMinutes(chore.expected_minutes)})</span>

@@ -1021,6 +1021,23 @@ against decision 3 and is not a dependency; **if it ships, its publication list 
 `shopping_lists`, `shopping_runs` and `shopping_items`**, and the recommendation on the epic is that
 it derive that list from `LIVE_SCHEMA` rather than hand-write it.
 
+**Decision 3 is reversed — 2026-09-08, #342, on the owner's direction of 2026-09-04** (*"i want
+the project to refresh automatically, the user should not have to refresh to receive updates"*).
+"Re-read on open, no Realtime, no polling" was the whole app's freshness model, stated here for the
+shopping surface because the surface inherited it. Two of its three words survive: there is still
+**no polling**, and arrival on a tab still re-reads. What changed is that a phone now also re-reads
+when its tab becomes visible again, and holds **one Realtime channel per household** on every table
+`refresh()` reads — derived from `LIVE_SCHEMA` exactly as the paragraph above asked, so the three
+shopping tables are in the `supabase_realtime` publication (`0037`) alongside the other eight. The
+consequence for the paragraphs below: "another phone's ticks appear on the next arrival on the tab"
+is now "within seconds, as a background re-read"; the tick itself still does not re-read, so
+decision 12 stands. The one place the old sentence stays true by design is the past-runs history
+(#359), which is read only when its disclosure is opened and is not on the channel. The arithmetic
+that says the Free plan carries this for a household of ten phones, and the kill condition that
+would reopen the question, are in `docs/hosting-decision.md`; the read-path consequences — which
+column each table is filtered on and why a delete is broadcast unfiltered — are in
+`docs/access-model.md`.
+
 **The strip measurement, by number (#350, 2026-09-05, at `13a4477`).** Five tabs do **not** fit a
 360 px viewport on one row as shipped: the four existing tabs sum to 279 px of natural width in a
 320 px content row, the fifth adds 61.9 px plus a 6 px gap and overshoots by **21 px**, and *Shop*

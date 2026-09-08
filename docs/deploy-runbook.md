@@ -264,10 +264,12 @@ the Connect Google Calendar button on the capacity screen fails when it is press
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
 "Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
 and `npm run check:live` is what tells the two apart, since it probes the table and the function as
-separate rows. Until `extract-description` has — and until its provider key is set, §3c — the
-plain-language capture on the capacity screen reports that the service could not answer and hands
-the member the typed field, which is #210's fallback working as designed; `check:live` reads the
-function's row as NOT DEPLOYED, the one excused red since #210.
+separate rows. **`extract-description` was deployed and its key set on 2026-09-08 by #209** (§3c),
+so all four are live and the excused-red set is empty — *measured 47 of 48 immediately before that
+deploy and 48 of 48 immediately after*. Before it, the plain-language capture on the capacity screen
+reported that the service could not answer and handed the member the typed field, which is #210's
+fallback working as designed, and `check:live` read the function's row as NOT DEPLOYED — the one
+excused red from #210 until #209.
 
 **A source change to an Edge Function needs a deploy of its own, and `npm run check:deployed`
 reports when one is owed.** Merging does not deploy a function, and neither does pasting a migration —
@@ -540,7 +542,21 @@ no Google account carries that address; they keep their PIN.
 
 ## 3c. The provider key, for the extraction endpoint
 
-Owner-only, and the step #209 exists for. `extract-description` (#208) asks a model through the
+> **Done 2026-09-08 by #209.** Deployment **v2**, `ezbr_sha256`
+> `46499420bb93ab3e9988b20485db12a9e648eaaaa3600a496bc2cf86aa57787a`, at
+> 2026-09-08T01:47:25.642Z; `ANTHROPIC_API_KEY` set at 01:49:03.859Z. The steps below are kept as
+> the procedure for the next project or the next rotation, with step 1's open measurement now
+> closed. **The secret was set AFTER the deploy and the function picked it up with no redeploy** —
+> the very next call answered 200 rather than refusing by name, so a secret change does not owe a
+> deploy.
+
+Owner-only in the sense that it holds a credential — but the key already lives in `.env.local` on
+the owner's machine, so a session can set it without the value entering a transcript, and #209 did
+so at a clickable question. That is the sixth instance of cairn's
+`externally-gated-is-not-externally-openable`: *ask, then run*, never *defer because the text says
+owner-only*.
+
+`extract-description` (#208) asks a model through the
 adapter `src/lib/extractionAdapter.js` wrote for the graded corpus, and the credential it needs is
 an Anthropic API key — the same `ANTHROPIC_API_KEY` the corpus runner reads from its environment,
 which lives in `.env.local` on this machine and **nowhere a phone can reach**. Until it is set, the
@@ -551,10 +567,23 @@ so a bare "not configured" would send you to check the wrong half.
 1. Deploy the function — `npm run deploy:function -- extract-description`, or the bare form, which
    ships all four. The deploy is the first that carries files from OUTSIDE `supabase/functions/`:
    the handler imports the adapter and the grader's contract from `src/lib`, and the CLI walks
-   relative imports from the entrypoint and uploads each file it reaches (read off the CLI source
-   at v2.116.0; #209 is where that reading is measured). If the deploy refuses a path under
-   `src/`, that reading was wrong and the repair is a `_shared/` copy held byte-identical by a
-   test — not a hand-maintained second prompt.
+   relative imports from the entrypoint and uploads each file it reaches. #208 could only read that
+   off the CLI's Go source at v2.116.0 and recorded it as **unmeasured**; **#209 measured it on
+   2026-09-08 and the reading was right.** The CLI printed each upload by repo-relative path and
+   there were five:
+
+   ```
+   Uploading asset (extract-description): supabase/functions/extract-description/index.ts
+   Uploading asset (extract-description): supabase/functions/extract-description/handler.ts
+   Uploading asset (extract-description): src/lib/extraction.js
+   Uploading asset (extract-description): src/lib/dueDates.js
+   Uploading asset (extract-description): src/lib/extractionAdapter.js
+   ```
+
+   No path under `src/` was refused, so the `_shared/` repair held in reserve here — a copy kept
+   byte-identical by a test, rather than a hand-maintained second prompt — **is not needed and was
+   not built**. Keep the paragraph anyway: it is the fallback if a later CLI version tightens the
+   walker, and the failure would present as a refusal naming the path rather than as a bad answer.
 2. Set the secret (not `.env.local`, which is for values the browser is allowed to see). **Never
    type the value into the command**: an Anthropic key is ~108 characters, the full line would be
    roughly double the ~90-character command that wrapped and ran as two commands here on
@@ -588,6 +617,23 @@ household the caller is NOT in is the control that the refusal is the function's
 gateway's. The rate bound is `RATE_LIMIT` in the function's `handler.ts` — the one place the two
 numbers are written, pinned by `handler.test.js`, and deliberately not copied here — and a 429
 past it is the ledger working, not a fault.
+
+*Measured 2026-09-08 (#209), against a fixture household created through the seeded account and
+deleted afterwards with the absence read back:*
+
+| the call | answer |
+|---|---|
+| real session, own household, `kind: capacity` | **200** `{"kind":"capacity","minutesByPerson":{…}}` |
+| real session, own household, `kind: chores` | **200** `{"kind":"chores","chores":[…]}` |
+| no `Authorization` header | 401 `{"code":"UNAUTHORIZED_NO_AUTH_HEADER"}` — the gateway |
+| publishable key only, no session | 401 `{"error":"Sign in first."}` — the function's own |
+| real session, a household the caller is NOT in | **403** `{"error":"You are not a member of that household."}` |
+| real session, `kind: "not-a-kind"` | 400, naming the kinds the corpus defines |
+
+`extraction_calls` then held exactly two rows for that household, one per kind — the ledger counting
+the answered calls and not the refusals, which is what it is for. The 403 is the load-bearing row:
+without it a 401 could be the gateway declining to spend an isolate, and the whole probe would prove
+only that the name resolves.
 
 **One thing `npm run check:deployed` could not see until #208, and can now.** This is the first
 function whose bundle carries files from outside its own directory — the adapter, the grader's

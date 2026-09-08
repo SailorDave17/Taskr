@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import Done from './Done.jsx'
+// #345 AC 4's positive control asks the predicate directly, to show the
+// fixture dates below WOULD have been coloured on an outstanding row.
+import * as choresLib from '../lib/chores.js'
 
 // #302 — completed work on its own surface, grouped by capacity week.
 //
@@ -395,5 +398,62 @@ describe('#307 — the holder a completion wrote, on the Done surface', () => {
     expect(surface()).not.toHaveTextContent(/m1/)
     // Two chores held by one person, and no figure anywhere saying "2".
     expect(within(surface()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+// #345 AC 4 — nothing on this surface is ever coloured as overdue.
+//
+// The Done tab renders the same `ChoreRow` the chore list does, so the
+// question is real rather than theoretical: a row here is by definition dated
+// in the past, and colouring it would paint the whole screen. `isOverdue`
+// requires `isOutstanding`, and a completed or missed row is neither — this is
+// where that shows on the surface. Chore names are synthetic — see #19.
+describe('#345 AC 4 — a finished or missed row is never coloured as overdue', () => {
+  // A month before setup()'s todayIso of Aug 24, so an "old date" reading of
+  // the rule would colour both of these.
+  const longAgoDone = {
+    id: 'c30',
+    household_id: 'h1',
+    title: 'Placeholder Old Done Chore',
+    expected_minutes: 25,
+    due_on: '2026-07-20',
+    completed_at: '2026-08-25T10:00:00Z',
+    completed_by_member_id: 'm1',
+  }
+  const longAgoMissed = {
+    id: 'c31',
+    household_id: 'h1',
+    title: 'Placeholder Old Missed Chore',
+    expected_minutes: 25,
+    due_on: '2026-07-21',
+    completed_at: null,
+    completed_by_member_id: null,
+    missed_at: '2026-08-25T10:00:00Z',
+  }
+
+  it('a completed row dated a month ago carries neither the modifier nor the word', () => {
+    setup({ chores: [longAgoDone] })
+    const row = screen.getByText('Placeholder Old Done Chore').closest('li')
+    expect(row).not.toHaveClass('chore--overdue')
+    expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+  })
+
+  it('a missed row dated a month ago carries neither either', () => {
+    setup({ chores: [longAgoMissed] })
+    const row = screen.getByText('Placeholder Old Missed Chore').closest('li')
+    expect(row).toHaveClass('chore--missed')
+    expect(row).not.toHaveClass('chore--overdue')
+    expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: the same dates on an OUTSTANDING row are overdue on the chore list', () => {
+    // Without this the two assertions above pass with `isOverdue` deleted, or
+    // with every row on both surfaces plain. Chores.test.jsx carries the
+    // outstanding cases; this one proves the fixture dates above are old
+    // enough to have been coloured, so what spares them is having left the
+    // list rather than their date.
+    const { isOverdue } = choresLib
+    expect(isOverdue({ ...longAgoDone, completed_at: null }, '2026-08-24', [])).toBe(true)
+    expect(isOverdue({ ...longAgoMissed, missed_at: null }, '2026-08-24', [])).toBe(true)
   })
 })

@@ -2254,3 +2254,100 @@ describe('#101 — import from calendar', () => {
     expect(screen.getByTestId('import-source')).toBeInTheDocument()
   })
 })
+
+// #345 — an overdue row is coloured as overdue, and a daily repeat never is.
+//
+// What this file proves is what the ROW carries: the modifier the stylesheet
+// keys on, and the word beside the date so colour is not the only carrier.
+// What it cannot prove is what the colour looks like — jsdom applies no
+// stylesheet — which is why AC 5 is asserted against `index.css` in
+// gate.test.js, and why the predicate's own cases are in lib/chores.test.js.
+// Chore names are synthetic — see #19.
+describe('#345 — a chore whose date has passed is coloured as overdue', () => {
+  // setup()'s own two chores are due Aug 10 and Aug 11 against a todayIso of
+  // Aug 24, so the default fixture is already two overdue rows.
+  const rowFor = (title) => screen.getByText(title).closest('li')
+
+  it('AC 1: a non-repeating row dated before today carries the modifier and the word', () => {
+    setup()
+    const row = rowFor('Placeholder Chore')
+    expect(row).toHaveClass('chore--overdue')
+    expect(within(row).getByText('overdue')).toBeInTheDocument()
+  })
+
+  it('AC 1: a row due TODAY carries neither, and one due later carries neither', () => {
+    // The `<` / `<=` mutation's case on this surface: due-today must stay
+    // plain, and it is the only row that separates the two operators.
+    const dueToday = { ...chores[0], id: 'c20', title: 'Placeholder Today Chore', due_on: '2026-08-24' }
+    const dueLater = { ...chores[0], id: 'c21', title: 'Placeholder Later Chore', due_on: '2026-08-30' }
+    setup({ chores: [dueToday, dueLater] })
+
+    for (const title of ['Placeholder Today Chore', 'Placeholder Later Chore']) {
+      const row = rowFor(title)
+      expect(row).not.toHaveClass('chore--overdue')
+      expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+    }
+  })
+
+  it('AC 2: neither a daily anchor nor a daily occurrence is highlighted, however old', () => {
+    const anchor = {
+      ...chores[0], id: 'r1', title: 'Placeholder Daily Chore',
+      due_on: '2026-08-01', repeat_kind: 'daily',
+    }
+    const occurrence = {
+      ...chores[0], id: 'o1', title: 'Placeholder Daily Occurrence',
+      due_on: '2026-08-20', repeat_kind: 'none', generated_from: 'r1',
+    }
+    setup({ chores: [anchor, occurrence] })
+
+    for (const title of ['Placeholder Daily Chore', 'Placeholder Daily Occurrence']) {
+      const row = rowFor(title)
+      expect(row).not.toHaveClass('chore--overdue')
+      expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+    }
+  })
+
+  it('AC 2: a weekly and a monthly occurrence dated before today ARE highlighted', () => {
+    // The control on the exclusion: it is about dailies, and this is what
+    // stops it quietly becoming "repeats are exempt".
+    const weeklyAnchor = { ...chores[0], id: 'r2', title: 'Placeholder Weekly Chore', due_on: '2026-08-03', repeat_kind: 'weekly', repeat_weekdays: [1] }
+    const weeklyOccurrence = { ...chores[0], id: 'o2', title: 'Placeholder Weekly Occurrence', due_on: '2026-08-17', repeat_kind: 'none', generated_from: 'r2' }
+    const monthlyOccurrence = { ...chores[0], id: 'o3', title: 'Placeholder Monthly Occurrence', due_on: '2026-08-05', repeat_kind: 'none', generated_from: 'r3' }
+    const monthlyAnchor = { ...chores[0], id: 'r3', title: 'Placeholder Monthly Chore', due_on: '2026-07-05', repeat_kind: 'monthly', repeat_monthday: 5 }
+    setup({ chores: [weeklyAnchor, weeklyOccurrence, monthlyAnchor, monthlyOccurrence] })
+
+    for (const title of [
+      'Placeholder Weekly Occurrence',
+      'Placeholder Monthly Occurrence',
+      'Placeholder Weekly Chore',
+      'Placeholder Monthly Chore',
+    ]) {
+      const row = rowFor(title)
+      expect(row).toHaveClass('chore--overdue')
+      expect(within(row).getByText('overdue')).toBeInTheDocument()
+    }
+  })
+
+  it('AC 3: reads the household day it is given, not the device clock', () => {
+    // The household is a day behind the device. A chore due on the
+    // household's today must stay plain — which is only true if the row reads
+    // `todayIso`. Nothing here depends on when the test runs.
+    const dueOnTheirToday = { ...chores[0], id: 'c22', title: 'Placeholder Zone Chore', due_on: '2026-08-24' }
+    setup({ chores: [dueOnTheirToday], todayIso: '2026-08-24' })
+    expect(rowFor('Placeholder Zone Chore')).not.toHaveClass('chore--overdue')
+  })
+
+  it('AC 3 POSITIVE CONTROL: the same row against a household one day ahead IS overdue', () => {
+    // Without this the assertion above passes with the feature deleted.
+    const dueOnTheirToday = { ...chores[0], id: 'c22', title: 'Placeholder Zone Chore', due_on: '2026-08-24' }
+    setup({ chores: [dueOnTheirToday], todayIso: '2026-08-25' })
+    expect(rowFor('Placeholder Zone Chore')).toHaveClass('chore--overdue')
+  })
+
+  it('carries no marker at all before the household day is known', () => {
+    // App renders before `localTodayIn` has a household, and a row must not
+    // guess: no todayIso, no colour.
+    setup({ todayIso: undefined })
+    expect(rowFor('Placeholder Chore')).not.toHaveClass('chore--overdue')
+  })
+})

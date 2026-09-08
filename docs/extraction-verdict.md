@@ -28,13 +28,18 @@ combines the two halves of the latency axis that no single story could measure.
 
 ## The deployed-path latency is an ESTIMATE — AC 3
 
+> **Superseded 2026-09-07 by #209**, which deployed the endpoint and measured this leg. The section
+> is kept as written because it is the record of how the verdict was actually taken, and because its
+> reasoning about the arithmetic turned out to be right. Read *"SETTLED 2026-09-07"* at the end of it
+> for the measurement.
+
 **Neither input story can print this number, and that is not a gap in either of them.** #205 timed a
 phone to `provision-member`, a function that does nothing but refuse; #206 timed a developer machine
 to the provider. The kill number is named on the *deployed path*, which is both legs inside one
 request — and no such request had been made when this verdict was taken, because the extraction
-endpoint (#208) did not exist yet. *(It does now — written 2026-09-07, the same day, and undeployed
-until #209; nothing below moved, since the figure is replaced by a measurement only once the
-deployed endpoint is timed from a phone.)*
+endpoint (#208) did not exist yet. *(It does now — written 2026-09-07, the same day, and **deployed
+2026-09-07 by #209**, which timed it from the phone and settled this axis. Nothing between those two
+dates moved, because the figure could only be replaced by a measurement of the deployed endpoint.)*
 
 So the figure below is **computed from two measurements, not taken from one**, and the report labels
 it so: `extractionThresholds.js` returns it as an estimate, the axis line prints `(est.)` with its
@@ -95,6 +100,37 @@ friendlier condition.
 estimate with a measurement, and until it does, the latency axis carries `(est.)` everywhere it is
 printed. Two directions of error are known and neither is measured here: that isolate will be larger
 than `provision-member` and may boot slower, and the correlation between the two legs is unknown.
+
+### SETTLED 2026-09-07 (#209) — the estimate held
+
+The endpoint was deployed and timed end to end from the same phone, on the deployed path, with 84
+real extraction calls over three passes. Full method, controls and caveats in
+`docs/hosting-decision.md`, section *"Measured 2026-09-07"*; raw rows in
+`docs/extraction-latency-2026-09-07.tsv`.
+
+| | estimated above | **measured** |
+|---|---|---|
+| deployed p95, wifi | 2,626 ms `(est.)` | **1,762 ms** (settled link) |
+| deployed p95, cellular | 2,245 ms `(est.)` | **1,692 ms** |
+| deployed p95, all 84 calls pooled | — | **2,659 ms** |
+| deployed p50, all 84 calls pooled | — | 1,456 ms |
+
+**The estimate held, and it held in the direction this section predicted it would err.** On the two
+clean passes the real figure is 33% below the estimate, which is exactly the overstatement *"the sum
+of two p95s is not the p95 of the sum"* argues for. On the pooled reading — which includes a pass
+taken on a badly degraded wifi link — it lands within **33 ms** of the estimate, and that is
+coincidence rather than precision; do not read it as the method being accurate to 1%.
+
+So `claude-haiku-4-5` clears the 3,000 ms kill number on measurement and not only on arithmetic, at
+**56–59%** of the budget on a healthy link and 89% pooled. The narrowing this axis made stands.
+
+**One thing the estimate could not have caught, and it is the reason to keep reading past the
+percentiles.** One call of the 84 took **16,787 ms** with clean per-cycle controls — its gateway-only
+control 315 ms, DNS 9 ms — so the whole 16.3 s sits in the endpoint-plus-provider leg. Three of 84
+exceeded 3,000 ms; **one exceeded `CLIENT_WAIT_MS`** and would have hit the typed-field fallback on
+the phone. A percentile at n=84 cannot describe that tail, and no arithmetic over two p95s could ever
+have produced it. The budget is met; the tail is unbounded. Both are true and the second is the one
+worth carrying into #214.
 
 ## The manual floor — AC 4
 
@@ -470,7 +506,7 @@ this run does not contain the evidence to take it.
 | ambiguous refused | PASS | PASS | PASS |
 | overconfident | PASS | PASS | PASS |
 | due dates exact | — | PASS | PASS |
-| deployed p95 | — | — | **PROVISIONAL** (estimate) |
+| deployed p95 | — | — | ~~**PROVISIONAL** (estimate)~~ → **PASS on measurement** (#209, 2026-09-07) |
 | cost | — | — | PASS |
 | correction rate | **FAIL** | PASS | PASS, exactly on the ceiling |
 
@@ -525,7 +561,12 @@ issue is closed as not-planned by it.
 
 - **One run, one day, one household.** No figure here has a confidence interval, and the member
   sentences come from a household of two.
-- **The deployed path is still an estimate.** #209 replaces it with a measurement.
+- ~~**The deployed path is still an estimate.** #209 replaces it with a measurement.~~
+  **Settled 2026-09-07 by #209**, which deployed the endpoint and timed 84 real calls from the
+  phone: p95 **1,692–1,762 ms** on a healthy link, **2,659 ms** pooled across a degraded one, against
+  the 2,626 ms estimate. See *"SETTLED 2026-09-07"* above. What replaced it is a narrower open
+  question rather than nothing: **the tail is unbounded** — one call of 84 took 16,787 ms with clean
+  controls, past what the phone waits.
 - **The correction rate is measured on a review, not on the flow.** The member judged extractions
   from sentences they wrote; nobody has yet corrected a figure inside the capture flow with the
   confirm form in front of them, because that flow (#210, #213) is what the verdict decides.

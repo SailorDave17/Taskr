@@ -476,9 +476,14 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // read NOT DEPLOYED with no directory behind it, and `scripts/deploy-function.mjs`
   // listed it as PENDING so a bare deploy did not try to ship a directory that
   // was not there. #208 wrote the function (supabase/functions/extract-description)
-  // and moved the name into that script's deployable list; the probe still
-  // reads NOT DEPLOYED until #209 runs the deploy, which is the honest state
-  // and is written down in docs/access-model.md's excused-red set.
+  // and moved the name into that script's deployable list; #209 deployed it on
+  // 2026-09-07, so this probe is green and docs/access-model.md's excused-red
+  // set is empty again. What the probe still cannot see is whether the
+  // function's provider secret is set — a preflight carries no body and invokes
+  // nothing, so this row reads the same either way, and what settles it is a
+  // POST with a real session (docs/deploy-runbook.md section 3c). The secret is
+  // deliberately not named here: this file is under `src/`, and gate.test.js
+  // refuses that spelling anywhere the bundler reads.
   'extract-description',
 ])
 

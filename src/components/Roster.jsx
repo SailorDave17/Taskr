@@ -553,14 +553,89 @@ BusyReadout.propTypes = {
  *
  * Connected state is read from the SERVER (`calendar_connections`, through
  * App's refresh), never remembered locally, so a second phone shows it too.
+ *
+ * WHAT #99 ADDED, AND WHY IT IS TWO TAPS
+ *
+ * A way back out, beside the sentence that says there is something to get out
+ * of. It is the charter's trust half: an input a member cannot switch off erodes
+ * exactly the trust the connection is asking for, so "Calendar connected" must
+ * not be a state with no exit next to it.
+ *
+ * Two taps — `Disconnect`, then `Disconnect Google Calendar?` beside `Keep` —
+ * which is the idiom Remove-a-member, Remove-a-chore and the second sign-out
+ * already use on this screen (owner decision at #99's pickup, 2026-09-08, over
+ * one tap). The reason is not that disconnecting is dangerous but that it is
+ * IRREVERSIBLE IN ONE DIRECTION: every derived figure goes, and getting them
+ * back is a fresh consent at Google and a fresh read, so a mis-tap costs a round
+ * trip nobody asked for. The confirm arm is the only control here drawn as
+ * `button--danger`, for the reason the Remove arms are.
+ *
+ * `revokeNote` is drawn in BOTH states, and that is what makes it reachable at
+ * all: the note exists only after a disconnect has SUCCEEDED, at which point
+ * the connection row is gone and this component is rendering its Connect arm.
+ * A note that lived inside the connected branch could never be seen.
  */
-function CalendarControl({ member, connection, busy, onConnect }) {
+function CalendarControl({ member, connection, busy, onConnect, onDisconnect, revokeNote }) {
+  // Declared before the early return below, because a hook after a conditional
+  // return is a hook that is not always called.
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false)
+
   if (!isRealEmailMember(member)) return null
+
+  // #99 AC 4 — said once, quietly, and only for the one outcome Taskr cannot
+  // vouch for. `revokeNoteFor` in calendar.js owns which outcome that is; this
+  // draws whatever it produced.
+  const note = revokeNote ? (
+    <span className="member__calendar-note" role="status" data-testid="calendar-note">
+      {revokeNote}
+    </span>
+  ) : null
 
   if (connection) {
     return (
       <span className="member__calendar" data-testid={`calendar-${member.id}`}>
         Calendar connected
+        {confirmingDisconnect ? (
+          <>
+            <button
+              className="button button--danger"
+              type="button"
+              // The two-arm handler is not decoration: onDisconnect routes
+              // through App's mutate(), which RETHROWS after recording the
+              // message, so a bare call here escapes as an unhandled promise
+              // rejection. The Remove arms in this file and in Chores.jsx do
+              // the same.
+              onClick={() => onDisconnect().then(() => {}, () => {})}
+              disabled={busy}
+            >
+              Disconnect Google Calendar?
+            </button>
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDisconnect(false)}
+              disabled={busy}
+            >
+              Keep
+            </button>
+          </>
+        ) : (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => setConfirmingDisconnect(true)}
+            disabled={busy}
+            // No `aria-label`, matching the Connect button below rather than
+            // the Remove and This-week controls above. Those carry one because
+            // they repeat down the roster and "Remove" alone names nobody; this
+            // control renders on the signed-in member's own row only, so the
+            // word is already unambiguous and a label would only be a second
+            // spelling to keep in step.
+          >
+            Disconnect
+          </button>
+        )}
+        {note}
       </span>
     )
   }
@@ -570,6 +645,7 @@ function CalendarControl({ member, connection, busy, onConnect }) {
       <button className="button button--quiet" type="button" onClick={onConnect} disabled={busy}>
         Connect Google Calendar
       </button>
+      {note}
     </span>
   )
 }
@@ -579,6 +655,8 @@ CalendarControl.propTypes = {
   connection: PropTypes.object,
   busy: PropTypes.bool,
   onConnect: PropTypes.func.isRequired,
+  onDisconnect: PropTypes.func.isRequired,
+  revokeNote: PropTypes.string,
 }
 
 /**
@@ -728,6 +806,8 @@ function MemberRow({
   onProposeCapacity,
   connection,
   onConnectCalendar,
+  onDisconnectCalendar,
+  revokeNote,
   busyWeek,
   busyComplaint,
   timeZone,
@@ -894,6 +974,8 @@ function MemberRow({
             connection={connection}
             busy={busy}
             onConnect={onConnectCalendar}
+            onDisconnect={onDisconnectCalendar}
+            revokeNote={revokeNote}
           />
         ) : null}
       </div>
@@ -985,6 +1067,8 @@ MemberRow.propTypes = {
   onProposeCapacity: PropTypes.func,
   connection: PropTypes.object,
   onConnectCalendar: PropTypes.func,
+  onDisconnectCalendar: PropTypes.func,
+  revokeNote: PropTypes.string,
   busyWeek: PropTypes.object,
   busyComplaint: PropTypes.string,
   timeZone: PropTypes.string,
@@ -1022,6 +1106,12 @@ export default function Roster({
   onProposeCapacity,
   connections = [],
   onConnectCalendar,
+  onDisconnectCalendar,
+  // #99 AC 4 — App's, not this component's, because the sentence describes the
+  // outcome of a call App made and outlives the row that made it: the
+  // connection is gone by the time it is drawn, so state held down here would
+  // have to survive the very re-render the disconnect causes.
+  calendarRevokeNote = null,
   busyWeeks = [],
   busyComplaint = null,
 }) {
@@ -1210,6 +1300,16 @@ export default function Roster({
                 // above.
                 connection={connectionFor(connections, member.id)}
                 onConnectCalendar={onConnectCalendar}
+                onDisconnectCalendar={onDisconnectCalendar}
+                // #99 — passed for every row and drawn on ONE, because
+                // `CalendarControl` renders only where `isMe` already holds
+                // (see MemberRow). A `me?.id === member.id` test here would be
+                // that same condition written twice, and this file has already
+                // measured what a spare guard costs: with two of them producing
+                // one observable, deleting either reddens nothing and the suite
+                // reports coverage it does not have (#95's `isMe` mutation,
+                // round 1). One guard, in the place that owns the question.
+                revokeNote={calendarRevokeNote}
                 // #96 — resolved here for the reason `override` is: at most one
                 // row per person per week (`0030`'s unique constraint), matched
                 // on the PERIOD as well as the person so a figure from another
@@ -1332,6 +1432,8 @@ Roster.propTypes = {
   onProposeCapacity: PropTypes.func,
   connections: PropTypes.array,
   onConnectCalendar: PropTypes.func,
+  onDisconnectCalendar: PropTypes.func,
+  calendarRevokeNote: PropTypes.string,
   busyWeeks: PropTypes.array,
   busyComplaint: PropTypes.string,
 }

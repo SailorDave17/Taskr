@@ -618,6 +618,12 @@ half turns out not to be worth its days.
 - **Leaving does not revoke the Google grant**, because #99 owns the revoke. The screen says so
   plainly and names it; the alternative coupled an irreversible household action to a calendar
   story's schedule.
+  *(#99 shipped 2026-09-08 and this
+  bullet still holds as written — the two are different acts, and
+  the sentence naming #99 is now naming something that exists rather than something planned.
+  Disconnect asks Google to revoke; LEAVING a household still does not, so a member who wants the
+  grant gone presses Disconnect before they leave. #99's revoke is best-effort besides, so even that
+  act can leave Google holding a grant it says so on screen.)*
 
 **What is not decided here.** How the client scopes a read to one household is deliberately left to a
 measurement story — `members` and `chores` both withhold `household_id` from the client select

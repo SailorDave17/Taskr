@@ -61,6 +61,14 @@ export const FUNCTION_NAMES = Object.freeze([
   // section 3c is where it is set. Deploying it is also the other half of
   // `0036`, which creates the call ledger the function's rate bound counts in.
   'extract-description',
+  // #99. The exit from #95's connection: it deletes the token row, every
+  // derived busy row and the connection row, and asks Google to revoke the
+  // grant best-effort. It needs NO secret beyond the three Supabase injects —
+  // unlike the two calendar functions beside it, which refuse without
+  // `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` — because Google's revocation
+  // endpoint takes the token alone, and an exit must not be narrower than the
+  // way in.
+  'calendar-disconnect',
 ])
 
 /**

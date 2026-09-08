@@ -15,11 +15,16 @@
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
   session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
-  EMPTY again as of 2026-09-07** — *measured **47 of 48** immediately before
+  EMPTY again as of 2026-09-08** — #99 adds
+  NO migration and one Edge Function, `calendar-disconnect`, so its row is a deploy's and never a
+  paste's: *measured **48 of 49** immediately before `npm run deploy:function` and
+  **49 of 49** immediately after* in #99's own session, the denominator having moved
+  from 48 to 49 on the one new function. Its whole history is the #99 bullet in the excused-red
+  table below. Every red, on any subject, is real.** Before that the set was
+  EMPTY as of 2026-09-07 — *measured **47 of 48** immediately before
   `npm run deploy:function` shipped `extract-description` in #209's own session and **48 of 48**
   immediately after*, the denominator unmoved because that row had existed since #210 listed the
-  name. Its whole history is the #210 bullet in the excused-red table below, now closed. Every red,
-  on any subject, is real.** Before that the set held ONE
+  name. Its whole history is the #210 bullet in the excused-red table below, now closed. Before that the set held ONE
   row — `extract-description`, the Edge Function #210's capture flow invokes, WRITTEN by #208 on
   2026-09-07 and DEPLOYED by #209 on 2026-09-07: *measured 2026-09-04 at 36 of 36 immediately before
   the name was listed and 36 of 37 immediately after*, in #210's own session, and *measured 47 of 48
@@ -842,6 +847,24 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#99 opened ONE row on 2026-09-08 — a DEPLOY's row, not a paste's — and drained it in its own
+  session.** `calendar-disconnect` is the Edge Function that deletes a member's token row, every
+  derived busy row and the connection row, and asks Google to revoke the grant best-effort. It
+  arrives with **no migration at all**: `0011` and `0030` already created the three tables it deletes
+  from and already grant `service_role` the DELETE it uses, so there is nothing to paste and nothing
+  a paste could clear. The row was red from the moment `LIVE_EDGE_FUNCTIONS` listed the name until
+  `npm run deploy:function` shipped it: *measured **48 of 49** immediately before the
+  deploy and **49 of 49** immediately after*, the denominator having moved from 48 to
+  49 on the one new function. Written down here and in README's `check:live` cell in the same change
+  that created the row, for the reason the #352 bullet below gives.
+
+  **What this check still cannot see about it, stated because the gap is wider here than usual.** A
+  preflight carries no body and invokes nothing, so a green row says the gateway has the function
+  and a browser could call it — and says nothing about whether the three deletions actually
+  succeed, which needs `service_role` to hold DELETE on all three tables. That half is
+  `npm run probe:live-grants`'s and `src/test/grants.pglite.test.js`'s, and it was already true
+  before this story: `0011` and `0030` grant it, and the catalog reading recorded under those two
+  entries is what says the live project agrees.
 - **#360 opened THREE reds on 2026-09-06 and drained all three in its own session** — the
   `archive_shopping_list` and `unarchive_shopping_list` RPC probes, red from the moment `LIVE_RPCS`
   listed them, and the `shopping_lists` TABLE probe, which went red the moment `archived_at` joined

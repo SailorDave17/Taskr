@@ -71,6 +71,8 @@ const {
   completeConnect,
   connectionFor,
   consentUrl,
+  disconnectCalendar,
+  revokeNoteFor,
   hasCalendarConfig,
   isBusyWeekStale,
   isRealEmailMember,
@@ -677,6 +679,107 @@ describe('fetchBusyWeek', () => {
     await expect(fetchBusyWeek({ householdId: 'h1', periodStart: WEEK })).rejects.toThrow(
       /Failed to send a request/,
     )
+  })
+})
+
+// #99 — the way back out. The DELETIONS are the Edge Function's and are proven
+// in supabase/functions/calendar-disconnect/handler.test.js; this is the client
+// half, which decides what is asked for and what is said afterwards.
+describe('disconnectCalendar', () => {
+  it('names the household and never who it is about', async () => {
+    // The function acts on the CALLER'S own member row, so a member id in this
+    // body would be a value the server must ignore — and the cheapest way to be
+    // sure it is ignored is not to send one. The same argument `fetchBusyWeek`
+    // and `completeConnect` make.
+    invoke.mockResolvedValue({ data: { ok: true, memberId: 'm1', revoked: true }, error: null })
+    await disconnectCalendar({ householdId: 'h1' })
+    expect(invoke).toHaveBeenCalledWith('calendar-disconnect', { body: { householdId: 'h1' } })
+    const [, options] = invoke.mock.calls[0]
+    expect(Object.keys(options.body)).toEqual(['householdId'])
+  })
+
+  it('refuses to ask without a household', async () => {
+    await expect(disconnectCalendar({})).rejects.toThrow(/Which household/)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('hands back what the function said, revoke outcome included', async () => {
+    invoke.mockResolvedValue({ data: { ok: true, memberId: 'm1', revoked: false }, error: null })
+    await expect(disconnectCalendar({ householdId: 'h1' })).resolves.toEqual({
+      ok: true,
+      memberId: 'm1',
+      revoked: false,
+    })
+  })
+
+  it('shows the FUNCTION’S sentence, not the SDK’s', async () => {
+    // #112's lesson again. The handler distinguishes a partial deletion the
+    // member should retry from a household they are not in, and collapsing both
+    // into "Edge Function returned a non-2xx status code" would put a sentence
+    // that reads like a network outage on a state with a one-tap repair.
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: {
+          json: async () => ({
+            error: 'Could not finish disconnecting that calendar. Part of it was removed.',
+          }),
+        },
+      },
+    })
+    await expect(disconnectCalendar({ householdId: 'h1' })).rejects.toThrow(/Part of it was removed/)
+  })
+
+  it('falls back to the SDK’s message when the body cannot be read', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Failed to send a request to the Edge Function',
+        context: {
+          json: async () => {
+            throw new SyntaxError('not json')
+          },
+        },
+      },
+    })
+    await expect(disconnectCalendar({ householdId: 'h1' })).rejects.toThrow(
+      /Failed to send a request/,
+    )
+  })
+})
+
+// #99 AC 4 — which of the three revoke outcomes is worth a sentence. Owner
+// decision at pickup, 2026-09-08: say the one Taskr cannot vouch for, and say
+// nothing on the other two, because a note on every disconnect is noise that
+// hides the one that matters.
+describe('revokeNoteFor', () => {
+  it('says nothing when Google accepted the revocation', () => {
+    expect(revokeNoteFor({ ok: true, revoked: true })).toBeNull()
+  })
+
+  it('says nothing when there was no credential to revoke', () => {
+    // `null` is not `false`, and this is the assertion that keeps them apart. A
+    // member who never had a grant outstanding must not be told Google may
+    // still hold one — which is the opposite of what this story is for.
+    expect(revokeNoteFor({ ok: true, revoked: null })).toBeNull()
+  })
+
+  it('names Google, and where to remove Taskr, when the revocation could not be confirmed', () => {
+    const note = revokeNoteFor({ ok: true, revoked: false })
+    expect(note).toMatch(/forgotten/)
+    expect(note).toMatch(/Google/)
+    // Actionable, which is the whole reason the sentence exists rather than a
+    // bare "could not revoke": a member reading this needs somewhere to go.
+    expect(note).toMatch(/Third-party apps/)
+  })
+
+  it('says nothing about a response it did not get', () => {
+    // A disconnect that threw never reaches this, and a caller that passes
+    // nothing must not produce a sentence claiming Google was asked.
+    expect(revokeNoteFor(null)).toBeNull()
+    expect(revokeNoteFor(undefined)).toBeNull()
+    expect(revokeNoteFor({})).toBeNull()
   })
 })
 

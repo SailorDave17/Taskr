@@ -276,6 +276,70 @@ export async function completeConnect(
 }
 
 /**
+ * Ask the Edge Function to forget this member's calendar — #99 AC 1.
+ *
+ * The function acts on the CALLER's own member row, so the body names only
+ * which household: who it is about is `auth.uid()` off the JWT, exactly as
+ * `completeConnect` sends no member id and `fetchBusyWeek` sends none. There is
+ * no version of this call that could disconnect somebody else.
+ *
+ * WHAT COMES BACK, AND WHY IT IS THREE-VALUED. `revoked` is `true` when Google
+ * accepted the revocation, `false` when Taskr asked and could not tell, and
+ * `null` when there was no stored credential to revoke at all. The screen shows
+ * a sentence for exactly one of the three (#99 AC 4), and collapsing `null` into
+ * `false` would put "Google may still list Taskr" on a member who never had a
+ * grant outstanding — the opposite of what this story is for.
+ *
+ * The failure sentence is read off the function's own body for #112's reason,
+ * the same as the two calls above it: `functions.invoke` collapses everything
+ * into "Edge Function returned a non-2xx status code", and the handler
+ * deliberately distinguishes a partial deletion the member should retry from a
+ * household they are not in.
+ */
+export async function disconnectCalendar({ householdId }) {
+  if (!householdId) throw new Error('Which household? A disconnect must name one.')
+
+  const { data, error } = await getSupabase().functions.invoke('calendar-disconnect', {
+    body: { householdId },
+  })
+
+  if (error) {
+    let detail = ''
+    try {
+      detail = (await error.context?.json?.())?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    throw new Error(detail || `Could not disconnect that calendar: ${error.message}`)
+  }
+
+  return data
+}
+
+/**
+ * What to say after a disconnect, or null when there is nothing to add — AC 4.
+ *
+ * Owner decision at #99's pickup, 2026-09-08, over reporting the revoke outcome
+ * silently: a member who disconnected for privacy reasons and was told only
+ * "done" is left believing Google no longer holds a grant it may still hold.
+ * So the one state Taskr cannot vouch for gets a sentence, and the two it can
+ * get none — a note on every disconnect would be noise that hides the one that
+ * matters.
+ *
+ * Deliberately a pure function over the response rather than a sentence built at
+ * the call site: it is the whole of the decision "which of the three states is
+ * worth saying", it is tested here, and the component that draws it holds no
+ * copy of the rule.
+ */
+export function revokeNoteFor(result) {
+  if (result?.revoked !== false) return null
+  return (
+    'Taskr has forgotten this calendar. Google may still list Taskr — remove it under ' +
+    'Third-party apps & services in your Google account.'
+  )
+}
+
+/**
  * Every calendar connection ONE household has — #159 AC 1.
  *
  * Scoped by `memberIds`, like capacity and exclusions: `calendar_connections`

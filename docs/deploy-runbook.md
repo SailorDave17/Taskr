@@ -245,8 +245,9 @@ persists anything.
 
 ## 3. The Edge Functions
 
-**Four of them since #208** — `provision-member`, `calendar-connect`, `calendar-busy` and
-`extract-description`. *(This said "three since #96" until 2026-09-07 — the count lives in
+**Five of them since #99** — `provision-member`, `calendar-connect`, `calendar-busy`,
+`extract-description` and `calendar-disconnect`. *(This said "four since #208" until 2026-09-08, and
+"three since #96" until 2026-09-07 — the count lives in
 `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
@@ -264,9 +265,17 @@ the Connect Google Calendar button on the capacity screen fails when it is press
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
 "Calendar suggests" figure ever appears; that symptom is identical to `0030` not having been applied,
 and `npm run check:live` is what tells the two apart, since it probes the table and the function as
-separate rows. **`extract-description` was deployed and its key set on 2026-09-07 by #209** (§3c),
-so all four are live and the excused-red set is empty — *measured 47 of 48 immediately before that
-deploy and 48 of 48 immediately after*. Before it, the plain-language capture on the capacity screen
+separate rows. Until `calendar-disconnect` has, the **Disconnect** control beside "Calendar
+connected" fails when it is pressed and a member who wants out has no way to take it — which is why
+#99 treats its deploy as part of the story rather than as a later step: the exit existing in the repo
+and not on the platform is the state that story is written against. It needs **no secret of its
+own** — the three Supabase injects are enough, because Google's revocation endpoint takes the token
+alone, so unlike `extract-description` there is no §3c step behind it.
+**`extract-description` was deployed and its key set on 2026-09-07 by #209** (§3c),
+so all four were live and the excused-red set empty — *measured 47 of 48 immediately before that
+deploy and 48 of 48 immediately after*. **`calendar-disconnect` was deployed on 2026-09-08 by #99** —
+*measured **48 of 49** immediately before the deploy and **49 of 49**
+immediately after*. Before it, the plain-language capture on the capacity screen
 reported that the service could not answer and handed the member the typed field, which is #210's
 fallback working as designed, and `check:live` read the function's row as NOT DEPLOYED — the one
 excused red from #210 until #209.

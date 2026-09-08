@@ -18,10 +18,14 @@
 // endpoint and wire it to the name. Until #209 deploys the function, the
 // gateway answers 404, `extractCapacity` reports FAILED, and the member gets
 // the manual field — which is the fallback AC 2 requires and #214 later proves
-// in production. `scripts/deploy-function.mjs` carries the name as PENDING so
-// a bare `npm run deploy:function` does not try to deploy a directory that is
-// not there; `LIVE_EDGE_FUNCTIONS` carries it as invoked, so `check:live`
-// reads one honest red until the deploy lands.
+// in production. `scripts/deploy-function.mjs` carried the name as PENDING so
+// a bare `npm run deploy:function` did not try to deploy a directory that was
+// not there; #208 wrote the function (2026-09-07) and moved the name into the
+// deployable list. `LIVE_EDGE_FUNCTIONS` carries it as invoked, so
+// `check:live` reads one honest red until the deploy lands. The endpoint
+// defaults the SPEAKER to the caller's own roster name (#207's third contract
+// gap) and accepts a `speaker` in the body; this flow does not send one yet,
+// which is #210's to decide.
 //
 // THE FIVE OUTCOMES, AND WHY A REFUSAL IS NOT A FAILURE
 //
@@ -289,9 +293,21 @@ export async function extractCapacity(
 
   let result
   try {
+    // The SPEAKER is the row this description is for — #207's third contract
+    // gap, and the owner's call at #208's review escalation (2026-09-07): the
+    // endpoint names nobody when this is omitted, so it is this line that
+    // tells the model who "I" is. The row's name rather than the caller's,
+    // because an organizer can type on another member's row and
+    // `proposeCapacity`'s first rule then attributes the figure by this name.
+    const speaker = String(member?.display_name ?? '').trim()
     result = await Promise.race([
       invoke({
-        body: { householdId, kind: 'capacity', text: description },
+        body: {
+          householdId,
+          kind: 'capacity',
+          text: description,
+          ...(speaker ? { speaker } : {}),
+        },
         signal: controller.signal,
       }),
       budget,

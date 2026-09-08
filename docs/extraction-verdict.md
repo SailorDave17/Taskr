@@ -31,8 +31,10 @@ combines the two halves of the latency axis that no single story could measure.
 **Neither input story can print this number, and that is not a gap in either of them.** #205 timed a
 phone to `provision-member`, a function that does nothing but refuse; #206 timed a developer machine
 to the provider. The kill number is named on the *deployed path*, which is both legs inside one
-request — and no such request has ever been made, because the extraction endpoint (#208) does not
-exist yet.
+request — and no such request had been made when this verdict was taken, because the extraction
+endpoint (#208) did not exist yet. *(It does now — written 2026-09-07, the same day, and undeployed
+until #209; nothing below moved, since the figure is replaced by a measurement only once the
+deployed endpoint is timed from a phone.)*
 
 So the figure below is **computed from two measurements, not taken from one**, and the report labels
 it so: `extractionThresholds.js` returns it as an estimate, the axis line prints `(est.)` with its
@@ -527,6 +529,9 @@ issue is closed as not-planned by it.
 - **The correction rate is measured on a review, not on the flow.** The member judged extractions
   from sentences they wrote; nobody has yet corrected a figure inside the capture flow with the
   confirm form in front of them, because that flow (#210, #213) is what the verdict decides.
-- **The prompt is unfitted and stays that way.** `extractionAdapter.js` has one commit. Any figure
-  here would move — in either direction — under a revised prompt, and revising it against these
-  sentences would make the next measurement circular.
+- **The prompt is unfitted and stays that way.** `extractionAdapter.js` had one commit when this
+  was taken. Any figure here would move — in either direction — under a revised prompt, and
+  revising it against these sentences would make the next measurement circular. *(#208 widened it
+  the same day for the three contract gaps above — schema additions, not a fit against these
+  sentences — and graded the widened prompt once on the corpus: 45 of 50 against the 43 here,
+  every axis passing; `docs/extraction-run.md`. The member sentences were NOT re-run under it.)*

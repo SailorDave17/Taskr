@@ -68,6 +68,49 @@
 // `DEFAULT_PROMPT` and `DEFAULT_CONFIGS` are defaults, not constants the code
 // reaches for: grading the corpus at two configurations is two configs handed
 // to the same functions, and the report names which one produced which figures.
+//
+// THE CONTRACT WIDENED ONCE, AFTER THE VERDICT (#208, 2026-09-07)
+//
+// #207 measured three gaps in what the contract could carry, against sentences
+// a real household member wrote — a chore's RECURRENCE (twelve of twelve cold
+// sentences described how often, and the extractor put the cadence into
+// `dueDate`, which nothing can parse), its ASSIGNEE (six of twenty-five named
+// who does it; every extraction dropped it), and WHO IS SPEAKING for a
+// capacity sentence (`I: 480 min` — an entity no roster row matches). Owner
+// decision at #208's pickup: all three land here, in the one place the prompt
+// and the parser are written. So the input gains an optional `speaker`, which
+// `userMessage` names only when it is given (a transcript recorded before it
+// existed keys on the message text, and the message text without a speaker is
+// byte-identical to what it was), and a chores answer gains optional `repeat`
+// and `assignee` fields, both copied AS STATED like `dueDate`. The grader
+// ignores both — `entitiesOf` scores title and minutes and the date axis
+// scores `dueDate` — so #206's figures stand; what moved is the prompt, whose
+// fingerprint is part of every transcript's config, so a corpus run recorded
+// under this prompt is a new run and not a re-reading of that one. That run
+// exists: `docs/extraction-run-2026-09-07.transcript.json`, Haiku only, 45 of
+// 50 within tolerance against #206's 43, every axis with a figure passing
+// (docs/extraction-run.md, "The widened prompt, graded once").
+
+/**
+ * The trailing lines of the prompt that carry #208's widening, kept apart
+ * from the text #206 graded so the widening is a diff a reader can see rather
+ * than a rewrite. Concatenated into `DEFAULT_PROMPT` below; nothing reads this
+ * on its own.
+ */
+const PROMPT_WIDENING = [
+  '',
+  'The input may name a speaker. Time the text gives in the first person - "I", "me", "my" -',
+  'belongs to the speaker: use the speaker\'s name as the entry, never the pronoun. A speaker',
+  'who is named and given no time gets no entry, like anybody else the text never mentions.',
+  '',
+  'A chore entry may also carry:',
+  '  "repeat": how OFTEN the job recurs, EXACTLY as the text states it - "every week", "every',
+  '  other Thursday", "monthly". Copy the phrase; do not reword it. A cadence is never a due',
+  '  date: it goes in repeat, and dueDate stays for a single date or is omitted. Omit repeat',
+  '  where the text states none.',
+  '  "assignee": the person the text says does the job, spelled exactly as the text spells',
+  '  them. Omit where the text names nobody. Never invent one.',
+]
 
 /**
  * Every outcome one extraction attempt can have. The first three are the
@@ -128,6 +171,7 @@ export const DEFAULT_PROMPT = [
   '',
   'For an explicit range, answer the midpoint. Amounts may be written as words - half an',
   'hour is 30 minutes.',
+  ...PROMPT_WIDENING,
 ].join('\n')
 
 /**
@@ -153,13 +197,33 @@ export const DEFAULT_CONFIGS = Object.freeze([
 ])
 
 /**
+ * The configuration the deployed endpoint runs — #207's verdict, recorded
+ * 2026-09-07: `claude-haiku-4-5`, because Opus at effort low fails the
+ * deployed-path latency kill number on every condition measured and the two
+ * are within a corpus's noise of each other on accuracy (43 of 50 against
+ * 44). Looked up by model rather than by index so a reordering of the
+ * defaults cannot quietly change what production runs; a test asserts it
+ * resolves.
+ */
+export const DEPLOYED_CONFIG = DEFAULT_CONFIGS.find((config) => config.model === 'claude-haiku-4-5')
+
+/**
  * The user message for one extraction. Deterministic and injective over the
  * corpus — descriptions are unique (the corpus asserts it), so this string
  * identifies the item, which is what lets a recorded transcript key its
  * responses on it.
+ *
+ * The speaker line (#208) appears only when a speaker is given, and BETWEEN
+ * the kind and the description rather than after it: a description is free
+ * text and could end in something that reads like a field, and the transcript
+ * key for every input recorded before #208 — which carried no speaker — is
+ * the two-line form unchanged.
  */
-export function userMessage({ kind, text }) {
-  return `input kind: ${kind}\ndescription: ${text}`
+export function userMessage({ kind, text, speaker }) {
+  const who = typeof speaker === 'string' ? speaker.trim() : ''
+  return who
+    ? `input kind: ${kind}\nspeaker: ${who}\ndescription: ${text}`
+    : `input kind: ${kind}\ndescription: ${text}`
 }
 
 /**
@@ -170,12 +234,12 @@ export function userMessage({ kind, text }) {
  * `thinking` is never sent: models that think by default (Opus 5) run
  * adaptively, and effort is the lever the config owns.
  */
-export function buildRequest(config, { kind, text }) {
+export function buildRequest(config, { kind, text, speaker }) {
   const body = {
     model: config.model,
     max_tokens: config.maxTokens ?? 4096,
     system: config.prompt,
-    messages: [{ role: 'user', content: userMessage({ kind, text }) }],
+    messages: [{ role: 'user', content: userMessage({ kind, text, speaker }) }],
   }
   if (config.effort) body.output_config = { effort: config.effort }
   return body
@@ -230,8 +294,8 @@ function refusalFor(outcome, detail) {
  * says what a tally line should say: the HTTP status, the parse problem, the
  * thrown message.
  */
-export async function attemptExtraction(config, transport, { kind, text }) {
-  const request = buildRequest(config, { kind, text })
+export async function attemptExtraction(config, transport, { kind, text, speaker }) {
+  const request = buildRequest(config, { kind, text, speaker })
 
   let response
   try {
@@ -324,9 +388,9 @@ export async function attemptExtraction(config, transport, { kind, text }) {
  * without a second grading pass.
  */
 export function createExtractor(config, transport, onAttempt) {
-  return async ({ kind, text }) => {
-    const attempt = await attemptExtraction(config, transport, { kind, text })
-    if (onAttempt) onAttempt(attempt, { kind, text })
+  return async ({ kind, text, speaker }) => {
+    const attempt = await attemptExtraction(config, transport, { kind, text, speaker })
+    if (onAttempt) onAttempt(attempt, { kind, text, speaker })
     return attempt.answer
   }
 }

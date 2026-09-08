@@ -122,6 +122,7 @@ export const MIGRATIONS = [
   '0033_finish_shopping_run.sql',
   '0034_remove_shopping_item.sql',
   '0035_archive_shopping_list.sql',
+  '0036_extraction_calls.sql',
 ]
 
 export function migrationSql(name) {

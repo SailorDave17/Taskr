@@ -18,8 +18,10 @@
 // Neither #205 nor #206 can print it. #205 timed a phone to a TRIVIAL function
 // and never called a provider; #206 timed a desk to the provider and never
 // touched a phone. The kill number is named on the deployed path, which is both
-// legs in one request — and no such request has ever been made, because the
-// extraction endpoint (#208) does not exist. So this command combines them and
+// legs in one request — and no such request had been made when the verdict was
+// taken, because the extraction endpoint (#208) did not exist; it does now,
+// undeployed until #209, which is the story that times it. So this command
+// combines the two legs and
 // labels the result an ESTIMATE, which `extractionThresholds.js` carries
 // through to a PROVISIONAL verdict rather than a pass (#207 AC 3).
 //

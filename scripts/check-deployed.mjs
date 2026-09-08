@@ -38,6 +38,7 @@
 // arguments, writes nothing, and deploys nothing.
 
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 // Imported, never restated — AC 2. The list of functions lives in
@@ -167,7 +168,79 @@ export function parseDeployTime(value) {
 }
 
 /**
- * When the last commit touching this function's source landed, in epoch ms.
+ * The import specifiers one source file names — the CLI's own pattern, copied
+ * from `apps/cli-go/pkg/function/deno.go` at v2.116.0 so this walks exactly
+ * what the deploy uploads.
+ */
+const IMPORT_PATTERN =
+  /(?:import|export)\s+(?:type\s+)?(?:\{[^{}]+\}|.*?)\s*(?:from)?\s*['"](.*?)['"]|import\(\s*['"](.*?)['"]\)/gi
+
+/**
+ * Every file the deploy of `name` carries — #208.
+ *
+ * Walked from the entrypoint the way the CLI's upload walker walks it: each
+ * `./` or `../` specifier with an extension, resolved against the importing
+ * file, depth first, once. Until #208 this check compared the deploy against
+ * the last commit to `supabase/functions/<name>` alone, and `extract-description`
+ * is the first function whose bundle carries files OUTSIDE that directory —
+ * the adapter (the prompt), the grader's contract and the date rules under
+ * `src/lib`. A prompt edit that merged with no redeploy read as CURRENT: the
+ * instrument built for exactly that omission (#222) agreeing with a green
+ * `check:live` (a preflight cannot see a prompt) that production was fine
+ * (review-fanout, 2026-09-07). The blindness is the same under either outcome
+ * of #209's import measurement — a `_shared/` copy is outside the directory
+ * too — which is why this walks imports rather than widening a glob.
+ *
+ * Paths are repo-relative posix, the shape `git log -- <path>` takes. A
+ * specifier this cannot read is kept in the list rather than dropped: `git
+ * log` over a path that never existed contributes nothing, and a dropped file
+ * is the silent half this function exists to close.
+ */
+export function bundleFilesOf(name, readFile = defaultReadFile) {
+  const entry = `supabase/functions/${name}/index.ts`
+  const seen = new Set()
+  const queue = [entry]
+  while (queue.length) {
+    const current = queue.pop()
+    if (seen.has(current)) continue
+    seen.add(current)
+    let text
+    try {
+      text = readFile(current)
+    } catch {
+      continue
+    }
+    for (const match of String(text ?? '').matchAll(IMPORT_PATTERN)) {
+      const specifier = (match[1] || match[2] || '').trim()
+      if (!specifier || !/\.[a-z]+$/i.test(specifier)) continue
+      if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue
+      queue.push(posixJoin(posixDirname(current), specifier))
+    }
+  }
+  return [...seen]
+}
+
+function posixDirname(path) {
+  const at = path.lastIndexOf('/')
+  return at === -1 ? '.' : path.slice(0, at)
+}
+
+function posixJoin(dir, relative) {
+  const parts = dir === '.' ? [] : dir.split('/')
+  for (const segment of relative.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') parts.pop()
+    else parts.push(segment)
+  }
+  return parts.join('/')
+}
+
+function defaultReadFile(path) {
+  return readFileSync(path, 'utf8')
+}
+
+/**
+ * When the last commit touching this function's BUNDLE landed, in epoch ms.
  *
  * REFUSES an empty answer. `git log` over a path prints nothing when the path
  * has no commits — which here means the name is wrong, the checkout is shallow,
@@ -189,9 +262,16 @@ export function sourceCommitTime(name, runGit = defaultRunGit) {
   return { iso: output, ms }
 }
 
-/** The real git read, split out so tests can inject. */
+/**
+ * The real git read, split out so tests can inject. Over the function's
+ * DIRECTORY plus every file its bundle carries (`bundleFilesOf`), so a commit
+ * to the adapter under `src/lib` is a commit to `extract-description`'s
+ * source. The directory stays in the list so a test file or a comment-only
+ * change there still counts, exactly as before #208.
+ */
 export function defaultRunGit(name) {
-  const result = spawnSync('git', ['log', '-1', '--format=%cI', '--', `supabase/functions/${name}`], {
+  const paths = [`supabase/functions/${name}`, ...bundleFilesOf(name)]
+  const result = spawnSync('git', ['log', '-1', '--format=%cI', '--', ...paths], {
     encoding: 'utf8',
   })
   if (result.status !== 0) {
@@ -269,11 +349,13 @@ async function main(env) {
     // changes can be either side of the deployed build and nothing here can
     // know which. Saying so beats silently reading a just-edited function as
     // current because its last COMMIT is old.
-    const dirty = spawnSync('git', ['status', '--porcelain', '--', `supabase/functions/${name}`], {
-      encoding: 'utf8',
-    })
+    const dirty = spawnSync(
+      'git',
+      ['status', '--porcelain', '--', `supabase/functions/${name}`, ...bundleFilesOf(name)],
+      { encoding: 'utf8' },
+    )
     if (String(dirty.stdout ?? '').trim()) {
-      console.log('  note     : uncommitted changes under this function — this comparison reads COMMITS, and cannot see them')
+      console.log('  note     : uncommitted changes under this function or in a file its bundle carries — this comparison reads COMMITS, and cannot see them')
     }
     console.log('')
   }

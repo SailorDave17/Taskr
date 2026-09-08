@@ -473,10 +473,12 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   'calendar-busy',
   // #210. Invoked by the capacity capture flow (src/lib/capture.js) AHEAD of
   // the function existing — owner decision at pickup, 2026-09-04 — so this
-  // reads NOT DEPLOYED until #208 writes it and #209 deploys it. That red is
-  // the honest state, and it is written down in docs/access-model.md's
-  // excused-red set. `scripts/deploy-function.mjs` lists it as PENDING so a
-  // bare deploy does not try to ship a directory that is not there.
+  // read NOT DEPLOYED with no directory behind it, and `scripts/deploy-function.mjs`
+  // listed it as PENDING so a bare deploy did not try to ship a directory that
+  // was not there. #208 wrote the function (supabase/functions/extract-description)
+  // and moved the name into that script's deployable list; the probe still
+  // reads NOT DEPLOYED until #209 runs the deploy, which is the honest state
+  // and is written down in docs/access-model.md's excused-red set.
   'extract-description',
 ])
 

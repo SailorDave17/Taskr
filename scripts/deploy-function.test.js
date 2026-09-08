@@ -115,10 +115,12 @@ describe('the script deploys the functions the checks look for', () => {
     expect(FUNCTION_NAMES.filter((name) => PENDING_FUNCTIONS.includes(name))).toEqual([])
   })
 
-  it('a pending function has NO directory yet — the entry expires the day #208 lands', () => {
+  it('a pending function has NO directory yet — the entry expires the day its function lands', () => {
     // The mirror of the directory test below, and what makes PENDING_FUNCTIONS
     // an exemption that cannot outlive its reason: once the directory exists
-    // this reddens until the name moves up into FUNCTION_NAMES.
+    // this reddens until the name moves up into FUNCTION_NAMES. It fired for
+    // real on #208: the list held `extract-description`, the directory
+    // arrived, and this test was the red line that moved the name.
     for (const name of PENDING_FUNCTIONS) {
       const entry = resolve(process.cwd(), 'supabase/functions', name, 'index.ts')
       expect(
@@ -129,8 +131,28 @@ describe('the script deploys the functions the checks look for', () => {
   })
 
   it('refuses to deploy a pending function by name, and says why', () => {
-    expect(() => functionsToDeploy(['extract-description'])).toThrow(/not in this tree yet/)
-    expect(() => functionsToDeploy(['extract-description'])).toThrow(/#208/)
+    // The list is empty since #208 landed its function, so the refusal is
+    // exercised through the injectable rather than through the module's own
+    // list — otherwise this would pass vacuously against a mechanism that had
+    // been deleted, which is the shape the next pending name would fall
+    // through.
+    const pending = ['placeholder-pending-function']
+    expect(() => functionsToDeploy(['placeholder-pending-function'], FUNCTION_NAMES, pending)).toThrow(
+      /not in this tree yet/,
+    )
+    expect(() => functionsToDeploy(['placeholder-pending-function'], FUNCTION_NAMES, pending)).toThrow(
+      /PENDING_FUNCTIONS/,
+    )
+  })
+
+  it('#208 — extract-description is deployable now, so a named deploy of it is accepted', () => {
+    // The positive control for the two tests above: the name that was pending
+    // until #208 resolves through the ordinary path, with its directory on
+    // disk, and is refused by nothing.
+    expect(functionsToDeploy(['extract-description'])).toEqual(['extract-description'])
+    expect(existsSync(resolve(process.cwd(), 'supabase/functions/extract-description/index.ts'))).toBe(
+      true,
+    )
   })
 
   it('POSITIVE CONTROL: there is more than one, so the comparison has work to do', () => {

@@ -195,6 +195,167 @@ describe('connecting a calendar, run against a real Postgres', () => {
   })
 
   // -------------------------------------------------------------------------
+  // #99 — what a disconnect takes, and what it must leave
+  // -------------------------------------------------------------------------
+  //
+  // The Edge Function's three deletions are proven against a fake client in
+  // supabase/functions/calendar-disconnect/handler.test.js, which can say what
+  // was CALLED and nothing about what Postgres then does. This is the other
+  // half: the same three statements against a real schema, asking what else
+  // moves when they run.
+  //
+  // AC 3 is the reason it is worth asking. "Confirmed capacity rows with source
+  // 'calendar' remain" is a claim about the SCHEMA, not about the handler — a
+  // foreign key from `member_capacity` to any calendar table, added by a later
+  // migration for a reason that looked good at the time, would delete an
+  // accepted figure on disconnect with nothing in the function to blame. That
+  // is exactly the shape cairn records as a constraint outliving the meaning of
+  // its column, and the only instrument that can see it is a database.
+  describe('#99 — the disconnect deletions, against a real Postgres', () => {
+    /**
+     * The deletion set the Edge Function actually issues, READ OFF ITS SOURCE.
+     *
+     * #99's review: a re-spelled literal would let the handler's set change
+     * while this block went on deleting its own hard-coded three, so the only
+     * instrument that reads a REAL schema would keep making its AC 3 claim
+     * about a set the code no longer has.
+     *
+     * Source text rather than an import, and that is not a shortcut — it is the
+     * only route available. `gate.test.js` refuses any file under `src/` that
+     * imports from `supabase/functions/`, because the function is a Deno module
+     * and an import would put it in the graph the bundler follows. Reaching for
+     * the constant directly would weaken a guard to tighten a test.
+     * `edge-function-cors.test.js` reads its subject the same way for the same
+     * reason.
+     *
+     * The parse is asserted rather than trusted: a regex that silently matched
+     * nothing would leave `TABLES` empty, every loop below would run zero
+     * statements, and every assertion about what SURVIVES a disconnect would
+     * pass having deleted nothing at all — the most reassuring possible way for
+     * this block to be worthless.
+     */
+    const HANDLER_SOURCE = readFileSync(
+      resolve(process.cwd(), 'supabase/functions/calendar-disconnect/handler.ts'),
+      'utf8',
+    )
+    const TABLES = (
+      HANDLER_SOURCE.match(/export const DELETED_TABLES = Object\.freeze\(\[([\s\S]*?)\]\)/)?.[1] ??
+      ''
+    )
+      .split(',')
+      .map((part) => part.trim().replace(/^'|'$/g, ''))
+      .filter(Boolean)
+
+    it('POSITIVE CONTROL: the deletion set was really read off the handler', () => {
+      // Without this the parse can go empty and every test below passes
+      // vacuously. Three names, each one a table this schema has.
+      expect(TABLES).toEqual(['calendar_tokens', 'calendar_busy', 'calendar_connections'])
+    })
+
+    /** The three statements the Edge Function issues, in the order it issues them. */
+    const disconnect = async (member) => {
+      for (const table of TABLES) {
+        await db.query(`delete from public.${table} where member_id = $1`, [member])
+      }
+    }
+
+    /** A derived figure, as `calendar-busy` writes one. */
+    const seedBusy = (household, member, periodStart = '2026-09-07') =>
+      db.query(
+        `insert into public.calendar_busy
+           (household_id, member_id, period_start, busy_minutes, event_count)
+         values ($1, $2, $3, 320, 6)`,
+        [household, member, periodStart],
+      )
+
+    it('takes the token, every derived week and the connection, and leaves the roster alone', async () => {
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA, '2026-09-07')
+      await seedBusy(householdA.id, organizerA, '2026-08-31')
+      expect(await countAsOwner('calendar_busy')).toBe(2)
+
+      await disconnect(organizerA)
+
+      expect(await countAsOwner('calendar_tokens')).toBe(0)
+      expect(await countAsOwner('calendar_busy')).toBe(0)
+      expect(await countAsOwner('calendar_connections')).toBe(0)
+      // The member is still on the roster. A cascade in this direction would be
+      // absurd and is asserted anyway, because the FKs here run the other way
+      // and a reader has to be able to tell that was checked.
+      const { rows } = await db.query('select id from public.members where id = $1', [organizerA])
+      expect(rows).toHaveLength(1)
+    })
+
+    it('leaves a HOUSEMATE’S calendar rows entirely alone', async () => {
+      // The deletes are keyed on `member_id`. One keyed on `household_id` —
+      // which is a column on all three tables and reads just as naturally —
+      // would take everybody's calendar with it, and every assertion in the
+      // test above would still pass.
+      await connect(householdA.id, organizerA)
+      await connect(householdA.id, memberTwo)
+      await seedBusy(householdA.id, memberTwo)
+
+      await disconnect(organizerA)
+
+      expect(await countAsOwner('calendar_tokens')).toBe(1)
+      expect(await countAsOwner('calendar_connections')).toBe(1)
+      expect(await countAsOwner('calendar_busy')).toBe(1)
+    })
+
+    it('AC 3 — a confirmed capacity row with source calendar SURVIVES, provenance intact', async () => {
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA)
+      await db.query(
+        `insert into public.member_capacity
+           (household_id, member_id, period_start, minutes, source)
+         values ($1, $2, '2026-09-07', 90, 'calendar')`,
+        [householdA.id, organizerA],
+      )
+
+      await disconnect(organizerA)
+
+      const { rows } = await db.query(
+        `select minutes, source from public.member_capacity where member_id = $1`,
+        [organizerA],
+      )
+      expect(rows).toHaveLength(1)
+      // The WORD as well as the row: an accepted figure is the member's own, and
+      // what produced it is part of what they accepted. A disconnect that
+      // rewrote the source to `manual` would keep the number and lose the fact.
+      expect(rows[0]).toMatchObject({ minutes: 90, source: 'calendar' })
+    })
+
+    it('POSITIVE CONTROL: the same row is deleted when the MEMBER goes', async () => {
+      // Which is what makes the survival above a fact about the disconnect
+      // rather than a fact about a table nothing can reach. `0005`'s cascade
+      // from `members` is real, so the fixture demonstrably CAN be deleted —
+      // and only the roster deletion does it.
+      await db.query(
+        `insert into public.member_capacity
+           (household_id, member_id, period_start, minutes, source)
+         values ($1, $2, '2026-09-07', 90, 'calendar')`,
+        [householdA.id, memberTwo],
+      )
+      expect(await countAsOwner('member_capacity')).toBe(1)
+      await db.query('delete from public.members where id = $1', [memberTwo])
+      expect(await countAsOwner('member_capacity')).toBe(0)
+    })
+
+    it('is idempotent — a second disconnect deletes nothing and refuses nothing', async () => {
+      // The handler's retry argument rests on this: a delete that fails part way
+      // through is repaired by pressing the control again, and the second pass
+      // finds some rows already gone. If deleting an absent row were an error,
+      // the repair would be a second failure.
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA)
+      await disconnect(organizerA)
+      const second = await attempt(() => disconnect(organizerA))
+      expect(second.error).toBeNull()
+      expect(await countAsOwner('calendar_connections')).toBe(0)
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // The token table: unreachable, and unreachable twice over
   // -------------------------------------------------------------------------
 

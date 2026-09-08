@@ -485,6 +485,14 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // deliberately not named here: this file is under `src/`, and gate.test.js
   // refuses that spelling anywhere the bundler reads.
   'extract-description',
+  // #99. The way back out of #95's connection, and the third function arriving
+  // with no migration that mentions it — `0011` and `0030` created the tables it
+  // deletes from, so both reaching the project says nothing about whether this
+  // is there. RED on purpose until `npm run deploy:function` ships it, exactly
+  // as `calendar-busy` was for #96 and `extract-description` was for #210: the
+  // row exists because a deploy is a step recorded nowhere else, and one
+  // withheld until after the deploy would leave the window it covers uncovered.
+  'calendar-disconnect',
 ])
 
 /**

@@ -462,6 +462,24 @@ body {
   opacity: 0.75;
 }
 
+/* What a disconnect could not vouch for — story #99.
+
+   Its own block under the control, because it is a sentence rather than a label
+   and at 360px it wraps to two or three lines: sharing the line with
+   "Connect Google Calendar" would push that button off the row it belongs to.
+
+   Not the `.error` palette, deliberately, and this is the whole judgement in the
+   rule. Nothing went wrong: the member asked Taskr to forget a calendar and it
+   did. What the sentence adds is that the OTHER side of the connection may not
+   have, which is information rather than a fault — the same call
+   `.shell__notice` makes about the catch-up pass, and the opposite of what a red
+   strip would say. */
+.member__calendar-note {
+  display: block;
+  margin-top: 0.25rem;
+  line-height: 1.5;
+}
+
 /* This week's capacity — story #46.
 
    Sits directly under the baseline rather than replacing it: the override is

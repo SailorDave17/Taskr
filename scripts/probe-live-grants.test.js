@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { LIVE_TABLES } from '../src/lib/liveSchema.js'
+import { isProbeFile } from '../src/test/support/probeFiles.js'
 import {
   MEASURED_GRANTS,
   MEASURED_TABLE_ACLS,
@@ -185,7 +186,9 @@ describe('what it asks for — AC 3', () => {
 function migrationsGranting(column) {
   const dir = resolve(process.cwd(), 'supabase/migrations')
   return readdirSync(dir)
-    .filter((name) => name.endsWith('.sql'))
+    // #192 — `isProbeFile` first, or the `readFileSync` below reads a probe that
+    // `retiredVocabulary.test.js` is about to remove in a parallel worker.
+    .filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
     .filter((file) =>
       new RegExp(`grant[^;]*\\b${column}\\b`, 'is').test(readFileSync(resolve(dir, file), 'utf8')),
     )
@@ -211,7 +214,8 @@ describe('the negative control — AC 3 requires one by name', () => {
     // enumerated by hand covers exactly the files somebody remembered, and the file
     // that breaks it is by definition the one written after the list.
     const dir = resolve(process.cwd(), 'supabase/migrations')
-    const files = readdirSync(dir).filter((name) => name.endsWith('.sql'))
+    // #192 — `isProbeFile` first, for the reason `migrationsGranting` gives.
+    const files = readdirSync(dir).filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
 
     // Without this the whole test passes the moment the filter stops matching.
     expect(files.length).toBeGreaterThan(10)

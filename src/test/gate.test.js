@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { signInAddressFor } from '../lib/household.js'
+import { PROBE_MARKER, isProbeFile } from './support/probeFiles.js'
 
 // AC 4 of #4: "a test suite containing zero tests must FAIL rather than pass
 // vacuously — an explicit fail-on-empty setting".
@@ -329,7 +330,10 @@ describe('every class name a component emits has a rule in the stylesheet', () =
   const components = [
     'src/App.jsx',
     ...readdirSync(resolve(process.cwd(), 'src/components'))
-      .filter((f) => f.endsWith('.jsx') && !f.endsWith('.test.jsx'))
+      // #192 — `isProbeFile` first: a probe planted by
+      // `retiredVocabulary.test.js` in a parallel worker matches the extension
+      // filter and is removed before the read below.
+      .filter((f) => !isProbeFile(f) && f.endsWith('.jsx') && !f.endsWith('.test.jsx'))
       .map((f) => `src/components/${f}`),
   ]
 
@@ -864,6 +868,9 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
 
   function filesUnder(dir) {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      // #192 — a probe planted by `retiredVocabulary.test.js` in a parallel
+      // worker is gone by the time the collected paths are read.
+      if (isProbeFile(entry.name)) return []
       const full = resolve(dir, entry.name)
       return entry.isDirectory() ? filesUnder(full) : [full]
     })
@@ -1147,6 +1154,11 @@ describe('#19 — no real household name reaches version control', () => {
     return paths.filter(
       (path) =>
         path !== 'src/test/gate.test.js' &&
+        // #192 — this corpus lists UNTRACKED files and then reads every one of
+        // them. A probe planted by `retiredVocabulary.test.js` in a parallel
+        // worker is listed under `supabase/migrations/` by the clause below and
+        // is removed before `codeOf` opens it.
+        !isProbeFile(path) &&
         (/^src\/.*\.test\.jsx?$/.test(path) ||
           /^src\/test\/.*\.jsx?$/.test(path) ||
           /^src\/lib\/[^/]*\.corpus\.js$/.test(path) ||
@@ -1885,15 +1897,23 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
     // End to end: listed, read, and REFUSED. Removed in a `finally`, and the
     // removal is then proven rather than assumed.
     //
-    // AT THE REPO ROOT, not under `src/test/`, and that is not cosmetic. Four
-    // suites — allocation, calendar, capacity and liveSchema — walk `src/`
-    // recursively at RUN TIME, and vitest's default file parallelism runs them
-    // alongside this one, so a probe written there can be read between the write
-    // and the `rm` and redden an unrelated suite with ENOENT. Nothing enumerates
+    // AT THE REPO ROOT, not under `src/test/`, and that is not cosmetic. Six
+    // suites — allocation, calendar, capacity, capture, liveSchema and the #87
+    // scan in this very file — walk `src/` recursively at RUN TIME, and vitest's
+    // default file parallelism runs them alongside this one, so a probe written
+    // there can be read between the write and the `rm` and redden an unrelated
+    // suite with ENOENT. (It said FOUR until #192 counted them; the two it
+    // missed were added after it was written, which is the whole argument for
+    // the convention below rather than a remembered list.) Nothing enumerates
     // the repo root. The extension is `.tmp` rather than `.js` for the same class
     // of reason: `npm run lint` is `eslint .`, which would lint a stray root
     // `.js`. The rule is cairn's — before writing a probe into a repo directory,
     // grep for who enumerates that directory at run time.
+    //
+    // #192 gave that rule a second half: a probe that MUST live in an enumerated
+    // directory carries `PROBE_MARKER`, which every walker above skips by name.
+    // This probe deliberately does not, and stays at the root — the marker buys
+    // nothing here, and the root case is the one this control exists to prove.
     const probe = '.token-probe.tmp'
     const absolute = resolve(process.cwd(), probe)
     writeFileSync(absolute, `const fixture = '${PREFIX}${'0123456789abcdef'.repeat(3)}'\n`)
@@ -2189,6 +2209,9 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     }
     return entries.flatMap((entry) => {
       if (entry.name === 'node_modules' || entry.name === '.temp') return []
+      // #192 — the read below is already in a `try`, so this is not the race;
+      // it keeps a probe out of a corpus whose POSITIVE CONTROL counts it.
+      if (isProbeFile(entry.name)) return []
       const full = resolve(dir, entry.name)
       return entry.isDirectory() ? filesUnder(full) : [full]
     })
@@ -2371,5 +2394,120 @@ describe('#345 — an overdue chore is warm, and it is not an error', () => {
     // ink still reads the fact.
     const chores = readFileSync(resolve(process.cwd(), 'src/components/Chores.jsx'), 'utf8')
     expect(chores).toMatch(/className="chore__overdue">overdue</)
+  })
+})
+
+// #192 — the reserved probe name is a HOLE, and these are the two things that
+// close it.
+//
+// `retiredVocabulary.test.js` plants a real file into each covered directory and
+// removes it in a `finally`. Other files in this repo enumerate those
+// directories at run time in parallel workers, so every one of them now skips a
+// filename — `src/test/support/probeFiles.js` carries the census and the
+// argument, and the counts are derived below rather than written down twice.
+// That skip is a hole in every one of those guards at once, and a skip nobody
+// re-derives is exactly the shape this file exists to refuse.
+//
+// So: no COMMITTED file may occupy the name, and no walker may be added that
+// does not honour it. The second is the one that decays on its own — a new
+// suite walking `src/` is the ordinary thing to write, and writing it the
+// obvious way silently reintroduces the race the eleven skips removed.
+describe('#192 — the reserved probe name is honoured, and cannot be occupied', () => {
+  const tracked = execSync('git ls-files -z', {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean)
+
+  // Comments stripped, for the reason every scan here gives: the paragraphs
+  // above each skip NAME the helper, and a guard that a correct file fails is a
+  // guard that gets deleted.
+  const codeOf = (text) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+  // Every source file the test run can execute. `scripts/` is in because two of
+  // its `*.test.js` files walk `supabase/migrations/`, and a `.mjs` they import
+  // would run under vitest just as readily.
+  const SOURCES = tracked.filter((path) => /^(src|scripts)\/.*\.(js|jsx|mjs|cjs)$/.test(path))
+
+  // A file that enumerates a directory and is structurally unable to see a
+  // probe. One entry, and it has to state WHY — the same bar the exemptions in
+  // `retiredVocabulary.test.js` are held to.
+  const EXEMPT = {
+    'src/test/edge-function-cors.test.js':
+      'filters the directory to `isDirectory()` entries, so a loose file is invisible to it ' +
+      'whatever it is called. That is why #170 could put a real untracked probe in ' +
+      'supabase/functions/ and nowhere else, and importing the helper here would be dead code.',
+  }
+
+  const ENUMERATES = /readdirSync\s*\(/
+  const HONOURS = /isProbeFile\s*\(/
+
+  it('POSITIVE CONTROL: there are enumerating files to check, so an empty pass is impossible', () => {
+    const walkers = SOURCES.filter((path) => ENUMERATES.test(codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))))
+    // Measured 2026-09-09: twelve files, eleven honouring the marker and one
+    // exempt. A FLOOR rather than an equality — the number moves whenever a
+    // walker is added, and pinning it would make this a change-detector — but a
+    // floor near the measured value, because the failure worth catching is the
+    // scan quietly finding nothing: a filter that stopped matching would leave
+    // the two assertions below as the only thing standing between a new
+    // unguarded walker and a green run.
+    expect(walkers.length).toBeGreaterThanOrEqual(12)
+    // Named files rather than only a count, one per hazard class: a `src/`
+    // walker, a `supabase/migrations/` reader that is not a test, and one under
+    // `scripts/`, which is in `SOURCES` for exactly this reason.
+    expect(walkers).toContain('src/lib/allocation.test.js')
+    expect(walkers).toContain('src/test/support/pgliteSupabase.js')
+    expect(walkers).toContain('scripts/probe-live-grants.test.js')
+    expect(walkers).toContain(Object.keys(EXEMPT)[0])
+  })
+
+  it('every file that enumerates a directory at run time skips the probe name', () => {
+    const offenders = []
+    for (const path of SOURCES) {
+      if (EXEMPT[path]) continue
+      const code = codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))
+      if (ENUMERATES.test(code) && !HONOURS.test(code)) offenders.push(path)
+    }
+    expect(
+      offenders,
+      `these walk a directory at run time and would read a probe mid-write: ${offenders.join(', ')}. ` +
+        'Import isProbeFile from src/test/support/probeFiles.js and skip it BEFORE any statSync or readFileSync.',
+    ).toEqual([])
+  })
+
+  it('the one exemption is still earned, and says why', () => {
+    for (const [path, reason] of Object.entries(EXEMPT)) {
+      expect(reason.length, `${path} needs a real reason, not a word`).toBeGreaterThan(40)
+      const code = codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))
+      // The claim, not the assertion of it: this file is exempt BECAUSE it
+      // filters to directories. The day it stops, the exemption is a hole.
+      expect(code, `${path} no longer filters its listing to directories`).toMatch(
+        /isDirectory\s*\(\s*\)/,
+      )
+    }
+  })
+
+  it('no COMMITTED file carries the reserved name, so the skip can hide nothing real', () => {
+    // The other half. Eleven walkers ignore this substring; if a real source
+    // file ever carried it, it would leave every one of their corpora at once
+    // and each would go on reporting a clean scan.
+    const occupied = tracked.filter((path) => isProbeFile(path))
+    expect(
+      occupied,
+      `these tracked files carry the reserved probe marker "${PROBE_MARKER}" and are invisible ` +
+        `to every run-time walker: ${occupied.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the predicate separates a probe name from an ordinary one', () => {
+    // Both directions, because a predicate matching nothing and one matching
+    // everything produce the same clean scan above.
+    expect(isProbeFile(`.${PROBE_MARKER}.plant.tmp.js`)).toBe(true)
+    expect(isProbeFile(`9999_${PROBE_MARKER}.plant.tmp.sql`)).toBe(true)
+    expect(isProbeFile('src/lib/household.js')).toBe(false)
+    expect(isProbeFile('0014_scope_reads_to_one_household.sql')).toBe(false)
   })
 })

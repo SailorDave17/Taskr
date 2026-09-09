@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isProbeFile } from '../test/support/probeFiles.js'
 import {
   allocate,
   assess,
@@ -46,6 +47,10 @@ function codeOf(text) {
 function sourceFiles(dir = resolve(process.cwd(), 'src')) {
   const found = []
   for (const entry of readdirSync(dir)) {
+    // #192 — before the `statSync`, not after. A probe planted by
+    // `retiredVocabulary.test.js` in a parallel worker exists for milliseconds,
+    // and the `statSync` below is what throws ENOENT when it goes.
+    if (isProbeFile(entry)) continue
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) found.push(...sourceFiles(path))
     else if (/\.(js|jsx)$/.test(entry)) found.push(path)

@@ -1525,6 +1525,59 @@ describe('applying the calendar suggestion — #97', () => {
     })
   })
 
+  // #106 — a week the calendar set with nobody tapping. The write is App's
+  // (App.test.jsx); what this file owes is what the person SEES for such a
+  // row (AC 4) and what their Save on it means.
+  describe('a week set automatically from the calendar — #106', () => {
+    const autoRow = (minutes, previous) => ({ ...calendarRow(minutes, 'calendar_auto'), previous_minutes: previous })
+
+    it('AC 4: the roster says the week was set automatically AND what it was before', () => {
+      withBusy({ overrides: [autoRow(75, 120)] })
+      const row = rowFor(name)
+      expect(within(row).getByTestId('week-m1')).toHaveTextContent('This week: 75 min')
+      expect(within(row).getByTestId('week-auto-m1')).toHaveTextContent(
+        /set from calendar automatically \(was 120 min\)/,
+      )
+      // Not the tap-confirmed mark: the difference is the whole of AC 4.
+      expect(within(row).getByTestId('week-m1')).not.toHaveTextContent(/· set from calendar$/)
+    })
+
+    it('AC 4: without a recorded previous figure the mark still says automatically, and claims no number', () => {
+      withBusy({ overrides: [autoRow(75, null)] })
+      const mark = within(rowFor(name)).getByTestId('week-auto-m1')
+      expect(mark).toHaveTextContent(/set from calendar automatically/)
+      expect(mark).not.toHaveTextContent(/was/)
+    })
+
+    it('REGRESSION: a tap-confirmed week reads as it did, with no "automatically" and no "was"', () => {
+      withBusy({ overrides: [calendarRow(75)] })
+      const figure = within(rowFor(name)).getByTestId('week-m1')
+      expect(figure).toHaveTextContent(/· set from calendar/)
+      expect(figure).not.toHaveTextContent(/automatically|was/)
+      expect(screen.queryByTestId('week-auto-m1')).not.toBeInTheDocument()
+    })
+
+    it('opens as the calendar’s figure, and an unedited Save is the confirm the person never tapped', async () => {
+      const { onSetCapacity } = withBusy({ overrides: [autoRow(75, 120)] })
+      await openFor()
+      expect(minutesField()).toHaveValue(75)
+      expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+      await save()
+      // `calendar`, not `calendar_auto`: the row becomes a confirmed one, and
+      // setCapacity's null default clears the previous figure with it.
+      expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '75', 'calendar')
+    })
+
+    it('and editing it first applies #97’s rule — it saves as manual', async () => {
+      const { onSetCapacity } = withBusy({ overrides: [autoRow(75, 120)] })
+      await openFor()
+      fireEvent.change(minutesField(), { target: { value: '60' } })
+      expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+      await save()
+      expect(onSetCapacity).toHaveBeenCalledWith(roster[0].id, '60', 'manual')
+    })
+  })
+
   it('AC 1: one tap opens the editor with max(0, baseline − busy) in the field, named as the calendar’s, and writes nothing', async () => {
     const { onSetCapacity } = withBusy()
     expect(screen.queryByLabelText(/minutes this week/i)).not.toBeInTheDocument()

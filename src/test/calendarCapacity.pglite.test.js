@@ -59,7 +59,9 @@ async function admittedSources(database) {
       where conname = 'member_capacity_source_known'`,
   )
   expect(rows, 'the constraint must exist exactly once').toHaveLength(1)
-  return [...rows[0].def.matchAll(/'([a-z]+)'::text/g)].map((m) => m[1]).sort()
+  // `[a-z_]`: 0039's fourth word carries an underscore, and `[a-z]+` stopped
+  // at it and reported three words on a four-word constraint (#106, measured).
+  return [...rows[0].def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]).sort()
 }
 
 /** A household with an organizer and a second member, on any database. */
@@ -267,19 +269,33 @@ describe('a confirmed calendar figure, run against a real Postgres', () => {
 
   describe('0031 is re-runnable, and 0005 re-pasted on top of it does not undo it', () => {
     it('applies a second time without error, and the constraint still admits three words', async () => {
-      await asDevice(db, device, () =>
-        upsert(db, { household: household.id, member: memberTwo, minutes: 240, source: 'calendar' }),
+      // On a database built THROUGH 0031, not on `db`: `db` is HEAD, which
+      // since 0039 (#106) admits a fourth word, and re-running 0031 there
+      // NARROWS the constraint back — the 0012/0025/0026-on-0028 hazard, on a
+      // constraint. That case is calendarAutoApply.pglite.test.js's to assert;
+      // this one is 0031's own idempotency, which is only true of 0031's own
+      // schema (cairn: a migration is re-runnable only against its own schema).
+      const at0031 = await databaseThrough(AFTER)
+      const seeded = await seedHousehold(at0031)
+      await asDevice(at0031, seeded.device, () =>
+        upsert(at0031, {
+          household: seeded.household.id,
+          member: seeded.memberTwo,
+          minutes: 240,
+          source: 'calendar',
+        }),
       )
-      const second = await attempt(() => db.exec(migrationSql(AFTER)))
+      const second = await attempt(() => at0031.exec(migrationSql(AFTER)))
       expect(second.error).toBeNull()
-      expect(await admittedSources(db)).toEqual(['calendar', 'extraction', 'manual'])
+      expect(await admittedSources(at0031)).toEqual(['calendar', 'extraction', 'manual'])
       // The drop-and-add validated the existing rows on the way through, and
       // a calendar row is one the new definition admits — so it survived.
-      const { rows } = await db.query(
+      const { rows } = await at0031.query(
         `select source from public.member_capacity where member_id = $1`,
-        [memberTwo],
+        [seeded.memberTwo],
       )
       expect(rows).toEqual([{ source: 'calendar' }])
+      await at0031.close()
     })
 
     it('issues no privilege statement — the grants through 0030 and through 0031 are the same grants', async () => {

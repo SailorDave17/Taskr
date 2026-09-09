@@ -144,13 +144,13 @@ const CLIENT_OPERATIONS = [
     table: 'member_capacity',
     op: 'select',
     site: 'capacity.js:169 listCapacity()',
-    sql: 'select id, member_id, period_start, minutes, note, source, created_at from public.member_capacity limit 0',
+    sql: 'select id, member_id, period_start, minutes, note, source, previous_minutes, created_at from public.member_capacity limit 0',
   },
   {
     table: 'member_capacity',
     op: 'insert',
     site: 'capacity.js:192 setCapacity() upsert',
-    sql: "insert into public.member_capacity (household_id, member_id, period_start, minutes, note, source) select gen_random_uuid(), gen_random_uuid(), current_date, 0, null, 'manual' where false",
+    sql: "insert into public.member_capacity (household_id, member_id, period_start, minutes, note, source, previous_minutes) select gen_random_uuid(), gen_random_uuid(), current_date, 0, null, 'manual', null where false",
   },
   {
     table: 'member_capacity',

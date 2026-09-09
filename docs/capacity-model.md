@@ -3,7 +3,8 @@
 - Story: #44 — store capacity for a week, not just a standing baseline
 - Decided by: owner (SailorDave17), at pickup of #44, 2026-08-08
 - Migration: `supabase/migrations/0005_weekly_capacity.sql`; `0031_calendar_capacity_source.sql`
-  widens `source` (#97)
+  widens `source` (#97); `0039_calendar_auto_apply.sql` widens it again and adds
+  `previous_minutes` (#106)
 - Module: [`src/lib/capacity.js`](../src/lib/capacity.js)
 
 ## Baseline and override, not a replacement
@@ -87,8 +88,12 @@ correct `claim_member` guard was bypassed by a direct `UPDATE`.
 | Privilege | Columns | Why |
 |---|---|---|
 | `select` | everything except `household_id` | Matches 0003's convention on chores: it is written on insert and never read back, since RLS already guarantees every visible row belongs to this household. Excluding it also makes `select('*')` **fail outright** rather than quietly omit a column. |
-| `insert` | `household_id, member_id, period_start, minutes, note, source` | `id` and `created_at` are the database's to say. A client that can write `created_at` can file this week's capacity as last week's. |
-| `update` | `minutes, note, source` | Only what a *correction* changes. `member_id` and `period_start` identify whose week it is; moving an override between people or weeks is a delete plus an insert. |
+| `insert` | `household_id, member_id, period_start, minutes, note, source, previous_minutes` | `id` and `created_at` are the database's to say. A client that can write `created_at` can file this week's capacity as last week's. `previous_minutes` is `0039`'s (#106). |
+| `update` | `minutes, note, source, previous_minutes` | Only what a *correction* changes. `member_id` and `period_start` identify whose week it is; moving an override between people or weeks is a delete plus an insert. |
+
+*(`0022` later widened SELECT to `household_id` and UPDATE to the three identity columns, because a
+PostgREST upsert names every payload column in its `DO UPDATE SET` and reads each through
+`EXCLUDED`; `capacity.pglite.test.js` holds the exact sets.)*
 
 A composite foreign key ties `(member_id, household_id)` to the members table, so an override cannot
 name a member of one household while claiming another — such a row would be visible to the wrong
@@ -97,7 +102,7 @@ family while pointing at a member they cannot see.
 ## Where a figure came from — `source`
 
 Every override row says how it was entered, so a later accuracy question is answerable from the
-data rather than from memory (#57 AC 5). `member_capacity_source_known` admits exactly three words,
+data rather than from memory (#57 AC 5). `member_capacity_source_known` admits exactly four words,
 and `CAPACITY_SOURCES` in `capacity.js` is held equal to the constraint by a test:
 
 | `source` | What it means | Since |
@@ -105,19 +110,111 @@ and `CAPACITY_SOURCES` in `capacity.js` is held equal to the constraint by a tes
 | `manual` | A person typed the number. | #46 (0005) |
 | `extraction` | A person described their week in a sentence and accepted the figure proposed from it, edited or not — a corrected interpretation is still derived from the description (#210 AC 6). | #210 |
 | `calendar` | A person tapped *Use this* on the calendar's suggestion and saved it **unedited**. The suggestion is `max(0, baseline − busy_minutes)` (owner decision, 2026-08-16); a figure they changed first is no longer the calendar's and saves as `manual` (#97 AC 2). | #97 (0031) |
+| `calendar_auto` | **Nobody tapped.** A calendar read landed, the suggestion was within the bound below, and the app wrote it. The row also carries `previous_minutes` — the figure the week resolved to a moment before — so the roster can show both (#106 AC 4). A person who re-opens the week and saves it unedited has now confirmed it, and it becomes `calendar`; edited, it becomes `manual`. | #106 (0039) |
 
 Two rules that hold whatever the word:
 
-- **A proposal is a prefill, never a write.** Both proposers land a figure in the same field the
-  typed path uses, name where it came from beside it, and the one Save is where the person agrees
-  — a figure nobody saw is a figure nobody can defend when the split is challenged.
+- **A proposal is a prefill, never a write** — with one bounded exception, decided by the owner and
+  recorded in the next section. Both proposers land a figure in the same field the typed path uses,
+  name where it came from beside it, and the one Save is where the person agrees — a figure nobody
+  saw is a figure nobody can defend when the split is challenged. The exception keeps that
+  defensibility by other means: the row names itself as automatic, keeps the figure it replaced,
+  and the change is announced.
 - **The latest write wins, by the `(member_id, period_start)` upsert.** A typed figure replaces a
   calendar one and a calendar one replaces a typed one; nothing is sticky. That is the charter's
-  manual floor made load-bearing: a person can always overtype what a machine suggested.
+  manual floor made load-bearing: a person can always overtype what a machine suggested — and the
+  automatic path below is the one writer that **never** overtypes a person.
 
 `effectiveCapacity` never reads `source`. What put the row there is provenance for the roster to
-show (a calendar-sourced week reads *set from calendar*); whether the row applies is decided by its
-presence alone, as above.
+show (a calendar-sourced week reads *set from calendar*, an automatic one *set from calendar
+automatically (was N min)*); whether the row applies is decided by its presence alone, as above.
+
+## A refreshed suggestion applies itself, within a bound — owner decision 2026-09-08 (#106)
+
+- Story: #106 — auto-apply calendar capacity within a bounded delta
+- Decided by: owner (SailorDave17), at pickup of #106, 2026-09-08, **before the live trust verdict
+  #100 AC 4 still owes** — the story's own deferral named that verdict as the informed moment, and
+  the owner chose to decide ahead of it with the tradeoff stated.
+- Module: `autoApplyDecision` and `AUTO_APPLY_BOUND_MINUTES` in [`src/lib/capacity.js`](../src/lib/capacity.js)
+
+The story filed three options and the owner took the third:
+
+| Option | What it would have meant |
+|---|---|
+| Never | Propose-then-confirm stays the only path. Zero build cost, and the charter's signature moment — "re-balances without anyone having to negotiate it" — needs a tap forever. |
+| Auto-apply, announcement only | Every refresh applies; #50's announcement is the visibility. Cheapest build and the widest exposure: a wrong free/busy read moves as much of the week as it likes before anyone sees it, which is the trust-erosion kill condition by name. |
+| **Auto-apply within a bound (chosen)** | A refresh applies itself only when it moves the week by at most a named number of minutes; a larger move only proposes, exactly as before. The signature moment fires for the ordinary drift of a week, and the change big enough to argue about still gets a person. |
+
+**The bound is `AUTO_APPLY_BOUND_MINUTES = 120`.** Two hours: a meeting or two of drift between one
+twelve-hour refresh and the next applies itself; a trip, a sick day or a cleared calendar asks.
+Rejected beside it: **60** (most real movement falls outside it, so the signature moment fires
+rarely and the story would have bought a constant) and **240** (half a working day applies silently,
+and a wrong read moves that much before anyone sees it). It is a delta on **the week's capacity**,
+not on the busy figure and not on the previous suggestion. Measuring suggestion-to-suggestion was
+rejected because a week sitting at its baseline could then be moved six hours by a read whose
+suggestion had moved thirty minutes since the last one — the bound would be on the wrong thing.
+
+**The bound is measured from the last figure a PERSON held — the anchor — not from the current
+figure** (owner decision at the review escalation, 2026-09-08). `humanFigureFor` in `capacity.js`:
+the baseline when there is no row; the row's figure for `manual`, `extraction` and `calendar` (a
+tap-confirmed calendar figure is a person's act); and for a `calendar_auto` row its
+`previous_minutes`, which *is* the anchor carried forward from the write before. The first draft
+measured every step from the current figure, and the review priced what that allowed: three
+refreshes could walk a week 360 minutes in 120-minute steps, each inside the bound, while *(was N
+min)* named only the last step — a figure nobody chose. Anchoring caps cumulative drift at one bound
+from what a person last held, and makes *(was N min)* always a person's figure. The cost, stated: a
+week whose calendar genuinely keeps filling stops at the bound until somebody taps, which is the
+propose-then-confirm path. Two figures, then, and they differ exactly on an automatic row: the
+**current** figure decides *no change* (a suggestion equal to what is on screen writes nothing), the
+**anchor** decides the bound and is what the write records.
+
+**What it never overwrites — the manual floor, kept, in two halves.** The automatic path writes only
+over **no row** or over a row the calendar already set (`calendar` or `calendar_auto`). A `manual` or
+`extraction` row is a person's figure and the refresh only proposes over it, whatever the delta.
+Rejected: *no row only* (an automatic week could never update itself again, so the second refresh
+of every week would ask) and *any row, latest write wins* (#97's upsert rule, read literally — a
+typed figure replaced by a machine within two hours is exactly the exposure the story warns about).
+The **client half** is `autoApplyDecision`'s `person-set` refusal over a row re-read from the server.
+The **server half** is `0039`'s trigger `member_capacity_automatic_never_overtypes` (errcode
+`TA106`), because the client half is a read followed by a write, and a figure a person saves in the
+one round trip between them would otherwise be overwritten with nobody tapping — the review found
+the first draft's docs claiming *never* over exactly that hop. The trigger refuses `calendar_auto`
+over `manual` or `extraction` and never refuses a person's word over anything; the App reads its
+refusal as *a person won* — no error, no re-assignment, a re-read — rather than as a fault.
+
+**Whose week, and when.** The signed-in member's own row, and nobody else's — the `calendar-busy`
+function acts on `auth.uid()` (#96, owner decision 2026-09-04), so a housemate's week is written
+when they open their own app. It fires at the one seam both calendar reads share — #96's first read
+of a week and #98's refresh of a stale one — after the derived row has landed and been re-read, and
+**both inputs it decides from — the override and the member row — are re-read from the server at
+that moment** rather than taken from the screen, so a figure a housemate typed during the round trip
+is seen and respected, and a baseline a housemate edited during it is the baseline the figure is
+computed from (the first draft read the roster off the latest render; the review measured that as
+current to within a Realtime echo and no better). It is client-triggered only, like every periodic
+read here (#53's reason, held by `gate.test.js`), and it can run at most once per session per
+(member, week) per trigger, because it sits inside the reads that are already bounded that way.
+
+**What a member sees.** Three things, none of them optional:
+
+1. **The roster names it.** The week reads *set from calendar automatically (was N min)* where
+   the tap-confirmed week reads *set from calendar* — `previous_minutes` is the N, written by the
+   same upsert as the figure, and always the last figure a person held (the anchor above). A person
+   who opens that week finds the calendar's figure in the field with its source line; Save unedited
+   is the confirm tap they never made, and the row becomes `calendar` with `previous_minutes`
+   cleared; an edit makes it `manual` (#97 AC 2's rule).
+2. **It is announced.** The write is followed by the same re-assignment a tap causes (#49), so
+   #50's announcement fires for every member on their next look, and its cause sentence says the
+   week was set from that member's calendar — an unattended change with no author named would read
+   as the app moving somebody's week on its own, which it did, and it must say so. **Only when the
+   whole change is the automatic write's own**: the statement nets everything since the viewer's
+   last look (#50 AC 5), so the clause is attached only when the figure that viewer was last shown
+   equals the `previous_minutes` the automatic row recorded (`automaticCauseSources`). A person's
+   change followed by an automatic one gets the plain cause sentence, which is true of it — the
+   review found the first draft labelling a person's 200 minutes the calendar's, and a cleared
+   override followed by an automatic write carrying the wrong sign.
+3. **Nothing is announced for nothing.** A read whose suggestion equals the week's current figure
+   writes nothing, so a refresh that confirms what is already there costs no row, no re-assignment
+   and no event (#50 AC 8's rule, inherited).
 
 ### One thing 0005 deliberately did **not** narrow
 

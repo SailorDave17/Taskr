@@ -298,16 +298,24 @@ describe('the minutes a person can claim for a week', () => {
     expect(() => normalizeCapacityMinutes('lots')).toThrow(/a number/i)
   })
 
-  it('lists exactly the columns 0005 grants, so select(*) is never attempted', () => {
-    const sql = readFileSync(
-      resolve(process.cwd(), 'supabase/migrations/0005_weekly_capacity.sql'),
-      'utf8',
-    )
-    const granted = sql
-      .match(/grant select \(([^)]+)\)\s*\n?\s*on public\.member_capacity/)[1]
-      .split(',')
-      .map((s) => s.trim())
-      .sort()
+  it('lists exactly the columns 0005 and 0039 grant, so select(*) is never attempted', () => {
+    // Two files, because the read set has been widened once by a feature:
+    // 0039 (#106) grants `previous_minutes`. 0022 also widened SELECT, to
+    // `household_id`, for the upsert's `EXCLUDED` read — and that column is
+    // deliberately NOT in the list (the module's comment says why), so 0022
+    // is deliberately not read here. A third widening has to arrive in both
+    // the migration and this test's file list.
+    const selectGrants = (file) =>
+      [
+        ...readFileSync(resolve(process.cwd(), `supabase/migrations/${file}`), 'utf8').matchAll(
+          /grant select \(([^)]+)\)\s*\n?\s*on public\.member_capacity/g,
+        ),
+      ].flatMap((m) => m[1].split(',').map((s) => s.trim()))
+    const from0005 = selectGrants('0005_weekly_capacity.sql')
+    const from0039 = selectGrants('0039_calendar_auto_apply.sql')
+    expect(from0005.length, 'POSITIVE CONTROL: 0005 grants a select list').toBeGreaterThan(0)
+    expect(from0039).toEqual(['previous_minutes'])
+    const granted = [...from0005, ...from0039].sort()
     expect(CAPACITY_COLUMNS.split(',').map((s) => s.trim()).sort()).toEqual(granted)
   })
 })

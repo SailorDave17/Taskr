@@ -41,7 +41,10 @@ import {
   updateChore,
 } from './lib/chores.js'
 import {
+  AUTO_APPLY_REFUSED_CODE,
+  autoApplyDecision,
   baselineMoved,
+  calendarSuggestion,
   capacitiesFor,
   clearCapacity,
   listCapacity,
@@ -53,6 +56,7 @@ import { extractCapacity, extractChores } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
+  automaticCauseSources,
   dismissFairnessNote,
   readSplitSeen,
   splitSnapshot,
@@ -457,10 +461,19 @@ export default function App() {
           // note. No row yet means never dismissed, which is exactly what a
           // first look should see.
           setFairnessNoteDismissed(Boolean(seen?.fairness_note_dismissed))
+          // #106 — which changes the cause sentence may call the calendar's:
+          // an automatic row whose recorded previous figure is the figure THIS
+          // member was last shown, so the net delta is that write's alone. The
+          // rule and its reason are `automaticCauseSources`'s.
+          const sources = automaticCauseSources({
+            seen,
+            overrides: overrideRows.filter((row) => row.period_start === period),
+          })
           const news = announcementFrom({
             seen,
             current,
             lastRebalance: found.last_rebalance ?? null,
+            sources,
           })
           if (news) setAnnouncement(news)
           const marker = found.last_rebalance?.applied_at ?? null
@@ -1473,38 +1486,110 @@ export default function App() {
   // the next load if the household on screen has moved on. React 18 tolerates
   // a state write after unmount, and App never unmounts. The member gets the
   // figure on the visit it arrived, once.
-  const readMyBusyWeek = useCallback(async ({ householdId, periodStart, memberIds }) => {
-    try {
-      await fetchBusyWeek({ householdId, periodStart })
-    } catch (err) {
-      // #96 AC 5 and #98 AC 4, the same sentence: nothing is cleared. The last
-      // derived figure — if there is one — stays on screen with its date, and
-      // the function's own sentence goes beside it. Not `setError`: that strip
-      // is for the app being broken, and a calendar Google would not answer is
-      // a fact about the calendar, with the manual path untouched underneath.
-      setBusyFetchComplaint(err.message)
-      return
-    }
-    setBusyFetchComplaint(null)
-    // Re-read rather than trusting the response body, for the reason every
-    // write on this screen re-reads: what the next device to load will see is
-    // exactly what this one now shows. The function's own answer would be a
-    // second representation of the row it just wrote. This re-read is also the
-    // whole of #98 AC 3 — the roster draws `busyWeeks`, so a figure that lands
-    // while the capacity screen is open is on it at the next render, and there
-    // is no reload to ask for because there is no cache to invalidate.
-    //
-    // In its OWN try, because a failure here is a failure of the TABLE, not of
-    // Google, and the two complaints are cleared by different things — a read
-    // failure filed under the fetch's complaint would outlive the next
-    // successful read, which is what one version of this did.
-    try {
-      setBusyWeeks(await listBusyWeeks(periodStart, memberIds))
-      setBusyReadComplaint(null)
-    } catch (err) {
-      setBusyReadComplaint(err.message)
-    }
-  }, [])
+  const readMyBusyWeek = useCallback(
+    async ({ householdId, periodStart, memberIds, myMemberId }) => {
+      try {
+        await fetchBusyWeek({ householdId, periodStart })
+      } catch (err) {
+        // #96 AC 5 and #98 AC 4, the same sentence: nothing is cleared. The last
+        // derived figure — if there is one — stays on screen with its date, and
+        // the function's own sentence goes beside it. Not `setError`: that strip
+        // is for the app being broken, and a calendar Google would not answer is
+        // a fact about the calendar, with the manual path untouched underneath.
+        setBusyFetchComplaint(err.message)
+        return
+      }
+      setBusyFetchComplaint(null)
+      // Re-read rather than trusting the response body, for the reason every
+      // write on this screen re-reads: what the next device to load will see is
+      // exactly what this one now shows. The function's own answer would be a
+      // second representation of the row it just wrote. This re-read is also the
+      // whole of #98 AC 3 — the roster draws `busyWeeks`, so a figure that lands
+      // while the capacity screen is open is on it at the next render, and there
+      // is no reload to ask for because there is no cache to invalidate.
+      //
+      // In its OWN try, because a failure here is a failure of the TABLE, not of
+      // Google, and the two complaints are cleared by different things — a read
+      // failure filed under the fetch's complaint would outlive the next
+      // successful read, which is what one version of this did.
+      let rows
+      try {
+        rows = await listBusyWeeks(periodStart, memberIds)
+        setBusyWeeks(rows)
+        setBusyReadComplaint(null)
+      } catch (err) {
+        setBusyReadComplaint(err.message)
+        return
+      }
+
+      // #106 — the one write on this screen nobody pressed a button for. A
+      // suggestion that lands within `AUTO_APPLY_BOUND_MINUTES` of the week's
+      // current figure is written as this member's capacity with the word
+      // `calendar_auto` and the figure it replaced, then re-assigned exactly as
+      // a tap would be (#49), then re-read so what this phone shows is what
+      // the next one loads (and so #50's announcement fires for THIS member
+      // too). Whether to write is `autoApplyDecision`'s alone — the bound, the
+      // manual floor and the no-change rule live there, with their tests.
+      //
+      // BOTH INPUTS ARE RE-READ FROM THE SERVER, not taken from the screen: the
+      // fetch above took seconds, and a housemate's typed figure landing in
+      // between must be seen and respected by the floor rule, while a baseline
+      // edit landing in between must be the baseline the figure is computed
+      // from (review-fanout, 2026-09-08: the first draft read the roster off a
+      // ref of the latest render, which is current to within a Realtime echo
+      // and no better). The window that survives the re-read — the one round
+      // trip between it and the write — is the trigger's (`0039`,
+      // `member_capacity_automatic_never_overtypes`), and its refusal is read
+      // as a PERSON having won, below.
+      //
+      // Deliberately NOT through `mutate()`: that sets `busy` over every
+      // control, and a write the person did not ask for must not grey out the
+      // one under their thumb — #342's reasoning for its background reads,
+      // applied to a background write. Its failure lands on the error strip,
+      // through `setError`, because a write that failed is the app being
+      // broken and a red nobody can see is how a fault stays unfound; the two
+      // calendar complaints above are for a CALENDAR that would not answer.
+      try {
+        const member = (await listMembers(householdId)).find((m) => m.id === myMemberId)
+        if (!member) return
+        const arrived = busyWeekFor(rows, member.id, periodStart)
+        const override =
+          (await listCapacity(periodStart, [member.id])).find((row) => row.member_id === member.id) ??
+          null
+        const decision = autoApplyDecision({
+          member,
+          override,
+          suggestion: calendarSuggestion(member, arrived),
+        })
+        if (!decision.apply) return
+        try {
+          await setCapacity({
+            memberId: member.id,
+            periodStart,
+            minutes: decision.to,
+            source: 'calendar_auto',
+            previousMinutes: decision.from,
+            householdId,
+          })
+        } catch (err) {
+          // The trigger refused because a person's figure landed in the one
+          // round trip between the re-read and this write. Nothing is wrong —
+          // the manual floor held, server-side — so nothing is announced and
+          // nothing is re-assigned; the re-read shows the figure that won.
+          if (err?.cause?.code === AUTO_APPLY_REFUSED_CODE) {
+            await requestRefresh()
+            return
+          }
+          throw err
+        }
+        await reassignHousehold({ householdId })
+        await requestRefresh()
+      } catch (err) {
+        setError(err.message)
+      }
+    },
+    [requestRefresh],
+  )
 
   useEffect(() => {
     if (status !== 'joined' || view !== 'who') return
@@ -1515,7 +1600,7 @@ export default function App() {
     if (askedForBusy.current.has(key)) return
     askedForBusy.current.add(key)
 
-    readMyBusyWeek({ householdId, periodStart, memberIds })
+    readMyBusyWeek({ householdId, periodStart, memberIds, myMemberId })
   }, [
     status,
     view,
@@ -1565,7 +1650,7 @@ export default function App() {
     if (refreshedBusy.current.has(key)) return
     refreshedBusy.current.add(key)
 
-    readMyBusyWeek({ householdId, periodStart, memberIds })
+    readMyBusyWeek({ householdId, periodStart, memberIds, myMemberId })
   }, [
     status,
     householdId,

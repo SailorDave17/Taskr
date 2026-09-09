@@ -57,9 +57,17 @@ export default function Announcement({ announcement, members, onDismiss }) {
   // performance — a capacity is a circumstance. When no capacity differs (a
   // change that arrived and reverted between looks, with budget-bound moves
   // left behind), the cause is stated at its honest width instead of invented.
+  //
+  // #106 — when the week was set from the calendar with nobody tapping, the
+  // cause says so. Still a circumstance (AC 9): the calendar is what the week
+  // has in it, and "their calendar" attributes the reading to its owner
+  // without saying they did anything, because they did not. A tap-confirmed
+  // calendar week (`calendar`) is a person's act and reads as every other
+  // capacity change does.
   const causeParts = inRosterOrder(capacityChanges, members).map(
-    ({ memberId, minutes }) =>
-      `${nameOf(memberId)}’s week has ${Math.abs(minutes)} min ${minutes < 0 ? 'less' : 'more'} room`,
+    ({ memberId, minutes, source }) =>
+      `${nameOf(memberId)}’s week has ${Math.abs(minutes)} min ${minutes < 0 ? 'less' : 'more'} room` +
+      (source === 'calendar_auto' ? ' (set from their calendar)' : ''),
   )
   const cause =
     causeParts.length > 0

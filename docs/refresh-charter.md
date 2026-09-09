@@ -962,6 +962,52 @@ This is that record, in the same shape as the catch-up bound's above.
   the config files for pg_cron, the `cron.` schema, a Vercel `crons` block and an Actions
   `schedule:` trigger, comments stripped, so the decision cannot be re-taken one story at a time.
 
+## Decision taken 2026-09-08 — a refreshed calendar suggestion applies itself within TWO HOURS
+
+Taken at the pickup of #106, which was filed **blocked on purpose** so that the one genuinely
+contested decision in the calendar epic — may the app change somebody's week with nobody tapping? —
+would be visible on the backlog instead of assumed inside a story. Its stated trigger was #100's
+live consent-friction and trust verdict; that verdict is still owed, and the owner chose to decide
+ahead of it with that stated. The full policy, the delta it measures and the rejected options are in
+`docs/capacity-model.md`'s section of the same date; this is the charter-level record.
+
+- **Auto-apply within a bound, and the bound is `AUTO_APPLY_BOUND_MINUTES = 120`.** When a calendar
+  read lands (#96's first read or #98's refresh) and the suggestion is within two hours of what the
+  week's capacity currently resolves to, the app writes it — `source = 'calendar_auto'`, with the
+  figure it replaced in `previous_minutes` — and re-assigns as a tap would. Larger moves only
+  propose, exactly as every refresh did before. Rejected: **never** (zero build cost, and the
+  signature moment — "re-balances without anyone having to negotiate it" — needs a tap forever) and
+  **announcement only, no bound** (the cheapest build and the widest exposure; a wrong free/busy read
+  moves as much of the week as it likes before anyone sees it, which is this decision's own
+  trust-erosion kill condition by name). **60** and **240** were rejected as values for the reasons
+  the model doc gives.
+- **It never overwrites a person, and the database holds that, not only the client.** The
+  automatic path writes over no row or over a calendar-set row; a `manual` or `extraction` figure
+  is a person's and the refresh only proposes over it — checked by the client against a server
+  re-read, and refused by `0039`'s trigger for the one round trip the client check cannot see (the
+  review found the first draft holding this as a client predicate alone, with this bullet saying
+  *never* over exactly that hop). The charter's manual floor is what this protects, and it is the
+  reason the option was safe to take before the trust verdict: the worst case is a wrong figure a
+  person can overtype, on a week nobody had set by hand.
+- **The bound is measured from the last figure a person held, so automatic writes cannot chain.**
+  Decided at the review escalation the same day: with the bound measured from the current figure,
+  three refreshes could move a week six hours in two-hour steps, each inside the bound, while *(was
+  N min)* named only the last step. The anchor (`humanFigureFor`) caps cumulative drift at one bound
+  and keeps *(was N min)* a person's figure; the cost is that a calendar which keeps filling stops
+  at the bound until somebody taps. Rejected: accept-and-document (the kill condition as written is
+  per read while the behaviour would have been cumulative) and automatic-over-confirmed-only (the
+  near-identical *no row only*, already rejected).
+- **What kills it, restated for this step.** The 2026-08-16 decision's second kill condition —
+  inference wrong often enough that members stop trusting the split — now has a sharper trigger:
+  an automatic write that a member reverts by hand is the observation to count. A week that keeps
+  needing to be corrected is a week the calendar should not have been allowed to set, and the
+  remedy is to lower the bound or return to propose-only, both of which are one constant and one
+  decision away.
+- **Visibility is not optional.** The roster names the week as set automatically with the figure
+  it replaced; #50's announcement carries the cause on every member's next look, saying the week
+  was set from that member's calendar; and a read that confirms the figure already there writes
+  nothing, so nothing is announced for nothing.
+
 ## Decision taken 2026-09-05 — the shopping list is a standalone household utility, on a fifth tab
 
 Owner decisions taken at the clarifying gate before grooming and at the grooming gate after it

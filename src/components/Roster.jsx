@@ -182,7 +182,13 @@ function CapacityControl({
     // no override, or a typed one, opens as manual with nothing proposed.
     const stored = override?.source
     if (stored && stored !== 'manual') {
-      setSource(stored)
+      // #106 — an automatic week opens as the CALENDAR'S figure: the field
+      // holds what the calendar put there, the source line names it, and the
+      // editor's own vocabulary stays three words. Save unedited is the confirm
+      // tap the person never made — the row becomes `calendar`, and
+      // `setCapacity`'s null default clears `previous_minutes` — and an edit
+      // applies #97 AC 2's rule and makes it manual.
+      setSource(stored === 'calendar_auto' ? 'calendar' : stored)
       setProposed(Number(override.minutes))
     } else {
       setSource('manual')
@@ -262,7 +268,19 @@ function CapacityControl({
                 roster saw no confirmation tap. The same quiet register as the
                 other two marks, for `.member__week-mark`'s reason. */}
             {isOverridden ? (
-              override.source === 'calendar' ? (
+              override.source === 'calendar_auto' ? (
+                // #106 AC 4 — nobody tapped, so the mark carries what a tap
+                // would have shown the person: the provenance AND the figure
+                // the week had before, from the row itself (`0039`). The same
+                // quiet register; the word "automatically" is the difference.
+                <span className="member__week-mark" data-testid={`week-auto-${member.id}`}>
+                  {' '}
+                  · set from calendar automatically
+                  {override.previous_minutes == null
+                    ? null
+                    : ` (was ${override.previous_minutes} min)`}
+                </span>
+              ) : override.source === 'calendar' ? (
                 <span className="member__week-mark"> · set from calendar</span>
               ) : (
                 <span className="member__week-mark"> · set for this week</span>

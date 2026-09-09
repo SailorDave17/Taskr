@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assess } from './allocation.js'
-import { announcementFrom, splitSnapshot } from './announce.js'
+import { announcementFrom, automaticCauseSources, splitSnapshot } from './announce.js'
 import { toAllocatorChores } from './chores.js'
 
 // #50 — the announcement's arithmetic, tested where it is pure.
@@ -105,6 +105,88 @@ describe('announcementFrom — when a member is owed a statement', () => {
       { memberId: 'm2', minutes: 30 },
     ])
     expect(news.capacityChanges).toEqual([{ memberId: 'm1', minutes: -150 }])
+  })
+
+  // #106 — where the changed week's figure came from rides on the change when
+  // the caller says, and only then, so every caller that predates it reads
+  // the shape above unchanged.
+  it('#106: a capacity change carries the member’s current source when one is mapped', () => {
+    const news = announcementFrom({
+      seen: seenBefore,
+      current: after,
+      lastRebalance: REBALANCE,
+      sources: { m1: 'calendar_auto' },
+    })
+    expect(news.capacityChanges).toEqual([{ memberId: 'm1', minutes: -150, source: 'calendar_auto' }])
+    // The moves are untouched — provenance is the CAUSE's, not the effect's.
+    expect(news.moves).toEqual([
+      { memberId: 'm1', minutes: -30 },
+      { memberId: 'm2', minutes: 30 },
+    ])
+  })
+
+  // #106 — which changes the statement may call the calendar's. The review
+  // found the first draft attributed the WHOLE net delta to the current word,
+  // so a person's change followed by an automatic one read as the calendar's,
+  // with the wrong sign when a cleared override preceded it.
+  describe('automaticCauseSources — the clause is attached only when the net delta is the automatic write’s own', () => {
+    const shown = (capacityMinutes) => ({ snapshot: { members: [{ id: 'm1', minutes: 90, capacityMinutes }] } })
+    const auto = (minutes, previous) => ({ member_id: 'm1', source: 'calendar_auto', minutes, previous_minutes: previous })
+
+    it('one automatic write since the last look: the figure shown IS the figure replaced', () => {
+      expect(automaticCauseSources({ seen: shown(100), overrides: [auto(40, 100)] })).toEqual({
+        m1: 'calendar_auto',
+      })
+    })
+
+    it('a person’s change and then an automatic one: the figure shown is NOT the figure replaced — no clause', () => {
+      // Shown 300; the person confirmed 100 by tap; the calendar then applied
+      // 40 over that (previous 100). 260 of the 260 minutes are not the
+      // calendar's alone.
+      expect(automaticCauseSources({ seen: shown(300), overrides: [auto(40, 100)] })).toEqual({})
+    })
+
+    it('a cleared override and then an automatic write: the sign would be wrong — no clause', () => {
+      // Shown 150 (a manual override); cleared back to 300 by a person; the
+      // calendar then applied 200 (previous 300). Net +50 room, calendar -100.
+      expect(automaticCauseSources({ seen: shown(150), overrides: [auto(200, 300)] })).toEqual({})
+    })
+
+    it('a confirmed or typed row is never the calendar’s doing, whatever the snapshot', () => {
+      for (const source of ['calendar', 'manual', 'extraction']) {
+        expect(
+          automaticCauseSources({
+            seen: shown(100),
+            overrides: [{ member_id: 'm1', source, minutes: 40, previous_minutes: null }],
+          }),
+        ).toEqual({})
+      }
+    })
+
+    it('an automatic row with no recorded previous figure claims nothing', () => {
+      expect(automaticCauseSources({ seen: shown(100), overrides: [auto(40, null)] })).toEqual({})
+    })
+
+    it('no snapshot, or a member the snapshot does not name: nothing to compare against — no clause', () => {
+      expect(automaticCauseSources({ seen: null, overrides: [auto(40, 100)] })).toEqual({})
+      expect(
+        automaticCauseSources({
+          seen: { snapshot: { members: [{ id: 'm2', minutes: 0, capacityMinutes: 100 }] } },
+          overrides: [auto(40, 100)],
+        }),
+      ).toEqual({})
+    })
+  })
+
+  it('#106: an unmapped member’s change carries no source key at all — the old shape exactly', () => {
+    const news = announcementFrom({
+      seen: seenBefore,
+      current: after,
+      lastRebalance: REBALANCE,
+      sources: { m2: 'manual' },
+    })
+    expect(news.capacityChanges).toEqual([{ memberId: 'm1', minutes: -150 }])
+    expect(Object.keys(news.capacityChanges[0])).toEqual(['memberId', 'minutes'])
   })
 
   it('AC 6: the verdict travels from the stored run, never recomputed', () => {

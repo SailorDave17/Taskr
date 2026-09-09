@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { isProbeFile } from '../test/support/probeFiles.js'
 
 // The calendar data layer — story #95.
 //
@@ -130,6 +131,9 @@ const LOCATION = { origin: 'https://taskr.example.test' }
 /** Every `.js`/`.jsx` file under `src/`, tests included — a query anywhere counts. */
 function sourceFilesUnderSrc(dir = resolve(process.cwd(), 'src'), out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // #192 — a probe planted by `retiredVocabulary.test.js` in a parallel worker
+    // is gone by the time the collected paths are read.
+    if (isProbeFile(entry.name)) continue
     const full = resolve(dir, entry.name)
     if (entry.isDirectory()) sourceFilesUnderSrc(full, out)
     else if (/\.(js|jsx)$/.test(entry.name)) out.push(full)

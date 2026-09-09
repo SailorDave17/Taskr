@@ -42,6 +42,7 @@
 
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { freshDatabase, asDevice, newDevice, attempt } from './support/pgliteSupabase.js'
+import { isProbeFile } from './support/probeFiles.js'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -446,7 +447,9 @@ describe('#157 — which household-scoping mechanism the column grants permit', 
   // exactly the two tables it named - which turns the report from a forecast
   // into a live guard that the decision was executed as recommended.
   it('AC7 (re-pointed): 0014 exists, and grants exactly what this report recommended', () => {
-    const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+    // #192 — `isProbeFile` first: a probe planted by `retiredVocabulary.test.js`
+    // in a parallel worker is a real `.sql` file for the length of one test.
+    const files = readdirSync(migrationsDir).filter((f) => !isProbeFile(f) && f.endsWith('.sql')).sort()
     const migration = files.find((f) => f.startsWith('0014'))
     expect(migration, 'the recommended grant should have landed as 0014').toBeTruthy()
 

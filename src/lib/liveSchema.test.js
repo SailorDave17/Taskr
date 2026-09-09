@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isProbeFile } from '../test/support/probeFiles.js'
 
 import {
   CALENDAR_BUSY_COLUMNS,
@@ -51,6 +52,10 @@ import {
 /** Every non-test source file under src/, so a new caller cannot hide. */
 function sourceFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {
+    // #192 — before the `statSync`, and doubly so here: a probe planted by
+    // `retiredVocabulary.test.js` spells a call to a DROPPED rpc, so reading one
+    // would put a retired name into the sets this file asserts about.
+    if (isProbeFile(name)) continue
     const path = join(dir, name)
     if (statSync(path).isDirectory()) {
       sourceFiles(path, out)

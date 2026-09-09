@@ -82,6 +82,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { isProbeFile } from './probeFiles.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(here, '..', '..', '..', 'supabase', 'migrations')
@@ -143,7 +144,11 @@ export function migrationSql(name) {
  */
 export function migrationFilesOnDisk() {
   return readdirSync(migrationsDir)
-    .filter((name) => name.endsWith('.sql'))
+    // #192 — a probe planted by `retiredVocabulary.test.js` is a real `.sql`
+    // file under this directory for the length of one test. Here the hazard is
+    // not a race but a REFUSAL: two pglite suites assert this list is a subset
+    // of `MIGRATIONS` above, and a probe would fail that outright.
+    .filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
     .sort()
 }
 

@@ -350,6 +350,11 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'member_capacity.household_id=arw',
       'member_capacity.member_id=arw',
       'member_capacity.period_start=arw',
+      // 0039, story #106. The figure an automatic calendar write replaced; all
+      // three letters are that file's and all three are the upsert's (SET
+      // target, `EXCLUDED` read, first write). `check:live` sees the column and
+      // nothing of the grant, so this row is the instrument for that half.
+      'member_capacity.previous_minutes=arw',
       // 0023, 2026-08-28 (#211). The one row here whose migration `check:live`
       // is NOT blind to — it caught the SELECT half as a 42703 before the apply.
       // It earns its place on the INSERT half, which only reads and so cannot

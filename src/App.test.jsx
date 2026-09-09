@@ -3853,6 +3853,306 @@ describe('busy figure refreshes itself on app open (#98)', () => {
   })
 })
 
+// #106 — a refreshed suggestion applies itself within the bound. The DECISION
+// is capacity.autoApply.test.js's (the bound, the floor, the boundary), the
+// ROW is calendarAutoApply.pglite.test.js's and the MARK is Roster.test.jsx's.
+// What App owes is the wiring only it can prove: that the write happens at the
+// seam a landed read passes through, with the word and the previous figure,
+// against the override the SERVER holds rather than the one the screen had;
+// that the re-assignment and the re-read follow; that a refused decision
+// writes nothing and leaves "Use this" standing; and that the cause reaches
+// #50's statement. `autoApplyDecision` and `calendarSuggestion` are REAL here
+// (the capacity mock spreads the actual module), so a decision the pure suite
+// proves is the decision these tests exercise.
+describe('a refreshed suggestion applies itself within the bound (#106)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  // 300 usual. With a confirmed 100 standing, a read of 260 busy suggests 40:
+  // a move of 60, inside the bound. A read of 30 busy suggests 270: a move of
+  // 170, outside it. With NO row, a read of 90 busy suggests 210: a move of 90
+  // from the baseline, inside.
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 300,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+  const HOUR = 60 * 60 * 1000
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const rowReadAgo = (msAgo, busy) => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: busy,
+    event_count: 4,
+    computed_at: new Date(Date.now() - msAgo).toISOString(),
+  })
+  const staleRow = (busy = 200) => rowReadAgo(13 * HOUR, busy)
+  const freshRow = (busy) => rowReadAgo(0, busy)
+  const override = (minutes, source, previous = null) => ({
+    id: 'o1',
+    member_id: 'm1',
+    period_start: week(),
+    minutes,
+    note: null,
+    source,
+    previous_minutes: previous,
+    created_at: '2026-09-07T00:00:00Z',
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  /**
+   * Boot with a stale row so #98's refresh fires, hold the fetch, then let it
+   * land with `busy` — the #98 AC 3 shape. Returns once the fetch has settled
+   * and everything it started has too.
+   */
+  async function refreshLandsWith(busy, { surface } = {}) {
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp(surface)
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(busy)])
+    await act(async () => finish({ ok: true }))
+    await act(async () => {})
+  }
+
+  beforeEach(() => {
+    api.currentHousehold.mockResolvedValue(household)
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+  })
+
+  it('AC 2: a refresh within the bound writes the week with source calendar_auto and the figure it replaced', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(260)
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: week(),
+      minutes: 40,
+      source: 'calendar_auto',
+      previousMinutes: 100,
+      householdId: 'h1',
+    })
+  })
+
+  it('AC 2: the write is followed by the same re-assignment a tap causes, then a re-read', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(260)
+    await waitFor(() => expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' }))
+    // Ordered: the row lands, THEN the re-assignment reads it, THEN the screen
+    // re-reads what the re-assignment stored — a re-assignment before the
+    // write would divide by last week's figure. All three legs by CALL ORDER:
+    // the first draft compared the read count against a number captured
+    // before the render, which the boot's own read exceeded whatever happened
+    // after the write (review-fanout, 2026-09-08 — an assertion that could not
+    // fail on any mutation).
+    const setAt = capacityApi.setCapacity.mock.invocationCallOrder[0]
+    const reassignAt = reassignApi.reassignHousehold.mock.invocationCallOrder[0]
+    expect(setAt).toBeLessThan(reassignAt)
+    await waitFor(() =>
+      expect(api.currentHousehold.mock.invocationCallOrder.some((n) => n > reassignAt)).toBe(true),
+    )
+  })
+
+  it('AC 2: decides against the BASELINE the server holds too — a housemate’s edit during the round trip is the baseline used', async () => {
+    // No override. Booted at 300 usual; during the fetch a housemate saved the
+    // baseline as 200 on another device. The read lands at 120 busy: from the
+    // fresh 200 the suggestion is 80 (a move of 120, inside); from the stale
+    // 300 it would have been 180. The write must carry the fresh pair.
+    capacityApi.listCapacity.mockResolvedValue([])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp()
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    api.listMembers.mockResolvedValue([{ ...me, weekly_minutes: 200 }, housemate])
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(120)])
+    await act(async () => finish({ ok: true }))
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity.mock.calls[0][0]).toMatchObject({
+      minutes: 80,
+      previousMinutes: 200,
+      source: 'calendar_auto',
+    })
+  })
+
+  it('the trigger’s refusal (a person won the race) is quiet: no error strip, no re-assignment, a re-read', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    const refusal = new Error('saving this week’s capacity: an automatic calendar figure cannot replace a figure a person set (manual)')
+    refusal.cause = { code: 'TA106', message: 'refused' }
+    capacityApi.setCapacity.mockRejectedValue(refusal)
+    await refreshLandsWith(260)
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    const setAt = capacityApi.setCapacity.mock.invocationCallOrder[0]
+    await waitFor(() =>
+      expect(api.currentHousehold.mock.invocationCallOrder.some((n) => n > setAt)).toBe(true),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: decides against the override the SERVER holds, re-read at the moment the figure lands', async () => {
+    // The screen booted with a confirmed 100; a housemate typed 100 during
+    // the round trip. The re-read sees `manual`, and the floor refuses.
+    capacityApi.listCapacity.mockResolvedValueOnce([override(100, 'calendar')])
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'manual')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    // And the re-read was scoped to this member and this week.
+    const mine = capacityApi.listCapacity.mock.calls.filter(([, ids]) => ids.length === 1 && ids[0] === 'm1')
+    expect(mine.length).toBeGreaterThan(0)
+    expect(mine[0][0]).toBe(week())
+  })
+
+  it('AC 2: fires on #96’s FIRST read of a week too, from the baseline — the seam is shared', async () => {
+    // No row and no override: opening the roster asks (#96), the read lands
+    // at 90 busy, the baseline 300 becomes 210 — a move of 90, inside.
+    capacityApi.listCapacity.mockResolvedValue([])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(90)])
+    await act(async () => finish({ ok: true }))
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity.mock.calls[0][0]).toMatchObject({
+      minutes: 210,
+      source: 'calendar_auto',
+      previousMinutes: 300,
+    })
+  })
+
+  it('AC 3: a refresh outside the bound writes nothing, and the readout only proposes', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(30, { surface: 'Who' })
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('30 min busy'),
+    )
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // Exactly as in the confirm story: the tap is there, and it is the way in.
+    expect(
+      inRoster().getByRole('button', { name: /use the calendar’s figure for placeholder one/i }),
+    ).toBeEnabled()
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 100 min')
+  })
+
+  it('the manual floor: a refresh within the bound over a TYPED week writes nothing', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'manual')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a refresh that confirms the figure already there writes nothing and re-assigns nothing', async () => {
+    // Confirmed at 40, the calendar still says 260 busy → 40. No row, no run,
+    // no event (#50 AC 8, inherited).
+    capacityApi.listCapacity.mockResolvedValue([override(40, 'calendar')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a failed refresh writes nothing — there is no new figure to apply', async () => {
+    // The stale row suggests 40 against a confirmed 100 — a move of 60,
+    // INSIDE the bound — so a build that reached the decision on the stale
+    // figure after the failed fetch WOULD write, and only the early return
+    // discharges the assertion. The first draft's stale row suggested exactly
+    // the standing figure, so the no-change rule discharged it instead
+    // (review-fanout, 2026-09-08; prove-tests shape 9).
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow(260)])
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/))
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: after the write the roster shows the week as set automatically, with the figure it replaced', async () => {
+    // A fake that MODELS the write: every read returns the confirmed row
+    // until setCapacity has been called, and the automatic row after — so the
+    // re-read after the write returns what the database now holds whatever
+    // number of refreshes the boot and the tab press happen to run.
+    capacityApi.listCapacity.mockImplementation(async () =>
+      capacityApi.setCapacity.mock.calls.length > 0
+        ? [override(40, 'calendar_auto', 100)]
+        : [override(100, 'calendar')],
+    )
+    await refreshLandsWith(260, { surface: 'Who' })
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(inRoster().getByTestId('week-auto-m1')).toHaveTextContent(
+        /set from calendar automatically \(was 100 min\)/,
+      ),
+    )
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 40 min')
+  })
+
+  it('a write that fails lands on the error strip rather than vanishing', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    capacityApi.setCapacity.mockRejectedValue(new Error('saving this week’s capacity: refused'))
+    await refreshLandsWith(260)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/refused/))
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: the change is announced with its cause — the statement says the week was set from their calendar', async () => {
+    // The seen-marker says this member last saw Placeholder One at 100 with
+    // c1; the re-balance moved c1 to Placeholder Two and the override rows
+    // now carry `calendar_auto`. The whole #50 pipeline is real here; what is
+    // new is the `sources` App passes it.
+    const APPLIED_AT = new Date().toISOString()
+    api.currentHousehold.mockResolvedValue({
+      ...household,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: false,
+        jobsMoved: 1,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: APPLIED_AT,
+      },
+    })
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+    ])
+    capacityApi.listCapacity.mockResolvedValue([override(40, 'calendar_auto', 100)])
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(260)])
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: {
+        members: [
+          { id: 'm1', minutes: 90, capacityMinutes: 100 },
+          { id: 'm2', minutes: 0, capacityMinutes: 300 },
+        ],
+      },
+      seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+    })
+    await renderApp()
+    const news = await screen.findByTestId('rebalance-announcement')
+    expect(news).toHaveTextContent('Placeholder One’s week has 60 min less room (set from their calendar)')
+    expect(news).toHaveTextContent('90 min of chores moved off Placeholder One’s list')
+  })
+})
+
 /
 // #210 — the capture flow, wired. What App owes is three things the roster
 // cannot prove on its own: that a description reaches lib/capture.js with the

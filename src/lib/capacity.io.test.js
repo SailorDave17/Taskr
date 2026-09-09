@@ -152,6 +152,49 @@ describe('setCapacity', () => {
     expect(upsert.row.source).toBe('manual')
   })
 
+  // #106 — the figure an automatic calendar write replaced travels with the
+  // row, and is ALWAYS in the payload.
+  it('carries previousMinutes as previous_minutes beside the automatic word', async () => {
+    results.member_capacity = { data: ROW, error: null }
+    await setCapacity({
+      memberId: 'm1',
+      periodStart: MONDAY,
+      minutes: 40,
+      source: 'calendar_auto',
+      previousMinutes: 100,
+      householdId: HOUSEHOLD.id,
+    })
+    const upsert = opsOn('member_capacity').find((c) => c.op === 'upsert')
+    expect(upsert.row).toMatchObject({ minutes: 40, source: 'calendar_auto', previous_minutes: 100 })
+  })
+
+  it('sends previous_minutes as null by default — PRESENT in the payload, so a confirm clears it', async () => {
+    results.member_capacity = { data: ROW, error: null }
+    await setCapacity({ memberId: 'm1', periodStart: MONDAY, minutes: 40, source: 'calendar', householdId: HOUSEHOLD.id })
+    const upsert = opsOn('member_capacity').find((c) => c.op === 'upsert')
+    // The KEY must be there: an upsert sets every column it names and none it
+    // omits, so a payload without it would leave an automatic row's history
+    // standing under the confirmed word — which 0039's second constraint then
+    // refuses whole. Asserted on the key, not the value, because `undefined`
+    // and `null` read the same through `toMatchObject`.
+    expect(Object.keys(upsert.row)).toContain('previous_minutes')
+    expect(upsert.row.previous_minutes).toBeNull()
+  })
+
+  it('refuses a previous figure the column would refuse, with minutes’ own sentence', async () => {
+    results.member_capacity = { data: ROW, error: null }
+    await expect(
+      setCapacity({
+        memberId: 'm1',
+        periodStart: MONDAY,
+        minutes: 40,
+        source: 'calendar_auto',
+        previousMinutes: -5,
+        householdId: HOUSEHOLD.id,
+      }),
+    ).rejects.toThrow(/cannot be negative/i)
+  })
+
   it('refuses a value the column would refuse, BEFORE any request is sent', async () => {
     results.member_capacity = { data: ROW, error: null }
     await expect(setCapacity({ memberId: 'm1', periodStart: MONDAY, minutes: -1, householdId: HOUSEHOLD.id })).rejects.toThrow(

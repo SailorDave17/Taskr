@@ -80,12 +80,13 @@ describe('AC 4 — a confirmed calendar figure resolves like any other override'
 })
 
 describe('the words a capacity row may carry', () => {
-  it('lists exactly what 0031’s constraint admits, read out of the migration', () => {
+  it('lists exactly what the LATEST constraint admits, read out of the migration that declares it', () => {
     // The same discipline as the minutes bounds against 0005: the list in the
     // module and the list in the constraint are two copies, and this is what
-    // holds them equal. A fourth proposer has to arrive in both.
+    // holds them equal. A fifth word has to arrive in both — and in THIS
+    // path, which named 0031 until 0039 (#106) re-declared the constraint.
     const sql = readFileSync(
-      resolve(process.cwd(), 'supabase/migrations/0031_calendar_capacity_source.sql'),
+      resolve(process.cwd(), 'supabase/migrations/0039_calendar_auto_apply.sql'),
       'utf8',
     )
     const match = sql.match(/check \(source in \(([^)]*)\)\)/)
@@ -97,5 +98,6 @@ describe('the words a capacity row may carry', () => {
   it('is frozen — a caller cannot grow it at runtime', () => {
     expect(Object.isFrozen(CAPACITY_SOURCES)).toBe(true)
     expect(CAPACITY_SOURCES).toContain('calendar')
+    expect(CAPACITY_SOURCES).toContain('calendar_auto')
   })
 })

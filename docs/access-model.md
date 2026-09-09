@@ -7,7 +7,15 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0038` are ALL applied to the live project (`0038` on 2026-09-08 in #101's own
+- Status: **`0001`–`0039` are ALL applied to the live project (`0039` on 2026-09-08 in #106's own
+  session, at md5 `798a49fea4559ee5f1caa3c261907d7e` (`11592 characters, 17 statements`), read back
+  identical — see its entry below; *measured* `check:live` **64 of 65**
+  immediately before the apply and **65 of 65** immediately after, the
+  denominator unmoved because a COLUMN adds no row and reddens the existing `member_capacity` row
+  instead (`0035`'s shape); `probe:live-grants` **19 of 20** before and
+  **20 of 20** after on the new `previous_minutes` control row; and the read-only
+  catalog query for the half neither can see, `member_capacity_source_known` at
+  `manual, extraction, calendar` before and `manual, extraction, calendar, calendar_auto` after; `0038` on 2026-09-08 in #101's own
   session, at md5 `04584d87e7b84da232a1eec74a200eea` (`17096 characters, 15 statements`), read back identical — see its
   entry below, and the `calendar-events` Edge Function it pairs with was deployed the same session,
   *measured* `check:live` **62 of 65** immediately before the apply,
@@ -610,6 +618,59 @@
     - **The publication gains the table**, with `0037`'s guarded shape, so a second phone's import
       moves this phone's *already imported* marks without a reload. `WATCHED_TABLES` derives it from
       `LIVE_SCHEMA` and `realtime.pglite.test.js` holds the publication equal — twelve tables now.
+  - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
+    `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
+    client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with
+    NOBODY tapping, and the row carries the figure it replaced so the roster can show both (#106
+    AC 4). The policy — the bound, the delta it measures, and that it never writes over a `manual`
+    or `extraction` row — is the client's and is in `docs/capacity-model.md`'s 2026-09-08 section;
+    this entry records the ACCESS model. Applied 2026-09-08 in #106's own session, before the
+    merge (`0020`'s safe order), at md5 `798a49fea4559ee5f1caa3c261907d7e`
+    (`11592 characters, 17 statements`), read back identical.
+    - **Three column grants, all the upsert's.** `select`, `insert` and `update` on
+      `previous_minutes` for `authenticated`, additive on `0005`'s and `0022`'s sets, for `0022`'s
+      reason exactly: PostgREST names every payload column in `DO UPDATE SET` and reads each through
+      `EXCLUDED`. The column is provenance, not privilege — a client that lies about the previous
+      figure lies only to the roster it reads itself. `anon` holds nothing on it (`0017`'s revoke
+      stands, asserted). No policy, no RPC.
+    - **One trigger, and it is the manual floor's server half.** `member_capacity_automatic_never_overtypes`
+      (`before update`, `0022`'s shape, executable by nobody) refuses `source = 'calendar_auto'`
+      over a `manual` or `extraction` row with errcode `TA106`, and never refuses a person's word
+      over anything. It exists because the client's floor is a read followed by a write, and a
+      person's figure saved in the one round trip between them would otherwise be overwritten with
+      nobody tapping — the review fan-out on this story's first draft found that hop, and the
+      header's *"a decision the database cannot see"* false for exactly this half. The App reads
+      `TA106` as *a person won*: no error strip, no re-assignment, a re-read. `check:live` cannot
+      see a trigger (it probes tables, columns and RPC signatures), and `probe:live-grants` has no
+      row for one; the catalog query below reads it on both sides.
+    - **Two constraints on the column, and the second is the one that matters.**
+      `member_capacity_previous_minutes_range` is `minutes`' range; `member_capacity_previous_only_when_auto`
+      refuses a non-null previous figure on any row whose word is not `calendar_auto`, so a person's
+      confirm or edit of an automatic week — which the client upserts as `calendar` or `manual`
+      with the column null — cannot leave the old history standing under the new word by forgetting
+      the column. The pglite suite proves every arm (`calendarAutoApply.pglite.test.js`).
+    - **Three instruments, one each.** `check:live` SEES this file, unlike `0031`: `CAPACITY_COLUMNS`
+      names the column, so the `member_capacity` row answered `42703` until the apply — one honest
+      red, and NO new row, `0035`'s shape (*measured* **64 of 65** before,
+      **65 of 65** after). `npm run probe:live-grants` gained a control row
+      for the column's `arw` (*measured* **19 of 20** before,
+      **20 of 20** after). Neither can see the constraint widening, for `0031`'s
+      reason, so the read-only catalog query over the Management API is the instrument for that
+      half, taken on both sides: `member_capacity_source_known` admitting
+      `manual, extraction, calendar` before and `manual, extraction, calendar, calendar_auto` after, the
+      `previous_minutes` column, its two constraints and the trigger absent before and present
+      after — the trigger reading `enabled=O`, its function `secdef=false` with
+      `has_function_privilege` **false for both `anon` and `authenticated`** (the ACL carries
+      `service_role=X` through the platform's inherited default, `0038`'s reading on every
+      function here, unused rather than dangerous), the column grants exactly
+      `authenticated=INSERT,SELECT,UPDATE`, and both column comments naming #106.
+    - **A later paste of `0031` NARROWS the constraint back** — the `0012`/`0025`/`0026`-on-`0028`
+      hazard, on a constraint for the first time: `0031` drops it by name and re-adds its own
+      three-word list. On an empty table that is silent; while any `calendar_auto` row exists the
+      re-add fails validation and the whole paste errors. Both arms are asserted, and re-pasting
+      `0039` restores the word. `calendarCapacity.pglite.test.js`'s own re-run test moved from HEAD
+      to a database built through `0031` for the same reason — a migration is re-runnable only
+      against its own schema.
   - **`0037`** (#342) — the `supabase_realtime` publication gains the eleven tables the client
     reads and now WATCHES: `households`, `members`, `chores`, `member_capacity`,
     `chore_exclusions`, `calendar_connections`, `chore_repeat_exceptions`, `calendar_busy`,

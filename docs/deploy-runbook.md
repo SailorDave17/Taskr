@@ -242,6 +242,38 @@ persists anything.
    pass a value for still falls back to `Site URL`.
 6. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
+7. **The invitation email — #341.** Adding a member no longer sets a credential; it sends them an
+   invitation they choose their own password from, and a member who already has a sign-in can be sent
+   a reset link the same way. Three facts about the mail path, all read off the live project rather
+   than off Supabase's documentation, because every one of them is a project setting whose default is
+   not necessarily what this project holds.
+
+   - **The template is *Invite user***, under Authentication → Email Templates. That is the one
+     `auth.admin.inviteUserByEmail` sends, and it is a **different template from *Confirm signup***
+     (#129's) — editing one does not touch the other. The reset link uses **Reset password**. Nothing
+     needs changing for the path to work; this is here so an edit lands on the right one.
+   - **The redirect lands on the app root**, because `provision-member` is passed the origin the
+     organizer was on, by the same `confirmationRedirectTo` rule as step 5. **Nothing to add to
+     `Redirect URLs`** — the production origin and `http://localhost:5173` are already there, and the
+     invitation link needs no path of its own. That is the whole reason this path does not need
+     #175's router.
+   - **The built-in mailer allows TWO emails per hour, and that is not enough for a household.**
+     *Measured 2026-09-09* against this project via the Management API
+     (`GET /v1/projects/{ref}/config/auth`): `rate_limit_email_sent = 2`, with `smtp_host` unset —
+     so the built-in service, not custom SMTP. A household of four cannot be invited in one sitting:
+     the third send is refused, and the app says the sign-in was not created and to try later
+     (#341 AC 4), which is honest but is a wall the organizer meets on their first afternoon.
+
+     **So custom SMTP is the owner's next step**, and it is a decision rather than a task: the limit
+     is raisable only by attaching your own sender under Authentication → SMTP Settings. Filed as a
+     finding rather than actioned here — it needs a mail provider and a domain, neither of which is
+     a code change.
+
+   **One more measured figure, because it changes what the organizer should say:**
+   `mailer_otp_exp = 3600` — **an invitation link is good for one hour**. An organizer who sends
+   invitations on Sunday for people who open their mail on Monday has sent nothing that works, and
+   the recipient sees the expired-link sentence rather than a password screen. Re-sending is the
+   repair and costs one of the two hourly sends.
 
 ## 3. The Edge Functions
 

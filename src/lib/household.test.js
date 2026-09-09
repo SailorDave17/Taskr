@@ -135,6 +135,24 @@ const fakeClient = {
       calls.push({ op: 'signOut', options })
       return Promise.resolve({ error: authState.signOutError ? { message: authState.signOutError } : null })
     },
+    // #341 — the two client-side halves of the invitation path. Both record
+    // their ARGUMENTS for the reason `signOut` above does: `updateUser` called
+    // with the wrong field and `resetPasswordForEmail` sent to the wrong address
+    // both look identical to a fake that pushes only `{ op }`.
+    updateUser: (attrs) => {
+      calls.push({ op: 'updateUser', attrs })
+      return Promise.resolve(
+        authState.updateUserError
+          ? { data: null, error: { message: authState.updateUserError } }
+          : { data: { user: { id: 'person-1' } }, error: null },
+      )
+    },
+    resetPasswordForEmail: (email, options) => {
+      calls.push({ op: 'resetPasswordForEmail', email, options })
+      return Promise.resolve(
+        authState.resetError ? { error: { message: authState.resetError } } : { error: null },
+      )
+    },
   },
 }
 
@@ -157,9 +175,13 @@ const {
   listMembers,
   normalizeMemberEmail,
   normalizeMinutes,
+  inviteMember,
   provisionMember,
+  readAuthCallback,
   readSignInReturn,
   removeMember,
+  sendPasswordReset,
+  setOwnPassword,
   signInAddressFor,
   resetMemberCredential,
   signIn,
@@ -1300,5 +1322,197 @@ describe('removing a member takes their sign-in with it - #247', () => {
     results.members = [row(null), { data: null, error: { message: 'permission denied' } }]
 
     await expect(removeMember('m1')).rejects.toThrow(/removing the person: permission denied/)
+  })
+})
+
+describe('#341 — the invitation path, at the data layer', () => {
+  const invokes = () => calls.filter((c) => c.op === 'invoke')
+
+  describe('inviteMember', () => {
+    it('asks the Edge Function to invite, with the origin and NO password', () => {
+      invokeResult = { data: { ok: true, action: 'invite' }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()).toHaveLength(1)
+        const { name, body } = invokes()[0]
+        expect(name).toBe('provision-member')
+        expect(body.action).toBe('invite')
+        expect(body.memberId).toBe('m1')
+        // The story, asserted as an absence on a body the fake records whole:
+        // nothing this call carries is a credential.
+        expect(body).not.toHaveProperty('password')
+      })
+    })
+
+    it('carries the running origin, not a constant', () => {
+      // The same rule `confirmationRedirectTo` exists for — a dev server has to
+      // come back to the dev server. Asserted against that function's own answer
+      // rather than a literal, so the two cannot drift apart.
+      invokeResult = { data: { ok: true }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()[0].body.redirectTo).toBe(confirmationRedirectTo())
+        // ...and the positive half, or the assertion above is satisfied by both
+        // being undefined.
+        expect(invokes()[0].body.redirectTo).toBeTruthy()
+      })
+    })
+
+    it('does not apply the password floor — the organizer is never asked for one', () => {
+      // The regression this guards is a one-word one. The floor used to read
+      // `action !== 'revoke'`, which silently included `invite` the moment it
+      // existed: the call would have been refused locally, before any round
+      // trip, with a sentence about six characters — on the path built to stop
+      // asking for a credential at all.
+      invokeResult = { data: { ok: true }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()).toHaveLength(1)
+      })
+    })
+
+    it('refuses with no member, before any round trip', () => {
+      return inviteMember({ memberId: '' }).then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => {
+          expect(err.message).toMatch(/pick a person/i)
+          expect(invokes()).toHaveLength(0)
+        },
+      )
+    })
+
+    it('surfaces the function’s own sentence, because it is one to act on', () => {
+      // #87's rule, inherited: "already has a Taskr sign-in, use Reset sign-in"
+      // is something an organizer can do something about, and "Edge Function
+      // returned a non-2xx status code" is not.
+      invokeResult = {
+        data: null,
+        error: {
+          name: 'FunctionsHttpError',
+          message: 'Edge Function returned a non-2xx status code',
+          context: {
+            json: () =>
+              Promise.resolve({
+                error: 'placeholder.one@example.test already has a Taskr sign-in, so no invitation was sent. Use Reset sign-in instead.',
+              }),
+          },
+        },
+      }
+      return inviteMember({ memberId: 'm1' }).then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => {
+          expect(err.message).toMatch(/already has a Taskr sign-in/i)
+          expect(err.message).toMatch(/Reset sign-in/i)
+        },
+      )
+    })
+  })
+
+  describe('sendPasswordReset', () => {
+    it('asks GoTrue directly — no Edge Function, no service_role', () => {
+      // The distinction worth asserting: provisioning needs a privileged server
+      // because it acts on somebody who does not exist yet, and a reset mail is
+      // a request about an address that the anon key may make. A regression that
+      // routed this through the function would still "work" and would put a
+      // privileged path where none is needed.
+      return sendPasswordReset('placeholder.one@example.test').then(() => {
+        expect(invokes()).toHaveLength(0)
+        const sent = calls.filter((c) => c.op === 'resetPasswordForEmail')
+        expect(sent).toHaveLength(1)
+        expect(sent[0].email).toBe('placeholder.one@example.test')
+        expect(sent[0].options.redirectTo).toBe(confirmationRedirectTo())
+      })
+    })
+
+    it('reports a refusal as a sentence naming the mail', () => {
+      authState.resetError = 'over_email_send_rate_limit'
+      return sendPasswordReset('placeholder.one@example.test').then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => expect(err.message).toMatch(/could not send that reset email/i),
+      )
+    })
+  })
+
+  describe('setOwnPassword', () => {
+    it('updates the caller’s own account and nothing else', () => {
+      // `updateUser` acts on `auth.uid()` and can reach nobody else, which is
+      // exactly why this one credential write is allowed in the client at all.
+      return setOwnPassword('a-good-password').then(() => {
+        const updates = calls.filter((c) => c.op === 'updateUser')
+        expect(updates).toHaveLength(1)
+        expect(updates[0].attrs).toEqual({ password: 'a-good-password' })
+      })
+    })
+
+    it('reports a refusal rather than resolving quietly', () => {
+      authState.updateUserError = 'New password should be different from the old password.'
+      return setOwnPassword('a-good-password').then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => expect(err.message).toMatch(/could not set that password/i),
+      )
+    })
+  })
+
+  describe('readAuthCallback', () => {
+    const at = (hash) => ({ hash })
+    const TOKEN = 'access_token=t&refresh_token=r&expires_in=3600&token_type=bearer'
+
+    it('reads an invitation arrival', () => {
+      expect(readAuthCallback(at(`#${TOKEN}&type=invite`))).toEqual({ type: 'invite' })
+    })
+
+    it('reads a recovery arrival', () => {
+      expect(readAuthCallback(at(`#${TOKEN}&type=recovery`))).toEqual({ type: 'recovery' })
+    })
+
+    it('refuses a type it does not own, so an OAuth return is left alone', () => {
+      // A Google sign-in comes back with a token and no type this screen owns.
+      // Treating any token as an arrival would put a password screen in front of
+      // every provider sign-in.
+      expect(readAuthCallback(at(`#${TOKEN}`))).toBeNull()
+      expect(readAuthCallback(at(`#${TOKEN}&type=magiclink`))).toBeNull()
+      expect(readAuthCallback(at(`#${TOKEN}&type=signup`))).toBeNull()
+    })
+
+    it('refuses an EXPIRED link, which carries the type and no token', () => {
+      // The trap. An expired invitation is `type=invite` alongside an error and
+      // no `access_token`; that return belongs to `readSignInReturn`, and
+      // mistaking it for an arrival shows a password screen for a session that
+      // does not exist.
+      expect(
+        readAuthCallback(
+          at('#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite'),
+        ),
+      ).toBeNull()
+    })
+
+    it('refuses an empty or absent hash without throwing', () => {
+      expect(readAuthCallback(at(''))).toBeNull()
+      expect(readAuthCallback({})).toBeNull()
+      expect(readAuthCallback(undefined)).toBeNull()
+    })
+
+    it('leaves the ERROR channel to readSignInReturn, and the two agree', () => {
+      // The two functions read the same few characters and must not both claim
+      // one return. Asserted as a pair rather than separately, because the
+      // failure is a DISAGREEMENT and neither function can show it alone.
+      const expired = at(
+        '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite',
+      )
+      expect(readAuthCallback(expired)).toBeNull()
+      expect(readSignInReturn({ ...expired, search: '' })).toMatchObject({
+        code: 'otp_expired',
+        source: 'fragment',
+      })
+
+      const arrived = at(`#${TOKEN}&type=invite`)
+      expect(readAuthCallback(arrived)).toEqual({ type: 'invite' })
+      expect(readSignInReturn({ ...arrived, search: '' })).toBeNull()
+    })
   })
 })

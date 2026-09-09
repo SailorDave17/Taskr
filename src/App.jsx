@@ -10,12 +10,16 @@ import {
   describeSignInReturn,
   findClaimedMember,
   listHouseholds,
+  inviteMember,
   listMembers,
   provisionMember,
+  readAuthCallback,
   readSignInReturn,
   removeMember,
   resetMemberCredential,
   resolveActiveHousehold,
+  sendPasswordReset,
+  setOwnPassword,
   signIn,
   signInWithGoogle,
   signOut,
@@ -108,6 +112,7 @@ import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
+import ChoosePassword from './components/ChoosePassword.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
@@ -310,6 +315,13 @@ export default function App() {
   // rendered while a person is signed out, and this is a sentence for exactly
   // that person.
   const [signInNotice, setSignInNotice] = useState(null)
+  // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
+  // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
+  // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
+  // construction and by the URL strip below, so the boot's reading is the only
+  // one there will ever be. A render that went back to `location.hash` would
+  // find nothing and drop the person straight into the app with no password.
+  const [authCallback, setAuthCallback] = useState(null)
   // #53 AC 4 — the catch-up pass skipped occurrences older than the bound and
   // the household is told rather than left to wonder. Transient and on the
   // device whose open performed the skip (owner decision, 2026-08-24): the
@@ -669,8 +681,18 @@ export default function App() {
         // the URL has to be intact when it looks. Stripped AFTER, for the same
         // reason, and so that a reload does not announce a spent failure twice.
         const signInReturn = readSignInReturn(globalThis.location)
+        // #341 — read in the SAME breath and for the same reason, which the
+        // paragraph above spells out: the client reads the URL once, at
+        // construction, and `currentSession()` is what constructs it. An invite
+        // link's `type=invite` rides in the same fragment as the `#access_token`
+        // the client is about to swallow, so a read placed after this line finds
+        // an empty hash — and the person lands in the app signed in, with no
+        // password of their own and nothing on screen to say so. That failure is
+        // silent and looks exactly like success, which is why the ordering is
+        // asserted by a test rather than left to this comment.
+        const callback = readAuthCallback(globalThis.location)
         const session = await currentSession()
-        if (signInReturn) {
+        if (signInReturn || callback) {
           const { pathname } = globalThis.location
           globalThis.history?.replaceState?.(null, '', pathname)
         }
@@ -682,6 +704,18 @@ export default function App() {
           }
           return
         }
+
+        // #341 AC 2 — an invitation was followed and the session is real, so ask
+        // for a password before anything else. Set AFTER the signed-out branch
+        // above, deliberately: a link whose token was rejected leaves no session,
+        // and showing a password screen for a session that does not exist would
+        // fail on the write with a sentence about the write. The sign-in screen
+        // plus the link's own expiry sentence is the honest state there.
+        //
+        // The read continues underneath rather than stopping here — the household
+        // load runs as normal, so dismissing this screen lands them in their
+        // household rather than on a second loading pass.
+        if (callback && !cancelled) setAuthCallback(callback)
 
         // #95 — Google sends the member back to the app ROOT with `?code=`, so
         // the return is an ordinary boot that happens to carry two query
@@ -984,6 +1018,64 @@ export default function App() {
       ),
     [mutate],
   )
+  /**
+   * Email somebody an invitation instead of choosing their password — #341 AC 1.
+   *
+   * Beside `handleProvision` rather than folded into it, because the two are no
+   * longer variants of one act. Provision takes a credential the organizer typed
+   * and reaches the roster's own screen; this takes nothing, and what it changes
+   * is in somebody else's inbox.
+   */
+  const handleInvite = useCallback(
+    (memberId) => mutate(() => inviteMember({ memberId })),
+    [mutate],
+  )
+
+  /**
+   * Email a member a link to set a new password — #341, owner decision at pickup.
+   *
+   * Takes the MEMBER rather than an id, because the address is what GoTrue is
+   * given and it is on the row. Nothing is re-read afterwards and `mutate` still
+   * wraps it for the busy flag and the error strip: what changed is in an inbox,
+   * so a re-read would show the same roster and imply something on screen had
+   * moved.
+   */
+  const handleSendReset = useCallback(
+    (member) => mutate(() => sendPasswordReset(member.email)),
+    [mutate],
+  )
+
+  /**
+   * Finish an invitation or a recovery by setting a password — #341 AC 2.
+   *
+   * `mutate()` is not used, and the difference is the point: every other write in
+   * this file re-reads the household afterwards, and there is no household on
+   * screen here — the shell is not rendered at all. What has to happen after the
+   * write is that this screen goes away, which is what clearing `authCallback`
+   * does; boot has already loaded the household underneath, so what they land on
+   * is their household rather than a second loading pass.
+   *
+   * The error is deliberately left set when the write fails: the screen stays,
+   * because a password that was not set is a person who cannot sign in again if
+   * they leave.
+   */
+  const handleChoosePassword = useCallback(
+    async (password) => {
+      setBusy(true)
+      setError(null)
+      try {
+        await setOwnPassword(password)
+        setAuthCallback(null)
+      } catch (err) {
+        setError(err.message)
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [setBusy, setError],
+  )
+
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
 
   /**
@@ -1921,6 +2013,36 @@ export default function App() {
     [mutate, myMemberId],
   )
 
+  // #341 AC 2 — the invitation and recovery landing, returned BEFORE the shell
+  // rather than rendered inside it.
+  //
+  // Early-returned deliberately, and the alternative is worth naming because it
+  // is the obvious one: adding `&& !authCallback` to the render conditions
+  // below. There are more than a dozen of them, every future surface adds
+  // another, and a single one forgotten renders a household's chores to somebody
+  // who has not finished setting up their account. The screen has one job, and a
+  // return is the only way to say "and nothing else" once.
+  //
+  // The shell's title and tagline go with it. Somebody who has just clicked a
+  // link in their email does not need the product pitch; they need the one field
+  // that finishes what they started.
+  if (authCallback) {
+    return (
+      <main className="shell">
+        <ChoosePassword
+          type={authCallback.type}
+          busy={busy}
+          onChoose={handleChoosePassword}
+        />
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </main>
+    )
+  }
+
   return (
     <main className="shell">
       <h1 className="shell__title">Taskr</h1>
@@ -2084,6 +2206,8 @@ export default function App() {
           onSave={handleSave}
           onRemove={handleRemove}
           onProvision={handleProvision}
+          onInvite={handleInvite}
+          onSendReset={handleSendReset}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
           // #166 — the affordance that did not exist. Owner decision at pickup:

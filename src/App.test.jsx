@@ -28,6 +28,13 @@ const api = {
   addMember: vi.fn(),
   updateMember: vi.fn(),
   removeMember: vi.fn(),
+  // #341 — the three impure halves of the invitation path. `readAuthCallback`
+  // is NOT here: it is pure, it reads the location this file already controls,
+  // and stubbing it would make the ordering test below assert a stub's call
+  // order instead of the app's behaviour.
+  inviteMember: vi.fn(),
+  sendPasswordReset: vi.fn(),
+  setOwnPassword: vi.fn(),
 }
 
 // #34. Mocked separately from household.js because it is a separate module, and
@@ -6631,5 +6638,232 @@ describe('#164/#166 — the review fan-out’s three, held in place', () => {
     })
 
     expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(created.id)
+  })
+})
+
+// #341 — following an invitation, at the level only App can answer.
+//
+// The component test covers what `ChoosePassword` DRAWS. These cover the three
+// things that belong to App and that a component test structurally cannot see:
+// that the fragment is read at all, that it is read EARLY ENOUGH, and that the
+// household shell does not render behind the screen.
+//
+// THE SECOND ONE IS THE WHOLE REASON THIS BLOCK EXISTS, and it needs a word
+// about the fake. `createClient` runs with `detectSessionInUrl` at its default
+// of true, so supabase-js reads the URL once, at construction, and CLEARS the
+// fragment — and `currentSession()` is the call that constructs it. A read
+// placed after that line finds an empty hash, the password screen never appears,
+// and the person lands in the app signed in with no password of their own.
+// Silent, plausible, and indistinguishable from success.
+//
+// A test that merely rendered with a fragment would pass either way here,
+// because `currentSession` is a stub and a stub constructs nothing. So the stub
+// REPRODUCES THE PLATFORM'S BEHAVIOUR: it clears the hash when it is called.
+// That is the difference between asserting the app's ordering and asserting the
+// fake's (cairn's `a-fake-cannot-disagree-with-its-author`).
+describe('#341 — following an invitation, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /** A completed auth link: a token in the fragment, and the type that says why. */
+  const TOKEN = 'access_token=t&refresh_token=r&expires_in=3600&token_type=bearer'
+
+  const atFragment = (hash) => {
+    replaceState = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', hash },
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    api.setOwnPassword.mockResolvedValue(undefined)
+    atFragment('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  it('POSITIVE CONTROL: with no fragment the ordinary shell renders', async () => {
+    // Without this, every "the password screen is shown" assertion below passes
+    // just as well against an app that shows it always — and every "the shell is
+    // not rendered" assertion passes against an app that renders nothing at all.
+    await renderApp()
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('shows Choose your password when an invitation link is followed', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose your password/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('choose-password-input')).toBeInTheDocument()
+  })
+
+  it('renders nothing of the household behind it — one screen, one job', async () => {
+    // AC 2 asks for "one field, one button". Asserted as the ABSENCE of the
+    // shell rather than the presence of the field, because the failure this
+    // guards is a household's data rendering to somebody who has not finished
+    // setting up their account — and that failure is invisible to any assertion
+    // about the field.
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    expect(screen.queryByRole('button', { name: 'Who' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Chores' })).not.toBeInTheDocument()
+    expect(screen.queryByText(household.name)).not.toBeInTheDocument()
+  })
+
+  it('reads the fragment BEFORE the client can consume it', async () => {
+    // The hazard, reproduced. See this block's docblock: the stub clears the
+    // hash exactly as supabase-js does at construction, so moving the read below
+    // `currentSession()` makes this test — and only this test — go red.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.currentSession.mockImplementation(async () => {
+      globalThis.location.hash = ''
+      return { user: { id: 'person-a' } }
+    })
+
+    await renderApp()
+    expect(
+      await screen.findByRole('heading', { name: /choose your password/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('strips the token off the URL, so a reload does not replay it', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  it('sets the password and lands them in their household', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    // The screen goes, and what is underneath is their household — not a second
+    // loading pass, because boot loaded it while this screen was up.
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+  })
+
+  it('keeps the screen up when the write fails, and says so', async () => {
+    // A password that was not set is a person who cannot sign in again once they
+    // leave. Dismissing the screen on a failure would strand them with no way
+    // back and nothing on screen to say why.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.setOwnPassword.mockRejectedValue(new Error('Could not set that password: nope'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(screen.getByRole('heading', { name: /choose your password/i })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not set that password/i)
+  })
+
+  it('refuses a short password before the round trip', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    fireEvent.change(screen.getByTestId('choose-password-input'), { target: { value: 'abc' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least 6 characters/i)
+  })
+
+  it('an EXPIRED invitation goes to the sign-in screen, not to the password screen', async () => {
+    // The trap this exists for: an expired link carries `type=invite` too,
+    // alongside an error and NO token. Reading `type` alone would show a
+    // password screen for a session that does not exist, and the write would
+    // then fail with a sentence about the write rather than about the link.
+    atFragment(
+      '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite',
+    )
+    api.currentSession.mockResolvedValue(null)
+
+    await renderApp()
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('does not show the password screen when the link left no session', async () => {
+    // The other half of the same rule, with a token that GoTrue rejected: there
+    // is nothing to set a password ON, so the sign-in screen is the honest state.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.currentSession.mockResolvedValue(null)
+
+    await renderApp()
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('a recovery link lands on the same screen, in its own words', async () => {
+    // AC 2's "build it once and both types route to it", asserted as the two
+    // headings differing — if the copy were shared, this and the invite test
+    // above would both pass against a screen that could not tell them apart.
+    atFragment(`#${TOKEN}&type=recovery`)
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose a new password/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('ignores a fragment whose type is neither', async () => {
+    // A Google sign-in return carries a token and no `type` this screen owns.
+    // Treating any token as an arrival would put a password screen in front of
+    // every OAuth sign-in.
+    atFragment(`#${TOKEN}`)
+    await renderApp()
+
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
   })
 })

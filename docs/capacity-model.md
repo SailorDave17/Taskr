@@ -222,9 +222,11 @@ read here (#53's reason, held by `gate.test.js`), and it can run at most once pe
 `name, timezone` — otherwise any member could rewrite `join_code` or reassign `organizer_member_id`,
 which is 0002's hole reopened.
 
-**`SELECT` on `households` is left alone on purpose.** `currentHousehold()` in
+**`SELECT` on `households` is left alone on purpose.** `listHouseholds()` in
 [`src/lib/household.js`](../src/lib/household.js) issues `select('*')`, which a column grant makes
-**fail outright**. #44 asks for per-column grants on *new* tables, which `households` is not, so
+**fail outright**. *(This named `currentHousehold()` until #164, which replaced that function with
+`listHouseholds()` plus a pure `resolveActiveHousehold()`. The reason below is unchanged, because the
+`select('*')` moved with it — but the name had to, or this paragraph would point at nothing.)* #44 asks for per-column grants on *new* tables, which `households` is not, so
 narrowing the read surface there is a separate change with its own caller migration and does not ride
 in on this one. A test asserts that `select('*')` still works.
 

@@ -89,6 +89,54 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* #164 — the same line, for somebody who belongs to more than one household.
+   It carries `.shell__household`'s type so the shell does not change shape when
+   a second household appears: same size, same weight, same colour, same
+   negative bottom margin holding the tab strip where it was.
+
+   What it adds is the 44px floor every other control on the phone uses and the
+   affordance that says it is one — a native select, so the picker itself is the
+   platform's. `max-width: 100%` rather than a width: a long household name must
+   not set the page width on a 360px phone, which is the same constraint
+   `.shell__household`'s `overflow-wrap` answers for the paragraph. */
+.shell__household-select {
+  margin: 0 0 -0.875rem;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 2rem 0 0.5rem;
+  font-family: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+  appearance: none;
+  /* The disclosure the `appearance: none` above removed, drawn rather than
+     imported: an inline SVG in a data URI is the one image this stylesheet can
+     carry without adding a file, and gate.test.js refuses a committed image
+     that is not the icon set. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23e9edf5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.625rem 0.375rem;
+  /* A long household name is SHORTENED, not cut. #163's paragraph wrapped —
+     `overflow-wrap: anywhere` above — and a `<select>` cannot, so without this
+     the one label saying which household you are looking at reads as broken.
+     *Measured at 360px*: a 37-character name wants 337.1px of text in 264.8px
+     of usable width and was cut mid-word at "…at Wint". The full name is still
+     one tap away, in the open list, and at 768px nothing clips at all.
+     `white-space` is already `pre` on a select in this engine; both other
+     properties are needed for the ellipsis to render. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell__household-select:disabled {
+  opacity: 0.6;
+}
+
 .shell__status {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.07);

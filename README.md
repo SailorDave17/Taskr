@@ -38,6 +38,20 @@ rather than stored. It
 persists to Supabase — data survives a restart, a reinstall and a redeploy, because it is in a
 hosted database rather than on the device.
 
+**One account can now hold more than one household.** The household's name above the tabs becomes a
+control for anybody who belongs to two, every surface re-reads against whichever is chosen, and the
+Who tab can start another one without signing out. This device remembers the last household chosen —
+the only thing kept between visits besides the sign-in itself, and it is a pointer at a row rather
+than a copy of one, so the household, the roster and the chores still arrive from the server on every
+load. With nothing remembered the app opens on the **oldest** household; somebody in exactly one
+household sees the name exactly as before and is offered no control at all.
+
+*"Between visits" is the precise claim and the first draft of this paragraph overstated it as "the
+only thing Taskr keeps locally". That is false the day it ships: connecting a calendar writes
+`taskr.calendar.consent-state` and `taskr.calendar.consent-household` for the one hop out to Google
+and back. Both are `sessionStorage`, both are removed on the way through including the failure path,
+and both die with the tab — so they are kept during a visit and never across one.*
+
 **What protects it is server-side.** Row-level security policies and column-level grants, in
 `supabase/migrations/`, asserted by tests that bypass the client. A client-side guard is not a guard,
 and the reasoning — including the honest statement of what the access model does *not* protect

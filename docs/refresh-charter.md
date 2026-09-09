@@ -560,6 +560,17 @@ considered and rejected was to guard `create_household` and stay single-househol
 and closes the gap just as well; it was rejected because the household this app is built for has
 members who belong to a second one.
 
+***The client has caught up, and this paragraph's present tense stopped being true on 2026-09-09.***
+#159 scoped every read to a named household, #160 resolved identity within it, and #163 put its name
+on the shell — each landing while there was still no way to reach a second household, deliberately,
+so the scoping was proven before anything made one reachable. #164, #165 and #166 close it: the name
+becomes a control listing every household the person belongs to, this device remembers which one was
+chosen, and a person already in a household can start another without signing out. The default when
+nothing is remembered is **oldest by `households.created_at`** — the decision below, taken against
+most-recently-joined because the set a person belongs to grows and "most recently joined" names a
+different household the day they join one. The sentence above is left standing rather than rewritten:
+it is the state that made the goal urgent, and what it describes is what the three stories were for.
+
 **Admission changes for the third time, and this is the reversal.** `access-model.md` records the
 chain: 2026-08-05 → 2026-08-06 → 2026-08-11 (#62, *"The join code is gone. Not repurposed —
 dropped"*). Admission is now **an invitation**: a code an organizer creates and can withdraw, and an

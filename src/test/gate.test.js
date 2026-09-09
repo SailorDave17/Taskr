@@ -806,6 +806,21 @@ describe('AC 10 — no component test proves an access rule', () => {
     expect(componentTests.map((f) => f.name)).toContain('Chores.test.jsx')
   })
 
+  // #164 AC 7, and it is the half that would otherwise be true by luck.
+  //
+  // The criterion says the switcher's component test must obey this rule, "and
+  // if the component lands outside `src/components/` the guard's corpus is
+  // widened so it is still covered". It landed INSIDE, so no widening was
+  // needed — but "the corpus happens to include it" and "the corpus is asserted
+  // to include it" read identically while they agree, and diverge silently the
+  // day somebody moves the file. This is the assertion that turns a placement
+  // into a guarantee: move `HouseholdSwitcher.test.jsx` anywhere else and this
+  // goes red naming it, rather than the two assertions above quietly ceasing to
+  // cover it.
+  it('#164 AC 7: the household switcher’s test is inside that corpus, not merely beside it', () => {
+    expect(componentTests.map((f) => f.name)).toContain('HouseholdSwitcher.test.jsx')
+  })
+
   it('none of them stands up a Supabase client, fake or real', () => {
     // The strongest available form: a file with no client cannot assert a rule
     // through one. These components take data and handlers as props, so there is
@@ -1292,6 +1307,29 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out': 'a button label — the this-device-only sign-out control',
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
+    // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
+    // tests because they find the control by that name, which is the point:
+    // the control's own text is the household's name, so the only stable way
+    // to reach it is the label a screen reader reads. Declared rather than
+    // lower-cased for the tab labels' reason — an accessible name is
+    // capitalised by design.
+    Household: 'the accessible name of the household switcher (#164)',
+    // #166 — the button on BOTH create paths: the onboarding card and the
+    // roster's "start another" card. Asserted by exact accessible name in the
+    // tests that tell the two apart, which is why it is a literal.
+    'Create household': 'a button label — the submit on both household-create forms',
+    // #166 AC 7 — the ONBOARDING card's heading, asserted by exact name to
+    // prove that path is unchanged. Distinct from the roster card's "Start
+    // another household", which is not name-shaped and needs no entry.
+    'Start a household': 'a heading — the onboarding household form (#154)',
+    // #165 AC 8 — DOMException names, thrown by the fixtures that reproduce a
+    // browser refusing storage. Platform vocabulary, not people: `SecurityError`
+    // is what a browser set to block site data raises from the localStorage
+    // accessor, and `QuotaExceededError` is what a full store raises from a
+    // write. Both are single capitalised words, which is the shape, and neither
+    // could be lower-cased without ceasing to be the name the platform uses.
+    SecurityError: 'a DOMException name — a browser refusing storage (#165 AC 8)',
+    QuotaExceededError: 'a DOMException name — a full store refusing a write (#165 AC 8)',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to

@@ -204,6 +204,14 @@ to two.** The schema has permitted plural membership since `0007` — `current_h
 side, and the invitation rule below is therefore written *before* the mechanism rather than after it,
 which is the only reason it can bind #171 rather than describe it.
 
+*(**The lead clause above is still true of live data and its justification is not, as of
+2026-09-09.** #166 merged a mechanism that creates the state — the *Start another household* card on
+the Who tab — and it is on none of the issue numbers listed here. Nobody belongs to two households
+yet, because merging a mechanism creates no membership row; the state fires the first time somebody
+taps that control, which is one tap after a deploy. Annotated in place rather than rewritten, this
+file's own idiom: what was believed when the re-read was taken stays visible. The re-read this owes
+is **#401**.)*
+
 ### Revisit when
 
 - **Vercel changes what *Standard Protection* exempts.** This arrangement rests on a measured
@@ -221,10 +229,14 @@ which is the only reason it can bind #171 rather than describe it.
   bullet was reaching for, and #241 shows why *a second household* was the wrong proxy for it: two
   households exist and both are the owner's. This is the day *"reversing is free and instant"* stops
   being a cost note, and it is the one to watch.
-- **The membership half fires — one person belongs to two households at once**, which #173's
-  redemption is the first thing that can produce. That is the point at which a single signed-in
-  session can hold two households' data in one client at one time, and the questions this decision
-  answers about *environments* start needing an answer about *sessions*.
+- **The membership half fires — one person belongs to two households at once.** That is the point at
+  which a single signed-in session can hold two households' data in one client at one time, and the
+  questions this decision answers about *environments* start needing an answer about *sessions*.
+  **Still unfired, and the thing that will fire it changed on 2026-09-09**: this read "which #173's
+  redemption is the first thing that can produce" until #166 shipped the *Start another household*
+  card, which needs no invitation and no second person — the organizer taps it themselves. A reader
+  watching #173 for this was watching the wrong story. The re-read is filed as **#401**, blocked on
+  #164/#165/#166 merging, because the state is not reachable until they do.
 - **Anyone needs to see a preview who does not hold a login on this Vercel account.** Gating is the
   whole mechanism; the first legitimate viewer it locks out is when a different mechanism — a
   separate Supabase project for Preview, rejected above and for reasons that would need re-pricing —

@@ -345,4 +345,94 @@ describe('#159 — one person in two households, over a real Postgres', () => {
     expect(filtered).toEqual(unfiltered)
     expect(filtered.length).toBeGreaterThan(0)
   })
+
+  // -------------------------------------------------------------------------
+  // #166 AC 2 — create_household, called by somebody who ALREADY has one
+  // -------------------------------------------------------------------------
+
+  // The criterion cites `rls.integration.test.js`'s fixture, which creates two
+  // households per run as one seeded organizer — true, and it is the LIVE suite:
+  // owner-only, credentialed, and deliberately not run by CI. So the behaviour
+  // #166's whole client change rests on was proven only where nobody would see
+  // it go red.
+  //
+  // This asserts it here instead, against real Postgres with RLS and the column
+  // grants on. It is the same question the live suite answers and it runs in
+  // `npm test`, so a migration that made `create_household` refuse a caller who
+  // already has a household would redden on the branch that wrote it rather
+  // than the next time somebody ran the live suite by hand.
+  //
+  // What this harness cannot say is what the file's header already says: it is
+  // not PostgREST. `createHousehold()`'s client call is asserted in
+  // `household.test.js`; this is the SQL underneath it.
+  it('#166 AC 2: a caller who already belongs to a household can create another', async () => {
+    // The precondition, read rather than assumed — this is the whole content of
+    // "already belongs to a household", and the assertion below means nothing
+    // without it.
+    const before = await db.query(
+      'select household_id from public.members where claimed_by = $1',
+      [person],
+    )
+    expect(before.rows).toHaveLength(2)
+
+    const created = await asDevice(db, person, async () => {
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
+        'Other Household',
+        'Placeholder Everywhere',
+      ])
+      return rows[0]
+    })
+
+    // It succeeded, and the household is real.
+    expect(created?.id).toBeTruthy()
+    expect(created.name).toBe('Other Household')
+
+    // AC 2's mechanism, and the reason it works at all: the organizer's member
+    // row is claimed to `auth.uid()` IN THE SAME STATEMENT. Read as owner,
+    // because the point is the raw fact rather than what a policy would show.
+    const organizer = await db.query(
+      'select id, claimed_by, household_id from public.members where household_id = $1',
+      [created.id],
+    )
+    expect(organizer.rows).toHaveLength(1)
+    expect(organizer.rows[0].claimed_by).toBe(person)
+    expect(created.organizer_member_id).toBe(organizer.rows[0].id)
+
+    // And the person now belongs to three. This is the assertion that would
+    // fail if `create_household` had ever grown a "you already have one" guard
+    // — the alternative the owner rejected on 2026-08-26 in favour of letting
+    // the client catch up to the schema.
+    const after = await db.query(
+      'select household_id from public.members where claimed_by = $1',
+      [person],
+    )
+    expect(after.rows).toHaveLength(3)
+    expect(after.rows.map((r) => r.household_id)).toContain(created.id)
+  })
+
+  // The half the criterion does not ask for and that #164's default rests on:
+  // the new household is the NEWEST, so it sorts LAST in the read every screen
+  // is scoped by. That is why #166 has to make it active explicitly — without
+  // that step a person would create a household and be returned to their first.
+  it('#166: the household just created sorts LAST in the deterministic order', async () => {
+    const created = await asDevice(db, person, async () => {
+      const { rows } = await db.query('select * from public.create_household($1, $2)', [
+        'Other Household',
+        'Placeholder Everywhere',
+      ])
+      return rows[0]
+    })
+
+    const ordered = await asDevice(db, person, async () => {
+      const { rows } = await db.query(
+        'select id from public.households order by created_at asc, id asc',
+      )
+      return rows.map((r) => r.id)
+    })
+
+    expect(ordered).toHaveLength(3)
+    expect(ordered.at(-1)).toBe(created.id)
+    // And the DEFAULT — the first of that order — is not the new one.
+    expect(ordered[0]).not.toBe(created.id)
+  })
 })

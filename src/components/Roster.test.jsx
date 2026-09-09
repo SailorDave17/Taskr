@@ -1910,3 +1910,161 @@ describe('the provenance line — #210, design-bar', () => {
     )
   })
 })
+
+// #166 — the "Start another household" card.
+//
+// These exist because review-fanout found the idiom copied and its proof left
+// behind: the clear-on-success / keep-on-failure `.then(ok, () => {})` sixty
+// lines above this card in Roster.jsx carries THREE named tests in this file,
+// and the card copied the construct into a file nobody opened. None of the nine
+// App-level #166 cases reads either field back after a submit, and none drives
+// a failing create — so both arms could have been broken with nothing red.
+describe('#166 — starting another household', () => {
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'me' }
+
+  /**
+   * `setup()` above renders and returns its handlers; this one keeps the prop
+   * bag so a test can change ONE prop and re-render, which is what the
+   * follows-a-rename case needs — the roster re-reads and `me` comes back
+   * carrying a different display name.
+   */
+  const renderRoster = (overrides = {}) => {
+    let props = {
+      household,
+      members: roster,
+      me: null,
+      periodStart: PERIOD,
+      onAdd: vi.fn().mockResolvedValue(undefined),
+      onSave: vi.fn().mockResolvedValue(undefined),
+      onRemove: vi.fn().mockResolvedValue(undefined),
+      onRefresh: vi.fn(),
+      onSignOut: vi.fn().mockResolvedValue(undefined),
+      onSetCapacity: vi.fn().mockResolvedValue(undefined),
+      onClearCapacity: vi.fn().mockResolvedValue(undefined),
+      onProvision: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }
+    const r = render(<Roster {...props} />)
+    return {
+      rerender: (next) => {
+        props = { ...props, ...next }
+        r.rerender(<Roster {...props} />)
+      },
+    }
+  }
+
+  const cardForm = () =>
+    screen.getByRole('button', { name: 'Create household' }).closest('form')
+
+  const fillAndSubmit = async (name = 'Placeholder Other Household') => {
+    const form = cardForm()
+    fireEvent.change(within(form).getByLabelText(/household name/i), { target: { value: name } })
+    await clickAndSettle(screen.getByRole('button', { name: 'Create household' }))
+    return form
+  }
+
+  it('is not offered at all when no handler is wired — the state before this story', () => {
+    setup({ me })
+    expect(
+      screen.queryByRole('region', { name: /start another household/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('prefills this person’s name from their own member row', () => {
+    setup({ me, onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }) })
+    expect(within(cardForm()).getByLabelText(/your name in it/i)).toHaveValue('Placeholder One')
+  })
+
+  // THE PREFILL FOLLOWS A RENAME. It froze at mount until review-fanout caught
+  // it, and this is the reproduction that needs one household and one screen:
+  // the roster re-reads, `me` carries the new name, and the field below must
+  // follow it rather than offering the name the person just stopped using.
+  it('follows a rename, rather than freezing at mount', () => {
+    const { rerender } = renderRoster({
+      me,
+      onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }),
+    })
+    expect(within(cardForm()).getByLabelText(/your name in it/i)).toHaveValue('Placeholder One')
+
+    rerender({ me: { ...me, display_name: 'Renamed Placeholder' } })
+
+    expect(within(cardForm()).getByLabelText(/your name in it/i)).toHaveValue('Renamed Placeholder')
+  })
+
+  it('stops following once the person types their own answer', () => {
+    const { rerender } = renderRoster({
+      me,
+      onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }),
+    })
+    fireEvent.change(within(cardForm()).getByLabelText(/your name in it/i), {
+      target: { value: 'Housemate' },
+    })
+
+    rerender({ me: { ...me, display_name: 'Renamed Placeholder' } })
+
+    expect(within(cardForm()).getByLabelText(/your name in it/i)).toHaveValue('Housemate')
+  })
+
+  it('names the household and the organizer it was given', async () => {
+    const onCreateHousehold = vi.fn().mockResolvedValue({ id: 'h2' })
+    setup({ me, onCreateHousehold })
+    await fillAndSubmit()
+
+    expect(onCreateHousehold).toHaveBeenCalledWith('Placeholder Other Household', {
+      organizerName: 'Placeholder One',
+    })
+  })
+
+  it('clears the household name after one is created, so the next starts empty', async () => {
+    setup({ me, onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }) })
+    const form = await fillAndSubmit()
+
+    expect(within(form).getByLabelText(/household name/i)).toHaveValue('')
+  })
+
+  // The organizer field is the one that must NOT clear to blank: it goes back
+  // to the live prefill, so a second household can be created without retyping
+  // a name the app already knows.
+  it('puts the organizer field back to the prefill rather than blanking it', async () => {
+    setup({ me, onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }) })
+    const form = await fillAndSubmit()
+
+    expect(within(form).getByLabelText(/your name in it/i)).toHaveValue('Placeholder One')
+  })
+
+  // THE REJECTION ARM, and it is more than tidiness: App's `mutate` sets the
+  // error and RETHROWS, so this handler really does reject on a failed create.
+  // Without the `() => {}` arm the typed values would be cleared by the thrown
+  // promise going unhandled, and the person would retype everything under an
+  // error strip.
+  it('keeps what was typed when the create fails, so nothing has to be retyped', async () => {
+    const onCreateHousehold = vi.fn().mockRejectedValue(new Error('network down'))
+    setup({ me, onCreateHousehold })
+    const form = cardForm()
+    fireEvent.change(within(form).getByLabelText(/household name/i), {
+      target: { value: 'Placeholder Other Household' },
+    })
+    fireEvent.change(within(form).getByLabelText(/your name in it/i), {
+      target: { value: 'Housemate' },
+    })
+    await clickAndSettle(screen.getByRole('button', { name: 'Create household' }))
+
+    expect(onCreateHousehold).toHaveBeenCalled()
+    expect(within(form).getByLabelText(/household name/i)).toHaveValue(
+      'Placeholder Other Household',
+    )
+    expect(within(form).getByLabelText(/your name in it/i)).toHaveValue('Housemate')
+  })
+
+  it('refuses to submit until both fields carry something', () => {
+    setup({ me, onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }) })
+    const form = cardForm()
+    expect(screen.getByRole('button', { name: 'Create household' })).toBeDisabled()
+
+    fireEvent.change(within(form).getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    expect(screen.getByRole('button', { name: 'Create household' })).toBeEnabled()
+
+    fireEvent.change(within(form).getByLabelText(/your name in it/i), { target: { value: '  ' } })
+    expect(screen.getByRole('button', { name: 'Create household' })).toBeDisabled()
+  })
+})

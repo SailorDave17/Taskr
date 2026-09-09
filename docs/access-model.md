@@ -2343,7 +2343,10 @@ outstanding is narrower:
     `name, timezone` only. Without that bound, any member could rewrite `join_code` or reassign
     `organizer_member_id` — the hole 0002 measured, reopened. **`SELECT` on `households` is
     deliberately left un-granted-per-column**: `currentHousehold()` issues `select('*')`, which a
-    column grant makes fail outright.
+    column grant makes fail outright. *(The function was replaced by `listHouseholds()` in #164 —
+    the name is left as it was written here because this entry records what 0002 was reasoning
+    about at the time. The `select('*')` moved to the new function unchanged, so the constraint on
+    the grant still binds; `capacity-model.md` carries it under the current name.)*
 - **The existing test households are unusable under 0002.** They have no `organizer_member_id`, so
   `is_household_organizer()` returns false for them and no PIN can ever be set. They are `TEST …` rows
   and the cleanup statement in *Running it* removes them.

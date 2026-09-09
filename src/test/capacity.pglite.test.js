@@ -572,7 +572,7 @@ describe('weekly capacity, run against a real Postgres', () => {
       expect(changed).toBe(0)
     })
 
-    it('POSITIVE CONTROL: currentHousehold’s select(*) still works — the read grant was left alone', async () => {
+    it('POSITIVE CONTROL: listHouseholds’ select(*) still works — the read grant was left alone', async () => {
       // src/lib/household.js issues `select('*')` on households. A column grant
       // there would make it fail OUTRIGHT, breaking the shipped app; 0005
       // deliberately narrows UPDATE only. This is what keeps that decision true.

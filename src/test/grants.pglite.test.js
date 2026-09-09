@@ -83,7 +83,7 @@ const CLIENT_OPERATIONS = [
   {
     table: 'households',
     op: 'select *',
-    site: 'household.js:197 currentHousehold()',
+    site: 'household.js listHouseholds()',
     sql: 'select * from public.households limit 1',
   },
   {
@@ -385,7 +385,7 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   // AC 2 — the households grant covers every column, because the client reads *
   // ---------------------------------------------------------------------------
 
-  it('grants select on EVERY column of households, because currentHousehold reads select(*)', async () => {
+  it('grants select on EVERY column of households, because listHouseholds reads select(*)', async () => {
     // 0013 grants `households` by column list rather than at table level, so
     // that adding a column is a decision rather than an automatic exposure. The
     // cost of that choice is a way to forget, and this is the guard for it: a

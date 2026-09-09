@@ -162,12 +162,17 @@ describe('what a client upsert actually needs, against a real Postgres', () => {
     expect(seen.conflictTarget).toEqual(['member_id'])
 
     const capacity = UPSERTS.find((u) => u.table === 'member_capacity')
+    // `previous_minutes` since 0039 (#106) — and the `it.each` below is what
+    // makes naming it here load-bearing: the column joined the payload, so
+    // it had to join all three grant sets, and this is the test that would
+    // have said so had the migration forgotten one.
     expect([...capacity.columns].sort()).toEqual([
       'household_id',
       'member_id',
       'minutes',
       'note',
       'period_start',
+      'previous_minutes',
       'source',
     ])
     expect(capacity.conflictTarget).toEqual(['member_id', 'period_start'])

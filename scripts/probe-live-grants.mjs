@@ -159,6 +159,18 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'arw',
     source: '0022 — `w` is 0022’s; `ar` is 0005’s',
   }),
+  // `0039` (#106): the figure an automatic calendar write replaced. All three
+  // letters are that file's, and they are the upsert's for `0022`'s reason —
+  // SET target, `EXCLUDED` read, first write. `check:live` sees the COLUMN
+  // (it is in `CAPACITY_COLUMNS`) and nothing of the grant, so this row is the
+  // instrument for the half that check cannot read: RED until `0039` is
+  // applied, the deliberate red this table's docblock describes.
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'previous_minutes',
+    privileges: 'arw',
+    source: '0039 (#106) — all three are 0039’s',
+  }),
   // `0023`, 2026-08-28 (#211). Chore provenance, and this row exists for HALF a
   // reason rather than the whole one — which is worth stating, because every
   // other row above is here because `check:live` is blind to its migration and

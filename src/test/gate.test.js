@@ -806,6 +806,21 @@ describe('AC 10 — no component test proves an access rule', () => {
     expect(componentTests.map((f) => f.name)).toContain('Chores.test.jsx')
   })
 
+  // #164 AC 7, and it is the half that would otherwise be true by luck.
+  //
+  // The criterion says the switcher's component test must obey this rule, "and
+  // if the component lands outside `src/components/` the guard's corpus is
+  // widened so it is still covered". It landed INSIDE, so no widening was
+  // needed — but "the corpus happens to include it" and "the corpus is asserted
+  // to include it" read identically while they agree, and diverge silently the
+  // day somebody moves the file. This is the assertion that turns a placement
+  // into a guarantee: move `HouseholdSwitcher.test.jsx` anywhere else and this
+  // goes red naming it, rather than the two assertions above quietly ceasing to
+  // cover it.
+  it('#164 AC 7: the household switcher’s test is inside that corpus, not merely beside it', () => {
+    expect(componentTests.map((f) => f.name)).toContain('HouseholdSwitcher.test.jsx')
+  })
+
   it('none of them stands up a Supabase client, fake or real', () => {
     // The strongest available form: a file with no client cannot assert a rule
     // through one. These components take data and handlers as props, so there is
@@ -1241,6 +1256,28 @@ describe('#19 — no real household name reaches version control', () => {
     // renamed titles are literals the assertions match by accessible name.
     'Placeholder Renamed Chore': 'a chore title',
     'Placeholder Renamed Occurrence': 'a chore title',
+    // #345 — the overdue fixtures. Each title names the case it exists to
+    // separate (due today, due later, the daily anchor and its occurrence, the
+    // weekly and monthly controls, the timezone row), because a screen full of
+    // 'Placeholder Chore' cannot tell a failing assertion which row it was
+    // about. NINE of the eleven are three words and match NAME_SHAPE, so their
+    // declarations are REQUIRED — remove one and the SHAPE scan below reddens.
+    // The two four-word ones ('Placeholder Old Done Chore' and 'Placeholder
+    // Old Missed Chore') slip past the three-word bound on their own and are
+    // declared anyway, deliberately: word count is not a reason to be
+    // undeclared, and letting a fixture through on it is the same wrong
+    // instinct the #37 chores above record.
+    'Placeholder Today Chore': 'a chore title — the row due on the household’s today',
+    'Placeholder Later Chore': 'a chore title — the row due after today',
+    'Placeholder Daily Chore': 'a chore title — the daily repeat anchor that is never coloured',
+    'Placeholder Daily Occurrence': 'a chore title — an occurrence generated from that daily anchor',
+    'Placeholder Weekly Chore': 'a chore title — the weekly anchor, which IS coloured',
+    'Placeholder Weekly Occurrence': 'a chore title — an occurrence of that weekly anchor',
+    'Placeholder Monthly Chore': 'a chore title — the monthly anchor, which IS coloured',
+    'Placeholder Monthly Occurrence': 'a chore title — an occurrence of that monthly anchor',
+    'Placeholder Zone Chore': 'a chore title — the row whose date is the household’s today in a zone behind the device',
+    'Placeholder Old Done Chore': 'a chore title — a completed row dated a month back, on the Done surface',
+    'Placeholder Old Missed Chore': 'a chore title — a missed row dated a month back, on the Done surface',
     // #49 — reassignment.pglite.test.js needs up to three distinguishable
     // chores per scenario. Declared rather than lower-cased, same instinct as
     // the #37 chores above: the vocabulary exists to put every name-shaped
@@ -1270,6 +1307,29 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out': 'a button label — the this-device-only sign-out control',
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
+    // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
+    // tests because they find the control by that name, which is the point:
+    // the control's own text is the household's name, so the only stable way
+    // to reach it is the label a screen reader reads. Declared rather than
+    // lower-cased for the tab labels' reason — an accessible name is
+    // capitalised by design.
+    Household: 'the accessible name of the household switcher (#164)',
+    // #166 — the button on BOTH create paths: the onboarding card and the
+    // roster's "start another" card. Asserted by exact accessible name in the
+    // tests that tell the two apart, which is why it is a literal.
+    'Create household': 'a button label — the submit on both household-create forms',
+    // #166 AC 7 — the ONBOARDING card's heading, asserted by exact name to
+    // prove that path is unchanged. Distinct from the roster card's "Start
+    // another household", which is not name-shaped and needs no entry.
+    'Start a household': 'a heading — the onboarding household form (#154)',
+    // #165 AC 8 — DOMException names, thrown by the fixtures that reproduce a
+    // browser refusing storage. Platform vocabulary, not people: `SecurityError`
+    // is what a browser set to block site data raises from the localStorage
+    // accessor, and `QuotaExceededError` is what a full store raises from a
+    // write. Both are single capitalised words, which is the shape, and neither
+    // could be lower-cased without ceasing to be the name the platform uses.
+    SecurityError: 'a DOMException name — a browser refusing storage (#165 AC 8)',
+    QuotaExceededError: 'a DOMException name — a full store refusing a write (#165 AC 8)',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to
@@ -2220,5 +2280,96 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
     expect(app).toMatch(/isBusyWeekStale\(/)
     expect(app).toMatch(/import \{[^}]*\bisBusyWeekStale\b[^}]*\} from '\.\/lib\/calendar\.js'/)
+  })
+})
+
+// #345 AC 5 — the overdue row's colour, asserted against the stylesheet.
+//
+// Here rather than in a component test for the reason the describes above
+// give: jsdom applies no stylesheet and computes no colour, so a render test
+// for "the row is coloured" would pass identically with every rule below
+// deleted. What CAN be checked is that the rule exists, that it is not the
+// `.error` palette wearing a different name, and that the palette judgement is
+// written down beside it — which is the part that stops the next person
+// reaching for `.error` because it was already there.
+//
+// Two readings of the file, deliberately. The rules are matched against the
+// COMMENT-STRIPPED text, for the reason `.row--actions` gives above (a `{` in
+// prose ends a `[^}]*` scan early); the comment assertion needs the raw text,
+// because stripping is exactly what would delete its subject.
+describe('#345 — an overdue chore is warm, and it is not an error', () => {
+  const raw = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+  const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('POSITIVE CONTROL: the overdue rules are in the stylesheet at all', () => {
+    // Without this every assertion below passes the moment the class is
+    // renamed — the empty-pass shape this file keeps finding.
+    expect(css).toMatch(/\.chore--overdue\s*\{/)
+    expect(css).toMatch(/\.chore__overdue\s*\{/)
+  })
+
+  it('marks the row and the word with a colour, so the row reads as different', () => {
+    expect(css).toMatch(/\.chore--overdue\s*\{[^}]*border-left-color:\s*#[0-9a-f]{6}/i)
+    expect(css).toMatch(/\.chore__overdue\s*\{[^}]*color:\s*#[0-9a-f]{6}/i)
+  })
+
+  it('recolours a RESERVED edge rather than widening one — the file’s own idiom', () => {
+    // The design pass measured what a width change costs: `box-sizing:
+    // border-box` takes the extra 2px out of the CONTENT box, so an overdue
+    // row's title started 58px from the left against its neighbours' 56px and
+    // its column was 2px narrower — a ragged edge on the one row the feature
+    // exists to highlight. `.chore` reserves the edge at 3px and the modifier
+    // only ever names a colour, which is what every other state modifier in
+    // this file does (six of them change `border-color` alone).
+    expect(css).toMatch(/\.chore\s*\{[^}]*border-left:\s*3px solid/)
+    // And the modifier must not reintroduce a width — the assertion that
+    // reddens if somebody "simplifies" it back to the shorthand.
+    expect(css).not.toMatch(/\.chore--overdue\s*\{[^}]*border-left:\s*\d/)
+  })
+
+  it('is NOT the .error palette — an overdue chore is the app working', () => {
+    // The three literals `.error` and `.button--danger` own. Asserted on the
+    // overdue rules themselves rather than anywhere in the file, so an
+    // unrelated use of red elsewhere cannot redden this and, more to the
+    // point, so reusing one of them HERE cannot pass.
+    for (const literal of ['#7f2b2b', '#ffdada', '#ffeaea']) {
+      expect(css).not.toMatch(
+        new RegExp(`\\.chore--overdue\\s*\\{[^}]*${literal}`, 'i'),
+      )
+      expect(css).not.toMatch(
+        new RegExp(`\\.chore__overdue\\s*\\{[^}]*${literal}`, 'i'),
+      )
+    }
+    // And it is not the accent either, which would read as "the app did
+    // something" rather than "this has slipped".
+    expect(css).not.toMatch(/\.chore--overdue\s*\{[^}]*var\(--accent\)/)
+    expect(css).not.toMatch(/\.chore__overdue\s*\{[^}]*var\(--accent\)/)
+  })
+
+  it('records the palette decision beside the rule, in the comment', () => {
+    // Read off the RAW file: the standing rule (red is for work, never for
+    // people) and the judgement that an overdue chore is work and therefore
+    // inside it, plus the refusal of `.error`. The three other places in this
+    // stylesheet that touch the rule state it the same way, and a rule whose
+    // reasoning is not written down is the one somebody later "tidies" into
+    // `.error`.
+    // Located by the comment's OWN opening line rather than by "the last
+    // comment before the rule": the reserved-edge note added to `.chore` sits
+    // between the two, and a positional locator silently picked that up
+    // instead — the assertion reddened for the right reason and the wrong
+    // subject, which is the whole argument for anchoring on the text.
+    const start = raw.indexOf('/* An outstanding chore whose date has passed')
+    expect(start, 'the palette comment is not in the stylesheet at all').toBeGreaterThan(-1)
+    const comment = raw.slice(start, raw.indexOf('*/', start))
+    expect(comment).toMatch(/red is for work/i)
+    expect(comment).toMatch(/\.error/)
+  })
+
+  it('the marker is a WORD as well as a colour, so colour is not the only carrier', () => {
+    // The component's half of AC 1, asserted here beside the palette it is
+    // the counterweight to: a member who cannot separate the tint from the
+    // ink still reads the fact.
+    const chores = readFileSync(resolve(process.cwd(), 'src/components/Chores.jsx'), 'utf8')
+    expect(chores).toMatch(/className="chore__overdue">overdue</)
   })
 })

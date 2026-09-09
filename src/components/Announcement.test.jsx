@@ -37,7 +37,7 @@ const REBALANCE = {
 }
 
 /** One capacity cut, one 90-minute move from Placeholder One to Two. */
-function movedNinety(verdict = REBALANCE) {
+function movedNinety(verdict = REBALANCE, sources = null) {
   const before = splitSnapshot({
     capacities: [
       { id: 'm1', capacityMinutes: 300 },
@@ -56,6 +56,7 @@ function movedNinety(verdict = REBALANCE) {
     seen: { snapshot: before, seen_rebalance_at: '2026-08-27T09:00:00Z' },
     current: after,
     lastRebalance: verdict,
+    sources,
   })
 }
 
@@ -67,6 +68,25 @@ describe('AC 1 — the statement names the cause and the effect', () => {
     renderNews(movedNinety())
     const region = screen.getByTestId('rebalance-announcement')
     expect(region).toHaveTextContent('Placeholder One’s week has 120 min less room')
+    expect(region).not.toHaveTextContent(/calendar/i)
+  })
+
+  // #106 AC 2 — announced WITH ITS CAUSE: when nobody tapped, the sentence says
+  // the week was set from the calendar. Built through the real pipeline with
+  // the sources map App passes, so a shape the pipeline never produces cannot
+  // pass here.
+  it('#106: says the week was set from their calendar when nobody tapped', () => {
+    renderNews(movedNinety(REBALANCE, { m1: 'calendar_auto' }))
+    expect(screen.getByTestId('rebalance-announcement')).toHaveTextContent(
+      'Placeholder One’s week has 120 min less room (set from their calendar)',
+    )
+  })
+
+  it('#106: a TAP-confirmed calendar week is a person’s act and reads as every other change', () => {
+    renderNews(movedNinety(REBALANCE, { m1: 'calendar' }))
+    const region = screen.getByTestId('rebalance-announcement')
+    expect(region).toHaveTextContent('Placeholder One’s week has 120 min less room')
+    expect(region).not.toHaveTextContent(/calendar/i)
   })
 
   it('says how many minutes moved to whom', () => {

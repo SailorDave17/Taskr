@@ -747,6 +747,51 @@ export function isOutstanding(chore) {
 }
 
 /**
+ * Has this chore's date passed? — #345.
+ *
+ * Four conditions, and each one is load-bearing:
+ *
+ * OUTSTANDING. A completed or missed row has left the list; an old date on
+ * work already filed is history rather than a warning, which is why the Done
+ * surface never colours a row however old it is (AC 4).
+ *
+ * `todayIso` PRESENT. The caller supplies the household's own day —
+ * `localTodayIn(household.timezone)`, the same string `SkipControl` compares
+ * against — so a member in a zone where it is already tomorrow does not see a
+ * chore go red a few hours early (AC 3). This function never reads the clock:
+ * a `new Date()` here would be the device's day, and the bug would appear only
+ * for households whose zone differs from the phone's, which is the shape no
+ * test with a fixed fixture would catch.
+ *
+ * STRICTLY BEFORE. Due today is not overdue — the day is not over.
+ *
+ * NOT A DAILY REPEAT. The owner's rule, and a decision rather than a
+ * derivation: skipping a daily now and then is normal, so a daily that slipped
+ * must not shout. It is not extended to weekly or monthly, which the owner did
+ * not name. Two rows carry a daily schedule and only one says so on its own
+ * columns: `chores_occurrence_does_not_repeat` (0012) forces a generated
+ * occurrence to `repeat_kind = 'none'`, so an occurrence's daily-ness lives on
+ * its ANCHOR and this has to look it up — which is why the whole list is a
+ * parameter, as it is for `completedInstances`. An anchor that has been
+ * deleted leaves `generated_from` dangling (0012 sets it null on delete, so
+ * this is the mid-refresh case rather than a lasting one) and the lookup
+ * simply misses: the occurrence is then treated as ordinary work, which is the
+ * safe direction — it may colour a row that a daily anchor would have spared,
+ * never hide one that is genuinely slipping.
+ */
+export function isOverdue(chore, todayIso, chores = []) {
+  if (!chore || !todayIso) return false
+  if (!isOutstanding(chore)) return false
+  if (!chore.due_on || chore.due_on >= todayIso) return false
+  if (chore.repeat_kind === 'daily') return false
+  if (chore.generated_from != null) {
+    const anchor = chores.find((c) => c.id === chore.generated_from)
+    if (anchor?.repeat_kind === 'daily') return false
+  }
+  return true
+}
+
+/**
  * Minutes of work still to do — #35 AC 5.
  *
  * Sums ONLY outstanding chores. A sum over every row is the defect this exists

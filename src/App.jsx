@@ -5,22 +5,28 @@ import { attachVisibilityRefresh, createReadQueue, subscribeToHousehold } from '
 import {
   addMember,
   createHousehold,
-  currentHousehold,
   currentSession,
   currentUserId,
   describeSignInReturn,
   findClaimedMember,
+  listHouseholds,
   listMembers,
   provisionMember,
   readSignInReturn,
   removeMember,
   resetMemberCredential,
+  resolveActiveHousehold,
   signIn,
   signInWithGoogle,
   signOut,
   signUpOrganizer,
   updateMember,
 } from './lib/household.js'
+import {
+  clearActiveHouseholdChoice,
+  readActiveHouseholdChoice,
+  writeActiveHouseholdChoice,
+} from './lib/activeHousehold.js'
 import {
   addChore,
   addChores,
@@ -41,7 +47,10 @@ import {
   updateChore,
 } from './lib/chores.js'
 import {
+  AUTO_APPLY_REFUSED_CODE,
+  autoApplyDecision,
   baselineMoved,
+  calendarSuggestion,
   capacitiesFor,
   clearCapacity,
   listCapacity,
@@ -53,6 +62,7 @@ import { extractCapacity, extractChores } from './lib/capture.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
+  automaticCauseSources,
   dismissFairnessNote,
   readSplitSeen,
   splitSnapshot,
@@ -97,6 +107,7 @@ import {
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
+import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
@@ -112,6 +123,23 @@ import Split from './components/Split.jsx'
 // held locally is the Supabase auth session, which is the credential, not the
 // data; that is what makes "still signed in days later" true without retyping
 // anything.
+//
+// #165 AC 6 — A SECOND THING IS HELD LOCALLY NOW, and this paragraph is where a
+// reader will come looking to decide whether that is a violation. It is not,
+// and the owner's reasoning of 2026-08-26 is why: what
+// `src/lib/activeHousehold.js` stores is the ID of the household this device
+// last had CHOSEN — a pointer at a row, never the row. Every name, every member
+// and every chore still arrives from the server on every load, so the paragraph
+// above is untouched in substance; a stale pointer costs one tap rather than a
+// wrong screen, and `resolveActiveHousehold` discards one that no longer names
+// a household the caller belongs to. The line this sits on is the CREDENTIAL
+// side of the discipline, not the data side: the auth session is already held
+// here and correctly, and a UI preference about which of your own households is
+// showing belongs beside it. The alternative on the table was a deterministic
+// default with no memory at all, rejected for what it costs the person the
+// feature exists for — somebody who mostly uses their second household would
+// re-pick it every morning, forever. The module's own docblock carries the
+// rest; this is the pointer from the discipline to its one exception.
 //
 // #62 changed what that session IS. It used to be an anonymous DEVICE identity,
 // minted on boot so the app always had one, with a separate step to say which
@@ -157,6 +185,40 @@ const NO_PAST_RUNS = { loading: false, loaded: false, runs: [], items: [] }
 export default function App() {
   const [status, setStatus] = useState('loading')
   const [household, setHousehold] = useState(null)
+  // #164 — EVERY household this person belongs to, in `listHouseholds()`'s
+  // order, held beside the active one because the shell needs the count to
+  // decide whether a switcher exists at all (AC 3) and the list to populate it.
+  // Server state like everything else on this screen: it is re-read on every
+  // refresh, so a household somebody was added to on another phone appears in
+  // the switcher after the next read rather than after a reload.
+  const [households, setHouseholds] = useState([])
+  // #164/#165 — which household this person has CHOSEN, as distinct from which
+  // one is showing. A ref rather than state, and the distinction is the point:
+  // nothing renders from this. What renders is `household`, resolved from it by
+  // `refresh()` and set as ordinary state, so the screen always draws the
+  // household the last read actually resolved rather than the one this device
+  // asked for. The two differ exactly when a stored choice is no longer in the
+  // membership set, and the screen must show the second.
+  //
+  // It is a ref because `refresh` is memoised on `[]` — see the comment at its
+  // head — and because every write here is followed by a read that must SEE it,
+  // in the same turn, before React has re-rendered.
+  //
+  // Seeded from this device's remembered choice (#165 AC 1). `readActive…`
+  // returns null when there is nothing stored, when storage is unavailable, and
+  // when the stored value is not a uuid — all three meaning "no choice", which
+  // is what `resolveActiveHousehold` turns into the deterministic default.
+  const activeIdRef = useRef(readActiveHouseholdChoice())
+  // #164/#166 — how many times a household has been CHOSEN in this session.
+  //
+  // Bumped by every deliberate act that sets `activeIdRef`, and read by
+  // `refresh()` before its first await. It exists so a read can tell whether
+  // its own snapshot is older than the choice it is about to judge: without it,
+  // a read already in flight when a household is created wipes the choice that
+  // creation just made, because a brand-new id and a revoked membership look
+  // identical to `resolveActiveHousehold`. A counter, not a timestamp — two
+  // choices inside one clock tick must be two epochs.
+  const choiceEpochRef = useRef(0)
   const [members, setMembers] = useState([])
   const [chores, setChores] = useState([])
   // #46 — this week's capacity overrides, and the period they belong to. Both
@@ -300,11 +362,60 @@ export default function App() {
 
   /** Re-read everything this device is allowed to see. */
   const refresh = useCallback(async () => {
-    const found = await currentHousehold()
-    setHousehold(found)
+    // #164 — ONE read, then a pure resolution. `listHouseholds()` is the round
+    // trip `currentHousehold()` used to make internally, so this costs the same
+    // eleven round trips #351 priced; what changed is that the array is kept
+    // rather than discarded after taking `[0]`, because the shell needs it to
+    // offer the switcher at all.
+    //
+    // THE CHOICE COMES FROM A REF, not from state, and that is load-bearing.
+    // `refresh` is memoised on `[]` so that `reads`, `requestRefresh` and the
+    // boot effect below are stable for the life of the component; putting the
+    // active id in the dependency array would rebuild that chain on every
+    // switch and re-run boot. The ref is written before every call that must
+    // see the new value, so a switch's own re-read resolves against the
+    // household the person just picked rather than the one they left.
+    // Named `all`, not `households`: the state above is also called
+    // `households`, and a local shadowing it here would make the two impossible
+    // to tell apart in a function whose whole subject is which of them is
+    // current. This one is the FRESH read; the state is what the last read set.
+    // THE EPOCH IS READ BEFORE THE AWAIT, and it is what makes the discard
+    // below safe. Found by review-fanout, and it defeated #166's own AC 1 and
+    // AC 5: a background read (a focus event, a Realtime echo) suspended HERE
+    // when somebody creates a household comes back holding a list from before
+    // it existed. `resolveActiveHousehold` then cannot find the brand-new id,
+    // which is indistinguishable from "you were removed from that household" —
+    // so the discard fired, cleared the ref and wiped the stored choice, and
+    // the person who had just created a household was returned to their first
+    // one with nothing remembered. The read is not wrong; it is just OLDER than
+    // the choice, and only a counter can tell those apart.
+    const epoch = choiceEpochRef.current
+    const all = await listHouseholds()
+    const found = resolveActiveHousehold(all, activeIdRef.current)
+    // #165 AC 2 — a stored choice that is no longer in the membership set is
+    // DISCARDED here, not merely ignored. `resolveActiveHousehold` has already
+    // fallen back to the default, so nothing on screen depends on this; what it
+    // prevents is a dead id sitting in storage being re-rejected on every load
+    // for the rest of the device's life. Silent, per the criterion: a removed
+    // membership is not this person's error to be told about.
+    //
+    // Guarded on the epoch: if anybody chose a household while this read was in
+    // flight, this read's list predates that choice and has no standing to
+    // judge it. The queue runs a fresh read for the chooser regardless
+    // (`createReadQueue` resolves a queued request from a read that STARTED
+    // after it asked), so skipping here costs nothing and the correct
+    // resolution arrives a moment later.
+    if (
+      choiceEpochRef.current === epoch &&
+      activeIdRef.current &&
+      found?.id !== activeIdRef.current
+    ) {
+      activeIdRef.current = found?.id ?? null
+      clearActiveHouseholdChoice()
+    }
     // #159 — every read below names the household it means. `found.id` is the
-    // ONE place that id enters this function, so a switcher later changes which
-    // household `currentHousehold()` returns and nothing here has to move.
+    // ONE place that id enters this function, so the switcher above changes
+    // which household is resolved and nothing here has to move.
     //
     // The roster is read FIRST and is not merely one read among several: the
     // three tables that withhold `household_id` (member_capacity,
@@ -312,6 +423,19 @@ export default function App() {
     // rather than by a household id, so `roster` below is the scope for all
     // three. That ordering is load-bearing, not incidental.
     const roster = found ? await listMembers(found.id) : []
+    // THE NAME AND THE ROSTER LAND TOGETHER, and the pairing is the fix rather
+    // than the tidiness. `setHousehold` used to sit above this read, so a
+    // switch put household B's NAME on the shell while B's roster was still a
+    // round trip away — and `findClaimedMember(members, userId, household.id)`
+    // pairs B's id against A's rows, which resolves `me` to null and takes
+    // #152's organizer controls off the screen until the read settles. The
+    // docblock on `chooseHousehold` says `me` is right "by construction"; that
+    // was true only after settle until these three setters were paired.
+    // Also found by review-fanout. The remaining reads below still land one at
+    // a time — that is `refresh()`'s pre-existing shape and a larger question —
+    // but the identity triple is now atomic.
+    setHouseholds(all)
+    setHousehold(found)
     setMembers(roster)
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
@@ -457,10 +581,19 @@ export default function App() {
           // note. No row yet means never dismissed, which is exactly what a
           // first look should see.
           setFairnessNoteDismissed(Boolean(seen?.fairness_note_dismissed))
+          // #106 — which changes the cause sentence may call the calendar's:
+          // an automatic row whose recorded previous figure is the figure THIS
+          // member was last shown, so the net delta is that write's alone. The
+          // rule and its reason are `automaticCauseSources`'s.
+          const sources = automaticCauseSources({
+            seen,
+            overrides: overrideRows.filter((row) => row.period_start === period),
+          })
           const news = announcementFrom({
             seen,
             current,
             lastRebalance: found.last_rebalance ?? null,
+            sources,
           })
           if (news) setAnnouncement(news)
           const marker = found.last_rebalance?.applied_at ?? null
@@ -681,6 +814,43 @@ export default function App() {
     (name, { organizerName }) => mutate(() => createHousehold(name, { organizerName })),
     [mutate],
   )
+
+  /**
+   * Start another household from inside one — #166.
+   *
+   * `create_household` already works for a caller who has a household: it
+   * claims the organizer's member row to `auth.uid()` in the same statement,
+   * and `rls.integration.test.js`'s own fixture has been creating two
+   * households per run over the wire since `0009`. So the server half of this
+   * story was done before the story existed, and what was missing was that
+   * `createHousehold` had exactly ONE call site, behind `status === 'onboarding'`
+   * — a person could acquire a second household only by being provisioned into
+   * it, never by making one.
+   *
+   * THE NEW HOUSEHOLD BECOMES ACTIVE (AC 1) and the choice is stored (AC 5),
+   * and the ordering is the whole of it: `createHousehold` returns the
+   * household row, so the id is in hand BEFORE `mutate`'s re-read runs. Setting
+   * the ref inside the action is what makes that re-read resolve to the new
+   * household. Without it the person would create a household and be left
+   * looking at their first one — `listHouseholds()` orders by `created_at`, so
+   * a brand-new household sorts LAST and the default would take them straight
+   * back to where they started.
+   */
+  const handleCreateAnotherHousehold = useCallback(
+    (name, { organizerName }) =>
+      mutate(async () => {
+        const created = await createHousehold(name, { organizerName })
+        if (created?.id) {
+          activeIdRef.current = created.id
+          choiceEpochRef.current += 1
+          writeActiveHouseholdChoice(created.id)
+          setAnnouncement(null)
+          setCalendarRevokeNote(null)
+        }
+        return created
+      }),
+    [mutate],
+  )
   // #154 — the organizer's own account, on its own. NOT through `mutate`, and
   // the reason is the grant layer: `mutate` re-reads the household after every
   // action, and after a signup that needs email confirmation there is no
@@ -741,7 +911,23 @@ export default function App() {
   // library's `global` default is still reachable at all. The scope is decided
   // by the control the person pressed, never by an unstated default.
   const handleSignOut = useCallback(
-    (options) => mutate(() => signOut(options)),
+    (options) =>
+      mutate(async () => {
+        const result = await signOut(options)
+        // #165 AC 7 — the remembered household does not outlive the session
+        // that chose it. This is a household app and a shared tablet is the
+        // likely case: without this, the next person to sign in on it lands on
+        // a household somebody else picked, and every read they make is scoped
+        // to it. Cleared AFTER the sign-out succeeds, so a refused sign-out
+        // does not cost this device a preference it still needs.
+        //
+        // The ref goes with it, because `mutate` re-reads immediately below and
+        // a stale id would resolve against the next session's membership set.
+        activeIdRef.current = null
+        choiceEpochRef.current += 1
+        clearActiveHouseholdChoice()
+        return result
+      }),
     [mutate],
   )
   // #159 AC 4 — every write names the household THIS SCREEN IS SHOWING, taken
@@ -799,6 +985,56 @@ export default function App() {
     [mutate],
   )
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
+
+  /**
+   * Show another household — #164 AC 2, and the only place a person makes the
+   * choice.
+   *
+   * The re-read is the criterion, not a nicety: "every surface RE-READS against
+   * it — asserted as a re-read of the five data-layer calls, not as a local
+   * state change". So this does NOT filter data this device already holds; it
+   * goes back to the server through the same `mutate()` every write uses, and
+   * what appears is what the next device to load would see. Filtering locally
+   * would have been faster and would have shown the other household's chores as
+   * of whenever this device last read them.
+   *
+   * `view` is untouched (AC 6). Somebody on the Chores surface who switches
+   * household is still on the Chores surface, now showing the other household's
+   * chores — the surface is where they are, not what they are looking at, and
+   * moving them would answer a question they did not ask.
+   *
+   * `me` and `isOrganizer` need nothing here (AC 5): both are derived at render
+   * from `members` and `household?.id`, so the re-read recomputes them inside
+   * the newly active household by construction rather than by a step somebody
+   * has to remember to add.
+   */
+  const chooseHousehold = useCallback(
+    (id) => {
+      // The ref FIRST — `refresh()` reads it, and the read below starts before
+      // React has re-rendered with the state beside it. The epoch goes with it,
+      // always: a read already in flight must not judge this choice.
+      activeIdRef.current = id
+      choiceEpochRef.current += 1
+      // #165 AC 1 — a CHOICE is what gets remembered, and this is the only
+      // place a person makes one. Nothing writes on a plain load, so a device
+      // whose owner has never switched household stores nothing at all.
+      writeActiveHouseholdChoice(id)
+      // THE OLD HOUSEHOLD'S NOTICES DO NOT COME WITH IT. Found by
+      // review-fanout. Both of these are written by a `refresh()` and cleared
+      // only by the control that answers them, so neither had anything on the
+      // switch path: a re-balance announcement about household A stood over
+      // household B's surfaces, read against B's member names — and pressing
+      // "Got it" there SPENT it, because `writeSplitSeen` had already advanced
+      // A's seen marker in the refresh that produced it, so `announcementFrom`
+      // can never derive it again. The calendar note is the same shape: a
+      // sentence about letting go of a connection in A, standing over B, where
+      // the connection is per member-and-household and still live.
+      setAnnouncement(null)
+      setCalendarRevokeNote(null)
+      return handleRefresh().catch(() => {})
+    },
+    [handleRefresh],
+  )
   /**
    * Move to another surface — #47 criterion 11.
    *
@@ -1473,38 +1709,110 @@ export default function App() {
   // the next load if the household on screen has moved on. React 18 tolerates
   // a state write after unmount, and App never unmounts. The member gets the
   // figure on the visit it arrived, once.
-  const readMyBusyWeek = useCallback(async ({ householdId, periodStart, memberIds }) => {
-    try {
-      await fetchBusyWeek({ householdId, periodStart })
-    } catch (err) {
-      // #96 AC 5 and #98 AC 4, the same sentence: nothing is cleared. The last
-      // derived figure — if there is one — stays on screen with its date, and
-      // the function's own sentence goes beside it. Not `setError`: that strip
-      // is for the app being broken, and a calendar Google would not answer is
-      // a fact about the calendar, with the manual path untouched underneath.
-      setBusyFetchComplaint(err.message)
-      return
-    }
-    setBusyFetchComplaint(null)
-    // Re-read rather than trusting the response body, for the reason every
-    // write on this screen re-reads: what the next device to load will see is
-    // exactly what this one now shows. The function's own answer would be a
-    // second representation of the row it just wrote. This re-read is also the
-    // whole of #98 AC 3 — the roster draws `busyWeeks`, so a figure that lands
-    // while the capacity screen is open is on it at the next render, and there
-    // is no reload to ask for because there is no cache to invalidate.
-    //
-    // In its OWN try, because a failure here is a failure of the TABLE, not of
-    // Google, and the two complaints are cleared by different things — a read
-    // failure filed under the fetch's complaint would outlive the next
-    // successful read, which is what one version of this did.
-    try {
-      setBusyWeeks(await listBusyWeeks(periodStart, memberIds))
-      setBusyReadComplaint(null)
-    } catch (err) {
-      setBusyReadComplaint(err.message)
-    }
-  }, [])
+  const readMyBusyWeek = useCallback(
+    async ({ householdId, periodStart, memberIds, myMemberId }) => {
+      try {
+        await fetchBusyWeek({ householdId, periodStart })
+      } catch (err) {
+        // #96 AC 5 and #98 AC 4, the same sentence: nothing is cleared. The last
+        // derived figure — if there is one — stays on screen with its date, and
+        // the function's own sentence goes beside it. Not `setError`: that strip
+        // is for the app being broken, and a calendar Google would not answer is
+        // a fact about the calendar, with the manual path untouched underneath.
+        setBusyFetchComplaint(err.message)
+        return
+      }
+      setBusyFetchComplaint(null)
+      // Re-read rather than trusting the response body, for the reason every
+      // write on this screen re-reads: what the next device to load will see is
+      // exactly what this one now shows. The function's own answer would be a
+      // second representation of the row it just wrote. This re-read is also the
+      // whole of #98 AC 3 — the roster draws `busyWeeks`, so a figure that lands
+      // while the capacity screen is open is on it at the next render, and there
+      // is no reload to ask for because there is no cache to invalidate.
+      //
+      // In its OWN try, because a failure here is a failure of the TABLE, not of
+      // Google, and the two complaints are cleared by different things — a read
+      // failure filed under the fetch's complaint would outlive the next
+      // successful read, which is what one version of this did.
+      let rows
+      try {
+        rows = await listBusyWeeks(periodStart, memberIds)
+        setBusyWeeks(rows)
+        setBusyReadComplaint(null)
+      } catch (err) {
+        setBusyReadComplaint(err.message)
+        return
+      }
+
+      // #106 — the one write on this screen nobody pressed a button for. A
+      // suggestion that lands within `AUTO_APPLY_BOUND_MINUTES` of the week's
+      // current figure is written as this member's capacity with the word
+      // `calendar_auto` and the figure it replaced, then re-assigned exactly as
+      // a tap would be (#49), then re-read so what this phone shows is what
+      // the next one loads (and so #50's announcement fires for THIS member
+      // too). Whether to write is `autoApplyDecision`'s alone — the bound, the
+      // manual floor and the no-change rule live there, with their tests.
+      //
+      // BOTH INPUTS ARE RE-READ FROM THE SERVER, not taken from the screen: the
+      // fetch above took seconds, and a housemate's typed figure landing in
+      // between must be seen and respected by the floor rule, while a baseline
+      // edit landing in between must be the baseline the figure is computed
+      // from (review-fanout, 2026-09-08: the first draft read the roster off a
+      // ref of the latest render, which is current to within a Realtime echo
+      // and no better). The window that survives the re-read — the one round
+      // trip between it and the write — is the trigger's (`0039`,
+      // `member_capacity_automatic_never_overtypes`), and its refusal is read
+      // as a PERSON having won, below.
+      //
+      // Deliberately NOT through `mutate()`: that sets `busy` over every
+      // control, and a write the person did not ask for must not grey out the
+      // one under their thumb — #342's reasoning for its background reads,
+      // applied to a background write. Its failure lands on the error strip,
+      // through `setError`, because a write that failed is the app being
+      // broken and a red nobody can see is how a fault stays unfound; the two
+      // calendar complaints above are for a CALENDAR that would not answer.
+      try {
+        const member = (await listMembers(householdId)).find((m) => m.id === myMemberId)
+        if (!member) return
+        const arrived = busyWeekFor(rows, member.id, periodStart)
+        const override =
+          (await listCapacity(periodStart, [member.id])).find((row) => row.member_id === member.id) ??
+          null
+        const decision = autoApplyDecision({
+          member,
+          override,
+          suggestion: calendarSuggestion(member, arrived),
+        })
+        if (!decision.apply) return
+        try {
+          await setCapacity({
+            memberId: member.id,
+            periodStart,
+            minutes: decision.to,
+            source: 'calendar_auto',
+            previousMinutes: decision.from,
+            householdId,
+          })
+        } catch (err) {
+          // The trigger refused because a person's figure landed in the one
+          // round trip between the re-read and this write. Nothing is wrong —
+          // the manual floor held, server-side — so nothing is announced and
+          // nothing is re-assigned; the re-read shows the figure that won.
+          if (err?.cause?.code === AUTO_APPLY_REFUSED_CODE) {
+            await requestRefresh()
+            return
+          }
+          throw err
+        }
+        await reassignHousehold({ householdId })
+        await requestRefresh()
+      } catch (err) {
+        setError(err.message)
+      }
+    },
+    [requestRefresh],
+  )
 
   useEffect(() => {
     if (status !== 'joined' || view !== 'who') return
@@ -1515,7 +1823,7 @@ export default function App() {
     if (askedForBusy.current.has(key)) return
     askedForBusy.current.add(key)
 
-    readMyBusyWeek({ householdId, periodStart, memberIds })
+    readMyBusyWeek({ householdId, periodStart, memberIds, myMemberId })
   }, [
     status,
     view,
@@ -1565,7 +1873,7 @@ export default function App() {
     if (refreshedBusy.current.has(key)) return
     refreshedBusy.current.add(key)
 
-    readMyBusyWeek({ householdId, periodStart, memberIds })
+    readMyBusyWeek({ householdId, periodStart, memberIds, myMemberId })
   }, [
     status,
     householdId,
@@ -1597,7 +1905,8 @@ export default function App() {
   // #160 — `me` above is resolved within THIS household, so this comparison
   // can no longer pair one household's member row with another household's
   // organizer id. Both sides come from the same `household` state, set by the
-  // single currentHousehold() read in refresh().
+  // single listHouseholds() read in refresh(), resolved by
+  // resolveActiveHousehold() (#164).
   const isOrganizer = Boolean(me && household && me.id === household.organizer_member_id)
 
   // #59 — record the dismissal against THIS member, then re-read like every
@@ -1702,13 +2011,20 @@ export default function App() {
           only sees static `className` strings, so a conditional class here
           would be a class nothing checks. */}
       {/* #163 — WHICH household the data on screen belongs to, named directly
-          above the surfaces it scopes and on every one of them. A paragraph,
-          not a button and not a heading: under one household the name is
-          information, and nothing here may suggest there is another to pick
-          (AC 4). The switcher (#253) attaches here later with no layout change.
+          above the surfaces it scopes and on every one of them. Under one
+          household it is still a paragraph, not a button and not a heading:
+          the name is information, and nothing here may suggest there is
+          another to pick (#163 AC 4). #164 is the switcher #163 said would
+          "attach here later with no layout change", and it kept that promise
+          by REPLACING the paragraph for somebody in two households rather
+          than sitting beside it — the tab strip below has no width to share.
+          Both cases live in `HouseholdSwitcher`, so there is one place that
+          decides which is drawn.
 
-          The read site, for AC 2: `household.name` arrives through the single
-          currentHousehold() read in refresh(), which is `select('*')` on
+          The read site, for #163 AC 2: `household.name` arrives through the
+          single listHouseholds() read in refresh() (#164 — it was
+          currentHousehold() until then, and the `select('*')` moved with it),
+          which is `select('*')` on
           `households`, and `name` is already in 0013:95's column grant
           (`select (id, name, created_at, organizer_member_id, timezone)`), so
           NO new grant ships with this story. The guard for a later column
@@ -1716,7 +2032,12 @@ export default function App() {
           outright rather than drop a field — is grants.pglite.test.js's
           "grants select on EVERY column of households". */}
       {status === 'joined' && household ? (
-        <p className="shell__household">{household.name}</p>
+        <HouseholdSwitcher
+          households={households}
+          activeId={household.id}
+          onChoose={chooseHousehold}
+          busy={busy}
+        />
       ) : null}
 
       {status === 'joined' && household ? (
@@ -1765,6 +2086,12 @@ export default function App() {
           onProvision={handleProvision}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
+          // #166 — the affordance that did not exist. Owner decision at pickup:
+          // its own card on this surface rather than an entry inside the
+          // switcher or a second control on the shell row, because the shell
+          // row already fits five tabs into 263.2px at exactly 8px of padding
+          // and this is household administration, which is what the Who tab is.
+          onCreateHousehold={handleCreateAnotherHousehold}
           overrides={overrides}
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}

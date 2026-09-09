@@ -107,8 +107,18 @@ function isAtOrAfter(a, b) {
  * is work arriving on that member's list, negative is work leaving it. The
  * capacity deltas name the cause (whose week changed, and by how many
  * minutes); the moves name the effect (how many minutes moved to whom).
+ *
+ * `sources` (#106) is optional: a map of member id → the `source` word on
+ * that member's CURRENT override, read off this week's rows. When a capacity
+ * change's member has an entry it travels on the change as `source`, so the
+ * statement can say the week was set from a calendar with nobody tapping —
+ * an unattended change with no author named would read as the app moving
+ * somebody's week on its own, which it did, and it must say so. Absent or
+ * unmapped, the change carries no `source` key at all, so every caller that
+ * predates this reads the shape it always did. The SNAPSHOT is untouched:
+ * provenance is a fact about now, not about what a member was last shown.
  */
-export function announcementFrom({ seen, current, lastRebalance }) {
+export function announcementFrom({ seen, current, lastRebalance, sources = null }) {
   if (!lastRebalance?.applied_at) return null
   if (!seen?.snapshot?.members) return null
   if (seen.seen_rebalance_at != null && isAtOrAfter(seen.seen_rebalance_at, lastRebalance.applied_at)) {
@@ -129,12 +139,47 @@ export function announcementFrom({ seen, current, lastRebalance }) {
     const minutesDelta = (now?.minutes ?? 0) - (was?.minutes ?? 0)
     if (minutesDelta !== 0) moves.push({ memberId: id, minutes: minutesDelta })
     const capacityDelta = (now?.capacityMinutes ?? 0) - (was?.capacityMinutes ?? 0)
-    if (capacityDelta !== 0) capacityChanges.push({ memberId: id, minutes: capacityDelta })
+    if (capacityDelta !== 0) {
+      const source = sources?.[id]
+      capacityChanges.push(
+        source ? { memberId: id, minutes: capacityDelta, source } : { memberId: id, minutes: capacityDelta },
+      )
+    }
   }
 
   if (moves.length === 0) return null
 
   return { moves, capacityChanges, verdict: lastRebalance }
+}
+
+/**
+ * Which members' capacity changes the statement may attribute to the calendar
+ * — #106, and the guard the review asked for.
+ *
+ * The statement nets EVERYTHING since this member's last look (AC 5), and an
+ * automatic write is one write among any number: a person's tap followed by an
+ * automatic write, or a cleared override followed by one, would have the whole
+ * net delta labelled the calendar's — with the wrong SIGN in the second case.
+ * The guard is in the data the automatic write carries: it stores the figure it
+ * replaced as `previous_minutes`, so the clause is attached only when the
+ * figure this member was last shown IS that figure — the net delta is then the
+ * automatic write's own and nothing else's. Any other history gets the plain
+ * cause sentence, which is true of it.
+ *
+ * Returns the `sources` map `announcementFrom` takes: member id → the word,
+ * for automatic rows only. A viewer with no snapshot gets an empty map (and
+ * `announcementFrom` announces nothing to them anyway).
+ */
+export function automaticCauseSources({ seen, overrides }) {
+  const shown = new Map((seen?.snapshot?.members ?? []).map((m) => [m.id, m.capacityMinutes]))
+  const sources = {}
+  for (const row of overrides ?? []) {
+    if (row.source !== 'calendar_auto' || row.previous_minutes == null) continue
+    if (!shown.has(row.member_id)) continue
+    if (Number(shown.get(row.member_id)) !== Number(row.previous_minutes)) continue
+    sources[row.member_id] = 'calendar_auto'
+  }
+  return sources
 }
 
 /**

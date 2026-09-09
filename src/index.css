@@ -89,6 +89,54 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* #164 — the same line, for somebody who belongs to more than one household.
+   It carries `.shell__household`'s type so the shell does not change shape when
+   a second household appears: same size, same weight, same colour, same
+   negative bottom margin holding the tab strip where it was.
+
+   What it adds is the 44px floor every other control on the phone uses and the
+   affordance that says it is one — a native select, so the picker itself is the
+   platform's. `max-width: 100%` rather than a width: a long household name must
+   not set the page width on a 360px phone, which is the same constraint
+   `.shell__household`'s `overflow-wrap` answers for the paragraph. */
+.shell__household-select {
+  margin: 0 0 -0.875rem;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 2rem 0 0.5rem;
+  font-family: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+  appearance: none;
+  /* The disclosure the `appearance: none` above removed, drawn rather than
+     imported: an inline SVG in a data URI is the one image this stylesheet can
+     carry without adding a file, and gate.test.js refuses a committed image
+     that is not the icon set. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23e9edf5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.625rem 0.375rem;
+  /* A long household name is SHORTENED, not cut. #163's paragraph wrapped —
+     `overflow-wrap: anywhere` above — and a `<select>` cannot, so without this
+     the one label saying which household you are looking at reads as broken.
+     *Measured at 360px*: a 37-character name wants 337.1px of text in 264.8px
+     of usable width and was cut mid-word at "…at Wint". The full name is still
+     one tap away, in the open list, and at 768px nothing clips at all.
+     `white-space` is already `pre` on a select in this engine; both other
+     properties are needed for the ellipsis to render. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell__household-select:disabled {
+  opacity: 0.6;
+}
+
 .shell__status {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -701,6 +749,21 @@ body {
   padding: 0.875rem;
   background: var(--bg);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  /* #345 — the left edge is RESERVED at its widest here, so `.chore--overdue`
+     only ever recolours it. This is the file's own idiom (`.button` at ~306,
+     and two more rules declare `border: 1px solid transparent` for exactly
+     this reason), and it exists because `box-sizing: border-box` takes a
+     widened border out of the CONTENT box: a modifier that set 3px directly
+     moved an overdue row's text 2px right of every neighbour and narrowed its
+     column by 2px — measured at 360px, title left edge 58px against 56px.
+     A ragged edge on the one row the feature exists to highlight.
+
+     The reserved edge keeps the hairline's own colour rather than going
+     transparent, so a plain row looks exactly as it did before #345 — the
+     three `transparent` reservations elsewhere sit on controls that have no
+     resting border at all, and copying that literal here would have erased
+     this card's left hairline for every row. */
+  border-left: 3px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.5rem;
 }
 
@@ -720,6 +783,19 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+}
+
+/* #345 — the title and the overdue marker share a line, so the word sits
+   where a scan starts rather than at the end of the cost line, where it
+   wrapped to a second row at 360px. Baseline-aligned so the smaller word sits
+   on the title's own line rather than floating against its cap height, and
+   wrapping is allowed: a long title with the marker after it is the case that
+   would otherwise set the row's width. */
+.chore__identity-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .chore__title {
@@ -745,6 +821,33 @@ body {
 
 .chore__due {
   opacity: 0.85;
+}
+
+/* An outstanding chore whose date has passed — story #345.
+
+   THE PALETTE DECISION, which is the whole judgement in this rule. The
+   stylesheet's standing rule is that red is for work and never for people
+   (.chore-list--done above, .split at #47, .announce at #50), and an overdue
+   chore is work — so a warning colour on this row is inside the rule, not an
+   exception to it. What it must NOT be is the `.error` palette: every other
+   `.error` comment in this file reserves that for something in the app having
+   failed, and a chore nobody has got to yet is the app working correctly. So
+   this is amber rather than red — a distinct hue with its own literals, far
+   enough from #7f2b2b that the two do not read as the same signal, and far
+   enough from --accent that neither reads as the other.
+
+   Warm, but still quiet. The marker sits on the row's left edge and on the
+   word, and the title, minutes and controls keep the ink they have on every
+   other row: a slipped chore is worth noticing on a scan, not worth shouting
+   at somebody about. And the word "overdue" rides beside the tint (Chores.jsx)
+   so colour is never the only carrier of the fact. */
+.chore--overdue {
+  border-left-color: #b5762a;
+}
+
+.chore__overdue {
+  color: #e0a458;
+  font-weight: 600;
 }
 
 /* Completed work — story #35.

@@ -182,7 +182,13 @@ function CapacityControl({
     // no override, or a typed one, opens as manual with nothing proposed.
     const stored = override?.source
     if (stored && stored !== 'manual') {
-      setSource(stored)
+      // #106 — an automatic week opens as the CALENDAR'S figure: the field
+      // holds what the calendar put there, the source line names it, and the
+      // editor's own vocabulary stays three words. Save unedited is the confirm
+      // tap the person never made — the row becomes `calendar`, and
+      // `setCapacity`'s null default clears `previous_minutes` — and an edit
+      // applies #97 AC 2's rule and makes it manual.
+      setSource(stored === 'calendar_auto' ? 'calendar' : stored)
       setProposed(Number(override.minutes))
     } else {
       setSource('manual')
@@ -262,7 +268,19 @@ function CapacityControl({
                 roster saw no confirmation tap. The same quiet register as the
                 other two marks, for `.member__week-mark`'s reason. */}
             {isOverridden ? (
-              override.source === 'calendar' ? (
+              override.source === 'calendar_auto' ? (
+                // #106 AC 4 — nobody tapped, so the mark carries what a tap
+                // would have shown the person: the provenance AND the figure
+                // the week had before, from the row itself (`0039`). The same
+                // quiet register; the word "automatically" is the difference.
+                <span className="member__week-mark" data-testid={`week-auto-${member.id}`}>
+                  {' '}
+                  · set from calendar automatically
+                  {override.previous_minutes == null
+                    ? null
+                    : ` (was ${override.previous_minutes} min)`}
+                </span>
+              ) : override.source === 'calendar' ? (
                 <span className="member__week-mark"> · set from calendar</span>
               ) : (
                 <span className="member__week-mark"> · set for this week</span>
@@ -1114,10 +1132,32 @@ export default function Roster({
   calendarRevokeNote = null,
   busyWeeks = [],
   busyComplaint = null,
+  // #166 — optional, and its absence renders exactly what #163 shipped.
+  onCreateHousehold = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
   const [email, setEmail] = useState('')
+  // #166 — the second household's name, and what this person is called in it.
+  //
+  // THE ORGANIZER NAME IS DERIVED, NOT HELD, and the first version got this
+  // wrong in a way its own comment denied. It was `useState(myName)`, whose
+  // initialiser runs ONCE — so the field froze at mount while the comment above
+  // it claimed the prefill "follows a rename". Found by review-fanout, and the
+  // sharpest reproduction needs one household and one screen: press Edit on
+  // your own row, change your name, and the field a few inches below still
+  // offers the old one. Submit without looking and the new household knows you
+  // by your pre-rename name.
+  //
+  // So the value is `override ?? myName`: null means "nobody has typed here,
+  // show them what they are currently called", and any keystroke pins it. The
+  // reset after a successful create is `setOrganizerOverride(null)` — back to
+  // the live prefill rather than to a `myName` captured in a stale closure,
+  // which was the same defect a second time.
+  const myName = me?.display_name ?? ''
+  const [anotherName, setAnotherName] = useState('')
+  const [organizerOverride, setOrganizerOverride] = useState(null)
+  const anotherOrganizer = organizerOverride ?? myName
   // #291 — the second sign-out is two taps, matching the Remove idiom below.
   // Not because it is destructive to data (it is not) but because it is
   // destructive to a session you are not holding: the point of pressing it is
@@ -1403,6 +1443,92 @@ export default function Roster({
         </form>
       </section>
 
+      {/* #166 — start another household without signing out.
+
+          Optional, and its absence is the state every screen was in before this
+          story: `createHousehold` had exactly one call site, behind
+          `status === 'onboarding'`, so a roster with no `onCreateHousehold`
+          wired renders exactly what #163 shipped. Same shape as
+          `onProposeCapacity` above, for the same reason.
+
+          BELOW "Add someone", deliberately. The two read as a pair and the
+          order is the likelihood: adding a person to the household you are in
+          is the everyday act, and starting a second household is something
+          most people do once or never. */}
+      {onCreateHousehold ? (
+        <section className="card" aria-labelledby="another-household-heading">
+          <h2 id="another-household-heading" className="card__heading">
+            Start another household
+          </h2>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              onCreateHousehold(anotherName, { organizerName: anotherOrganizer }).then(
+                () => {
+                  setAnotherName('')
+                  // The organizer field is NOT cleared to blank — the override
+                  // is dropped, which puts it back to the LIVE prefill. Clearing
+                  // it would leave a required field empty on a form about to be
+                  // used again by the same person, and re-setting it from
+                  // `myName` here would capture whatever that was when this
+                  // closure was made.
+                  setOrganizerOverride(null)
+                },
+                () => {},
+              )
+            }}
+          >
+            {/* INSIDE the form, which is the Add-someone card's idiom and not a
+                preference: `.card__note` carries `margin-bottom: 0`, so a note
+                placed between the heading and the form butts straight against
+                the first label — measured at a 0px gap, against the
+                neighbouring card's 14px. The form's own `gap` is what spaces
+                every other note in this file. */}
+            <p className="card__note">
+              A second home, with its own people and its own chores. You will be
+              its organizer, and you can move between them from the name at the
+              top of the screen.
+            </p>
+            <label className="field">
+              <span className="field__label">Household name</span>
+              <input
+                className="field__input"
+                value={anotherName}
+                onChange={(e) => setAnotherName(e.target.value)}
+                maxLength={60}
+                autoComplete="off"
+              />
+            </label>
+            {/* PREFILLED from this person's member row in the household they
+                are already in, and editable. `create_household` writes a member
+                row for the organizer in the NEW household and takes its display
+                name as an argument, so this cannot be skipped — but asking
+                somebody their own name again, on a screen that is already
+                showing it, is the kind of question an app asks when nobody
+                looked. Editable because a household is allowed to know you by a
+                different name. */}
+            <label className="field">
+              <span className="field__label">Your name in it</span>
+              <input
+                className="field__input"
+                value={anotherOrganizer}
+                onChange={(e) => setOrganizerOverride(e.target.value)}
+                maxLength={40}
+                autoComplete="off"
+              />
+            </label>
+            <button
+              className="button"
+              type="submit"
+              disabled={busy || !anotherName.trim() || !anotherOrganizer.trim()}
+            >
+              Create household
+            </button>
+          </form>
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -1436,4 +1562,5 @@ Roster.propTypes = {
   calendarRevokeNote: PropTypes.string,
   busyWeeks: PropTypes.array,
   busyComplaint: PropTypes.string,
+  onCreateHousehold: PropTypes.func,
 }

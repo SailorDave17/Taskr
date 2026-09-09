@@ -541,22 +541,49 @@ export async function listHouseholds() {
 }
 
 /**
- * The household the app is currently showing.
+ * Which of the caller's households the app is showing — #164 AC 4.
  *
- * THIS IS THE SEAM the household switcher replaces. Today "active" means "first
- * of the ordered set", which is a deliberate placeholder and not a product
- * decision: there is no affordance for choosing yet, and #159 ships before that
- * affordance exists precisely so the scoping is proven correct before anything
- * makes a second household reachable by accident.
+ * THIS IS THE SEAM #159 left open, and this is the story that fills it. It
+ * replaces `currentHousehold()`, which took no argument and returned
+ * `households[0]` unconditionally: a placeholder that was correct while there
+ * was no affordance for choosing and is a bug the moment there is one.
  *
- * For anyone in exactly one household this returns what `.limit(1)` returned and
- * every screen renders identically — #159 AC 9. That is what lets this land this
- * early: under one household it changes nothing observable, so it carries no
- * release risk while removing all of it from the stories that follow.
+ * PURE, and deliberately: the read is `listHouseholds()` and it happens ONCE,
+ * in App's `refresh()`. A version of this that did its own read would give the
+ * shell a switcher list and an active household from two round trips, which can
+ * disagree — a person who joined a household between them would see it in the
+ * list and not be able to reach it, or the reverse. The list on screen and the
+ * household the surfaces are scoped to are now the same array read at the same
+ * instant.
+ *
+ * THE DEFAULT IS OLDEST BY `households.created_at`, then `id` — the owner's
+ * decision of 2026-08-26, taken against most-recently-joined, on the ground
+ * that oldest is STABLE: the set a person belongs to grows, so "most recently
+ * joined" names a different household the day they join one, and an app that
+ * silently re-points itself is worse than one that opens where it always does.
+ * `listHouseholds()` is what puts the set in that order, so this function does
+ * not sort — reordering that read moves this default with it, which is the
+ * intent.
+ *
+ * `chosenId` is what the person picked (#164) or what this device remembered
+ * (#165). It is honoured ONLY when it is still in the set: a membership that
+ * has been removed, a household that has been deleted, and a value that was
+ * never a household id at all are the same case here, and all three fall back
+ * to the default rather than leaving the app on a household no policy will
+ * serve (#165 AC 2). The CALLER is what discards a stored value that lands
+ * here — this function reports nothing, because a pure resolver that also
+ * cleared storage would be doing two things and be untestable as either.
+ *
+ * For anyone in exactly one household this returns what `currentHousehold()`
+ * returned and every screen renders identically, whatever `chosenId` says.
  */
-export async function currentHousehold() {
-  const households = await listHouseholds()
-  return households[0] ?? null
+export function resolveActiveHousehold(households, chosenId = null) {
+  if (!Array.isArray(households) || households.length === 0) return null
+  if (chosenId) {
+    const chosen = households.find((h) => h.id === chosenId)
+    if (chosen) return chosen
+  }
+  return households[0]
 }
 
 /**

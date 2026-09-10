@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -14,7 +14,7 @@ const backend = { hasSupabaseConfig: true }
 
 const api = {
   currentSession: vi.fn(),
-  currentHousehold: vi.fn(),
+  listHouseholds: vi.fn(),
   listMembers: vi.fn(),
   currentUserId: vi.fn(),
   createHousehold: vi.fn(),
@@ -61,6 +61,17 @@ const choresApi = {
 // their own tests, and a stub of them could disagree with the single
 // implementation capacity.test.js asserts exists. Same reasoning the household
 // mock gives for leaving findClaimedMember alone.
+// #210 — only the IMPURE capture function is stubbed. `proposeCapacity` and
+// the outcome vocabulary stay real (importActual below) for the standing
+// reason: pure, own tests, and a stub could disagree with the classification
+// the roster renders from.
+const captureApi = {
+  extractCapacity: vi.fn(),
+  // #213 — the chore half, stubbed for the same reason: `proposeChores` is
+  // pure and has its own tests; what App owes is the WIRING.
+  extractChores: vi.fn(),
+}
+
 const capacityApi = {
   listCapacity: vi.fn(),
   setCapacity: vi.fn(),
@@ -113,6 +124,22 @@ const calendarApi = {
   // rule AC 1's trigger is built out of.
   listBusyWeeks: vi.fn(),
   fetchBusyWeek: vi.fn(),
+  // #99 — the impure one. `revokeNoteFor` stays REAL (importActual below) for
+  // the standing reason: it is pure, it has its own tests, and the sentence a
+  // member reads about Google should be the one the app words rather than a
+  // stub's — this file's claim is the WIRING.
+  disconnectCalendar: vi.fn(),
+  // #101 — the three impure ones. `hasEventReadScope`, `eventChorePrefill`,
+  // `importedEventIds` and `startConnect` stay REAL for the standing reason —
+  // pure (or pure over an injected storage), own tests — so the consent URL
+  // these tests read is the one the app would send somebody to, and the
+  // prefill the form shows is the one the data layer computes. The fakes
+  // RECORD THEIR ARGUMENTS: `recordCalendarImport` is asserted with the chore
+  // id `addChore` returned, because a fake recording only the call could not
+  // tell a ledger row naming the chore from one naming nothing.
+  listCalendarImports: vi.fn(),
+  fetchCalendarEvents: vi.fn(),
+  recordCalendarImport: vi.fn(),
 }
 
 // Set BEFORE `calendar.js` is imported, because it reads `import.meta.env` once
@@ -141,6 +168,11 @@ vi.mock('./lib/capacity.js', async () => {
   return { ...actual, ...capacityApi }
 })
 
+vi.mock('./lib/capture.js', async () => {
+  const actual = await vi.importActual('./lib/capture.js')
+  return { ...actual, ...captureApi }
+})
+
 vi.mock('./lib/exclusions.js', async () => {
   const actual = await vi.importActual('./lib/exclusions.js')
   return { ...actual, ...exclusionsApi }
@@ -163,6 +195,83 @@ vi.mock('./lib/household.js', async () => {
   // rather than a stub that could disagree with it.
   const actual = await vi.importActual('./lib/household.js')
   return { ...actual, ...api }
+})
+
+// #353 — only the IMPURE shopping functions are stubbed, plus the client
+// accessor, which would otherwise reach the supabase.js mock above and throw.
+// `normalizeName` and `firstNameOf` stay REAL (importActual below) for the
+// standing reason: pure, own tests, and the sentence a person reads when a
+// name is empty should be the one the data layer words. The fakes RECORD THE
+// ARGUMENTS — `readShopping` is asserted with the household it was handed and
+// `addItem` with its run, name and note — because a fake that only records
+// the call cannot tell a scoped read from an unscoped one (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`).
+//
+// #355 — `purchaseItem` and `unpurchaseItem` join them, and their fakes are
+// the story's whole instrument: the tick does NOT re-read, so what proves it
+// worked is the RETURN VALUE reaching the screen. A fake that only recorded
+// the call could not tell the one-round-trip route from the old full-refresh
+// one, nor a tick of the right item from a tick of the first item on screen.
+// `orderShoppingItems`, `replaceShoppingItem` and `purchasedLabel` stay REAL,
+// like the other pure helpers.
+//
+// #357 — `finishRun` joins them, and its fake carries the run id for the same
+// argument reason: the RPC takes the run THIS SCREEN is showing, and a fake
+// that only recorded the call could not tell that from one passing the list.
+//
+// #358 — `renameList` joins them, carrying the list id and the name, and
+// `createList`'s fake starts RETURNING the row it made: App reads the created
+// list's id to move the picker onto it, so a fake resolving `undefined` could
+// not tell "the new list is on screen" from "the first list by name is".
+// #359 — `readClosedRuns` joins them, and its fake carries the LIST IDS for the
+// argument reason above: the history read is the one read on this surface that
+// `refresh()` does not perform, and a fake that only recorded the call could not
+// tell "asked for the list on screen" from "asked for the household's history"
+// — nor tell either from a read that fired on arrival, which is the criterion.
+const shoppingApi = {
+  readShopping: vi.fn(),
+  readClosedRuns: vi.fn(),
+  createList: vi.fn(),
+  renameList: vi.fn(),
+  // #360 — both carry the LIST ID for the argument reason above: an archive
+  // names the list this tab is showing, and a fake recording only the call
+  // could not tell that from one passing the household or the run.
+  archiveList: vi.fn(),
+  unarchiveList: vi.fn(),
+  addItem: vi.fn(),
+  removeItem: vi.fn(),
+  purchaseItem: vi.fn(),
+  unpurchaseItem: vi.fn(),
+  finishRun: vi.fn(),
+  shoppingClient: vi.fn(),
+}
+/** The object App hands to every shopping call, so the tests can see it did. */
+const SHOPPING_CLIENT = { fake: 'shopping client' }
+const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
+
+vi.mock('./lib/shopping.js', async () => {
+  const actual = await vi.importActual('./lib/shopping.js')
+  return { ...actual, ...shoppingApi }
+})
+
+// #342 — only the IMPURE half is stubbed: `subscribeToHousehold` opens a
+// websocket. `attachVisibilityRefresh` and `createReadQueue` stay REAL
+// (importActual below) — pure over the DOM and over promises, with their own
+// tests in `realtime.test.js` — because what App owes here is the WIRING: when
+// the channel opens and closes, what household and roster it is handed, and
+// that a change, a re-join or a focus event is a read through the same queue
+// as a write. The fake RECORDS ITS ARGUMENTS and hands back a `close` the
+// tests can see, for the standing reason (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`): a fake that only
+// recorded the call could not tell a channel on the household on screen from
+// one on the first household by name, nor a channel closed on sign-out from
+// one left open.
+const realtimeApi = {
+  subscribeToHousehold: vi.fn(),
+}
+vi.mock('./lib/realtime.js', async () => {
+  const actual = await vi.importActual('./lib/realtime.js')
+  return { ...actual, ...realtimeApi }
 })
 
 const { default: App } = await import('./App.jsx')
@@ -201,15 +310,32 @@ const renderApp = async (surface) => {
 
 beforeEach(() => {
   backend.hasSupabaseConfig = true
+  // #165 — every test starts on a device that has chosen nothing.
+  //
+  // There was no reset here before this story because nothing in the app wrote
+  // to storage, so there was nothing to leak. #165 makes a switch persist, and
+  // the leak is immediate and silent: a test that switches household leaves the
+  // choice behind, the NEXT test boots straight into that household, and its
+  // fixtures describe one household while its assertions read another. Found
+  // exactly that way — three tests that passed alone failed in the full run,
+  // and the failures read as app bugs rather than as pollution.
+  window.localStorage.clear()
   Object.values(api).forEach((fn) => fn.mockReset())
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
+  Object.values(captureApi).forEach((fn) => fn.mockReset())
   Object.values(exclusionsApi).forEach((fn) => fn.mockReset())
   Object.values(calendarApi).forEach((fn) => fn.mockReset())
   calendarApi.listCalendarConnections.mockResolvedValue([])
   calendarApi.completeConnect.mockResolvedValue({ ok: true })
   calendarApi.listBusyWeeks.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
+  calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
+  // #101 — nothing imported yet, which is the ordinary state; the import tests
+  // override this.
+  calendarApi.listCalendarImports.mockResolvedValue([])
+  calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [] })
+  calendarApi.recordCalendarImport.mockResolvedValue({ id: 'i1' })
   exclusionsApi.listExclusions.mockResolvedValue([])
   exclusionsApi.excludeMember.mockResolvedValue(undefined)
   exclusionsApi.allowMember.mockResolvedValue(undefined)
@@ -225,6 +351,22 @@ beforeEach(() => {
   announceApi.writeSplitSeen.mockResolvedValue(undefined)
   announceApi.dismissFairnessNote.mockResolvedValue(undefined)
   choresApi.listChores.mockResolvedValue([])
+  // #353 — no list yet, which is the ordinary first open of the Shop tab.
+  Object.values(shoppingApi).forEach((fn) => fn.mockReset())
+  shoppingApi.shoppingClient.mockReturnValue(SHOPPING_CLIENT)
+  shoppingApi.readShopping.mockResolvedValue(EMPTY_SHOPPING)
+  // #359 — no finished run, which is the ordinary state of a new list. Tests
+  // about the history override this.
+  shoppingApi.readClosedRuns.mockResolvedValue({ runs: [], items: [] })
+  shoppingApi.createList.mockResolvedValue(undefined)
+  shoppingApi.renameList.mockResolvedValue(undefined)
+  shoppingApi.archiveList.mockResolvedValue(undefined)
+  shoppingApi.unarchiveList.mockResolvedValue(undefined)
+  shoppingApi.addItem.mockResolvedValue(undefined)
+  shoppingApi.removeItem.mockResolvedValue(undefined)
+  shoppingApi.purchaseItem.mockResolvedValue(undefined)
+  shoppingApi.unpurchaseItem.mockResolvedValue(undefined)
+  shoppingApi.finishRun.mockResolvedValue(undefined)
   // Nothing missed and nothing skipped, which is the ordinary open. Tests
   // about the notice and the failure path override this.
   choresApi.catchUpRepeats.mockResolvedValue({ created: 0, skipped: 0 })
@@ -237,7 +379,7 @@ beforeEach(() => {
   // signed-OUT case is now a first-class state rather than a failure, and it has
   // its own describe below.
   api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
-  api.currentHousehold.mockResolvedValue(null)
+  api.listHouseholds.mockResolvedValue([])
   api.listMembers.mockResolvedValue([])
   api.currentUserId.mockResolvedValue('person-a')
   api.signIn.mockResolvedValue({ user: { id: 'person-a' } })
@@ -246,6 +388,10 @@ beforeEach(() => {
     needsConfirmation: false,
   })
   api.signOut.mockResolvedValue(undefined)
+  // #342 — a channel that opens and can be closed, and nothing arrives on it
+  // unless a test pushes something through the handlers it recorded.
+  realtimeApi.subscribeToHousehold.mockReset()
+  realtimeApi.subscribeToHousehold.mockImplementation(() => ({ close: vi.fn() }))
 })
 
 afterEach(() => {
@@ -339,7 +485,7 @@ describe('when nobody is signed in', () => {
     await screen.findByRole('button', { name: /^sign in$/i })
 
     expect(api.currentSession).toHaveBeenCalled()
-    expect(api.currentHousehold).not.toHaveBeenCalled()
+    expect(api.listHouseholds).not.toHaveBeenCalled()
     expect(api.listMembers).not.toHaveBeenCalled()
   })
 
@@ -366,7 +512,7 @@ describe('when nobody is signed in', () => {
     // refuse it, and the refusal would have been reported over the top of a
     // signup that succeeded. This is why the signup does not go through
     // `mutate`.
-    expect(api.currentHousehold).not.toHaveBeenCalled()
+    expect(api.listHouseholds).not.toHaveBeenCalled()
     // Back on the sign-in form, which is where the confirmed person goes next.
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
   })
@@ -414,7 +560,7 @@ describe('when nobody is signed in', () => {
     // Sign out — and no signup, because calling `signUp` again for an address
     // that now exists is the dead end #62 found.
     api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
-    api.currentHousehold.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
     api.currentUserId.mockResolvedValue('person-a')
     await renderApp()
     await screen.findByRole('button', { name: /create household/i })
@@ -436,11 +582,11 @@ describe('when nobody is signed in', () => {
     api.currentSession.mockResolvedValue(null)
     api.signIn.mockImplementation(async () => {
       api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
-      api.currentHousehold.mockResolvedValue({
+      api.listHouseholds.mockResolvedValue([{
         id: 'h1',
         name: 'Placeholder Household',
         timezone: 'America/New_York',
-      })
+      }])
       api.listMembers.mockResolvedValue([
         { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
       ])
@@ -478,7 +624,7 @@ describe('#304 — Continue with Google, from the sign-in screen', () => {
     // is leaving for Google, and a refresh here would be refused by 0017 and
     // painted over a sign-in that is working.
     expect(api.signIn).not.toHaveBeenCalled()
-    expect(api.currentHousehold).not.toHaveBeenCalled()
+    expect(api.listHouseholds).not.toHaveBeenCalled()
   })
 
   it('AC 3: a Google account matching nobody lands signed in with no household, and nothing is minted', async () => {
@@ -491,7 +637,7 @@ describe('#304 — Continue with Google, from the sign-in screen', () => {
       user: { id: 'google-person', app_metadata: { provider: 'google', providers: ['google'] } },
     })
     api.currentUserId.mockResolvedValue('google-person')
-    api.currentHousehold.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
     api.listMembers.mockResolvedValue([])
     await renderApp()
 
@@ -515,7 +661,7 @@ describe('when the signed-in person belongs to a household', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([
       { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
     ])
@@ -535,7 +681,18 @@ describe('when the signed-in person belongs to a household', () => {
     await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(inRoster().getByText('Placeholder One')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /create household/i })).not.toBeInTheDocument()
+    // #166 re-aimed this assertion, and the reason is worth keeping. It read
+    // `queryByRole('button', { name: /create household/i })` — using the
+    // onboarding form's BUTTON LABEL as the way to say "the onboarding screen
+    // is not showing". That worked while the label was unique to that screen,
+    // and #166 puts a second control with the same words on the roster, where
+    // it legitimately belongs. Loosening the query or dropping the assertion
+    // would both have been wrong: the property this test is about — a joined
+    // person does not see the onboarding screen — is still exactly right and
+    // still worth guarding. So it now names that screen by its own identity
+    // (`signed-in-note` is rendered only by Onboarding's household card),
+    // which no other surface can produce.
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
   })
 
   // #291 — the SCOPE reaches the data layer, from the control a person presses.
@@ -570,14 +727,58 @@ describe('when the signed-in person belongs to a household', () => {
   // AC 3: the roster is read from the server on load. If it were cached
   // locally, a passing "survives a restart" check would be indistinguishable
   // from a device that merely remembered.
-  it('reads the household from the server on every load, not from storage', async () => {
+  //
+  // #165 AC 4 REWROTE this test, and the rewrite is the criterion. It used to
+  // assert that `taskr.household` and `taskr.members` were both absent from
+  // storage — two specific KEYS — under a name claiming the app reads "not from
+  // storage" at all. #165 makes that name false in the letter and leaves it
+  // true in the substance: this device now remembers WHICH household was
+  // chosen, and remembers nothing else.
+  //
+  // The cheap move was to leave the assertions alone. They would have gone on
+  // passing, because #165's key is neither of the two they name — and the test
+  // would then have been green while its own title described a property the app
+  // no longer had. That is the move the criterion forbids by name, so the test
+  // is rewritten to the property that SURVIVES: the household row and the
+  // roster are never cached, and the only thing on this device is a pointer.
+  //
+  // #165 AC 5 pins what must not be lost in the rewrite — that the two reads
+  // actually happened on this load. The criterion names `api.currentHousehold`;
+  // #164 replaced it with `api.listHouseholds`, which is the same read under
+  // the name it now has.
+  it('reads the household and roster from the server on every load, caching neither', async () => {
     await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
-    expect(api.currentHousehold).toHaveBeenCalled()
+    // AC 5 — the guarantee this test has always existed for.
+    expect(api.listHouseholds).toHaveBeenCalled()
     expect(api.listMembers).toHaveBeenCalled()
-    expect(window.localStorage.getItem('taskr.household')).toBeNull()
-    expect(window.localStorage.getItem('taskr.members')).toBeNull()
+
+    // The property that survives, asserted over EVERYTHING this device stored
+    // rather than over two names it might have used. A future story that cached
+    // the roster under a third key would pass the old assertions and fails
+    // these.
+    const stored = Object.fromEntries(
+      Object.keys(window.localStorage).map((k) => [k, window.localStorage.getItem(k)]),
+    )
+    expect(stored['taskr.household']).toBeUndefined()
+    expect(stored['taskr.members']).toBeUndefined()
+    // Nothing anywhere in storage carries the household's name or a member's:
+    // a cache under any key is a cache.
+    const everything = Object.values(stored).join(' ')
+    expect(everything).not.toContain('Placeholder Household')
+    expect(everything).not.toContain('Placeholder One')
+  })
+
+  // #165 AC 1's other half, and the reason the test above can be honest about
+  // "only the CHOICE is stored": a person who has never switched household has
+  // never made a choice, so this device stores nothing at all. Nothing writes
+  // on a plain load — which is also what keeps #210's "a reload starts clean"
+  // reading `localStorage.length === 0`.
+  it('stores nothing at all for somebody who has never chosen a household', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(window.localStorage.length).toBe(0)
   })
 
   // #159 AC 1 / AC 4 - WHICH household App names, not merely that it read.
@@ -625,6 +826,59 @@ describe('when the signed-in person belongs to a household', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /refresh/i })))
 
     await waitFor(() => expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore))
+  })
+
+  // -------------------------------------------------------------------------
+  // #163 — the household is NAMED in the shell, above the tabs, on every
+  // surface. The roster card already carried the name on the Who tab; the
+  // claim here is the shell's, so every query below is scoped to the shell's
+  // own element rather than to "the name appears somewhere", which the Who
+  // tab would satisfy with the shell element deleted.
+  // -------------------------------------------------------------------------
+
+  const shellName = () => screen.getByText(household.name, { selector: '.shell__household' })
+
+  it('names the household above the tabs on every surface (#163 AC 1, AC 7)', async () => {
+    await renderApp()
+    // The default surface first — the one with NO roster card, so this is the
+    // assertion that reddens when the shell element is removed and nothing
+    // else on the page happens to say the name.
+    const nav = screen.getByRole('navigation', { name: /household surfaces/i })
+    const above = () =>
+      Boolean(shellName().compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(above(), 'the name is not above the tab strip on the split').toBe(true)
+
+    for (const surface of ['Chores', 'Who', 'Done', 'Shop']) {
+      await act(async () => void fireEvent.click(screen.getByRole('button', { name: surface })))
+      expect(above(), `the name is not above the tab strip on ${surface}`).toBe(true)
+    }
+  })
+
+  it('reads as information, not as a control to pick another household (#163 AC 4)', async () => {
+    await renderApp()
+    const name = shellName()
+    expect(name.tagName).toBe('P')
+    expect(name.closest('button, a, [role="button"], [role="combobox"], select')).toBeNull()
+    expect(screen.queryByRole('button', { name: household.name })).not.toBeInTheDocument()
+  })
+
+  it('shows the edited name after the roster re-reads, with no reload (#163 AC 5)', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(shellName()).toBeInTheDocument()
+
+    // The organizer renamed it on another device; the next read returns the
+    // new row. The shell must follow the re-read that every write already
+    // triggers — the same refresh() path — rather than remembering the name
+    // it booted with.
+    const renamed = { ...household, name: 'Placeholder Household Renamed' }
+    api.listHouseholds.mockResolvedValue([renamed])
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /refresh/i })))
+
+    expect(
+      await screen.findByText(renamed.name, { selector: '.shell__household' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(household.name, { selector: '.shell__household' })).not.toBeInTheDocument()
   })
 })
 
@@ -693,7 +947,7 @@ describe('#160 — identity and organizer within the active household', () => {
   })
 
   it('AC 5 / AC 3 positive: with their organized household active, the organizer-only controls are offered', async () => {
-    api.currentHousehold.mockResolvedValue(householdA)
+    api.listHouseholds.mockResolvedValue([householdA])
     await renderApp('Who')
 
     expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
@@ -702,7 +956,7 @@ describe('#160 — identity and organizer within the active household', () => {
   })
 
   it('AC 4 / AC 3 negative: a plain member of the active household gets no organizer-only control on any row', async () => {
-    api.currentHousehold.mockResolvedValue(householdB)
+    api.listHouseholds.mockResolvedValue([householdB])
     await renderApp('Who')
     await screen.findByRole('region', { name: /who is in the household/i })
 
@@ -726,7 +980,7 @@ describe('#160 — identity and organizer within the active household', () => {
     // this must redden (AC 7): unscoped, `me` becomes m-b2, `isOrganizer` goes
     // false, and both assertions below fail.
     api.listMembers.mockImplementation(async () => [...rosterB, ...rosterA])
-    api.currentHousehold.mockResolvedValue(householdA)
+    api.listHouseholds.mockResolvedValue([householdA])
     await renderApp('Who')
 
     expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
@@ -735,7 +989,7 @@ describe('#160 — identity and organizer within the active household', () => {
   })
 
   it('AC 3: the household on screen and the identity come from the SAME read', async () => {
-    // currentHousehold answers A, then B, then A… — the two-household coin
+    // The households read answers A, then B, then A… — the two-household coin
     // toss #159 removed from the data layer, made deterministic. Every refresh
     // (boot, and arriving on Who re-reads) must derive the household state AND
     // the roster scope from its OWN single read: a refresh that drew them from
@@ -743,7 +997,7 @@ describe('#160 — identity and organizer within the active household', () => {
     // resolves to nobody, and the badge below has no row to land on (AC 7's
     // second mutation).
     let calls = 0
-    api.currentHousehold.mockImplementation(async () => (++calls % 2 ? householdA : householdB))
+    api.listHouseholds.mockImplementation(async () => [++calls % 2 ? householdA : householdB])
     await renderApp('Who')
 
     // Which household won depends only on how many refreshes ran, so read it
@@ -776,7 +1030,7 @@ describe('#247 — a removal that succeeds while its auth half does not', () => 
       'NOT deleted: This function is not configured. That account can still ' +
       'sign in until it is deleted.'
     let removed = false
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
     api.removeMember.mockImplementation(async () => {
       removed = true
@@ -806,7 +1060,7 @@ describe('#247 — a removal that succeeds while its auth half does not', () => 
     // shows every removal as a warning — the state most removals end in is
     // silence, and silence has to be shown reachable.
     let removed = false
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockImplementation(async () => (removed ? [me] : [me, target]))
     api.removeMember.mockImplementation(async () => {
       removed = true
@@ -856,7 +1110,7 @@ describe('chores — the write path and the re-read', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([])
     choresApi.listChores.mockResolvedValue([chore])
   })
@@ -1067,7 +1321,7 @@ describe('moving between surfaces — #47 criterion 11', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([
       { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
       { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 60 },
@@ -1183,7 +1437,7 @@ describe('moving between surfaces — #47 criterion 11', () => {
     expect(screen.getByRole('region', { name: /the split/i })).toBeInTheDocument()
   })
 
-  it('marks the surface you are on, so the tabs are not four identical buttons', async () => {
+  it('marks the surface you are on, so the tabs are not five identical buttons', async () => {
     await renderApp()
     expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
@@ -1196,6 +1450,38 @@ describe('moving between surfaces — #47 criterion 11', () => {
     await tab('Done')
     expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Who' })).not.toHaveAttribute('aria-current')
+
+    // #353 — and the fifth.
+    await tab('Shop')
+    expect(screen.getByRole('button', { name: 'Shop' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Done' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('#353 AC 2: arriving on Shop re-reads everything, and the shopping read names the household on screen AFTER the roster read', async () => {
+    await renderApp()
+    const before = {
+      members: api.listMembers.mock.calls.length,
+      chores: choresApi.listChores.mock.calls.length,
+      capacity: capacityApi.listCapacity.mock.calls.length,
+      shopping: shoppingApi.readShopping.mock.calls.length,
+    }
+
+    await tab('Shop')
+
+    expect(screen.getByRole('region', { name: 'Shop' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /the split/i })).not.toBeInTheDocument()
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(before.members)
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(before.chores)
+    expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(before.capacity)
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(before.shopping)
+    // WHICH household — #159's rule — and the client App was handed. The
+    // three reads inside are shopping.io.test.js's; what only this level can
+    // see is that App named `found.id` and nothing else.
+    expect(shoppingApi.readShopping).toHaveBeenLastCalledWith(SHOPPING_CLIENT, household.id)
+    // After the roster read of the same refresh, the order the issue names.
+    const rosterOrder = api.listMembers.mock.invocationCallOrder.at(-1)
+    const shoppingOrder = shoppingApi.readShopping.mock.invocationCallOrder.at(-1)
+    expect(shoppingOrder).toBeGreaterThan(rosterOrder)
   })
 
   it('#302 AC 4: arriving on Done re-reads everything, as every other tab does', async () => {
@@ -1257,9 +1543,634 @@ describe('moving between surfaces — #47 criterion 11', () => {
 
   it('offers no surfaces at all until there is a household to look at', async () => {
     // A tab strip above the sign-in screen is three buttons that lead nowhere.
-    api.currentHousehold.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
     await renderApp()
     expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #353 — the Shop tab: the write path, the re-read, and WHICH household.
+//
+// What the surface DRAWS is Shopping.test.jsx's. These cover what only App can
+// answer: that the create, add and remove go through the data layer and are
+// followed by a re-read; that a refused write reaches the strip and patches
+// nothing; and that the household on screen is the one the read names.
+// ---------------------------------------------------------------------------
+describe('#353 — the Shop tab, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+  }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const emptyList = { lists: [list], runs: [run], items: [] }
+  const withMilk = { lists: [list], runs: [run], items: [milk] }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+
+  it('AC 3: with no list, opening the tab writes nothing; Create goes through createList in the household on screen, then re-reads', async () => {
+    await renderApp('Shop')
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Groceries')
+    expect(shoppingApi.createList).not.toHaveBeenCalled()
+
+    // The next read returns the list the tap made, with its empty open run.
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/create list/i)
+
+    expect(shoppingApi.createList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.createList).toHaveBeenCalledWith(SHOPPING_CLIENT, household.id, 'Groceries')
+    // Written, then re-read — the full refresh, not a patch from the answer.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.createList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(1)
+    // And the screen is what the re-read said: the list, empty, above its form.
+    expect(screen.queryByLabelText(/^list name$/i)).not.toBeInTheDocument()
+    const empty = within(shop()).getByText(/nothing to buy yet/i)
+    const form = screen.getByLabelText(/^item$/i).closest('form')
+    expect(empty.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('AC 4: adding an item goes through addItem with the run, the name and null for an omitted note, re-reads, clears the form, and names the adder from the roster', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    expect(shoppingApi.addItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.addItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r1', 'Milk', null)
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.addItem.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    // The item is on screen from the RE-READ (its adder is m2, which the form
+    // never knew), the form is clear, and the adder is the roster's word.
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('added by Robin')
+    expect(screen.getByLabelText(/^item$/i)).toHaveValue('')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: an empty item name is refused with a sentence before any call', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/add item/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/name is required/i)
+    expect(shoppingApi.addItem).not.toHaveBeenCalled()
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('AC 5: Remove goes through removeItem with the item, then re-reads, and the item is gone', async () => {
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    await renderApp('Shop')
+    expect(within(shop()).getByText('Milk')).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/remove milk/i)
+
+    expect(shoppingApi.removeItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.removeItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(within(shop()).queryByText('Milk')).not.toBeInTheDocument()
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('AC 5: bought on another phone between render and tap — the delete affects nothing, the re-read shows it bought, and no error is shown', async () => {
+    shoppingApi.readShopping.mockResolvedValue(withMilk)
+    await renderApp('Shop')
+    expect(within(shop()).getByRole('button', { name: /remove milk/i })).toBeInTheDocument()
+
+    // The policy admits only an unbought item, so the delete resolves having
+    // touched zero rows — which is what a resolved `removeItem` IS here — and
+    // the re-read returns the row with the other phone's stamp on it.
+    shoppingApi.readShopping.mockResolvedValue({
+      ...withMilk,
+      items: [{ ...milk, purchased_at: '2026-09-05T02:00:00Z', purchased_by_member_id: 'm1' }],
+    })
+    await tab(/remove milk/i)
+
+    expect(shoppingApi.removeItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent(/bought/)
+    expect(within(row).queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 6: a refused add reaches the strip outside the list, and nothing local is patched', async () => {
+    shoppingApi.readShopping.mockResolvedValue(emptyList)
+    await renderApp('Shop')
+    shoppingApi.addItem.mockRejectedValue(new Error('adding the item: run already closed'))
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('adding the item: run already closed')
+    expect(alert.closest('ul, li, form')).toBeNull()
+    // No re-read followed a failed write, the item is not on the list, and the
+    // form still holds what was typed — the two-arm handler patched nothing.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(within(shop()).queryByRole('listitem')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^item$/i)).toHaveValue('Milk')
+    expect(within(shop()).getByText(/nothing to buy yet/i)).toBeInTheDocument()
+  })
+
+  it('AC 7: with the seeded person in two households, the Shop tab shows only the ACTIVE household’s lists and items', async () => {
+    // The #160 fixture shape: person-a holds a member row in both, and each
+    // household has its own list with its own item. The fake scopes by the
+    // household id it is handed — so an App that named the wrong household,
+    // or none, draws the wrong list or nothing.
+    const householdA = { id: 'household-a', name: 'Placeholder Household', timezone: 'America/New_York' }
+    const householdB = { id: 'household-b', name: 'Placeholder Other Household', timezone: 'America/New_York' }
+    const shopA = {
+      lists: [{ ...list, id: 'la', household_id: 'household-a', name: 'Groceries' }],
+      runs: [{ ...run, id: 'ra', list_id: 'la', household_id: 'household-a' }],
+      items: [{ ...milk, id: 'ia', run_id: 'ra', household_id: 'household-a', name: 'Milk' }],
+    }
+    const shopB = {
+      lists: [{ ...list, id: 'lb', household_id: 'household-b', name: 'Hardware' }],
+      runs: [{ ...run, id: 'rb', list_id: 'lb', household_id: 'household-b' }],
+      items: [{ ...milk, id: 'ib', run_id: 'rb', household_id: 'household-b', name: 'Bread' }],
+    }
+    api.listMembers.mockImplementation(async (id) =>
+      id === householdA.id
+        ? [{ id: 'm-a1', household_id: 'household-a', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }]
+        : id === householdB.id
+          ? [{ id: 'm-b1', household_id: 'household-b', display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' }]
+          : [],
+    )
+    shoppingApi.readShopping.mockImplementation(async (_client, id) =>
+      id === householdA.id ? shopA : id === householdB.id ? shopB : EMPTY_SHOPPING,
+    )
+
+    api.listHouseholds.mockResolvedValue([householdA])
+    await renderApp('Shop')
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    expect(within(shop()).getByText('Milk')).toBeInTheDocument()
+    expect(within(shop()).queryByText('Bread')).not.toBeInTheDocument()
+    expect(within(shop()).queryByText('Hardware')).not.toBeInTheDocument()
+
+    // The active household changes; the next re-read (arriving on the tab
+    // again) must draw B's list and nothing of A's.
+    api.listHouseholds.mockResolvedValue([householdB])
+    await tab('Shop')
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Hardware')
+    expect(within(shop()).getByText('Bread')).toBeInTheDocument()
+    expect(within(shop()).queryByText('Milk')).not.toBeInTheDocument()
+    expect(within(shop()).queryByText('Groceries')).not.toBeInTheDocument()
+    expect(shoppingApi.readShopping).toHaveBeenLastCalledWith(SHOPPING_CLIENT, householdB.id)
+  })
+
+  it('AC 8 (#35 AC 9): nothing on the surface counts, ranks or scores who added what', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      ...withMilk,
+      items: [milk, { ...milk, id: 'i2', name: 'Eggs' }, { ...milk, id: 'i3', name: 'Bread', added_by_member_id: 'm1' }],
+    })
+    await renderApp('Shop')
+    const text = shop().textContent
+    expect(text).not.toMatch(/streak|rank|score|points|leaderboard|best|winner|most/i)
+    expect(text).not.toMatch(/\b\d+\s+(items?|added|by)\b/i)
+    expect(shop()).not.toHaveTextContent(/m1|m2/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #355 — the tick, from App: which RPC, with which item, and what the screen
+// does with the answer.
+//
+// This is the story's own re-read decision made visible. Every other write on
+// this surface goes through `mutate()` and re-reads everything; the tick does
+// not, because #351 measured that route at 6.5 s on Slow 4G against a 1 s bar.
+// So the assertions here are in two halves: the happy path must NOT re-read
+// (one round trip, the RPC's own row) and the refusal path MUST (the one
+// moment this phone knows its picture is stale).
+// ---------------------------------------------------------------------------
+describe('#355 — the tick, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const eggs = { ...milk, id: 'i2', name: 'Eggs', added_at: '2026-09-05T02:00:00Z' }
+  /** What `purchase_shopping_item` returns: the same row, stamped. */
+  const milkBought = {
+    ...milk,
+    purchased_at: '2026-09-05T05:00:00Z',
+    purchased_by_member_id: 'm1',
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue({ lists: [list], runs: [run], items: [milk, eggs] })
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const rowNames = () =>
+    Array.from(shop().querySelectorAll('.shopping-item__name')).map((node) => node.textContent)
+
+  it('AC 8 + AC 9: a tick sends purchaseItem with THAT item id, and the RPC’s own row is the re-read — one round trip, no readShopping', async () => {
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    shoppingApi.purchaseItem.mockResolvedValue(milkBought)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    const rosterReadsBefore = api.listMembers.mock.calls.length
+
+    await tab(/mark milk bought/i)
+
+    // The RPC, named, with the item — not the run, not the first row on screen.
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    // ONE round trip. The owner's decision at this story's pickup: a full
+    // refresh per tick measured 6.5 s at Slow 4G against a 1 s bar.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(api.listMembers.mock.calls.length).toBe(rosterReadsBefore)
+    // And the screen is what the RPC answered: the row sank below Eggs and
+    // carries the stamp the SERVER wrote (m1, 05:00 UTC → 1:00 AM in New York),
+    // neither of which this phone knew before the call.
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('bought by Placeholder · 1:00 AM')
+    expect(row).toHaveClass('shopping-item--bought')
+    expect(within(shop()).getByText('1 left to buy')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 8 + AC 4: untick sends unpurchaseItem with that item, and the cleared row it returns goes back into added order', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [run],
+      items: [milkBought, eggs],
+    })
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    shoppingApi.unpurchaseItem.mockResolvedValue(milk)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    const boughtRow = within(shop()).getByText('Milk').closest('li')
+    await act(async () =>
+      void fireEvent.click(within(boughtRow).getByRole('button', { name: /not bought after all/i })),
+    )
+
+    expect(shoppingApi.unpurchaseItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.unpurchaseItem).toHaveBeenCalledWith(SHOPPING_CLIENT, 'i1')
+    expect(shoppingApi.purchaseItem).not.toHaveBeenCalled()
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    // Milk was added before Eggs, so it goes back ABOVE it, and the stamp is
+    // gone because the row the server returned has no stamp on it.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    expect(within(shop()).getByText('Milk').closest('li')).not.toHaveTextContent(/bought by/)
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+  })
+
+  it('AC 8: another phone got there first — the refusal reaches the strip OUTSIDE the list, and the full re-read shows their stamp with the row in the bought half', async () => {
+    await renderApp('Shop')
+    shoppingApi.purchaseItem.mockRejectedValue(
+      new Error('marking it bought: item already bought'),
+    )
+    // What the full re-read returns: the OTHER phone's stamp (m2, Robin), which
+    // this phone could not have invented from its own tap.
+    const theirs = { ...milk, purchased_at: '2026-09-05T04:30:00Z', purchased_by_member_id: 'm2' }
+    shoppingApi.readShopping.mockResolvedValue({ lists: [list], runs: [run], items: [theirs, eggs] })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/mark milk bought/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('marking it bought: item already bought')
+    expect(alert.closest('ul, li')).toBeNull()
+    // The refusal is the one moment the picture is known to be stale, so THIS
+    // path re-reads everything — the opposite of the happy path above.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    const row = within(shop()).getByText('Milk').closest('li')
+    expect(row).toHaveTextContent('bought by Robin · 12:30 AM')
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+    // The refusal's own sentence is still what is on screen after the re-read.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('item already bought')
+  })
+
+  it('AC 7: a second tap while the first tick is in flight sends nothing', async () => {
+    await renderApp('Shop')
+    let finish
+    shoppingApi.purchaseItem.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+
+    await tab(/mark milk bought/i)
+    // In flight: every control on the surface is disabled, which is what makes
+    // the second tap impossible rather than merely unlikely.
+    expect(screen.getByRole('button', { name: /mark eggs bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /remove milk/i })).toBeDisabled()
+    await tab(/mark eggs bought/i)
+    expect(shoppingApi.purchaseItem).toHaveBeenCalledTimes(1)
+
+    await act(async () => finish(milkBought))
+    expect(screen.getByRole('button', { name: /mark eggs bought/i })).not.toBeDisabled()
+    expect(rowNames()).toEqual(['Eggs', 'Milk'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #357 — finishing the run, from App: which RPC with which argument, that it
+// goes through `mutate()` (unlike the tick above), and what the screen shows
+// after the re-read.
+//
+// The confirm itself is Shopping.test.jsx's. What only this level can answer is
+// that the write is followed by a FULL re-read and that the screen is then the
+// server's answer — a DIFFERENT run, carrying the items that were not bought —
+// rather than anything this phone patched. The refusal half is the mirror: the
+// one rejection `0033` is built to raise means another phone finished first, so
+// the picture is stale and this path re-reads too.
+// ---------------------------------------------------------------------------
+describe('#357 — finishing a run, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const list = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const run = {
+    id: 'r1',
+    list_id: 'l1',
+    household_id: 'h1',
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  }
+  const milk = {
+    id: 'i1',
+    run_id: 'r1',
+    household_id: 'h1',
+    name: 'Milk',
+    note: null,
+    added_by_member_id: 'm2',
+    added_at: '2026-09-05T01:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  }
+  const eggs = { ...milk, id: 'i2', name: 'Eggs', added_at: '2026-09-05T02:00:00Z' }
+  /** Bought on this trip, so it stays on the run being closed. */
+  const boughtBread = {
+    ...milk,
+    id: 'i3',
+    name: 'Bread',
+    added_at: '2026-09-05T03:00:00Z',
+    purchased_at: '2026-09-05T04:00:00Z',
+    purchased_by_member_id: 'm1',
+  }
+
+  /** What `finish_shopping_run` returns and opens: the list's NEXT run. */
+  const nextRun = { ...run, id: 'r2', opened_at: '2026-09-05T06:00:00Z' }
+  /**
+   * What the re-read then finds on it — `0033`'s copies. New ids, the
+   * ORIGINAL's adder and `added_at` (which is why they are at the top), the
+   * purchase columns null, and `carried_from_item_id` pointing back.
+   */
+  const carriedMilk = { ...milk, id: 'i4', run_id: 'r2', carried_from_item_id: 'i1' }
+  const carriedEggs = { ...eggs, id: 'i5', run_id: 'r2', carried_from_item_id: 'i2' }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [run],
+      items: [milk, eggs, boughtBread],
+    })
+  })
+
+  const tab = (name) =>
+    act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const rowNames = () =>
+    Array.from(shop().querySelectorAll('.shopping-item__name')).map((node) => node.textContent)
+
+  /** Open the confirm and take the confirming tap. */
+  const finishTheRun = async () => {
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+  }
+
+  it('AC 1: the first tap calls no RPC at all — the io fake records zero calls', async () => {
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/done shopping/i)
+
+    expect(shoppingApi.finishRun).not.toHaveBeenCalled()
+    // Not the read either: a question is not a round trip.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(within(shop()).getByText(/2 items not bought will carry over/)).toBeInTheDocument()
+  })
+
+  it('AC 3: the confirming tap sends finishRun with the run on screen, once, then re-reads — and the screen is the NEW run', async () => {
+    await renderApp('Shop')
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Bread'])
+    shoppingApi.finishRun.mockResolvedValue(nextRun)
+    // The re-read the server's answer produces: the next run, holding only the
+    // two that were not bought.
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [nextRun],
+      items: [carriedMilk, carriedEggs],
+    })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+    // The RUN, and the client — never the list id, which is what a second
+    // phone resolving afresh would have closed.
+    expect(shoppingApi.finishRun).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r1')
+    // Through mutate(): written, THEN re-read. Unlike the tick, which does not.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.finishRun.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+
+    // The two unbought items carried, on top, unpurchased and marked; the
+    // bought one is gone with the run it was bought on. #359 is where that run
+    // becomes readable again — this tab does not fetch it.
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    for (const name of ['Milk', 'Eggs']) {
+      const row = within(shop()).getByText(name).closest('li')
+      expect(row).toHaveTextContent('from last run')
+      expect(row).not.toHaveClass('shopping-item--bought')
+      expect(row).not.toHaveTextContent(/bought by/)
+    }
+    expect(within(shop()).queryByText('Bread')).not.toBeInTheDocument()
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // The confirm is gone with the run it was about, and the tab offers the
+    // next trip's control against the new run.
+    expect(screen.queryByText(/carry over to the next list/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /done shopping/i })).toBeInTheDocument()
+  })
+
+  it('AC 5: another phone finished first — the refusal reaches the strip OUTSIDE the list, and the re-read shows THEIR run', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(
+      new Error('finishing the run: run already closed'),
+    )
+    // What the re-read finds: the run the OTHER phone opened, with the items
+    // it carried — neither of which this phone could have invented.
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [list],
+      runs: [nextRun],
+      items: [carriedMilk, carriedEggs],
+    })
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('finishing the run: run already closed')
+    // Outside the list, like every other refused write on this surface.
+    expect(alert.closest('ul, li')).toBeNull()
+    // `mutate()` does not re-read after a failure; this path does, because a
+    // refusal here means the run on screen no longer exists.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(rowNames()).toEqual(['Milk', 'Eggs'])
+    expect(within(shop()).getByText('Milk').closest('li')).toHaveTextContent('from last run')
+    // The refusal's own sentence is still what is on screen after the re-read.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('run already closed')
+  })
+
+  it('AC 5: any other rejection leaves the run open with its items intact, and patches nothing', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(new Error('finishing the run: not authenticated'))
+    // The server state did not move, so the re-read returns what was there.
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await finishTheRun()
+
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('not authenticated')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Same run, same three rows, same order, and the bought one still bought.
+    expect(rowNames()).toEqual(['Milk', 'Eggs', 'Bread'])
+    expect(within(shop()).getByText('Bread').closest('li')).toHaveClass('shopping-item--bought')
+    expect(within(shop()).getByText('2 left to buy')).toBeInTheDocument()
+    // Nothing was marked as carried: a client that patched a finish locally
+    // would have had to invent the copies.
+    expect(shop()).not.toHaveTextContent(/from last run/)
+  })
+
+  it('AC 5: a re-read that itself fails leaves the refusal on screen rather than replacing it', async () => {
+    await renderApp('Shop')
+    shoppingApi.finishRun.mockRejectedValue(
+      new Error('finishing the run: run already closed'),
+    )
+    shoppingApi.readShopping.mockRejectedValue(new Error('loading shopping lists: network down'))
+
+    await finishTheRun()
+
+    // The refusal explains what happened; a complaint about a read the person
+    // did not ask for would replace the answer with a symptom.
+    expect(within(shop()).getByRole('alert')).toHaveTextContent('run already closed')
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument()
+  })
+
+  it('AC 1 + AC 7: every control on the surface is disabled while the finish is in flight', async () => {
+    await renderApp('Shop')
+    let settle
+    shoppingApi.finishRun.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve
+      }),
+    )
+
+    await finishTheRun()
+    expect(screen.getByRole('button', { name: /mark milk bought/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^finish$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /keep shopping/i })).toBeDisabled()
+    // A second confirming tap while the first is in flight sends nothing.
+    await tab(/^finish$/i)
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+
+    await act(async () => settle(nextRun))
   })
 })
 
@@ -1272,7 +2183,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([
       { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'device-a' },
     ])
@@ -1532,7 +2443,7 @@ describe('capacity — this week, set by hand (#46)', () => {
   })
 
   it('#49 AC 7: the stored verdict reaches the split surface from the household row', async () => {
-    api.currentHousehold.mockResolvedValue({
+    api.listHouseholds.mockResolvedValue([{
       ...household,
       last_rebalance: {
         contested: true,
@@ -1544,7 +2455,7 @@ describe('capacity — this week, set by hand (#46)', () => {
         changeBudgetMinutes: 120,
         applied_at: '2026-08-27T12:00:00Z',
       },
-    })
+    }])
     await renderApp()
     await screen.findByRole('region', { name: /the split/i })
 
@@ -1618,7 +2529,7 @@ describe('#50 — a re-balance is announced as an event', () => {
     })
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue(members)
     choresApi.listChores.mockResolvedValue(chores)
   })
@@ -1721,7 +2632,7 @@ describe('#59 — the fairness note is dismissed per member, on the server', () 
   })
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue(members)
   })
 
@@ -1792,7 +2703,7 @@ describe('exclusions — the write path and the re-read (#37)', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue(members)
     choresApi.listChores.mockResolvedValue([chore])
   })
@@ -1905,7 +2816,7 @@ describe('exclusions — the write path and the re-read (#37)', () => {
   })
 
   it('reads nothing when there is no household, rather than asking for another one’s rows', async () => {
-    api.currentHousehold.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
     await renderApp()
     await screen.findByRole('region', { name: /start a household/i })
     expect(exclusionsApi.listExclusions).not.toHaveBeenCalled()
@@ -1966,7 +2877,7 @@ describe('connecting a calendar (#95)', () => {
   beforeEach(() => {
     realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
     realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([me])
     globalThis.sessionStorage?.clear?.()
     atUrl('')
@@ -2189,7 +3100,7 @@ describe('#53 — the boot-time catch-up pass', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([])
   })
 
@@ -2272,7 +3183,7 @@ describe('#12 — adjusting how long a chore took', () => {
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([])
     choresApi.listChores.mockResolvedValue([doneChore])
   })
@@ -2332,7 +3243,7 @@ describe('#284 — dealing out the work nobody has, from the split', () => {
   ]
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([
       { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 200, claimed_by: 'person-a' },
       { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 240 },
@@ -2457,11 +3368,18 @@ describe('calendar-suggested busy minutes (#96)', () => {
     period_start: WEEK,
     busy_minutes: 320,
     event_count: 6,
-    computed_at: '2026-09-08T14:00:00Z',
+    // Read NOW, not on a fixed date. This was '2026-09-08T14:00:00Z' until #98
+    // — a date in the future when written — and #98 makes a row older than
+    // twelve hours a TRIGGER, so on the evening of 2026-09-09 this fixture
+    // would have aged across the bound and turned "does NOT fetch when a row
+    // exists" into one call, on a diff that touched nothing. Every test in
+    // this block is about a row EXISTING; none is about its age, and a fresh
+    // timestamp is the only value that keeps it that way indefinitely.
+    computed_at: new Date().toISOString(),
   }
 
   beforeEach(() => {
-    api.currentHousehold.mockResolvedValue(household)
+    api.listHouseholds.mockResolvedValue([household])
     api.listMembers.mockResolvedValue([me, housemate])
     calendarApi.listCalendarConnections.mockResolvedValue([connection])
   })
@@ -2617,7 +3535,7 @@ describe('calendar-suggested busy minutes (#96)', () => {
   })
 
   it('asks for nothing at all when this device has joined no household', async () => {
-    api.currentHousehold.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
     await renderApp()
     await screen.findByRole('region', { name: /start a household/i })
     expect(calendarApi.listBusyWeeks).not.toHaveBeenCalled()
@@ -2639,7 +3557,7 @@ describe('calendar-suggested busy minutes (#96)', () => {
   // is the one thing that lets the suite disagree with the mocks' author.
   describe('with mocks that return fresh references, as the network does', () => {
     const fresh = () => {
-      api.currentHousehold.mockImplementation(async () => ({ ...household }))
+      api.listHouseholds.mockImplementation(async () => [{ ...household }])
       api.listMembers.mockImplementation(async () => [{ ...me }, { ...housemate }])
       calendarApi.listCalendarConnections.mockImplementation(async () => [{ ...connection }])
       calendarApi.listBusyWeeks.mockImplementation(async () => [])
@@ -2772,5 +3690,2946 @@ describe('calendar-suggested busy minutes (#96)', () => {
     await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
     expect(inRoster().queryByTestId('busy-complaint')).not.toBeInTheDocument()
     expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument()
+  })
+})
+
+// #98 — the busy figure refreshes itself on app open when it is stale. The
+// mirror of the #96 block above, and written to stay disjoint from it: that
+// block proves the fetch fires on NO row and never on a row; this one proves it
+// fires on a STALE row and never on a fresh one, on the APP opening rather than
+// the capacity screen, and once a session. `isBusyWeekStale` is real here — the
+// bound and its boundary are calendar.test.js's — so every row below is aged
+// against the actual clock rather than against a stubbed answer.
+describe('busy figure refreshes itself on app open (#98)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = {
+    id: 'c1',
+    member_id: 'm1',
+    scope: 'freebusy',
+    connected_at: '2026-08-24T00:00:00Z',
+  }
+  const HOUR = 60 * 60 * 1000
+  /** This week, by the app's own arithmetic in the household's zone. */
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  /** A derived row for `me`, read `msAgo` before now. */
+  const rowReadAgo = (msAgo, extra = {}) => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 320,
+    event_count: 6,
+    computed_at: new Date(Date.now() - msAgo).toISOString(),
+    ...extra,
+  })
+  // Thirteen hours and eleven — an hour either side of the twelve-hour bound,
+  // so a slow run cannot walk a fixture across it. The boundary itself is
+  // pinned with an injected clock in calendar.test.js, not sampled here.
+  const staleRow = (extra) => rowReadAgo(13 * HOUR, extra)
+  const freshRow = (extra) => rowReadAgo(11 * HOUR, extra)
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  it('AC 1: a row older than the bound is refreshed when the APP opens — on the split, before any tab', async () => {
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp()
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    const [call] = calendarApi.fetchBusyWeek.mock.calls
+    expect(call[0]).toEqual({ householdId: 'h1', periodStart: week() })
+    // The capacity screen was never opened, so #96's trigger — which keys on
+    // that screen — cannot have been the caller. "When the app opens" is the
+    // whole of this criterion's clause, and the split is where the app opens.
+    expect(
+      screen.queryByRole('region', { name: /who is in the household/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('AC 2: a row fresher than the bound is left alone, across repeated opens', async () => {
+    // The rate bound, as the criterion asks for it: three opens, zero calls.
+    // Each open is a fresh mount — a phone opening the app three times in a
+    // morning — and each one draws the figure it already has.
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow()])
+    for (let open = 0; open < 3; open += 1) {
+      await renderApp('Who')
+      await waitFor(() =>
+        expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+      )
+      cleanup()
+    }
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1/AC 2: the bound is the ROW’S age, so a row that never freshens costs one call per open and never a loop', async () => {
+    // The other half of the rate statement. A member whose Google keeps
+    // refusing keeps a stale row; each open asks once — bounded by the key —
+    // and a session never asks twice. Three opens, three calls, not thirty.
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    for (let open = 0; open < 3; open += 1) {
+      await renderApp()
+      await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(open + 1))
+      // Settle anything the mount left in flight before counting the next open.
+      await act(async () => {})
+      expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(open + 1)
+      cleanup()
+    }
+  })
+
+  it('AC 1: once a session — refreshes, tab switches and re-renders do not ask again', async () => {
+    // Fresh references throughout, as the network hands them back, so this is
+    // the version of the claim that can disagree with the mocks' author: the
+    // trigger keys on the timestamp as a VALUE, and a refresh that decodes the
+    // same row into a new object leaves it alone. The row stays stale on every
+    // re-read (the mock never freshens it), so nothing the effect decides by
+    // ever moves and this is one call BY CONSTRUCTION — the value-keyed
+    // dependency list is what it witnesses. The session KEY is witnessed
+    // separately, by the roster-change test at the end of this block, which is
+    // the one that makes a dependency move after a failure.
+    api.listHouseholds.mockImplementation(async () => [{ ...household }])
+    api.listMembers.mockImplementation(async () => [{ ...me }, { ...housemate }])
+    calendarApi.listCalendarConnections.mockImplementation(async () => [{ ...connection }])
+    const row = staleRow()
+    calendarApi.listBusyWeeks.mockImplementation(async () => [{ ...row }])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    }
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    // Exactly one, with the capacity screen open the whole time: #96's trigger
+    // saw a row and did nothing, which is the disjointness both stories claim.
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: does not refresh for a member who has connected nothing, however old the row', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+    )
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: does not refresh a HOUSEMATE’s stale row', async () => {
+    // Owner decision on #96, inherited: this device reads the signed-in
+    // member's own calendar. My row is fresh; the housemate's is a day old and
+    // is theirs to refresh when they open their own app.
+    calendarApi.listBusyWeeks.mockResolvedValue([
+      freshRow(),
+      staleRow({ id: 'b2', member_id: 'm2', busy_minutes: 90 }),
+    ])
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getAllByText(/calendar suggests:/i)).toHaveLength(2))
+    expect(calendarApi.fetchBusyWeek).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a refresh that lands while the capacity screen is open updates the figure in place', async () => {
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    // The stale figure is on screen and the refresh is in flight — started at
+    // boot, before the tab was pressed. Both refreshes goTo started have
+    // settled by now with the same stale row, so what lands next lands late.
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy'),
+    )
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(0, { busy_minutes: 400, event_count: 7 })])
+    await act(async () => finish({ ok: true }))
+    // No reload, no refresh button, no tab: the promise settled and the screen
+    // followed. The date beside it is the new read's.
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('400 min busy'),
+    )
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent(/· read /)
+    // And the fresh row did not re-arm the trigger: still one call.
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4: a refresh that fails leaves the stale figure and its date on screen, and interrupts nothing', async () => {
+    calendarApi.fetchBusyWeek.mockRejectedValue(
+      new Error('Could not reach Google. Try again in a moment.'),
+    )
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/),
+    )
+    // The figure the member had, with the date it was read — not zeroed, not
+    // cleared, not replaced by the sentence.
+    const figure = inRoster().getByText(/calendar suggests:/i)
+    expect(figure).toHaveTextContent('320 min busy')
+    expect(figure).toHaveTextContent(/· read /)
+    // "No error interrupts the session": nothing is in the app's error strip,
+    // no alert is on the page, and the manual path is there to use. The one
+    // sentence that appears is a polite status beside the figure, which is
+    // #96 AC 5's surface reused rather than a new one.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not reach the household/i)).not.toBeInTheDocument()
+    expect(
+      inRoster().getByRole('button', { name: /set this week for placeholder one/i }),
+    ).toBeEnabled()
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 4: a failed refresh is not asked again when the roster changes underneath it', async () => {
+    // The witness that reaches the session KEY rather than the dependency list.
+    // After a failure the row is unchanged, so no dependency moves and the
+    // effect is silent by construction — until something it decides by DOES
+    // move. A housemate joining changes the member set the re-read names; the
+    // effect re-runs, the row is still stale, and only the key stands between
+    // that and a second call for a week Google just refused.
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/),
+    )
+    api.listMembers.mockResolvedValue([
+      me,
+      housemate,
+      { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null },
+    ])
+    await act(async () => void fireEvent.click(inRoster().getByRole('button', { name: /^refresh$/i })))
+    await waitFor(() => expect(inRoster().getByText('Placeholder Three')).toBeInTheDocument())
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+    expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/)
+  })
+})
+
+// #106 — a refreshed suggestion applies itself within the bound. The DECISION
+// is capacity.autoApply.test.js's (the bound, the floor, the boundary), the
+// ROW is calendarAutoApply.pglite.test.js's and the MARK is Roster.test.jsx's.
+// What App owes is the wiring only it can prove: that the write happens at the
+// seam a landed read passes through, with the word and the previous figure,
+// against the override the SERVER holds rather than the one the screen had;
+// that the re-assignment and the re-read follow; that a refused decision
+// writes nothing and leaves "Use this" standing; and that the cause reaches
+// #50's statement. `autoApplyDecision` and `calendarSuggestion` are REAL here
+// (the capacity mock spreads the actual module), so a decision the pure suite
+// proves is the decision these tests exercise.
+describe('a refreshed suggestion applies itself within the bound (#106)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  // 300 usual. With a confirmed 100 standing, a read of 260 busy suggests 40:
+  // a move of 60, inside the bound. A read of 30 busy suggests 270: a move of
+  // 170, outside it. With NO row, a read of 90 busy suggests 210: a move of 90
+  // from the baseline, inside.
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 300,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+  const HOUR = 60 * 60 * 1000
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const rowReadAgo = (msAgo, busy) => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: busy,
+    event_count: 4,
+    computed_at: new Date(Date.now() - msAgo).toISOString(),
+  })
+  const staleRow = (busy = 200) => rowReadAgo(13 * HOUR, busy)
+  const freshRow = (busy) => rowReadAgo(0, busy)
+  const override = (minutes, source, previous = null) => ({
+    id: 'o1',
+    member_id: 'm1',
+    period_start: week(),
+    minutes,
+    note: null,
+    source,
+    previous_minutes: previous,
+    created_at: '2026-09-07T00:00:00Z',
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  /**
+   * Boot with a stale row so #98's refresh fires, hold the fetch, then let it
+   * land with `busy` — the #98 AC 3 shape. Returns once the fetch has settled
+   * and everything it started has too.
+   */
+  async function refreshLandsWith(busy, { surface } = {}) {
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp(surface)
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(busy)])
+    await act(async () => finish({ ok: true }))
+    await act(async () => {})
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+  })
+
+  it('AC 2: a refresh within the bound writes the week with source calendar_auto and the figure it replaced', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(260)
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: week(),
+      minutes: 40,
+      source: 'calendar_auto',
+      previousMinutes: 100,
+      householdId: 'h1',
+    })
+  })
+
+  it('AC 2: the write is followed by the same re-assignment a tap causes, then a re-read', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(260)
+    await waitFor(() => expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1' }))
+    // Ordered: the row lands, THEN the re-assignment reads it, THEN the screen
+    // re-reads what the re-assignment stored — a re-assignment before the
+    // write would divide by last week's figure. All three legs by CALL ORDER:
+    // the first draft compared the read count against a number captured
+    // before the render, which the boot's own read exceeded whatever happened
+    // after the write (review-fanout, 2026-09-08 — an assertion that could not
+    // fail on any mutation).
+    const setAt = capacityApi.setCapacity.mock.invocationCallOrder[0]
+    const reassignAt = reassignApi.reassignHousehold.mock.invocationCallOrder[0]
+    expect(setAt).toBeLessThan(reassignAt)
+    await waitFor(() =>
+      expect(api.listHouseholds.mock.invocationCallOrder.some((n) => n > reassignAt)).toBe(true),
+    )
+  })
+
+  it('AC 2: decides against the BASELINE the server holds too — a housemate’s edit during the round trip is the baseline used', async () => {
+    // No override. Booted at 300 usual; during the fetch a housemate saved the
+    // baseline as 200 on another device. The read lands at 120 busy: from the
+    // fresh 200 the suggestion is 80 (a move of 120, inside); from the stale
+    // 300 it would have been 180. The write must carry the fresh pair.
+    capacityApi.listCapacity.mockResolvedValue([])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow()])
+    await renderApp()
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    api.listMembers.mockResolvedValue([{ ...me, weekly_minutes: 200 }, housemate])
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(120)])
+    await act(async () => finish({ ok: true }))
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity.mock.calls[0][0]).toMatchObject({
+      minutes: 80,
+      previousMinutes: 200,
+      source: 'calendar_auto',
+    })
+  })
+
+  it('the trigger’s refusal (a person won the race) is quiet: no error strip, no re-assignment, a re-read', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    const refusal = new Error('saving this week’s capacity: an automatic calendar figure cannot replace a figure a person set (manual)')
+    refusal.cause = { code: 'TA106', message: 'refused' }
+    capacityApi.setCapacity.mockRejectedValue(refusal)
+    await refreshLandsWith(260)
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    const setAt = capacityApi.setCapacity.mock.invocationCallOrder[0]
+    await waitFor(() =>
+      expect(api.listHouseholds.mock.invocationCallOrder.some((n) => n > setAt)).toBe(true),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: decides against the override the SERVER holds, re-read at the moment the figure lands', async () => {
+    // The screen booted with a confirmed 100; a housemate typed 100 during
+    // the round trip. The re-read sees `manual`, and the floor refuses.
+    capacityApi.listCapacity.mockResolvedValueOnce([override(100, 'calendar')])
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'manual')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    // And the re-read was scoped to this member and this week.
+    const mine = capacityApi.listCapacity.mock.calls.filter(([, ids]) => ids.length === 1 && ids[0] === 'm1')
+    expect(mine.length).toBeGreaterThan(0)
+    expect(mine[0][0]).toBe(week())
+  })
+
+  it('AC 2: fires on #96’s FIRST read of a week too, from the baseline — the seam is shared', async () => {
+    // No row and no override: opening the roster asks (#96), the read lands
+    // at 90 busy, the baseline 300 becomes 210 — a move of 90, inside.
+    capacityApi.listCapacity.mockResolvedValue([])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(90)])
+    await act(async () => finish({ ok: true }))
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    expect(capacityApi.setCapacity.mock.calls[0][0]).toMatchObject({
+      minutes: 210,
+      source: 'calendar_auto',
+      previousMinutes: 300,
+    })
+  })
+
+  it('AC 3: a refresh outside the bound writes nothing, and the readout only proposes', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    await refreshLandsWith(30, { surface: 'Who' })
+    await waitFor(() =>
+      expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('30 min busy'),
+    )
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // Exactly as in the confirm story: the tap is there, and it is the way in.
+    expect(
+      inRoster().getByRole('button', { name: /use the calendar’s figure for placeholder one/i }),
+    ).toBeEnabled()
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 100 min')
+  })
+
+  it('the manual floor: a refresh within the bound over a TYPED week writes nothing', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'manual')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a refresh that confirms the figure already there writes nothing and re-assigns nothing', async () => {
+    // Confirmed at 40, the calendar still says 260 busy → 40. No row, no run,
+    // no event (#50 AC 8, inherited).
+    capacityApi.listCapacity.mockResolvedValue([override(40, 'calendar')])
+    await refreshLandsWith(260)
+    await act(async () => {})
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a failed refresh writes nothing — there is no new figure to apply', async () => {
+    // The stale row suggests 40 against a confirmed 100 — a move of 60,
+    // INSIDE the bound — so a build that reached the decision on the stale
+    // figure after the failed fetch WOULD write, and only the early return
+    // discharges the assertion. The first draft's stale row suggested exactly
+    // the standing figure, so the no-change rule discharged it instead
+    // (review-fanout, 2026-09-08; prove-tests shape 9).
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    calendarApi.fetchBusyWeek.mockRejectedValue(new Error('Could not reach Google.'))
+    calendarApi.listBusyWeeks.mockResolvedValue([staleRow(260)])
+    await renderApp('Who')
+    await waitFor(() => expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/reach Google/))
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: after the write the roster shows the week as set automatically, with the figure it replaced', async () => {
+    // A fake that MODELS the write: every read returns the confirmed row
+    // until setCapacity has been called, and the automatic row after — so the
+    // re-read after the write returns what the database now holds whatever
+    // number of refreshes the boot and the tab press happen to run.
+    capacityApi.listCapacity.mockImplementation(async () =>
+      capacityApi.setCapacity.mock.calls.length > 0
+        ? [override(40, 'calendar_auto', 100)]
+        : [override(100, 'calendar')],
+    )
+    await refreshLandsWith(260, { surface: 'Who' })
+    await waitFor(() => expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(inRoster().getByTestId('week-auto-m1')).toHaveTextContent(
+        /set from calendar automatically \(was 100 min\)/,
+      ),
+    )
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 40 min')
+  })
+
+  it('a write that fails lands on the error strip rather than vanishing', async () => {
+    capacityApi.listCapacity.mockResolvedValue([override(100, 'calendar')])
+    capacityApi.setCapacity.mockRejectedValue(new Error('saving this week’s capacity: refused'))
+    await refreshLandsWith(260)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/refused/))
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: the change is announced with its cause — the statement says the week was set from their calendar', async () => {
+    // The seen-marker says this member last saw Placeholder One at 100 with
+    // c1; the re-balance moved c1 to Placeholder Two and the override rows
+    // now carry `calendar_auto`. The whole #50 pipeline is real here; what is
+    // new is the `sources` App passes it.
+    const APPLIED_AT = new Date().toISOString()
+    api.listHouseholds.mockResolvedValue([{
+      ...household,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: false,
+        jobsMoved: 1,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: APPLIED_AT,
+      },
+    }])
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+    ])
+    capacityApi.listCapacity.mockResolvedValue([override(40, 'calendar_auto', 100)])
+    calendarApi.listBusyWeeks.mockResolvedValue([freshRow(260)])
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: {
+        members: [
+          { id: 'm1', minutes: 90, capacityMinutes: 100 },
+          { id: 'm2', minutes: 0, capacityMinutes: 300 },
+        ],
+      },
+      seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+    })
+    await renderApp()
+    const news = await screen.findByTestId('rebalance-announcement')
+    expect(news).toHaveTextContent('Placeholder One’s week has 60 min less room (set from their calendar)')
+    expect(news).toHaveTextContent('90 min of chores moved off Placeholder One’s list')
+  })
+})
+
+/
+// #210 — the capture flow, wired. What App owes is three things the roster
+// cannot prove on its own: that a description reaches lib/capture.js with the
+// household ON SCREEN and this member (and NOT the Supabase client); that it
+// is not a mutation — nothing re-reads and nothing is written until a submit;
+// and that the one submit carries the source through the same setCapacity a
+// typed figure uses, once, followed by the same re-assignment and re-read.
+// #99 — disconnecting, from App.
+//
+// The DELETIONS are the Edge Function's and are proven against a fake client in
+// supabase/functions/calendar-disconnect/handler.test.js; the CONTROL is the
+// roster's and is proven in Roster.test.jsx. What is left, and what this file
+// owes, is the wiring: which household travels with the call, that the screen
+// re-reads the server rather than patching itself, and what a member is told
+// afterwards.
+describe('disconnecting a calendar (#99)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const connection = {
+    id: 'c1',
+    member_id: 'm1',
+    scope: 'freebusy',
+    connected_at: '2026-08-24T00:00:00Z',
+  }
+  /** This week, by the app's own arithmetic in the household's zone. */
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const busyRow = () => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 320,
+    event_count: 6,
+    // NOW, so the row is never stale — #98's refresh trigger keys on age, and a
+    // fixture that aged across the bound mid-run would add a fetch this block
+    // says nothing about. The same reason #96's fixture reads the clock.
+    computed_at: new Date().toISOString(),
+  })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    calendarApi.listBusyWeeks.mockResolvedValue([busyRow()])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+  /**
+   * What the SERVER says once the three rows are gone.
+   *
+   * The point of driving it this way rather than asserting on local state: AC 2
+   * says the connect action returns when the capacity screen RE-RENDERS, and the
+   * only honest way to produce that is to change what the reads answer and let
+   * `mutate()`'s refresh find it — which is what the running app does.
+   */
+  const serverForgets = () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+  }
+
+  /** Both taps of the house confirm idiom. */
+  const disconnect = async () => {
+    await act(
+      async () => void fireEvent.click(inRoster().getByRole('button', { name: /^disconnect$/i })),
+    )
+    await act(
+      async () =>
+        void fireEvent.click(
+          inRoster().getByRole('button', { name: /disconnect google calendar\?/i }),
+        ),
+    )
+  }
+
+  it('AC 1: names the household on screen, and nothing about who', async () => {
+    // The function acts on the CALLER'S own member row, so a member id here
+    // would be a value the server must ignore — `completeConnect` and
+    // `fetchBusyWeek` send none for the same reason.
+    await renderApp('Who')
+    await disconnect()
+    expect(calendarApi.disconnectCalendar).toHaveBeenCalledTimes(1)
+    expect(calendarApi.disconnectCalendar).toHaveBeenCalledWith({ householdId: 'h1' })
+  })
+
+  it('AC 2: the connect action returns and the suggestion goes with the rows', async () => {
+    await renderApp('Who')
+    // The before state, so the after state is a CHANGE rather than an
+    // arrangement that could never have shown either one.
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(inRoster().getByText(/calendar suggests:/i)).toHaveTextContent('320 min busy')
+
+    serverForgets()
+    await disconnect()
+
+    expect(
+      inRoster().getByRole('button', { name: /connect google calendar/i }),
+    ).toBeInTheDocument()
+    expect(inRoster().queryByText(/calendar connected/i)).not.toBeInTheDocument()
+    expect(inRoster().queryByText(/calendar suggests:/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 2: re-reads the server rather than patching what is on screen', async () => {
+    // `mutate()`'s refresh is what produces the state above. Asserting the
+    // re-read is what separates "the screen changed" from "the screen changed
+    // because the server said so" — a locally patched roster would satisfy
+    // every assertion in the test above and show a connected calendar again on
+    // the next reload.
+    await renderApp('Who')
+    const readsBefore = calendarApi.listCalendarConnections.mock.calls.length
+    serverForgets()
+    await disconnect()
+    expect(calendarApi.listCalendarConnections.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('AC 3: the confirmed capacity row is not touched, and the week still reads from it', async () => {
+    // An accepted figure is the member's own whatever produced it. The write
+    // path this story owns can only delete calendar rows, so the assertion is
+    // that a `calendar`-sourced override outlives the disconnect on screen —
+    // and that nothing in App reached for the capacity writers.
+    capacityApi.listCapacity.mockResolvedValue([
+      { id: 'cap1', member_id: 'm1', period_start: week(), minutes: 90, source: 'calendar' },
+    ])
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 90 min')
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent(/set from calendar/i)
+    expect(capacityApi.clearCapacity).not.toHaveBeenCalled()
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: says so when Google could not confirm the revocation', async () => {
+    calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: false })
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    // The sentence is `revokeNoteFor`'s, left REAL in this file's mock, so this
+    // is the wording a member would actually read.
+    expect(inRoster().getByTestId('calendar-note')).toHaveTextContent(/google may still list/i)
+  })
+
+  it('AC 4: says nothing when Google accepted it', async () => {
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: says nothing when there was no credential to revoke', async () => {
+    // `null` is not `false`. A member who never had a grant outstanding must
+    // not be told Google may still hold one.
+    calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: null })
+    await renderApp('Who')
+    serverForgets()
+    await disconnect()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('a refused disconnect shows the function’s sentence and leaves the connection alone', async () => {
+    calendarApi.disconnectCalendar.mockRejectedValue(
+      new Error('Could not finish disconnecting that calendar. Part of it was removed.'),
+    )
+    await renderApp('Who')
+    await disconnect()
+    expect(screen.getByRole('alert')).toHaveTextContent(/Part of it was removed/)
+    // Still connected, because the reads still say so — and still offering the
+    // control, which is the repair the sentence asks for.
+    expect(inRoster().getByText(/calendar connected/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('calendar-note')).not.toBeInTheDocument()
+  })
+
+  it('clears the calendar complaint, which now describes a calendar the member does not have', async () => {
+    // #99's review, test-vacuity: `setBusyFetchComplaint(null)` in
+    // `handleDisconnectCalendar` was defended by nothing, because every other
+    // case in this block mocks `fetchBusyWeek` resolved and a complaint can
+    // only arise when it REJECTS. So the sentence a member is left looking at
+    // is the thing to arrange first.
+    //
+    // The sentence itself is the Edge Function's own, read off the failure by
+    // `fetchBusyWeek` — "no longer valid. Connect it again." under a row with
+    // no calendar at all is true of nothing.
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    calendarApi.fetchBusyWeek.mockRejectedValue(
+      new Error('That calendar connection is no longer valid. Connect it again.'),
+    )
+    await renderApp('Who')
+    await waitFor(() =>
+      expect(inRoster().getByTestId('busy-complaint')).toHaveTextContent(/no longer valid/i),
+    )
+
+    serverForgets()
+    await disconnect()
+
+    expect(screen.queryByTestId('busy-complaint')).not.toBeInTheDocument()
+  })
+
+  it('lets a member connect again in the same session and still get a figure', async () => {
+    // #96's trigger is once per (member, week) PER SESSION, and #98's refresh
+    // keeps a second such set. Neither knew about a disconnect until this
+    // story: without clearing them, re-connecting would find the key already
+    // present, fetch nothing, and leave the member looking at a connected
+    // calendar with no figure until they reloaded. Forgetting what was read
+    // includes forgetting that it was asked for.
+    calendarApi.listBusyWeeks.mockResolvedValue([])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+
+    calendarApi.listCalendarConnections.mockResolvedValue([])
+    await disconnect()
+    expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1)
+
+    // The calendar comes back — a second consent, landing on the next read.
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('capacity — described in plain language (#210)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const PROPOSAL = { outcome: 'proposal', minutes: 180, derivedFrom: { who: 'me', minutes: 180 } }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    captureApi.extractCapacity.mockResolvedValue(PROPOSAL)
+  })
+
+  const openTheWeekEditor = async () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set this week for placeholder one/i })),
+    )
+
+  const describeWeek = async (text) => {
+    fireEvent.change(screen.getByLabelText(/describe this week for placeholder one/i), {
+      target: { value: text },
+    })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /work out the minutes/i })))
+  }
+
+  const saveProposed = () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /save the proposed figure for placeholder one/i })),
+    )
+
+  const save = () => act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+  const onTheRoster = async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+  }
+
+  it('asks through lib/capture.js with the household on screen and this member, and writes nothing', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+
+    expect(captureApi.extractCapacity).toHaveBeenCalledTimes(1)
+    expect(captureApi.extractCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        householdId: 'h1',
+        text: 'I have three hours this week',
+        member: expect.objectContaining({ id: 'm1' }),
+        members: [expect.objectContaining({ id: 'm1' })],
+      }),
+    )
+    expect(screen.getByTestId('proposal-m1')).toHaveTextContent('180 min')
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(180)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // Not a mutation: a proposal is not a change, so nothing re-reads after it.
+    expect(capacityApi.listCapacity.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('AC 9: one tap on the proposal writes capacity ONCE, with source extraction, then re-assigns and re-reads', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    const readPeriod = capacityApi.listCapacity.mock.calls[0][0]
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your description/i)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+
+    await saveProposed()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: readPeriod,
+      minutes: '180',
+      source: 'extraction',
+      householdId: 'h1',
+    })
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('a typed figure still goes through the same call, with source manual', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '120' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 'm1', minutes: '120', source: 'manual' }),
+    )
+  })
+
+  it('AC 3: leaving for another surface after a proposal writes nothing', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Split' })))
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: a reload starts clean — nothing was kept on the device to apply later', async () => {
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    // Nothing persisted: a proposal lives in component state and nowhere else.
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+
+    cleanup()
+    await onTheRoster()
+    await openTheWeekEditor()
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(300)
+    expect(screen.queryByTestId('capture-proposal')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: when the service cannot answer, the same flow saves a typed figure as manual', async () => {
+    captureApi.extractCapacity.mockResolvedValue({
+      outcome: 'failed',
+      sentence: 'The extraction service could not answer: Failed to send a request to the Edge Function',
+    })
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('capture-failure')).toHaveTextContent(/could not answer/)
+    expect(screen.queryByRole('alert'), 'a failed proposal is not an app error').not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '90' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ minutes: '90', source: 'manual' }),
+    )
+  })
+
+  it('the proposer never touches the Supabase client from App — it goes through lib/capture.js', async () => {
+    // getSupabase throws in this file's mock, so the flow completing to a
+    // proposal on screen is the assertion.
+    await onTheRoster()
+    await openTheWeekEditor()
+    await describeWeek('I have three hours this week')
+    expect(screen.getByTestId('proposal-m1')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+// #213 — the chore capture flow, wired. What App owes, as for #210: that a
+// description reaches lib/capture.js with the household ON SCREEN, today on
+// the household's calendar and the person typing (and NOT the Supabase
+// client); that asking is not a mutation — nothing re-reads and nothing is
+// written; and that confirming goes through the same addChores a typed batch
+// uses, with the household on screen and `source: 'extraction'` on every row,
+// followed by the same re-read.
+describe('chores — described in plain language (#213)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    join_code: 'ABCD2345',
+    timezone: 'America/New_York',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' }
+  const chore = { id: 'c1', household_id: 'h1', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10' }
+  const PROPOSAL = {
+    outcome: 'proposal',
+    rows: [
+      {
+        key: 'proposed-1',
+        title: 'mow the grass',
+        minutes: '45',
+        dueOn: '2026-08-29',
+        problem: null,
+        note: 'Read as “mow the grass”, 45 min, due “Saturday”.',
+        derivedFrom: { title: 'mow the grass', expectedMinutes: 45, dueDate: 'Saturday', repeat: null, assignee: null },
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    choresApi.listChores.mockResolvedValue([chore])
+    captureApi.extractChores.mockResolvedValue(PROPOSAL)
+  })
+
+  const onTheChores = async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+  }
+
+  const describeChores = async (text) => {
+    fireEvent.change(screen.getByLabelText(/what needs doing this week/i), { target: { value: text } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /work out the chores/i })))
+  }
+
+  it('asks through lib/capture.js with the household on screen, today on its calendar and the person typing — and writes nothing', async () => {
+    await onTheChores()
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(captureApi.extractChores).toHaveBeenCalledTimes(1)
+    expect(captureApi.extractChores).toHaveBeenCalledWith({
+      householdId: 'h1',
+      text: 'takes about 45 min to mow the grass',
+      // Today in America/New_York, as `localTodayIn` says it — the same call
+      // the tab's skip picker is handed, never the phone's zone.
+      todayIso: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      speaker: 'Placeholder One',
+    })
+    // The proposal is on screen, editable, and NOTHING has been written or
+    // re-read: a proposal is not a mutation.
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(choresApi.listChores.mock.calls.length).toBe(readsBefore)
+  })
+
+  it('confirming goes through addChores with the household on screen and source extraction on every row, then re-reads', async () => {
+    choresApi.addChores.mockResolvedValue([{ ok: true, chore: { id: 'n1' } }])
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    const readsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add these chores/i })))
+
+    expect(choresApi.addChores).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChores).toHaveBeenCalledWith(
+      [{ title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' }],
+      { householdId: household.id },
+    )
+    await waitFor(() => expect(choresApi.listChores.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(choresApi.addChores.mock.invocationCallOrder[0]).toBeLessThan(
+      choresApi.listChores.mock.invocationCallOrder[readsBefore],
+    )
+    // Everything landed, so the list is gone.
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 6: when the endpoint fails, the typed form is the road in, and it is the SAME add path', async () => {
+    captureApi.extractChores.mockResolvedValue({ outcome: 'failed', sentence: 'The extraction service could not answer.' })
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(screen.getByTestId('capture-failure')).toHaveTextContent(/could not answer/)
+    expect(screen.getByLabelText(/^chore$/i)).toHaveFocus()
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+    expect(choresApi.addChore).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Dishes', expectedMinutes: '20', dueOn: '2026-08-10', householdId: 'h1' }),
+    )
+  })
+
+  it('the proposer never touches the Supabase client from App — it goes through lib/capture.js', async () => {
+    // getSupabase throws in this file's mock, so the flow completing to a
+    // proposal on screen is the assertion — #210's shape.
+    await onTheChores()
+    await describeChores('takes about 45 min to mow the grass')
+    expect(screen.getByLabelText(/title for chore 1/i)).toHaveValue('mow the grass')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('applying the calendar suggestion to the week (#97)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  // 120 usual, 45 busy: a prefill of 75. Read NOW for #98's reason — a fixed
+  // timestamp ages across the refresh bound and turns a row that EXISTS into
+  // a fetch on a diff that touched nothing.
+  const busyRow = () => ({
+    id: 'b1',
+    member_id: 'm1',
+    period_start: week(),
+    busy_minutes: 45,
+    event_count: 3,
+    computed_at: new Date().toISOString(),
+  })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    calendarApi.listBusyWeeks.mockResolvedValue([busyRow()])
+  })
+
+  const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+  const onTheRoster = async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await waitFor(() => expect(inRoster().getByText(/calendar suggests:/i)).toBeInTheDocument())
+  }
+  const useIt = () =>
+    act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /use the calendar’s figure for placeholder one/i })),
+    )
+  const save = () => act(async () => void fireEvent.click(screen.getByRole('button', { name: /^save$/i })))
+
+  it('AC 1 / AC 2: the tap prefills 75 and writes nothing; Save writes ONCE with source calendar, re-assigns and re-reads', async () => {
+    await onTheRoster()
+    const readsBefore = capacityApi.listCapacity.mock.calls.length
+    await useIt()
+    expect(screen.getByLabelText(/minutes this week for placeholder one/i)).toHaveValue(75)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your calendar/i)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+    // A prefill is not a change: nothing re-reads after it.
+    expect(capacityApi.listCapacity.mock.calls.length).toBe(readsBefore)
+
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith({
+      memberId: 'm1',
+      periodStart: week(),
+      minutes: '75',
+      source: 'calendar',
+      householdId: 'h1',
+    })
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(capacityApi.listCapacity.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+  })
+
+  it('AC 2: a figure edited before Save goes through the same call as manual', async () => {
+    await onTheRoster()
+    await useIt()
+    fireEvent.change(screen.getByLabelText(/minutes this week for placeholder one/i), {
+      target: { value: '60' },
+    })
+    await save()
+    expect(capacityApi.setCapacity).toHaveBeenCalledTimes(1)
+    expect(capacityApi.setCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 'm1', minutes: '60', source: 'manual' }),
+    )
+  })
+
+  it('AC 6: after the re-read the roster shows the week as set from the calendar', async () => {
+    await onTheRoster()
+    await useIt()
+    // What the server will hand back once the write lands — the re-read after
+    // `mutate()` is what puts the provenance on screen, not the tap.
+    capacityApi.listCapacity.mockResolvedValue([
+      { id: 'o1', member_id: 'm1', period_start: week(), minutes: 75, note: null, source: 'calendar' },
+    ])
+    await save()
+    await waitFor(() => expect(inRoster().getByTestId('week-m1')).toHaveTextContent('This week: 75 min'))
+    expect(inRoster().getByTestId('week-m1')).toHaveTextContent(/set from calendar/i)
+  })
+
+  it('the tap touches no calendar read — the figure is already on the device', async () => {
+    // Taking the suggestion is arithmetic on a row already read. It must not
+    // spend a Google call: #96 fetches when there is no row and #98 when the
+    // row is stale, and this is neither.
+    await onTheRoster()
+    const fetches = calendarApi.fetchBusyWeek.mock.calls.length
+    await useIt()
+    await save()
+    expect(calendarApi.fetchBusyWeek.mock.calls.length).toBe(fetches)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #358 — several named lists, from App.
+//
+// What the surface DRAWS is Shopping.test.jsx's, and which SQLSTATE the
+// database raises is shopping.pglite.test.js's. These cover what only App can
+// answer: that the two list writes go through the data layer with the right
+// arguments and are followed by a re-read, that a refused one reaches the strip
+// and patches nothing, and — the criterion no other level can reach — that the
+// chosen list survives a tab switch and falls back when it names nothing.
+// ---------------------------------------------------------------------------
+describe('#358 — several named lists, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const other = { id: 'h2', name: 'Placeholder Other Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const groceries = {
+    id: 'l1',
+    household_id: 'h1',
+    name: 'Groceries',
+    created_at: '2026-09-05T00:00:00Z',
+  }
+  const hardware = {
+    id: 'l2',
+    household_id: 'h1',
+    name: 'Hardware',
+    created_at: '2026-09-06T00:00:00Z',
+  }
+  const runOf = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: list.household_id,
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const runA = runOf(groceries, 'r1')
+  const runB = runOf(hardware, 'r2')
+  // Read order is `created_at`, so the read hands them over oldest-first and
+  // App is what sorts by name. Kept that way on purpose: a fixture already in
+  // name order could not tell the ordering from the read.
+  /**
+   * One item per list, so a test can ask WHICH LIST WAS DRAWN and not only
+   * which button is pressed. The picker's pressed state comes from the
+   * preference; the rows come from the list on screen, and the mutation that
+   * drew the wrong list moved the rows while leaving the button alone.
+   */
+  const item = (id, runId, name) => ({
+    id,
+    run_id: runId,
+    household_id: 'h1',
+    name,
+    note: null,
+    added_by_member_id: 'm1',
+    added_at: '2026-09-06T10:00:00Z',
+    purchased_at: null,
+    purchased_by_member_id: null,
+    carried_from_item_id: null,
+  })
+  const twoLists = {
+    lists: [groceries, hardware],
+    runs: [runA, runB],
+    items: [item('i1', 'r1', 'Milk'), item('i2', 'r2', 'Bread')],
+  }
+  const oneList = { lists: [groceries], runs: [runA], items: [item('i1', 'r1', 'Milk')] }
+  /** The item names on screen, top to bottom — the list the tab actually drew. */
+  const rowsOnScreen = () =>
+    Array.from(document.querySelectorAll('.shopping-item__name')).map((n) => n.textContent)
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  const picker = () =>
+    Array.from(
+      screen.getByRole('group', { name: /which list/i }).querySelectorAll('button'),
+    ).map((b) => [b.querySelector('.shopping-picker__name').textContent, b.getAttribute('aria-pressed')])
+  /**
+   * The list on screen. With a picker up the heading stands down (the owner's
+   * call at the design pass), so the pressed button is what names it; with one
+   * list there is no picker and the heading is the name.
+   */
+  const heading = () => {
+    const group = screen.queryByRole('group', { name: /which list/i })
+    if (!group) return screen.getByRole('heading', { level: 3 }).textContent
+    return group
+      .querySelector('button[aria-pressed="true"]')
+      .querySelector('.shopping-picker__name').textContent
+  }
+  /** Tap a picker button by its list NAME — its accessible name carries the count too. */
+  const choose = (name) =>
+    act(async () =>
+      void fireEvent.click(
+        Array.from(
+          screen.getByRole('group', { name: /which list/i }).querySelectorAll('button'),
+        ).find((b) => b.querySelector('.shopping-picker__name').textContent === name),
+      ),
+    )
+
+  it('AC 1: orders the picker by NAME, whatever order the read returned', async () => {
+    // Both of the read's own orders point the other way: `created_at` ascending
+    // AND the id tie-break `orderShoppingLists` falls back on. The ids agreed
+    // with the names in the first draft, and a mutation deleting the name
+    // comparison outright still produced this expectation from the tie-break.
+    const early = { ...hardware, id: 'la', created_at: '2026-09-01T00:00:00Z' }
+    const late = { ...groceries, id: 'lb' }
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [early, late],
+      runs: [runOf(early, 'r1'), runOf(late, 'r2')],
+      items: [],
+    })
+    await renderApp('Shop')
+    expect(picker().map(([name]) => name)).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('AC 1: creates the list through the data layer, re-reads, and lands the picker on the NEW one', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+    await renderApp('Shop')
+    expect(heading()).toBe('Groceries')
+
+    // The write returns the row it made; the next read holds both lists.
+    shoppingApi.createList.mockResolvedValue(hardware)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/new list/i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Hardware' } })
+    await tab(/create list/i)
+
+    expect(shoppingApi.createList).toHaveBeenCalledWith(SHOPPING_CLIENT, household.id, 'Hardware')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // The write is before the read, which is what makes the id resolvable.
+    expect(shoppingApi.createList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder[readsBefore],
+    )
+    // Second by name, and it is the one on screen — a list somebody just named
+    // is the list they want to be looking at.
+    await waitFor(() => expect(heading()).toBe('Hardware'))
+    expect(picker()).toEqual([
+      ['Groceries', 'false'],
+      ['Hardware', 'true'],
+    ])
+  })
+
+  it('AC 4: renames through the data layer with the list id, then re-reads', async () => {
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    shoppingApi.readShopping.mockResolvedValue({
+      ...twoLists,
+      lists: [{ ...groceries, name: 'Bakery' }, hardware],
+    })
+
+    await tab(/^rename /i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Bakery' } })
+    await tab(/save name/i)
+
+    expect(shoppingApi.renameList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.renameList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l1', 'Bakery')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // The heading comes from the RE-READ, not from the field: the id did not
+    // move, so the same list is on screen under its new name.
+    await waitFor(() => expect(heading()).toBe('Bakery'))
+  })
+
+  it('AC 5: a refused rename puts the data layer’s sentence on the strip and changes nothing on screen', async () => {
+    // WHICH sentence is shopping.js's, keyed on SQLSTATE 23505 and proved in
+    // shopping.io.test.js; what only this level can say is that the refusal
+    // reaches the strip and that nothing on the screen moved with it.
+    shoppingApi.renameList.mockRejectedValue(
+      new Error('You already have a list called Hardware.'),
+    )
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/^rename /i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'Hardware' } })
+    await tab(/save name/i)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('You already have a list called Hardware.'),
+    )
+    // No re-read: `mutate()` re-reads only what it wrote, and nothing was
+    // written. The editor is still open with the name that was refused.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(screen.getByLabelText(/^list name$/i)).toHaveValue('Hardware')
+    expect(picker().map(([name]) => name)).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('AC 5: a refused create leaves the household on the list it had', async () => {
+    shoppingApi.createList.mockRejectedValue(new Error('You already have a list called Hardware.'))
+    await renderApp('Shop')
+
+    await tab(/new list/i)
+    fireEvent.change(screen.getByLabelText(/^list name$/i), { target: { value: 'HARDWARE' } })
+    await tab(/create list/i)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('You already have a list called Hardware.'),
+    )
+    expect(heading()).toBe('Groceries')
+    expect(picker()).toEqual([
+      ['Groceries', 'true'],
+      ['Hardware', 'false'],
+    ])
+  })
+
+  it('AC 3: finishing names the chosen list’s run, and the other list comes back untouched', async () => {
+    shoppingApi.finishRun.mockResolvedValue({ ...runB, id: 'r3' })
+    await renderApp('Shop')
+    await choose('Hardware')
+
+    // The re-read after the finish: Hardware on a NEW run with nothing on it,
+    // and Groceries exactly as it was — same run, same item.
+    const fresh = { ...runB, id: 'r3' }
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [groceries, hardware],
+      runs: [runA, fresh],
+      items: [item('i1', 'r1', 'Milk')],
+    })
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+
+    // The RUN, never the list — 0033's whole design, and what the fake records.
+    expect(shoppingApi.finishRun).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.finishRun).toHaveBeenCalledWith(SHOPPING_CLIENT, 'r2')
+
+    // And the other list is untouched by it: switch back and its row is there.
+    await waitFor(() => expect(heading()).toBe('Hardware'))
+    expect(rowsOnScreen()).toEqual([])
+    await choose('Groceries')
+    expect(rowsOnScreen()).toEqual(['Milk'])
+  })
+
+  it('AC 6: the chosen list survives a visit to another tab, in the same session', async () => {
+    await renderApp('Shop')
+    expect(heading()).toBe('Groceries')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // The component unmounts on the way out and mounts again on the way back —
+    // which is the whole reason the choice is not held inside it.
+    await tab('Chores')
+    expect(screen.queryByRole('region', { name: 'Shop' })).not.toBeInTheDocument()
+    await tab('Shop')
+    expect(heading()).toBe('Hardware')
+    expect(picker()).toEqual([
+      ['Groceries', 'false'],
+      ['Hardware', 'true'],
+    ])
+    // The BODY, not only the button: the rows on screen are the chosen list's.
+    expect(rowsOnScreen()).toEqual(['Bread'])
+  })
+
+  it('AC 6: nothing is written for a choice — not to the server, not to storage', async () => {
+    const wrote = []
+    const spy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation((...args) => void wrote.push(args))
+    try {
+      await renderApp('Shop')
+      const reads = shoppingApi.readShopping.mock.calls.length
+      await choose('Hardware')
+      expect(heading()).toBe('Hardware')
+      expect(shoppingApi.readShopping.mock.calls.length).toBe(reads)
+      expect(wrote).toEqual([])
+      for (const fn of [shoppingApi.createList, shoppingApi.renameList, shoppingApi.addItem]) {
+        expect(fn).not.toHaveBeenCalled()
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('AC 6: a list that is gone after a re-read falls back to the first by name', async () => {
+    await renderApp('Shop')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // Another phone removed the list this one was looking at. The next re-read
+    // — here the one an add drags behind it — no longer holds l2.
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Milk' } })
+    await tab(/add item/i)
+
+    await waitFor(() => expect(heading()).toBe('Groceries'))
+    expect(screen.queryByRole('group', { name: /which list/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 6: the active household changing resets the choice to that household’s first list', async () => {
+    await renderApp('Shop')
+    await choose('Hardware')
+    expect(heading()).toBe('Hardware')
+
+    // The household on screen changes under the choice. Its lists are other
+    // rows entirely, so the preference names nothing — one rule, three causes.
+    const bakery = { id: 'l9', household_id: 'h2', name: 'Bakery', created_at: '2026-09-06T00:00:00Z' }
+    api.listHouseholds.mockResolvedValue([other])
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [bakery],
+      runs: [runOf(bakery, 'r9')],
+      items: [],
+    })
+    await tab('Chores')
+    await tab('Shop')
+
+    await waitFor(() => expect(heading()).toBe('Bakery'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #359 AC 4 — the history read, and the discipline it deliberately departs from.
+//
+// Every other read on this surface runs on arrival; this one runs when the Past
+// runs disclosure is opened, because history is unbounded. Only App can answer
+// either half — what the disclosure DRAWS is Shopping.test.jsx's, and which
+// filters the read sends is shopping.io.test.js's.
+// ---------------------------------------------------------------------------
+describe('#359 — past runs, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Robin', weekly_minutes: 60, claimed_by: null },
+  ]
+  const groceries = { id: 'l1', household_id: 'h1', name: 'Groceries', created_at: '2026-09-05T00:00:00Z' }
+  const hardware = { id: 'l2', household_id: 'h1', name: 'Hardware', created_at: '2026-09-06T00:00:00Z' }
+  const openRun = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: 'h1',
+    opened_at: '2026-09-06T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const item = (id, runId, name, purchased = null) => ({
+    id,
+    run_id: runId,
+    household_id: 'h1',
+    name,
+    note: null,
+    added_by_member_id: 'm1',
+    added_at: '2026-09-06T10:00:00Z',
+    purchased_at: purchased,
+    purchased_by_member_id: purchased ? 'm2' : null,
+    carried_from_item_id: null,
+  })
+  const oneList = {
+    lists: [groceries],
+    runs: [openRun(groceries, 'r-open')],
+    items: [item('i1', 'r-open', 'Milk')],
+  }
+  const twoLists = {
+    lists: [groceries, hardware],
+    runs: [openRun(groceries, 'r-open'), openRun(hardware, 'r-open-2')],
+    items: [item('i1', 'r-open', 'Milk'), item('i2', 'r-open-2', 'Bread')],
+  }
+  /** One finished trip on the Groceries list: one bought, one carried forward. */
+  const finished = {
+    runs: [
+      {
+        id: 'r-closed',
+        list_id: 'l1',
+        household_id: 'h1',
+        opened_at: '2026-09-04T00:00:00Z',
+        closed_at: '2026-09-05T22:00:00Z',
+        closed_by_member_id: 'm2',
+      },
+    ],
+    items: [item('p1', 'r-closed', 'Eggs', '2026-09-05T21:02:00Z'), item('p2', 'r-closed', 'Butter')],
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(oneList)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  /**
+   * Open the disclosure with a real tap, then let the platform's own `toggle`
+   * arrive — jsdom queues it as a task, so a microtask-only flush reads zero
+   * toggles and the read looks as though it never fired. The measurement behind
+   * that sentence is in Shopping.test.jsx's own helper.
+   */
+  const openPast = async () => {
+    fireEvent.click(screen.getByText('Past runs'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  const history = () => screen.getByText('Past runs').closest('details')
+
+  it('does NOT read the history on arrival, on a re-arrival, or on a write — only on the disclosure', async () => {
+    await renderApp('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(0)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // A second arrival, which is a full re-read of everything else.
+    await tab('Chores')
+    await tab('Shop')
+    expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+
+    // And a write, which drags a re-read behind it through mutate().
+    fireEvent.change(screen.getByLabelText(/^item$/i), { target: { value: 'Bread' } })
+    await tab(/add item/i)
+    expect(shoppingApi.addItem).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.readClosedRuns).not.toHaveBeenCalled()
+  })
+
+  it('reads it when the disclosure opens, naming the list on screen and its client', async () => {
+    shoppingApi.readClosedRuns.mockResolvedValue(finished)
+    await renderApp('Shop')
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await openPast()
+
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    // The LIST, as an array of one — the read filters `.in('list_id', …)`, and
+    // the household's other lists are not what somebody just asked about.
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledWith(SHOPPING_CLIENT, ['l1'])
+    // It is a read: nothing goes through mutate(), so nothing else is re-read.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+
+    // And what came back is on the screen, with the roster resolved and the
+    // household's zone applied — 21:02 UTC is 5:02 PM in New York.
+    expect(within(history()).getByRole('heading', { level: 4 })).toHaveTextContent(
+      'Finished Sep 5, 2026 by Robin',
+    )
+    expect(within(history()).getByText('Eggs').closest('li')).toHaveTextContent(
+      'bought by Robin · 5:02 PM',
+    )
+    expect(within(history()).getByText('Butter').closest('li')).toHaveTextContent('carried over')
+  })
+
+  it('reads the list the picker is on, not the household’s first', async () => {
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    await renderApp('Shop')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Hardware/ })))
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenLastCalledWith(SHOPPING_CLIENT, ['l2'])
+  })
+
+  it('a refused history read reports itself on the strip and shows no rows', async () => {
+    shoppingApi.readClosedRuns.mockRejectedValue(
+      new Error('loading finished runs: permission denied'),
+    )
+    await renderApp('Shop')
+    await openPast()
+
+    expect(
+      within(screen.getByRole('region', { name: 'Shop' })).getByRole('alert'),
+    ).toHaveTextContent(/loading finished runs: permission denied/)
+    // Not "reading…" forever, and not the last answer either: a failure clears
+    // the rows rather than leaving somebody looking at a history nothing here
+    // can vouch for.
+    expect(screen.queryByText(/reading the finished runs/i)).not.toBeInTheDocument()
+    expect(within(history()).queryByRole('heading', { level: 4 })).not.toBeInTheDocument()
+  })
+
+  it('finishing a run closes the disclosure, so nobody reads a history from before the trip ended', async () => {
+    await renderApp('Shop')
+    await openPast()
+    expect(history()).toHaveAttribute('open')
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+
+    // One list draws ONE finish control. This is the assertion that caught the
+    // duplicate React key — `PastRuns` and `FinishRun` are siblings, and while
+    // both were keyed on the run id React rendered three of them.
+    expect(document.querySelectorAll('.shopping-finish')).toHaveLength(1)
+
+    // The trip ends: the RPC returns the new run and the re-read shows it.
+    const nextRun = openRun(groceries, 'r-next')
+    shoppingApi.finishRun.mockResolvedValue(nextRun)
+    shoppingApi.readShopping.mockResolvedValue({ lists: [groceries], runs: [nextRun], items: [] })
+    await tab(/done shopping/i)
+    await tab(/^finish$/i)
+
+    // Keyed on the open run, so a new run remounts it closed — and the run that
+    // just closed is now part of the history, which the next open re-reads.
+    await waitFor(() => expect(history()).not.toHaveAttribute('open'))
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(1)
+    await openPast()
+    expect(shoppingApi.readClosedRuns).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #360 — putting a list away, from App.
+//
+// The half only App can answer: that both writes go through `mutate()` (write,
+// then a full re-read), and that the list the picker shows follows the read
+// rather than a second copy of it. What the tab DRAWS for an archived list is
+// Shopping.test.jsx's, what the module sends is shopping.io.test.js's, and what
+// the database refuses is archive-shopping-list.pglite.test.js's.
+//
+// The fallback is the interesting one and it is asserted nowhere else:
+// archiving the list on screen leaves `shoppingListId` naming a list the
+// visible set no longer holds, and `resolveSelectedListId` is what turns that
+// into "the first active list by name" rather than an empty tab.
+// ---------------------------------------------------------------------------
+describe('#360 — archiving a list, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const groceries = {
+    id: 'l1',
+    household_id: 'h1',
+    name: 'Groceries',
+    created_at: '2026-09-05T00:00:00Z',
+    archived_at: null,
+  }
+  const hardware = {
+    id: 'l2',
+    household_id: 'h1',
+    name: 'Hardware',
+    created_at: '2026-09-06T00:00:00Z',
+    archived_at: null,
+  }
+  const AWAY = '2026-09-06T12:00:00Z'
+  const openRunOf = (list, id) => ({
+    id,
+    list_id: list.id,
+    household_id: list.household_id,
+    opened_at: '2026-09-05T00:00:00Z',
+    closed_at: null,
+    closed_by_member_id: null,
+  })
+  const runA = openRunOf(groceries, 'r1')
+  const runB = openRunOf(hardware, 'r2')
+  // Both runs are EMPTY, which is not a convenience: `0035` refuses an archive
+  // while the open run holds anything, so a fixture with items on the list
+  // being archived would be a state the database cannot produce.
+  const twoLists = { lists: [groceries, hardware], runs: [runA, runB], items: [] }
+  /** The same household after Hardware has been put away. */
+  const oneAway = {
+    lists: [groceries, { ...hardware, archived_at: AWAY }],
+    runs: [runA, runB],
+    items: [],
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+  })
+
+  const tab = (name) => act(async () => void fireEvent.click(screen.getByRole('button', { name })))
+  const shop = () => screen.getByRole('region', { name: 'Shop' })
+  const pickerNames = () => {
+    const group = screen.queryByRole('group', { name: /which list/i })
+    if (!group) return null
+    return Array.from(group.querySelectorAll('.shopping-picker__name')).map((n) => n.textContent)
+  }
+
+  it('AC 3: Archive goes through archiveList with the list on screen, then re-reads', async () => {
+    await renderApp('Shop')
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    // Onto the SECOND list, so the id this asserts is the one on screen rather
+    // than the first by name — which is what the tab lands on and what a
+    // handler passing the wrong thing would most likely send.
+    await tab(/^hardware/i)
+
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/^archive hardware$/i)
+
+    expect(shoppingApi.archiveList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.archiveList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l2')
+    // Through mutate(): written, THEN re-read. The write is what changes which
+    // lists exist, so a screen that did not re-read would be showing the answer
+    // from before the tap.
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    expect(shoppingApi.archiveList.mock.invocationCallOrder[0]).toBeLessThan(
+      shoppingApi.readShopping.mock.invocationCallOrder.at(-1),
+    )
+  })
+
+  it('AC 3: the archived list leaves the picker, and the tab falls back to the first active list', async () => {
+    await renderApp('Shop')
+    // Stand on Hardware, so the list being archived is the one on screen —
+    // the only case where the fallback has anything to do.
+    await tab(/^hardware/i)
+    expect(screen.getByRole('button', { name: /^archive hardware$/i })).toBeInTheDocument()
+
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await tab(/^archive hardware$/i)
+
+    // One visible list, so #358's one-button rule takes the picker away and the
+    // heading carries the name again.
+    await waitFor(() => expect(pickerNames()).toBeNull())
+    expect(within(shop()).getByRole('heading', { level: 3 })).toHaveTextContent('Groceries')
+    expect(within(shop()).queryByText(/put away/i)).not.toBeInTheDocument()
+    // And the way back is offered, with the count.
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+  })
+
+  it('AC 3: revealing the archived lists puts them back in the picker and lets one be chosen', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    expect(pickerNames()).toBeNull()
+
+    await tab('Show archived (1)')
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    // Nothing was written to reveal them — it is a view change.
+    expect(shoppingApi.archiveList).not.toHaveBeenCalled()
+    expect(shoppingApi.unarchiveList).not.toHaveBeenCalled()
+
+    await tab(/^hardware/i)
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unarchive Hardware' })).toBeInTheDocument()
+    // An archived list on screen offers none of the working controls.
+    expect(within(shop()).queryByLabelText(/^item$/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 3: Unarchive goes through unarchiveList, re-reads, and the list comes back working', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    await tab('Show archived (1)')
+    await tab(/^hardware/i)
+
+    shoppingApi.readShopping.mockResolvedValue(twoLists)
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+    await tab(/^unarchive hardware$/i)
+
+    expect(shoppingApi.unarchiveList).toHaveBeenCalledTimes(1)
+    expect(shoppingApi.unarchiveList).toHaveBeenCalledWith(SHOPPING_CLIENT, 'l2')
+    await waitFor(() =>
+      expect(shoppingApi.readShopping.mock.calls.length).toBeGreaterThan(readsBefore),
+    )
+    // Still the list on screen — it was in the visible set under both settings
+    // of the toggle — and it works again.
+    expect(within(shop()).queryByText(/put away/i)).not.toBeInTheDocument()
+    expect(within(shop()).getByLabelText(/^item$/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /archived/i })).not.toBeInTheDocument()
+  })
+
+  it('the toggle survives a tab switch, because which list this phone is looking at is not a fact about the household', async () => {
+    shoppingApi.readShopping.mockResolvedValue(oneAway)
+    await renderApp('Shop')
+    await tab('Show archived (1)')
+    await tab(/^hardware/i)
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+
+    // `Shopping` unmounts on a tab switch, so a toggle held inside it would
+    // last exactly as long as the person stayed on the screen.
+    await tab(/^chores$/i)
+    await tab(/^shop$/i)
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+    expect(within(shop()).getByText(/put away/i)).toBeInTheDocument()
+  })
+
+  it('AC 3: a refused archive reaches the strip outside the list, and nothing is re-read', async () => {
+    await renderApp('Shop')
+    await tab(/^hardware/i)
+    shoppingApi.archiveList.mockRejectedValue(
+      new Error('archiving the list: finish or clear this run first'),
+    )
+    const readsBefore = shoppingApi.readShopping.mock.calls.length
+
+    await tab(/^archive hardware$/i)
+
+    const alert = within(shop()).getByRole('alert')
+    expect(alert).toHaveTextContent('archiving the list: finish or clear this run first')
+    expect(alert.closest('ul, li, form')).toBeNull()
+    // `mutate()` does not re-read after a failed write, and the picker is
+    // exactly where it was.
+    expect(shoppingApi.readShopping.mock.calls.length).toBe(readsBefore)
+    expect(pickerNames()).toEqual(['Groceries', 'Hardware'])
+  })
+
+  it('a household whose only list is archived is not told it has none', async () => {
+    shoppingApi.readShopping.mockResolvedValue({
+      lists: [{ ...groceries, archived_at: AWAY }],
+      runs: [runA],
+      items: [],
+    })
+    await renderApp('Shop')
+    expect(within(shop()).queryByText(/no shopping list yet/i)).not.toBeInTheDocument()
+    expect(within(shop()).getByText(/every list is put away/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show archived (1)' })).toBeInTheDocument()
+  })
+})
+
+// #342 — the REAL debounce constant, through the same importActual the mock
+// spreads, so the wait below is the app's and not a number copied here.
+const actualRealtime = await vi.importActual('./lib/realtime.js')
+
+describe('#342 — the app updates itself when the household changes', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const roster = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 90, claimed_by: null },
+  ]
+  const chore = {
+    id: 'c1',
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: 20,
+    due_on: '2026-08-10',
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue(roster)
+    choresApi.listChores.mockResolvedValue([chore])
+    // jsdom reports the page as visible only when told to; the handler reads
+    // this property, so it is pinned per test and removed after.
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+  afterEach(() => {
+    delete document.visibilityState
+  })
+
+  /** The arguments of the most recent channel App opened. */
+  const channel = () => realtimeApi.subscribeToHousehold.mock.calls.at(-1)[0]
+  /** The `close` of the n-th channel App opened. */
+  const closeOf = (n) => realtimeApi.subscribeToHousehold.mock.results[n].value.close
+  /** How many full reads have run — `listHouseholds` is `refresh()`'s first call. */
+  const reads = () => api.listHouseholds.mock.calls.length
+  const joined = () => screen.findByRole('button', { name: 'Chores' })
+  const pause = (ms) => act(async () => void (await new Promise((r) => setTimeout(r, ms))))
+
+  it('AC 2: opens ONE channel on the household on screen, scoped by its roster, once joined', async () => {
+    await renderApp()
+    await joined()
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    // The household and the member ids travel — the server filters on them.
+    expect(channel()).toMatchObject({ householdId: 'h1', memberIds: ['m1', 'm2'] })
+    expect(typeof channel().onChange).toBe('function')
+    expect(typeof channel().onReconnect).toBe('function')
+  })
+
+  it('opens no channel for a person who is signed out, nor for one with no household yet', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(realtimeApi.subscribeToHousehold).not.toHaveBeenCalled()
+    cleanup()
+    api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+    api.listHouseholds.mockResolvedValue([])
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+    expect(realtimeApi.subscribeToHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: a change another phone made is a full re-read, with nobody pressing anything', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    const chorReadsBefore = choresApi.listChores.mock.calls.length
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    // The whole of refresh(), not a patch from the payload: the chores were
+    // re-read too, and the payload carried none of them.
+    await waitFor(() => expect(choresApi.listChores.mock.calls.length).toBe(chorReadsBefore + 1))
+  })
+
+  it('AC 3: a re-join after a drop is a re-read — the catch-up for what was missed', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => void channel().onReconnect())
+    await waitFor(() => expect(reads()).toBe(before + 1))
+  })
+
+  it('AC 5: an own write followed by its echoes is TWO reads, never one per echo', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+    // Hold the write's own re-read open, so the echoes land while it is in flight.
+    let release
+    api.listHouseholds.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve([household])
+        }),
+    )
+    const before = reads()
+    fireEvent.change(screen.getByLabelText(/^chore$/i), { target: { value: 'Dishes' } })
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText(/^due$/i), { target: { value: '2026-08-10' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /add chore/i })))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    // Three echoes — the insert on `chores`, say, seen through three bindings
+    // or three phones' worth of the same second — while the write's read runs.
+    await act(async () => {
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+      channel().onChange({ eventType: 'INSERT', table: 'chores' })
+    })
+    // Nothing ran concurrently with the read in flight.
+    expect(reads()).toBe(before + 1)
+    await act(async () => void release())
+    // Exactly one more, for all three.
+    await waitFor(() => expect(reads()).toBe(before + 2))
+    await pause(30)
+    expect(reads()).toBe(before + 2)
+  })
+
+  it('AC 5: an echo that lands AFTER the write has re-read is a read of its own', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(before + 2))
+  })
+
+  it('AC 1: the tab coming back is ONE read, however many focus events it fires', async () => {
+    await renderApp()
+    await joined()
+    const before = reads()
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+      window.dispatchEvent(new Event('focus'))
+    })
+    // Debounced: nothing has run yet.
+    expect(reads()).toBe(before)
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    await pause(actualRealtime.REFRESH_DEBOUNCE_MS * 2)
+    expect(reads()).toBe(before + 1)
+  })
+
+  it('AC 1: a focus event on the sign-in screen reads nothing', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+    })
+    await pause(actualRealtime.REFRESH_DEBOUNCE_MS * 2)
+    expect(api.listHouseholds).not.toHaveBeenCalled()
+  })
+
+  it('closes the channel on sign-out, and opens none for the screen that follows', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    const close = closeOf(0)
+    expect(close).not.toHaveBeenCalled()
+    // After the sign-out the server has no household for nobody.
+    api.listHouseholds.mockResolvedValue([])
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+  })
+
+  it('a household switch closes the old channel and opens one on the new household', async () => {
+    await renderApp()
+    await joined()
+    const close = closeOf(0)
+    // #164 built the switcher, and this test deliberately does NOT use it: the
+    // subject here is the READ coming back different, which is what a Realtime
+    // echo produces and what a switch also produces. Driving it through the
+    // read keeps this about the channel rather than about the control.
+    api.listHouseholds.mockResolvedValue([{ ...household, id: 'h2' }])
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'households' }))
+    await waitFor(() => expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(2))
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(channel()).toMatchObject({ householdId: 'h2', memberIds: ['m1', 'm2'] })
+  })
+
+  it('a roster change re-scopes the channel to the new member set, and a re-read that changes nothing does not', async () => {
+    await renderApp()
+    await joined()
+    // A re-read returning the same ids: refresh() hands back new objects, and
+    // the channel must not be torn down for them.
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    await waitFor(() => expect(reads()).toBe(2))
+    expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(1)
+    expect(closeOf(0)).not.toHaveBeenCalled()
+    // A member joins on another phone.
+    api.listMembers.mockResolvedValue([
+      ...roster,
+      { id: 'm3', display_name: 'Placeholder Three', weekly_minutes: 60, claimed_by: null },
+    ])
+    await act(async () => void channel().onChange({ eventType: 'INSERT', table: 'members' }))
+    await waitFor(() => expect(realtimeApi.subscribeToHousehold).toHaveBeenCalledTimes(2))
+    expect(closeOf(0)).toHaveBeenCalledTimes(1)
+    expect(channel().memberIds).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('a failed background read lands on the error strip and takes nothing else down', async () => {
+    await renderApp()
+    await joined()
+    api.listHouseholds.mockRejectedValueOnce(new Error('the network went away for a moment'))
+    await act(async () => void channel().onChange({ eventType: 'UPDATE', table: 'chores' }))
+    expect(await screen.findByText(/the network went away for a moment/)).toBeInTheDocument()
+    // Still the joined shell, still listening.
+    expect(screen.getByRole('button', { name: 'Chores' })).toBeInTheDocument()
+    expect(closeOf(0)).not.toHaveBeenCalled()
+  })
+})
+
+// #101 — importing a calendar event as a chore, at the level only App can
+// answer: the WIRING. Chores.test.jsx covers what the section DRAWS and which
+// handler a tap reaches; everything here is about what App does with that —
+// which read fills the "already imported" marks, which write the confirm
+// reaches and in what order, and what happens on the phone that loses the race.
+describe('importing a calendar event as a chore (#101)', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
+  const READONLY = 'https://www.googleapis.com/auth/calendar.readonly'
+  const narrow = { id: 'c1', member_id: 'm1', scope: FREEBUSY, connected_at: '2026-08-24T00:00:00Z' }
+  const widened = { ...narrow, scope: `${FREEBUSY} ${READONLY}` }
+  const event = {
+    id: 'evt-1',
+    title: 'Placeholder Event',
+    start: '2026-09-10T17:00:00.000Z',
+    end: '2026-09-10T18:30:00.000Z',
+    allDay: false,
+    durationMinutes: 90,
+    dueOn: '2026-09-10',
+  }
+
+  let assign
+  let realLocation
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    assign = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', hash: '', assign },
+    })
+    globalThis.sessionStorage?.clear?.()
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+    calendarApi.listCalendarConnections.mockResolvedValue([widened])
+    calendarApi.fetchCalendarEvents.mockResolvedValue({ ok: true, events: [event] })
+    choresApi.addChore.mockResolvedValue({ id: 'c-new', title: 'Placeholder Event' })
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+  })
+
+  const inChores = () => within(screen.getByRole('region', { name: /what needs doing/i }))
+  const openImport = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import from calendar/i })),
+    )
+  const pickEvent = () =>
+    act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /import placeholder event/i })),
+    )
+  const submitAdd = () =>
+    act(async () => void fireEvent.click(inChores().getByRole('button', { name: /add chore/i })))
+
+  it('reads the import ledger BY HOUSEHOLD on every refresh, like every other row', async () => {
+    await renderApp('Chores')
+    expect(calendarApi.listCalendarImports).toHaveBeenCalledWith('h1')
+  })
+
+  it('offers the import on the Chores tab to a member whose OWN calendar is connected', async () => {
+    await renderApp('Chores')
+    expect(inChores().getByRole('button', { name: /import from calendar/i })).toBeInTheDocument()
+  })
+
+  it('offers nothing when only a housemate is connected — their calendar is not this phone’s to read', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([{ ...widened, member_id: 'm2' }])
+    await renderApp('Chores')
+    expect(inChores().queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a free/busy-only connection gets the consent step, and Allow leaves for Google with the readonly scope ADDED', async () => {
+    calendarApi.listCalendarConnections.mockResolvedValue([narrow])
+    await renderApp('Chores')
+    await openImport()
+    expect(inChores().getByTestId('import-consent')).toBeInTheDocument()
+    // Nothing was asked of the Edge Function: the row already says the scope
+    // is too narrow, and a call would only be refused.
+    expect(calendarApi.fetchCalendarEvents).not.toHaveBeenCalled()
+
+    await act(
+      async () =>
+        void fireEvent.click(inChores().getByRole('button', { name: /allow reading events/i })),
+    )
+    expect(assign).toHaveBeenCalledTimes(1)
+    const url = new URL(assign.mock.calls[0][0])
+    // `startConnect` is REAL here, so this is the URL the app would send.
+    expect(url.searchParams.get('scope')).toBe(READONLY)
+    expect(url.searchParams.get('include_granted_scopes')).toBe('true')
+    expect(url.searchParams.get('prompt')).toBe('consent')
+    // The household on screen travels with the state, so the widened token
+    // lands on the connection the member was looking at (#161's rule).
+    expect(globalThis.sessionStorage.getItem('taskr.calendar.consent-household')).toBe('h1')
+  })
+
+  it('AC 2: opening the section asks the function for THIS household and THIS week, and lists what came back', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await waitFor(() => expect(calendarApi.fetchCalendarEvents).toHaveBeenCalledTimes(1))
+    const [call] = calendarApi.fetchCalendarEvents.mock.calls
+    expect(call[0].householdId).toBe('h1')
+    expect(call[0].periodStart).toBe(actualCapacity.periodStartFor(new Date(), household.timezone))
+    expect(await inChores().findByText('Placeholder Event')).toBeInTheDocument()
+    // Listing wrote nothing: no addChore, no ledger row.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+    expect(calendarApi.recordCalendarImport).not.toHaveBeenCalled()
+  })
+
+  it('AC 3 / AC 4: Use prefills the form, and Add writes the chore through addChore with source calendar, THEN the ledger row naming it', async () => {
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+
+    // The prefill is the data layer's, shown in the form the member already knows.
+    expect(inChores().getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(inChores().getByLabelText(/expected minutes/i)).toHaveValue(90)
+    expect(inChores().getByLabelText(/^due$/i)).toHaveValue('2026-09-10')
+    expect(inChores().getByTestId('import-source')).toHaveTextContent(/from your calendar/i)
+    // Nothing written by picking.
+    expect(choresApi.addChore).not.toHaveBeenCalled()
+
+    // The member edits the minutes — editable before save is the criterion —
+    // and confirms with the ordinary Add.
+    fireEvent.change(inChores().getByLabelText(/expected minutes/i), { target: { value: '60' } })
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.addChore).toHaveBeenCalledWith({
+      title: 'Placeholder Event',
+      expectedMinutes: '60',
+      dueOn: '2026-09-10',
+      repeatKind: 'none',
+      repeatWeekdays: [],
+      repeatMonthday: '',
+      source: 'calendar',
+      householdId: 'h1',
+    })
+    expect(calendarApi.recordCalendarImport).toHaveBeenCalledWith({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'evt-1',
+      choreId: 'c-new',
+    })
+    // ORDER: the chore first, then the row naming it — the ledger needs the id
+    // the write returned, and this is what makes the race resolve the way
+    // 0038's header says.
+    expect(choresApi.addChore.mock.invocationCallOrder[0]).toBeLessThan(
+      calendarApi.recordCalendarImport.mock.invocationCallOrder[0],
+    )
+    // No second write path: addChores was never touched.
+    expect(choresApi.addChores).not.toHaveBeenCalled()
+    // And the screen re-read, like every other write.
+    expect(choresApi.listChores.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('AC 5: already-imported events are marked from the ledger and offer no Use', async () => {
+    calendarApi.listCalendarImports.mockResolvedValue([
+      { id: 'i1', household_id: 'h1', member_id: 'm2', calendar_event_id: 'evt-1', chore_id: 'c9' },
+    ])
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    expect(inChores().getByTestId('imported-evt-1')).toHaveTextContent(/already imported/i)
+    expect(
+      inChores().queryByRole('button', { name: /import placeholder event/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('AC 5: on the phone that LOSES the race, the ledger’s refusal removes the chore just created and says so', async () => {
+    const refused = new Error('That event is already on the list as a chore.')
+    refused.alreadyImported = true
+    calendarApi.recordCalendarImport.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).toHaveBeenCalledWith('c-new')
+    expect(await inChores().findByText(/already on the list as a chore/i)).toBeInTheDocument()
+  })
+
+  it('a ledger failure for any OTHER reason leaves the chore standing — the household still wants it', async () => {
+    calendarApi.recordCalendarImport.mockRejectedValue(
+      new Error('recording the import: the network went away'),
+    )
+    await renderApp('Chores')
+    await openImport()
+    await inChores().findByText('Placeholder Event')
+    await pickEvent()
+    await submitAdd()
+
+    expect(choresApi.addChore).toHaveBeenCalledTimes(1)
+    expect(choresApi.removeChore).not.toHaveBeenCalled()
+    expect(await inChores().findByText(/the network went away/i)).toBeInTheDocument()
+  })
+
+  it('a stale connection row: the function’s own scope refusal lands as the consent step, not as an outage', async () => {
+    const refused = new Error(
+      'This calendar is connected for free/busy only. Allow Taskr to read events to import one.',
+    )
+    refused.needsScope = true
+    calendarApi.fetchCalendarEvents.mockRejectedValue(refused)
+    await renderApp('Chores')
+    await openImport()
+    expect(await inChores().findByTestId('import-consent')).toBeInTheDocument()
+    expect(inChores().getByRole('button', { name: /allow reading events/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #164 / #165 / #166 — more than one household on one device.
+//
+// The three stories ship together because each is only observable through the
+// next: a switcher with nothing to switch to, a remembered choice with no way
+// to make one, and a second household nobody can reach. Names are synthetic —
+// see #19.
+//
+// EVERY assertion here is about a RE-READ, not about local state. #164 AC 2
+// says so in as many words ("asserted as a re-read of the five data-layer
+// calls, not as a local state change"), and it is the criterion the obvious
+// implementation fails: filtering data this device already holds would put the
+// right household on screen and show its chores as of whenever the app last
+// looked.
+// ---------------------------------------------------------------------------
+
+const HOUSEHOLD_ONE = {
+  id: '11111111-1111-4111-8111-111111111111',
+  name: 'Placeholder Household',
+  timezone: 'America/New_York',
+  organizer_member_id: 'm1',
+  created_at: '2026-01-01T00:00:00Z',
+}
+const HOUSEHOLD_TWO = {
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'Placeholder Other Household',
+  timezone: 'America/New_York',
+  organizer_member_id: 'm9',
+  created_at: '2026-02-01T00:00:00Z',
+}
+
+describe('#164 — holding more than one household and moving between them', () => {
+  // The person is `person-a`, and they are the ORGANIZER of the second
+  // household and an ordinary member of the first. That asymmetry is AC 5's
+  // subject: organizer controls must follow the household, not the person.
+  const inOne = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-b' },
+    { id: 'm2', display_name: 'Placeholder Everywhere', weekly_minutes: 60, claimed_by: 'person-a' },
+  ]
+  // TWO members, and the second one is load-bearing: self-removal is forbidden
+  // (0007's `members_delete_same_household` carries `claimed_by is distinct
+  // from auth.uid()`), so a household where the organizer is the only member
+  // offers no Remove control at all — and AC 5's assertion would then be
+  // reading the household size rather than who organises it.
+  const inTwo = [
+    { id: 'm9', display_name: 'Placeholder Everywhere', weekly_minutes: 90, claimed_by: 'person-a' },
+    { id: 'm10', display_name: 'Placeholder Two', weekly_minutes: 30, claimed_by: null },
+  ]
+
+  /** Answer every scoped read according to which household was asked for. */
+  const scopedByHousehold = () => {
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : inOne))
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOUSEHOLD_TWO.id
+        ? [{ id: 'c9', title: 'Placeholder Other Chore', expected_minutes: 15, due_on: '2026-08-10', completed_at: null, completed_by_member_id: null, assigned_member_id: null, actual_minutes: null }]
+        : [{ id: 'c1', title: 'Placeholder Chore', expected_minutes: 30, due_on: '2026-08-10', completed_at: null, completed_by_member_id: null, assigned_member_id: null, actual_minutes: null }],
+    )
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE, HOUSEHOLD_TWO])
+    scopedByHousehold()
+  })
+
+  const switcher = () => screen.getByRole('combobox', { name: 'Household' })
+  const switchTo = async (id) =>
+    act(async () => void fireEvent.change(switcher(), { target: { value: id } }))
+
+  // AC 1 — the name becomes a control listing every household, in the
+  // deterministic order. Asserted through App rather than only in the
+  // component's own file, because what is on trial here is that App HANDS it
+  // the whole list: a version passing `[household]` renders a control the
+  // component test would still pass.
+  it('AC 1: the shell names every household this person belongs to, in order', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+
+    expect(Array.from(switcher().options).map((o) => o.textContent)).toEqual([
+      'Placeholder Household',
+      'Placeholder Other Household',
+    ])
+  })
+
+  // AC 3 — and it is asserted as the PREVIOUS story's element, not merely as
+  // the absence of a control, so a version that rendered nothing at all would
+  // fail. #163's screen has to be intact for everybody who has one household.
+  it('AC 3: a person in exactly one household is offered no control, and sees #163 name', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    await renderApp()
+    await screen.findByText('Placeholder Household')
+
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    expect(document.querySelector('.shell__household')).toHaveTextContent('Placeholder Household')
+  })
+
+  // AC 4 — no stored choice, so the app opens on the deterministic default the
+  // owner chose: OLDEST by created_at. The fixture's second household is the
+  // NEWER one, so a version defaulting to most-recently-joined fails here.
+  it('AC 4: with no choice stored, the app opens on the oldest household', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+
+    expect(switcher()).toHaveValue(HOUSEHOLD_ONE.id)
+    expect(api.listMembers).toHaveBeenCalledWith(HOUSEHOLD_ONE.id)
+    expect(api.listMembers).not.toHaveBeenCalledWith(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 2 — THE criterion. Every scoped read runs again, against the newly
+  // chosen household, and the five named in the story are asserted by the id
+  // they were given rather than by a call count.
+  it('AC 2: choosing another household RE-READS every surface against it', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    // The reads that have happened so far all name household one.
+    expect(api.listMembers).not.toHaveBeenCalledWith(HOUSEHOLD_TWO.id)
+
+    await switchTo(HOUSEHOLD_TWO.id)
+
+    // The reads that take a HOUSEHOLD ID, each asked about the new one.
+    expect(api.listMembers).toHaveBeenCalledWith(HOUSEHOLD_TWO.id)
+    expect(choresApi.listChores).toHaveBeenCalledWith(HOUSEHOLD_TWO.id)
+    expect(shoppingApi.readShopping).toHaveBeenCalledWith(SHOPPING_CLIENT, HOUSEHOLD_TWO.id)
+    expect(calendarApi.listCalendarImports).toHaveBeenCalledWith(HOUSEHOLD_TWO.id)
+    // The reads that take the MEMBER SET rather than a household id (0025's
+    // reasoning), asserted through the roster that scopes them. `listCapacity`
+    // is here because an earlier version of this comment NAMED it among the
+    // three and asserted only the other two — a comment vouching for an
+    // assertion that did not exist, found by review-fanout. It is the read that
+    // decides whose minutes the split is drawn from, so leaving it unasserted
+    // while claiming it was covered is the worst of the three.
+    expect(exclusionsApi.listExclusions).toHaveBeenLastCalledWith(inTwo.map((m) => m.id))
+    expect(calendarApi.listCalendarConnections).toHaveBeenLastCalledWith(inTwo.map((m) => m.id))
+    expect(capacityApi.listCapacity).toHaveBeenLastCalledWith(
+      expect.anything(),
+      inTwo.map((m) => m.id),
+    )
+    // STILL UNASSERTED, and said out loud rather than left to be assumed:
+    // `listRepeatExceptions` (its scope is the ANCHOR ids out of the chores
+    // just read, so it is covered transitively by `listChores` above) and
+    // `listBusyWeeks`. Neither is claimed by this test. The PERIOD half of
+    // `listCapacity` is also not discriminated here and cannot be with this
+    // fixture: both households carry `America/New_York`, so a period computed
+    // from the stale household is byte-identical — separating it needs two
+    // timezones, which is a different test than this one.
+  })
+
+  it('AC 2: and it happens without a page reload or a sign-out', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+
+    await switchTo(HOUSEHOLD_TWO.id)
+
+    expect(api.signOut).not.toHaveBeenCalled()
+    // Still the same mounted app: the switcher is the control it was, now
+    // showing the other household.
+    expect(switcher()).toHaveValue(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 5 — `me` and `isOrganizer` resolve WITHIN the newly active household.
+  // The fixture is built so the two answers differ: `person-a` organises
+  // household two and merely belongs to household one, so a version that
+  // resolved identity against the wrong household would show organizer
+  // controls in the household they do not organise.
+  it('AC 5: who you are and what you organise are recomputed in the new household', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    const inRoster = () => within(screen.getByRole('region', { name: /who is in the household/i }))
+
+    // In household one they are an ordinary member: no Remove control, which
+    // #152 gates on isOrganizer. Matched on the control's ACCESSIBLE name,
+    // which #152 built as `Remove <member>` so that a row's control names the
+    // person it acts on — a bare /^remove$/ matches nothing here and would have
+    // passed this assertion for the wrong reason.
+    expect(inRoster().queryByRole('button', { name: /^remove /i })).not.toBeInTheDocument()
+
+    await switchTo(HOUSEHOLD_TWO.id)
+    await screen.findByText('Placeholder Everywhere')
+
+    // In household two they organise, so the organizer control appears.
+    expect(inRoster().getAllByRole('button', { name: /^remove /i }).length).toBeGreaterThan(0)
+  })
+
+  // AC 6 — the surface is where they are, not what they are looking at.
+  it('AC 6: somebody on the Chores surface stays there, showing the other household chores', async () => {
+    await renderApp('Chores')
+    await screen.findByText('Placeholder Chore')
+
+    await switchTo(HOUSEHOLD_TWO.id)
+
+    // Still the Chores surface…
+    expect(screen.getByRole('button', { name: 'Chores' })).toHaveAttribute('aria-current', 'page')
+    // …and it is the other household's chore list.
+    expect(await screen.findByText('Placeholder Other Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Chore')).not.toBeInTheDocument()
+  })
+
+  // AC 8's end-to-end half. The re-read is what this asserts, and the mutation
+  // that removes it is recorded in the story comment.
+  it('AC 8: switching is asserted end to end — the other household roster is on screen', async () => {
+    await renderApp('Who')
+    await screen.findByText('Placeholder One')
+
+    await switchTo(HOUSEHOLD_TWO.id)
+
+    expect(await screen.findByText('Placeholder Everywhere')).toBeInTheDocument()
+    // Household one's other member is gone, which is the half that proves the
+    // roster was replaced rather than added to.
+    expect(screen.queryByText('Placeholder One')).not.toBeInTheDocument()
+  })
+})
+
+describe('#165 — remembering which household was last chosen on this device', () => {
+  const inOne = [
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const inTwo = [
+    { id: 'm9', display_name: 'Placeholder Everywhere', weekly_minutes: 90, claimed_by: 'person-a' },
+  ]
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE, HOUSEHOLD_TWO])
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : inOne))
+  })
+
+  const switcher = () => screen.getByRole('combobox', { name: 'Household' })
+
+  // AC 1 — the whole point. `cleanup()` between the two renders is this suite's
+  // way of closing and reopening the app: the component tree is destroyed, so
+  // anything that survives did so through storage rather than through React.
+  it('AC 1: the household chosen before the app closed is active when it reopens', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    await act(
+      async () => void fireEvent.change(switcher(), { target: { value: HOUSEHOLD_TWO.id } }),
+    )
+    expect(switcher()).toHaveValue(HOUSEHOLD_TWO.id)
+
+    cleanup()
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+
+    expect(switcher()).toHaveValue(HOUSEHOLD_TWO.id)
+    // And the reads on THIS load named it — the choice reached the data layer,
+    // rather than only the control.
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 2 — a membership that has gone. The stored id names a household the
+  // person no longer belongs to, so the read no longer returns it.
+  it('AC 2: a stored household outside the membership set is discarded, silently', async () => {
+    window.localStorage.setItem('taskr.activeHousehold', HOUSEHOLD_TWO.id)
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+
+    await renderApp()
+    await screen.findByText('Placeholder Household')
+
+    // The deterministic default, and no error anywhere on screen.
+    expect(api.listMembers).toHaveBeenCalledWith(HOUSEHOLD_ONE.id)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // DISCARDED, not merely ignored: the dead id is gone from storage, so it
+    // is not re-rejected on every load for the life of the device.
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBeNull()
+  })
+
+  // AC 3 — a value that was never a household id at all.
+  //
+  // WHAT THIS TEST CANNOT SEPARATE, measured rather than assumed: mutating the
+  // uuid pattern to accept everything leaves it GREEN. With the check gone the
+  // junk reaches `resolveActiveHousehold`, is not in the membership set, and
+  // falls back to the same default — then App's own discard clears the same
+  // key. Two different mechanisms, one observable, and at this level there is
+  // no fixture that tells them apart, because a value that is not a uuid can
+  // never name a household either way. So this asserts the OUTCOME the
+  // criterion asks for, and the shape check itself is discriminated in
+  // `activeHousehold.test.js`, where the same mutation reddens 7. Said out loud
+  // because a reader counting this as coverage of the check would be wrong.
+  it('AC 3: a stored value that is not a uuid is discarded and the default is used', async () => {
+    window.localStorage.setItem('taskr.activeHousehold', 'not-a-uuid')
+
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+
+    expect(switcher()).toHaveValue(HOUSEHOLD_ONE.id)
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBeNull()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // AC 7 — a shared tablet must not select a household for the next person.
+  it('AC 7: signing out forgets the household this device had chosen', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    await act(
+      async () => void fireEvent.change(switcher(), { target: { value: HOUSEHOLD_TWO.id } }),
+    )
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(HOUSEHOLD_TWO.id)
+
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Who' })))
+    await screen.findByRole('region', { name: /who is in the household/i })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBeNull()
+  })
+
+  // AC 8 — private mode. The accessor itself throws, which is what a browser
+  // set to block site data actually does; the app must render on the default
+  // rather than failing to boot.
+  it('AC 8: a device whose storage throws still opens, on the deterministic default', async () => {
+    // A getter on the global, NOT a Proxy — measured: a Proxy's `get` trap does
+    // not fire when `globalThis.localStorage` is read, so the proxy form left
+    // the accessor guard unexecuted. `activeHousehold.test.js` carries the
+    // measurement.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+    })
+    try {
+      await renderApp()
+      await screen.findByRole('combobox', { name: 'Household' })
+
+      expect(switcher()).toHaveValue(HOUSEHOLD_ONE.id)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // And a switch still works — it just is not remembered.
+      await act(
+        async () => void fireEvent.change(switcher(), { target: { value: HOUSEHOLD_TWO.id } }),
+      )
+      expect(api.listMembers).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original)
+      else delete globalThis.localStorage
+    }
+  })
+})
+
+describe('#166 — starting another household without signing out', () => {
+  const inOne = [
+    { id: 'm1', display_name: 'Placeholder Everywhere', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const inTwo = [
+    { id: 'm9', display_name: 'Placeholder Everywhere', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+
+  const inCard = () => within(screen.getByRole('region', { name: /start another household/i }))
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : inOne))
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOUSEHOLD_TWO.id
+        ? [{ id: 'c9', title: 'Placeholder Other Chore', expected_minutes: 15, due_on: '2026-08-10', completed_at: null, completed_by_member_id: null, assigned_member_id: null, actual_minutes: null }]
+        : [{ id: 'c1', title: 'Placeholder Chore', expected_minutes: 30, due_on: '2026-08-10', completed_at: null, completed_by_member_id: null, assigned_member_id: null, actual_minutes: null }],
+    )
+    // The write succeeds and the read that follows sees both households — the
+    // ordinary shape of `mutate()`, and the reason the fixture cannot simply
+    // return a static list.
+    api.createHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE, HOUSEHOLD_TWO])
+      return HOUSEHOLD_TWO
+    })
+  })
+
+  const startAnother = async (name = 'Placeholder Other Household') => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /start another household/i })
+    fireEvent.change(inCard().getByLabelText(/household name/i), { target: { value: name } })
+    await act(
+      async () => void fireEvent.click(inCard().getByRole('button', { name: 'Create household' })),
+    )
+  }
+
+  // The hole the story exists to fill, stated as the state BEFORE the change:
+  // `createHousehold` had one call site and it was behind onboarding.
+  it('AC 1: a person already in a household is offered a way to start another', async () => {
+    await renderApp('Who')
+    expect(
+      await screen.findByRole('region', { name: /start another household/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('AC 1: their own name is prefilled from the household they are already in', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /start another household/i })
+    expect(inCard().getByLabelText(/your name in it/i)).toHaveValue('Placeholder Everywhere')
+  })
+
+  it('AC 1: creating one names it, with this person as its organizer', async () => {
+    await startAnother()
+
+    expect(api.createHousehold).toHaveBeenCalledTimes(1)
+    expect(api.createHousehold).toHaveBeenCalledWith('Placeholder Other Household', {
+      organizerName: 'Placeholder Everywhere',
+    })
+  })
+
+  // AC 1's second half and the one the ordering makes easy to get wrong: the
+  // new household sorts LAST by created_at, so the deterministic default would
+  // take the person straight back to the household they started from.
+  it('AC 1: and the new household becomes the active one', async () => {
+    await startAnother()
+
+    const switcher = await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 6 — the switcher now lists two, and the active one is the new one.
+  it('AC 6: the switcher lists both households, with the new one active', async () => {
+    await startAnother()
+
+    const switcher = await screen.findByRole('combobox', { name: 'Household' })
+    expect(Array.from(switcher.options).map((o) => o.textContent)).toEqual([
+      'Placeholder Household',
+      'Placeholder Other Household',
+    ])
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 5 — a reload must not silently return them to the first household.
+  it('AC 5: the stored choice is updated, so a reload does not go back', async () => {
+    await startAnother()
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(HOUSEHOLD_TWO.id)
+
+    cleanup()
+    await renderApp()
+    const switcher = await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 3 — the new household's surfaces show its data ALONE.
+  it('AC 3: every surface shows the new household data, and not the first', async () => {
+    await startAnother()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+
+    expect(await screen.findByText('Placeholder Other Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Chore')).not.toBeInTheDocument()
+    expect(choresApi.listChores).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+  })
+
+  // AC 4 — THE ROUND TRIP, and the criterion says why it is separate: "a
+  // one-way test cannot tell scoping from a coincidence of ordering". A version
+  // that showed the newest household's data for every read would pass AC 3 and
+  // fail here.
+  it('AC 4: switching back shows the first household data alone', async () => {
+    await startAnother()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await screen.findByText('Placeholder Other Chore')
+
+    await act(
+      async () =>
+        void fireEvent.change(screen.getByRole('combobox', { name: 'Household' }), {
+          target: { value: HOUSEHOLD_ONE.id },
+        }),
+    )
+
+    expect(await screen.findByText('Placeholder Chore')).toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Other Chore')).not.toBeInTheDocument()
+    expect(choresApi.listChores).toHaveBeenLastCalledWith(HOUSEHOLD_ONE.id)
+  })
+
+  // AC 7 — the existing onboarding path is untouched. A person in NO household
+  // gets #154's screen, and the roster's card cannot be involved because there
+  // is no roster.
+  it('AC 7: somebody in no household still gets the onboarding path, unchanged', async () => {
+    api.listHouseholds.mockResolvedValue([])
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Start a household', level: 2 }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: /start another household/i }),
+    ).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/household name/i), { target: { value: 'Ours' } })
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Alex' } })
+    await act(
+      async () => void fireEvent.click(screen.getByRole('button', { name: 'Create household' })),
+    )
+
+    expect(api.createHousehold).toHaveBeenCalledWith('Ours', { organizerName: 'Alex' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The review-fanout fixes, each with the test that makes it fail to remove.
+//
+// The first mutation pass on these three fixes reddened ZERO. That was
+// PREDICTED — none of the three is observable from a test that only asserts
+// after a switch has settled — and a predicted zero is still a zero: three
+// corrections would have shipped that nothing could hold in place. These are
+// the arrangements that observe them.
+// ---------------------------------------------------------------------------
+
+describe('#164/#166 — the review fan-out’s three, held in place', () => {
+  const HH_A = {
+    id: '11111111-1111-4111-8111-111111111111',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+    created_at: '2026-01-01T00:00:00Z',
+    last_rebalance: {
+      contested: true,
+      level: true,
+      reason: null,
+      boundByBudget: false,
+      jobsMoved: 1,
+      minutesMoved: 90,
+      changeBudgetMinutes: 120,
+      applied_at: '2026-08-27T18:00:00+00:00',
+    },
+  }
+  const HH_B = {
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+    created_at: '2026-02-01T00:00:00Z',
+    last_rebalance: null,
+  }
+  const inA = [
+    { id: 'm1', household_id: HH_A.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm2', household_id: HH_A.id, display_name: 'Placeholder Two', weekly_minutes: 300, claimed_by: null },
+  ]
+  const inB = [
+    { id: 'm9', household_id: HH_B.id, display_name: 'Placeholder Everywhere', weekly_minutes: 200, claimed_by: 'person-a' },
+  ]
+  const choresA = [
+    { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+    { id: 'c2', title: 'Placeholder Other Chore', expected_minutes: 50, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+  ]
+
+  const switcher = () => screen.getByRole('combobox', { name: 'Household' })
+  // The #342 block's helper, which is scoped to that describe. Redeclared here
+  // rather than hoisted, because hoisting it would touch a block this story has
+  // no business editing.
+  const pause = (ms) => act(async () => void (await new Promise((r) => setTimeout(r, ms))))
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HH_A, HH_B])
+    api.listMembers.mockImplementation(async (id) => (id === HH_B.id ? inB : inA))
+    choresApi.listChores.mockImplementation(async (id) => (id === HH_B.id ? [] : choresA))
+  })
+
+  // FINDING 6 — the announcement belongs to the household that produced it.
+  //
+  // Without the clear, household A's re-balance statement stands over B's
+  // surfaces, read against B's member names — and pressing "Got it" there
+  // SPENDS it, because `writeSplitSeen` advanced A's marker in the refresh that
+  // produced it, so `announcementFrom` can never derive it again.
+  it('an announcement about the old household does not follow the switch', async () => {
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: {
+        members: [
+          { id: 'm1', minutes: 90, capacityMinutes: 420 },
+          { id: 'm2', minutes: 50, capacityMinutes: 300 },
+        ],
+      },
+      seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+    })
+    await renderApp()
+    // The precondition: it really is on screen before the switch. Without this
+    // the assertion below passes on a page that never had one.
+    await screen.findByTestId('rebalance-announcement')
+
+    await act(
+      async () => void fireEvent.change(switcher(), { target: { value: HH_B.id } }),
+    )
+
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+  })
+
+  // FINDING 1/5 — the name and the data land together.
+  //
+  // `setHousehold` used to sit above the roster read, so a switch whose roster
+  // read FAILS left household B's name on the shell over household A's people.
+  // With the two paired, a failed roster read leaves the whole screen on A and
+  // puts the reason on the error strip — one household, coherently, plus a
+  // sentence saying what went wrong.
+  it('a switch whose roster read fails leaves the shell on the household it can still show', async () => {
+    await renderApp('Who')
+    await screen.findByText('Placeholder One')
+
+    api.listMembers.mockRejectedValueOnce(new Error('the network went away for a moment'))
+    await act(
+      async () => void fireEvent.change(switcher(), { target: { value: HH_B.id } }),
+    )
+
+    // The name must not have moved ahead of the people underneath it.
+    expect(switcher()).toHaveValue(HH_A.id)
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    expect(await screen.findByText(/the network went away/i)).toBeInTheDocument()
+  })
+
+  // FINDING 2 — a read older than the choice may not overrule it.
+  //
+  // The arrangement is the whole test: hold a background read open at its FIRST
+  // await, create a household while it is suspended, then release it. Its list
+  // predates the new household, so without the epoch guard its discard branch
+  // fires, clears the ref and wipes the stored choice — and #166 AC 1 and AC 5
+  // are both defeated by a read that did nothing wrong except start earlier.
+  it('a read that started before the new household cannot wipe the choice', async () => {
+    const created = {
+      id: '99999999-9999-4999-8999-999999999999',
+      name: 'Mutant Household',
+      timezone: 'America/New_York',
+      organizer_member_id: 'm99',
+      created_at: '2026-03-01T00:00:00Z',
+      last_rebalance: null,
+    }
+    api.listMembers.mockImplementation(async (id) =>
+      id === created.id
+        ? [{ id: 'm99', household_id: created.id, display_name: 'Placeholder Everywhere', weekly_minutes: 0, claimed_by: 'person-a' }]
+        : id === HH_B.id
+          ? inB
+          : inA,
+    )
+    api.createHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([HH_A, HH_B, created])
+      return created
+    })
+
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /start another household/i })
+
+    // Hold the NEXT households read open — this is the background read that
+    // will come back holding a list from before the household exists.
+    let release
+    let started = false
+    api.listHouseholds.mockImplementationOnce(() => {
+      started = true
+      return new Promise((resolve) => {
+        release = () => resolve([HH_A, HH_B])
+      })
+    })
+    // Start it, and leave it suspended. `attachVisibilityRefresh` DEBOUNCES by
+    // REFRESH_DEBOUNCE_MS, so a focus event only SCHEDULES the read — without
+    // waiting past the debounce the hanging mock is consumed by the create's
+    // own re-read instead, which starts after the choice and is therefore
+    // entitled to judge it. The arrangement is the test: the read has to have
+    // begun before the choice for the epoch to mean anything.
+    act(() => void window.dispatchEvent(new Event('focus')))
+    await pause(actualRealtime.REFRESH_DEBOUNCE_MS * 2)
+    // POSITIVE CONTROL: if this is false the background read never began and
+    // everything below is asserting about a scenario that did not happen.
+    expect(started).toBe(true)
+
+    const card = within(screen.getByRole('region', { name: /start another household/i }))
+    fireEvent.change(card.getByLabelText(/household name/i), { target: { value: 'Mutant Household' } })
+    await act(async () => {
+      fireEvent.click(card.getByRole('button', { name: 'Create household' }))
+    })
+
+    // Now let the stale read finish, after the choice was made.
+    await act(async () => {
+      release?.()
+    })
+
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(created.id)
   })
 })

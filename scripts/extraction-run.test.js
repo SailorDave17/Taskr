@@ -13,9 +13,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { gradeExtraction, oracleExtractorFor, zeroExtractor } from '../src/lib/extraction.js'
 import { CORPUS } from '../src/lib/extraction.corpus.js'
-import { userMessage } from '../src/lib/extractionAdapter.js'
+import { DEFAULT_CONFIGS, userMessage } from '../src/lib/extractionAdapter.js'
 import { scoreLines } from './extraction-report-format.mjs'
 import {
+  configsFor,
   gradeConfig,
   liveTransport,
   main,
@@ -202,6 +203,38 @@ describe('#203 — a live recording round-trips, and the key never enters the re
   it('gradeConfig tallies every adapter outcome it sees', async () => {
     const { tally } = await gradeConfig(ORACLE_CONFIG, async () => ({ status: 503, body: {} }))
     expect(tally['http-error']).toBe(CORPUS.length)
+  })
+})
+
+describe('#208 — a live run can be narrowed to one default configuration', () => {
+  it('records both defaults when no model is named — #206’s shape unchanged', () => {
+    expect(configsFor(['--record', 'x.json'])).toEqual([...DEFAULT_CONFIGS])
+  })
+
+  it('narrows to the default carrying the named model', () => {
+    const chosen = configsFor(['--record', 'x.json', '--model', 'claude-haiku-4-5'])
+    expect(chosen).toHaveLength(1)
+    expect(chosen[0].model).toBe('claude-haiku-4-5')
+    expect(chosen[0].prompt).toBe(DEFAULT_CONFIGS[1].prompt)
+  })
+
+  it('REFUSES a model no default carries, naming the known ones, rather than recording nothing', () => {
+    // An empty transcript with no rows printed would read as a quiet success.
+    expect(() => configsFor(['--record', 'x.json', '--model', 'claude-nope'])).toThrow(/no default configuration/)
+    expect(() => configsFor(['--record', 'x.json', '--model', 'claude-nope'])).toThrow(/claude-haiku-4-5/)
+    expect(() => configsFor(['--record', 'x.json', '--model'])).toThrow(/missing/)
+  })
+
+  it('refuses a bad model BEFORE the key is looked at, so the refusal needs no key and can reach no network', async () => {
+    // With NO key in the environment: if the model filter were checked after
+    // the key, this would be refused for the missing key instead — and under a
+    // mutation that no-ops the filter, a version of this test that supplied a
+    // key reached the real provider sixty times and wrote a transcript into
+    // the tree (measured 2026-09-07). No key means no network is possible
+    // whichever check comes first.
+    await expect(main(['--record', 'ignored.json', '--model', 'claude-nope'], {})).rejects.toThrow(
+      /no default configuration/,
+    )
   })
 })
 

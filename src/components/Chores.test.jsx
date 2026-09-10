@@ -1,6 +1,20 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import * as fsForSource from 'node:fs'
+import { resolve } from 'node:path'
 import Chores from './Chores.jsx'
+
+// #213 AC 3 — the single-implementation scan reads component SOURCE, so it
+// needs the tree and not the DOM. Comments are stripped first, for the reason
+// gate.test.js gives: a docblock explaining the shell would otherwise be a
+// second shell.
+const resolveDir = (dir) => resolve(process.cwd(), dir)
+const listSource = (dir) =>
+  fsForSource
+    .readdirSync(dir)
+    .filter((f) => /\.jsx?$/.test(f) && !/\.test\.jsx?$/.test(f))
+    .map((f) => `${dir}/${f}`)
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 
 // #34 — the chore list and the form that refuses a bad value BEFORE it becomes
 // a request (AC 2). Chore names are synthetic — see #19.
@@ -1488,6 +1502,264 @@ describe('batch entry — #220, several chores in one pass', () => {
 })
 
 // ---------------------------------------------------------------------------
+// #213 — the week's chores in plain language
+//
+// The shell's four behaviours are CaptureShell.test.jsx's; what this block
+// owns is what a proposal LOOKS like on this tab and which handler each
+// gesture reaches: the review list fed from proposals, the marked rows that
+// cannot be confirmed as they stand, the confirm that goes through onAddMany
+// with `source: 'extraction'`, the three failures that hand the member the
+// form that was there throughout, and — AC 10 made structural — that a tab
+// rendered without a proposer is exactly the #34 surface. Titles are lower
+// case and sentences are the data layer's — see #19.
+// ---------------------------------------------------------------------------
+
+describe('chores described in plain language — #213', () => {
+  const row = (overrides = {}) => ({
+    key: 'proposed-1',
+    title: 'mow the grass',
+    minutes: '45',
+    dueOn: '2026-08-29',
+    problem: null,
+    note: 'Read as “mow the grass”, 45 min, due “Saturday”.',
+    derivedFrom: { title: 'mow the grass', expectedMinutes: 45, dueDate: 'Saturday', repeat: null, assignee: null },
+    ...overrides,
+  })
+  const proposal = (rows) => ({ outcome: 'proposal', rows })
+
+  /** Render with a proposer wired, the way App does. */
+  function setupWithProposer(result, overrides = {}) {
+    const onPropose = vi.fn().mockResolvedValue(result)
+    const handlers = setup({ onPropose, ...overrides })
+    return { ...handlers, onPropose }
+  }
+
+  const box = () => screen.queryByLabelText(/what needs doing this week/i)
+  const describeChores = async (text) => {
+    fireEvent.change(box(), { target: { value: text } })
+    await clickAndSettle(screen.getByRole('button', { name: /work out the chores/i }))
+  }
+  const confirmProposed = () =>
+    clickAndSettle(screen.getByRole('button', { name: /add these chores/i }))
+  const draftField = (position, which) =>
+    screen.getByLabelText(new RegExp(`${which} for chore ${position}$`, 'i'))
+
+  it('AC 10: with no proposer wired, the tab is exactly the #34 surface — no box, no shell, the form and the batch button', () => {
+    setup()
+    expect(box()).not.toBeInTheDocument()
+    expect(screen.queryByTestId('capture-shell')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+  })
+
+  it('asks a direct question, and the typed form is on screen beside it before anything is described (owner amendment, 2026-09-07)', () => {
+    setupWithProposer(proposal([row()]))
+    expect(box()).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /work out the chores/i })).toBeDisabled()
+    // The form is still an option: same fields, same button, no proposal.
+    expect(screen.getByLabelText(/^chore$/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add several at once/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a description becomes the review list — each row with title, minutes, date and what it was read from — and nothing is written', async () => {
+    const handlers = setupWithProposer(
+      proposal([
+        row(),
+        row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15', note: 'Read as “put the shopping away”, 15 min, due “Saturday”.' }),
+      ]),
+    )
+    await describeChores('do the weekly shop on saturday, an hour and a half, and put the shopping away, fifteen minutes')
+
+    expect(handlers.onPropose).toHaveBeenCalledWith(
+      'do the weekly shop on saturday, an hour and a half, and put the shopping away, fifteen minutes',
+    )
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(2)
+    expect(draftField(1, 'title')).toHaveValue('mow the grass')
+    expect(draftField(1, 'expected minutes')).toHaveValue(45)
+    expect(draftField(1, 'due date')).toHaveValue('2026-08-29')
+    expect(screen.getByText('Read as “mow the grass”, 45 min, due “Saturday”.')).toBeInTheDocument()
+    expect(draftField(2, 'title')).toHaveValue('put the shopping away')
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(handlers.onAdd).not.toHaveBeenCalled()
+    // The form is STILL there, under the proposal.
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('AC 2: one chore described is one row', async () => {
+    setupWithProposer(proposal([row()]))
+    await describeChores('takes about 45 min to mow the grass')
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(screen.getByText(/one chore read from what you wrote/i)).toBeInTheDocument()
+  })
+
+  it('AC 9: confirming writes every listed row through onAddMany with source extraction, and a removed row is not written', async () => {
+    const handlers = setupWithProposer(
+      proposal([row(), row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true, chore: { id: 'n1' } }])
+    await describeChores('the shop and putting it away')
+    await clickAndSettle(screen.getByRole('button', { name: /remove chore 2 from the list/i }))
+    // No placeholder: one row remains and it is the first.
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(draftField(1, 'title')).toHaveValue('mow the grass')
+
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledTimes(1)
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' },
+    ])
+    // Everything landed: the list is gone, the box is back and empty, the form is still there.
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    expect(box()).toHaveValue('')
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('AC 4: the date is editable per row before confirming, and the edited value is what is written', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('mow the grass on saturday')
+    fireEvent.change(draftField(1, 'due date'), { target: { value: '2026-08-31' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      expect.objectContaining({ dueOn: '2026-08-31', source: 'extraction' }),
+    ])
+  })
+
+  it('AC 5: a chore with no date arrives marked as needing one, cannot be confirmed as it stands, and can once a date is picked', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ dueOn: '', problem: 'When is this chore due?', note: 'Read as “mow the grass”, 45 min, no date stated.' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('takes about 45 min to mow the grass')
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/when is this chore due/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    // Still marked — confirm re-ran the same validator and refused.
+    expect(screen.getByRole('alert')).toHaveTextContent(/when is this chore due/i)
+
+    fireEvent.change(draftField(1, 'due date'), { target: { value: '2026-08-29' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([
+      { title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29', source: 'extraction' },
+    ])
+  })
+
+  it('#207 ruling 2: a zero duration arrives as an EMPTY minutes field, marked, and is not a value the member can confirm', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ minutes: '', problem: 'How many minutes does this chore take?' })]),
+    )
+    await describeChores('the grass needs mowed every week')
+    expect(draftField(1, 'expected minutes')).toHaveValue(null)
+    expect(screen.getByRole('alert')).toHaveTextContent(/how many minutes/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+  })
+
+  it('AC 7: a row over the bounds arrives marked with the data layer’s sentence and cannot be confirmed until edited', async () => {
+    const handlers = setupWithProposer(
+      proposal([row({ minutes: '1441', problem: 'That is more than a day of work — split it into smaller chores.' })]),
+    )
+    handlers.onAddMany.mockResolvedValue([{ ok: true }])
+    await describeChores('rebuild the fireplace, a day and a bit')
+    expect(screen.getByRole('alert')).toHaveTextContent(/more than a day of work/i)
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+
+    fireEvent.change(draftField(1, 'expected minutes'), { target: { value: '360' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).toHaveBeenCalledWith([expect.objectContaining({ expectedMinutes: '360' })])
+  })
+
+  it('AC 7: confirm re-validates with the SAME validators — a row that arrived clean and was edited to a bad value is refused with OUR sentence', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    await describeChores('mow the grass')
+    fireEvent.change(draftField(1, 'expected minutes'), { target: { value: '0' } })
+    await confirmProposed()
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least a minute/i)
+  })
+
+  it('a partial failure on write keeps the refused rows listed and says how many saved — the #220 arithmetic, shared', async () => {
+    const handlers = setupWithProposer(
+      proposal([row(), row({ key: 'proposed-2', title: 'put the shopping away', minutes: '15' })]),
+    )
+    handlers.onAddMany.mockResolvedValueOnce([
+      { ok: true, chore: { id: 'n1' } },
+      { ok: false, message: 'adding the chore: the server refused this row' },
+    ])
+    await describeChores('the shop and putting it away')
+    await confirmProposed()
+    expect(screen.getByTestId('proposal-notice')).toHaveTextContent(/1 of 2 saved/i)
+    expect(screen.getAllByLabelText(/title for chore \d/i)).toHaveLength(1)
+    expect(draftField(1, 'title')).toHaveValue('put the shopping away')
+    expect(screen.getByRole('alert')).toHaveTextContent(/the server refused this row/i)
+  })
+
+  it('discarding the proposal writes nothing, clears the list, and leaves the form where it was', async () => {
+    const handlers = setupWithProposer(proposal([row()]))
+    await describeChores('mow the grass')
+    await clickAndSettle(screen.getByRole('button', { name: /^discard$/i }))
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add chore/i })).toBeInTheDocument()
+  })
+
+  it('a question keeps the box with the sentence under it, and no list', async () => {
+    setupWithProposer({ outcome: 'question', sentence: 'One more detail is needed. Say how long each one takes.' })
+    await describeChores('we do the dishes every day')
+    expect(screen.getByTestId('capture-question')).toHaveTextContent(/one more detail/i)
+    expect(box()).toHaveValue('we do the dishes every day')
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['failed', 'The extraction service could not be reached: network down'],
+    ['timeout', 'No answer came back within 6 seconds.'],
+    ['unusable', 'That did not come back as a list of chores.'],
+  ])('AC 6 (%s): the failure is stated, nothing is written, the typed form is focused, and typing completes the task through onAdd', async (outcome, sentence) => {
+    const handlers = setupWithProposer({ outcome, sentence })
+    await describeChores('mow the grass')
+
+    const failure = screen.getByTestId('capture-failure')
+    expect(failure).toHaveTextContent(sentence)
+    expect(failure).toHaveTextContent(/type them in below instead/i)
+    expect(handlers.onAddMany).not.toHaveBeenCalled()
+    expect(handlers.onAdd).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/title for chore 1/i)).not.toBeInTheDocument()
+    // The form that was there throughout, now holding focus — not revealed.
+    const titleField = screen.getByLabelText(/^chore$/i)
+    expect(titleField).toHaveFocus()
+
+    fillAddForm({ title: 'mow the grass', minutes: '45', due: '2026-08-29' })
+    await submitAdd()
+    expect(handlers.onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'mow the grass', expectedMinutes: '45', dueOn: '2026-08-29' }),
+    )
+  })
+
+  it('AC 3: the description field, the pending state and the swap live in ONE shell — Chores renders CaptureShell and defines none of them', () => {
+    const { readFileSync } = fsForSource
+    const components = resolveDir('src/components')
+    const shells = []
+    for (const file of listSource(components)) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      if (/data-testid="capture-shell"/.test(code) || /capture-pending/.test(code)) shells.push(file)
+    }
+    expect(shells).toHaveLength(1)
+    expect(shells[0]).toMatch(/[\\/]CaptureShell\.jsx$/)
+    const chores = stripComments(readFileSync(`${components}/Chores.jsx`, 'utf8'))
+    expect(chores).toMatch(/from '\.\/CaptureShell\.jsx'/)
+    expect(chores).toMatch(/<CaptureShell\b/)
+    // No second description box or pending line of its own.
+    expect(chores).not.toMatch(/<textarea/)
+    expect(chores).not.toMatch(/Working it out/)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // #105 — skipping one occurrence of a repeat
 //
 // Everything here is about the SCREEN: what is offered, what is said, and which
@@ -1754,5 +2026,328 @@ describe('#305 — a chore that did not get done, on the Chores tab', () => {
     // And it is not "done" either: the line to the Done tab shows (something
     // has left the list) and counts zero.
     expect(screen.getByTestId('done-this-week')).toHaveTextContent('0 done this week')
+  })
+})
+
+// #101 — importing a calendar event as a chore, on this tab.
+//
+// What this file can prove is what the section DRAWS and which handler a tap
+// reaches with what: that the control is absent without a connection, that a
+// free/busy-only connection gets the consent step and never a list, that
+// picking an event prefills the ONE form and marks it, and that Add then
+// reaches `onImportEvent` with the event id rather than `onAdd`. The two
+// writes App makes behind that handler — and their order — are App.test.jsx's.
+// Names are synthetic — see #19.
+describe('#101 — import from calendar', () => {
+  const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'
+  const READONLY = 'https://www.googleapis.com/auth/calendar.readonly'
+  const narrow = { id: 'c1', member_id: 'm1', scope: FREEBUSY, connected_at: '2026-08-24T00:00:00Z' }
+  const widened = { ...narrow, scope: `${FREEBUSY} ${READONLY}` }
+  const timed = {
+    id: 'evt-1',
+    title: 'Placeholder Event',
+    start: '2026-09-10T17:00:00.000Z',
+    end: '2026-09-10T18:30:00.000Z',
+    allDay: false,
+    durationMinutes: 90,
+    dueOn: '2026-09-10',
+  }
+  const allDay = {
+    id: 'evt-2',
+    title: 'Placeholder Other Event',
+    start: '2026-09-12',
+    end: '2026-09-13',
+    allDay: true,
+    durationMinutes: null,
+    dueOn: '2026-09-12',
+  }
+
+  const importHandlers = (overrides = {}) => ({
+    onFetchCalendarEvents: vi.fn().mockResolvedValue({ ok: true, events: [timed, allDay] }),
+    onWidenCalendarConsent: vi.fn(),
+    onImportEvent: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  })
+
+  const importButton = () => screen.getByRole('button', { name: /import from calendar/i })
+  const openImport = () => clickAndSettle(importButton())
+  const useTimed = () => clickAndSettle(screen.getByRole('button', { name: /import placeholder event$/i }))
+  const useAllDay = () =>
+    clickAndSettle(screen.getByRole('button', { name: /import placeholder other event/i }))
+
+  it('mounts nothing without a connection — the tab is exactly the #34 surface', () => {
+    setup({ calendarConnection: null, calendarImports: [], ...importHandlers() })
+    expect(screen.queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('calendar-import')).not.toBeInTheDocument()
+  })
+
+  it('mounts nothing when the handlers are not wired, whatever the connection says', () => {
+    setup({ calendarConnection: widened, calendarImports: [] })
+    expect(screen.queryByRole('button', { name: /import from calendar/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: a free/busy-only connection gets the consent step and no list, and asks the function nothing', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: narrow, calendarImports: [], ...handlers })
+    await openImport()
+    expect(screen.getByTestId('import-consent')).toHaveTextContent(/read event titles/i)
+    expect(handlers.onFetchCalendarEvents).not.toHaveBeenCalled()
+    await clickAndSettle(screen.getByRole('button', { name: /allow reading events/i }))
+    expect(handlers.onWidenCalendarConsent).toHaveBeenCalledTimes(1)
+    // Nothing was written by asking: the confirm is a trip to Google.
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: "Not now" closes the consent step and leaves the button where it was', async () => {
+    setup({ calendarConnection: narrow, calendarImports: [], ...importHandlers() })
+    await openImport()
+    await clickAndSettle(screen.getByRole('button', { name: /not now/i }))
+    expect(screen.queryByTestId('import-consent')).not.toBeInTheDocument()
+    expect(importButton()).toBeInTheDocument()
+  })
+
+  it('AC 2: a widened connection asks the function on open and lists the events, transiently', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    expect(handlers.onFetchCalendarEvents).toHaveBeenCalledTimes(1)
+    const list = screen.getByTestId('calendar-import')
+    expect(within(list).getByText('Placeholder Event')).toBeInTheDocument()
+    expect(within(list).getByText('Placeholder Other Event')).toBeInTheDocument()
+    // The timed event says when and how long, in the household's zone; the
+    // all-day one says so.
+    expect(list).toHaveTextContent(/Thu, Sep 10 · 1:00 PM · 1h 30m/)
+    expect(list).toHaveTextContent(/Sat, Sep 12 · all day/)
+    // Closing forgets the list; reopening reads again rather than showing a
+    // week that may have moved on.
+    await clickAndSettle(within(list).getByRole('button', { name: /^close$/i }))
+    expect(screen.queryByText('Placeholder Event')).not.toBeInTheDocument()
+    await openImport()
+    expect(handlers.onFetchCalendarEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('AC 2: says so when the week is empty, and shows the function’s sentence when it refuses', async () => {
+    const handlers = importHandlers({
+      onFetchCalendarEvents: vi.fn().mockResolvedValue({ ok: true, events: [] }),
+    })
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    expect(screen.getByText(/nothing upcoming on your calendar this week/i)).toBeInTheDocument()
+
+    handlers.onFetchCalendarEvents.mockRejectedValue(
+      new Error('Could not reach Google. Try again in a moment.'),
+    )
+    await clickAndSettle(screen.getByRole('button', { name: /read again/i }))
+    expect(screen.getByTestId('import-complaint')).toHaveTextContent(/could not reach google/i)
+    // A refusal that is not about scope does not turn into the consent step.
+    expect(screen.queryByTestId('import-consent')).not.toBeInTheDocument()
+  })
+
+  it('AC 1: the function’s own scope refusal turns into the consent step', async () => {
+    const refused = new Error('This calendar is connected for free/busy only.')
+    refused.needsScope = true
+    setup({
+      calendarConnection: widened,
+      calendarImports: [],
+      ...importHandlers({ onFetchCalendarEvents: vi.fn().mockRejectedValue(refused) }),
+    })
+    await openImport()
+    expect(screen.getByTestId('import-consent')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /allow reading events/i })).toBeInTheDocument()
+  })
+
+  it('AC 3: Use prefills the ONE form — title, minutes from the duration, due date — and marks it', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(screen.getByLabelText(/expected minutes/i)).toHaveValue(90)
+    expect(screen.getByLabelText(/^due$/i)).toHaveValue('2026-09-10')
+    expect(screen.getByTestId('import-source')).toHaveTextContent(/from your calendar · placeholder event/i)
+    // A one-time chore: the repeat control is gone while the form is an import.
+    expect(screen.queryByLabelText(/repeats/i)).not.toBeInTheDocument()
+    // Picking writes nothing.
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+    expect(base.onAdd).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: an all-day event prefills a BLANK minutes field, and Add refuses until the member says', async () => {
+    const handlers = importHandlers()
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useAllDay()
+    expect(screen.getByLabelText(/expected minutes/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/^due$/i)).toHaveValue('2026-09-12')
+    await submitAdd()
+    // The data layer's own sentence, before any request.
+    expect(screen.getByRole('alert')).toHaveTextContent(/how many minutes/i)
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: Add on an imported form reaches onImportEvent with the fields AND the event id — never onAdd', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    // Editable before save: the member changes the minutes.
+    fireEvent.change(screen.getByLabelText(/expected minutes/i), { target: { value: '60' } })
+    await submitAdd()
+
+    expect(handlers.onImportEvent).toHaveBeenCalledTimes(1)
+    expect(handlers.onImportEvent).toHaveBeenCalledWith(
+      {
+        title: 'Placeholder Event',
+        expectedMinutes: '60',
+        dueOn: '2026-09-10',
+        repeatKind: 'none',
+        repeatWeekdays: [],
+        repeatMonthday: '',
+      },
+      'evt-1',
+    )
+    expect(base.onAdd).not.toHaveBeenCalled()
+    // The form and the mark reset after a successful write, like a typed add.
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('')
+    expect(screen.queryByTestId('import-source')).not.toBeInTheDocument()
+  })
+
+  it('AC 3: "Not from the calendar" keeps the typed fields and turns Add back into an ordinary add', async () => {
+    const handlers = importHandlers()
+    const base = setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    await clickAndSettle(screen.getByRole('button', { name: /not from the calendar/i }))
+    expect(screen.queryByTestId('import-source')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    await submitAdd()
+    expect(base.onAdd).toHaveBeenCalledTimes(1)
+    expect(base.onAdd.mock.calls[0][0]).not.toHaveProperty('source')
+    expect(handlers.onImportEvent).not.toHaveBeenCalled()
+  })
+
+  it('AC 5: an event the ledger already holds is marked and offers no Use', async () => {
+    setup({
+      calendarConnection: widened,
+      calendarImports: [
+        { id: 'i1', household_id: 'h1', member_id: 'm2', calendar_event_id: 'evt-1', chore_id: 'c9' },
+      ],
+      ...importHandlers(),
+    })
+    await openImport()
+    expect(screen.getByTestId('imported-evt-1')).toHaveTextContent(/already imported/i)
+    expect(
+      screen.queryByRole('button', { name: /import placeholder event$/i }),
+    ).not.toBeInTheDocument()
+    // POSITIVE CONTROL: the other event, not in the ledger, still offers Use.
+    expect(screen.getByRole('button', { name: /import placeholder other event/i })).toBeInTheDocument()
+  })
+
+  it('a failed import leaves the form as it was, so the member can retry or disown it', async () => {
+    const handlers = importHandlers({ onImportEvent: vi.fn().mockRejectedValue(new Error('refused')) })
+    setup({ calendarConnection: widened, calendarImports: [], ...handlers })
+    await openImport()
+    await useTimed()
+    await submitAdd()
+    expect(screen.getByLabelText(/^chore$/i)).toHaveValue('Placeholder Event')
+    expect(screen.getByTestId('import-source')).toBeInTheDocument()
+  })
+})
+
+// #345 — an overdue row is coloured as overdue, and a daily repeat never is.
+//
+// What this file proves is what the ROW carries: the modifier the stylesheet
+// keys on, and the word beside the date so colour is not the only carrier.
+// What it cannot prove is what the colour looks like — jsdom applies no
+// stylesheet — which is why AC 5 is asserted against `index.css` in
+// gate.test.js, and why the predicate's own cases are in lib/chores.test.js.
+// Chore names are synthetic — see #19.
+describe('#345 — a chore whose date has passed is coloured as overdue', () => {
+  // setup()'s own two chores are due Aug 10 and Aug 11 against a todayIso of
+  // Aug 24, so the default fixture is already two overdue rows.
+  const rowFor = (title) => screen.getByText(title).closest('li')
+
+  it('AC 1: a non-repeating row dated before today carries the modifier and the word', () => {
+    setup()
+    const row = rowFor('Placeholder Chore')
+    expect(row).toHaveClass('chore--overdue')
+    expect(within(row).getByText('overdue')).toBeInTheDocument()
+  })
+
+  it('AC 1: a row due TODAY carries neither, and one due later carries neither', () => {
+    // The `<` / `<=` mutation's case on this surface: due-today must stay
+    // plain, and it is the only row that separates the two operators.
+    const dueToday = { ...chores[0], id: 'c20', title: 'Placeholder Today Chore', due_on: '2026-08-24' }
+    const dueLater = { ...chores[0], id: 'c21', title: 'Placeholder Later Chore', due_on: '2026-08-30' }
+    setup({ chores: [dueToday, dueLater] })
+
+    for (const title of ['Placeholder Today Chore', 'Placeholder Later Chore']) {
+      const row = rowFor(title)
+      expect(row).not.toHaveClass('chore--overdue')
+      expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+    }
+  })
+
+  it('AC 2: neither a daily anchor nor a daily occurrence is highlighted, however old', () => {
+    const anchor = {
+      ...chores[0], id: 'r1', title: 'Placeholder Daily Chore',
+      due_on: '2026-08-01', repeat_kind: 'daily',
+    }
+    const occurrence = {
+      ...chores[0], id: 'o1', title: 'Placeholder Daily Occurrence',
+      due_on: '2026-08-20', repeat_kind: 'none', generated_from: 'r1',
+    }
+    setup({ chores: [anchor, occurrence] })
+
+    for (const title of ['Placeholder Daily Chore', 'Placeholder Daily Occurrence']) {
+      const row = rowFor(title)
+      expect(row).not.toHaveClass('chore--overdue')
+      expect(within(row).queryByText('overdue')).not.toBeInTheDocument()
+    }
+  })
+
+  it('AC 2: a weekly and a monthly occurrence dated before today ARE highlighted', () => {
+    // The control on the exclusion: it is about dailies, and this is what
+    // stops it quietly becoming "repeats are exempt".
+    const weeklyAnchor = { ...chores[0], id: 'r2', title: 'Placeholder Weekly Chore', due_on: '2026-08-03', repeat_kind: 'weekly', repeat_weekdays: [1] }
+    const weeklyOccurrence = { ...chores[0], id: 'o2', title: 'Placeholder Weekly Occurrence', due_on: '2026-08-17', repeat_kind: 'none', generated_from: 'r2' }
+    const monthlyOccurrence = { ...chores[0], id: 'o3', title: 'Placeholder Monthly Occurrence', due_on: '2026-08-05', repeat_kind: 'none', generated_from: 'r3' }
+    const monthlyAnchor = { ...chores[0], id: 'r3', title: 'Placeholder Monthly Chore', due_on: '2026-07-05', repeat_kind: 'monthly', repeat_monthday: 5 }
+    setup({ chores: [weeklyAnchor, weeklyOccurrence, monthlyAnchor, monthlyOccurrence] })
+
+    for (const title of [
+      'Placeholder Weekly Occurrence',
+      'Placeholder Monthly Occurrence',
+      'Placeholder Weekly Chore',
+      'Placeholder Monthly Chore',
+    ]) {
+      const row = rowFor(title)
+      expect(row).toHaveClass('chore--overdue')
+      expect(within(row).getByText('overdue')).toBeInTheDocument()
+    }
+  })
+
+  it('AC 3: reads the household day it is given, not the device clock', () => {
+    // The household is a day behind the device. A chore due on the
+    // household's today must stay plain — which is only true if the row reads
+    // `todayIso`. Nothing here depends on when the test runs.
+    const dueOnTheirToday = { ...chores[0], id: 'c22', title: 'Placeholder Zone Chore', due_on: '2026-08-24' }
+    setup({ chores: [dueOnTheirToday], todayIso: '2026-08-24' })
+    expect(rowFor('Placeholder Zone Chore')).not.toHaveClass('chore--overdue')
+  })
+
+  it('AC 3 POSITIVE CONTROL: the same row against a household one day ahead IS overdue', () => {
+    // Without this the assertion above passes with the feature deleted.
+    const dueOnTheirToday = { ...chores[0], id: 'c22', title: 'Placeholder Zone Chore', due_on: '2026-08-24' }
+    setup({ chores: [dueOnTheirToday], todayIso: '2026-08-25' })
+    expect(rowFor('Placeholder Zone Chore')).toHaveClass('chore--overdue')
+  })
+
+  it('carries no marker at all before the household day is known', () => {
+    // App renders before `localTodayIn` has a household, and a row must not
+    // guess: no todayIso, no colour.
+    setup({ todayIso: undefined })
+    expect(rowFor('Placeholder Chore')).not.toHaveClass('chore--overdue')
   })
 })

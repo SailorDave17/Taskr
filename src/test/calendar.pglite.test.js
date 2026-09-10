@@ -13,31 +13,63 @@
 // design until it was; that check, not this file, is the authority on live state.
 //
 // ===========================================================================
-// #95 AC 2 SAYS THE HARNESS CANNOT PROVE GRANTS. IT CAN PROVE THE HALF THAT
-// MATTERS, AND THAT HALF IS UNUSUALLY STRONG HERE
+// WHICH OF THESE ASSERTIONS TESTIFY ABOUT `0011` — CORRECTED UNDER #334
 // ===========================================================================
 //
-// The criterion reads "the pglite harness structurally cannot prove grants, so
-// the live grant proof lives in the verification story". That is right about one
-// direction and wrong about the other, and the difference is worth stating
-// because the wrong half is the one this story turns on.
+// #95 AC 2 reads "the pglite harness structurally cannot prove grants, so the
+// live grant proof lives in the verification story". This header used to
+// answer that the harness OVERSTATES the platform — `alter default privileges
+// ... grant all` — so that every client refusal below could only pass because
+// `0011`'s revokes were there, and that proving `service_role` HAS its grants
+// was vacuous. Both halves expired with #91, which narrowed the stub to the
+// platform's real default: `truncate, references, trigger, maintain` and NO
+// DML (support/pgliteSupabase.js; grants.pglite.test.js's positive control
+// asserts exactly that set). An expired sentence rather than a wrong one — it
+// was true of the harness it was written against — but this file had no way
+// to notice, and a reader used it to decide what a green run meant.
 //
-// - Proving `service_role` HAS its grants is vacuous here. The stub's
-//   `alter default privileges ... grant all` hands every role everything on
-//   every new table, so the assertion passes with the grant deleted. That half
-//   genuinely does belong to a live check, and the source-level assertion below
-//   is the most this file can honestly say about it.
+// What each assertion below is worth, MEASURED rather than reasoned:
 //
-// - Proving `authenticated` and `anon` have NOTHING is the opposite: the stub's
-//   default is PERMISSIVE, so a table with no explicit `revoke` arrives with
-//   `all` granted to both. Every refusal asserted below therefore fails unless
-//   `0011`'s revokes are actually there. The harness overstating the platform,
-//   which is a weakness everywhere else, is what makes this file's central claim
-//   load-bearing.
+// - *2026-09-05, #334*: deleting both `revoke` lines from `0011` reddens
+//   **3 of 23** tests here — the two `holds NO privilege of any kind` cases
+//   (the default leaves `Dxtm` on the table, which is not `[]`) and `revokes
+//   before it grants`. Those three are what the revokes are load-bearing for.
+//   First measured 2026-09-04 during #96, same count, which is how this issue
+//   was found.
+// - Everything else — the member's refused read, `select *` failing, the
+//   column-grant comparison, the cross-household reads — is proven by the
+//   PLATFORM DEFAULT the harness models. Still worth asserting, since it is
+//   what a client must never be able to do and a later grant would redden it;
+//   but it does not testify about `0011`.
+// - Proving `service_role` HAS its grants is the half that got BETTER. With
+//   the default at `Dxtm`, an explicit grant is the only thing that can put
+//   DML on a table, so the assertion is real rather than vacuous — and it is
+//   made through the CATALOG, in grants.pglite.test.js's `and service_role
+//   reaches only what the Edge Functions need`. *Measured 2026-09-05, #334*:
+//   deleting `0011`'s two `service_role` grants reddens exactly that test —
+//   predicted 1, actual 1 — plus the two source-level tests at the bottom of
+//   this file, predicted 2, actual 2.
 //
-// So the token table's isolation is proven here, on every push, rather than
-// deferred. That is the claim #95 AC 2 is actually about — no grant to
-// `authenticated` or `anon` — and it is the one whose failure would be silent.
+//   Catalog rather than behaviour, and not laziness: `service_role` is created
+//   `nologin` here with no BYPASSRLS, so an insert under `set role
+//   service_role` would be refused by row-level security — true of the harness,
+//   false of production, and nothing to do with the grant.
+//
+// The source-level `service_role` block at the bottom is left as it was. A
+// scan of the migration text can say nothing about the LIVE project whatever
+// the harness default is — that is `npm run probe:live-grants` and #100 — and
+// its ordering test is what guards a re-paste. The catalog test above is the
+// local proof; that block is not, and does not claim to be.
+//
+// calendarBusy.pglite.test.js carries the same correction for `0030`, against
+// its own measurement (#96). Neither is a copy of the other — each cites a
+// mutation of its own migration — and the rule that decides which direction a
+// stub can prove is written once, in grants.pglite.test.js's header.
+//
+// So the token table's isolation is still proven here, on every push — by the
+// default the harness models, with the revokes as the house convention on
+// top — and that is the claim #95 AC 2 is actually about: no grant to
+// `authenticated` or `anon`, the failure that would be silent.
 //
 // Names are synthetic — see #19.
 
@@ -163,14 +195,176 @@ describe('connecting a calendar, run against a real Postgres', () => {
   })
 
   // -------------------------------------------------------------------------
+  // #99 — what a disconnect takes, and what it must leave
+  // -------------------------------------------------------------------------
+  //
+  // The Edge Function's three deletions are proven against a fake client in
+  // supabase/functions/calendar-disconnect/handler.test.js, which can say what
+  // was CALLED and nothing about what Postgres then does. This is the other
+  // half: the same three statements against a real schema, asking what else
+  // moves when they run.
+  //
+  // AC 3 is the reason it is worth asking. "Confirmed capacity rows with source
+  // 'calendar' remain" is a claim about the SCHEMA, not about the handler — a
+  // foreign key from `member_capacity` to any calendar table, added by a later
+  // migration for a reason that looked good at the time, would delete an
+  // accepted figure on disconnect with nothing in the function to blame. That
+  // is exactly the shape cairn records as a constraint outliving the meaning of
+  // its column, and the only instrument that can see it is a database.
+  describe('#99 — the disconnect deletions, against a real Postgres', () => {
+    /**
+     * The deletion set the Edge Function actually issues, READ OFF ITS SOURCE.
+     *
+     * #99's review: a re-spelled literal would let the handler's set change
+     * while this block went on deleting its own hard-coded three, so the only
+     * instrument that reads a REAL schema would keep making its AC 3 claim
+     * about a set the code no longer has.
+     *
+     * Source text rather than an import, and that is not a shortcut — it is the
+     * only route available. `gate.test.js` refuses any file under `src/` that
+     * imports from `supabase/functions/`, because the function is a Deno module
+     * and an import would put it in the graph the bundler follows. Reaching for
+     * the constant directly would weaken a guard to tighten a test.
+     * `edge-function-cors.test.js` reads its subject the same way for the same
+     * reason.
+     *
+     * The parse is asserted rather than trusted: a regex that silently matched
+     * nothing would leave `TABLES` empty, every loop below would run zero
+     * statements, and every assertion about what SURVIVES a disconnect would
+     * pass having deleted nothing at all — the most reassuring possible way for
+     * this block to be worthless.
+     */
+    const HANDLER_SOURCE = readFileSync(
+      resolve(process.cwd(), 'supabase/functions/calendar-disconnect/handler.ts'),
+      'utf8',
+    )
+    const TABLES = (
+      HANDLER_SOURCE.match(/export const DELETED_TABLES = Object\.freeze\(\[([\s\S]*?)\]\)/)?.[1] ??
+      ''
+    )
+      .split(',')
+      .map((part) => part.trim().replace(/^'|'$/g, ''))
+      .filter(Boolean)
+
+    it('POSITIVE CONTROL: the deletion set was really read off the handler', () => {
+      // Without this the parse can go empty and every test below passes
+      // vacuously. Three names, each one a table this schema has.
+      expect(TABLES).toEqual(['calendar_tokens', 'calendar_busy', 'calendar_connections'])
+    })
+
+    /** The three statements the Edge Function issues, in the order it issues them. */
+    const disconnect = async (member) => {
+      for (const table of TABLES) {
+        await db.query(`delete from public.${table} where member_id = $1`, [member])
+      }
+    }
+
+    /** A derived figure, as `calendar-busy` writes one. */
+    const seedBusy = (household, member, periodStart = '2026-09-07') =>
+      db.query(
+        `insert into public.calendar_busy
+           (household_id, member_id, period_start, busy_minutes, event_count)
+         values ($1, $2, $3, 320, 6)`,
+        [household, member, periodStart],
+      )
+
+    it('takes the token, every derived week and the connection, and leaves the roster alone', async () => {
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA, '2026-09-07')
+      await seedBusy(householdA.id, organizerA, '2026-08-31')
+      expect(await countAsOwner('calendar_busy')).toBe(2)
+
+      await disconnect(organizerA)
+
+      expect(await countAsOwner('calendar_tokens')).toBe(0)
+      expect(await countAsOwner('calendar_busy')).toBe(0)
+      expect(await countAsOwner('calendar_connections')).toBe(0)
+      // The member is still on the roster. A cascade in this direction would be
+      // absurd and is asserted anyway, because the FKs here run the other way
+      // and a reader has to be able to tell that was checked.
+      const { rows } = await db.query('select id from public.members where id = $1', [organizerA])
+      expect(rows).toHaveLength(1)
+    })
+
+    it('leaves a HOUSEMATE’S calendar rows entirely alone', async () => {
+      // The deletes are keyed on `member_id`. One keyed on `household_id` —
+      // which is a column on all three tables and reads just as naturally —
+      // would take everybody's calendar with it, and every assertion in the
+      // test above would still pass.
+      await connect(householdA.id, organizerA)
+      await connect(householdA.id, memberTwo)
+      await seedBusy(householdA.id, memberTwo)
+
+      await disconnect(organizerA)
+
+      expect(await countAsOwner('calendar_tokens')).toBe(1)
+      expect(await countAsOwner('calendar_connections')).toBe(1)
+      expect(await countAsOwner('calendar_busy')).toBe(1)
+    })
+
+    it('AC 3 — a confirmed capacity row with source calendar SURVIVES, provenance intact', async () => {
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA)
+      await db.query(
+        `insert into public.member_capacity
+           (household_id, member_id, period_start, minutes, source)
+         values ($1, $2, '2026-09-07', 90, 'calendar')`,
+        [householdA.id, organizerA],
+      )
+
+      await disconnect(organizerA)
+
+      const { rows } = await db.query(
+        `select minutes, source from public.member_capacity where member_id = $1`,
+        [organizerA],
+      )
+      expect(rows).toHaveLength(1)
+      // The WORD as well as the row: an accepted figure is the member's own, and
+      // what produced it is part of what they accepted. A disconnect that
+      // rewrote the source to `manual` would keep the number and lose the fact.
+      expect(rows[0]).toMatchObject({ minutes: 90, source: 'calendar' })
+    })
+
+    it('POSITIVE CONTROL: the same row is deleted when the MEMBER goes', async () => {
+      // Which is what makes the survival above a fact about the disconnect
+      // rather than a fact about a table nothing can reach. `0005`'s cascade
+      // from `members` is real, so the fixture demonstrably CAN be deleted —
+      // and only the roster deletion does it.
+      await db.query(
+        `insert into public.member_capacity
+           (household_id, member_id, period_start, minutes, source)
+         values ($1, $2, '2026-09-07', 90, 'calendar')`,
+        [householdA.id, memberTwo],
+      )
+      expect(await countAsOwner('member_capacity')).toBe(1)
+      await db.query('delete from public.members where id = $1', [memberTwo])
+      expect(await countAsOwner('member_capacity')).toBe(0)
+    })
+
+    it('is idempotent — a second disconnect deletes nothing and refuses nothing', async () => {
+      // The handler's retry argument rests on this: a delete that fails part way
+      // through is repaired by pressing the control again, and the second pass
+      // finds some rows already gone. If deleting an absent row were an error,
+      // the repair would be a second failure.
+      await connect(householdA.id, organizerA)
+      await seedBusy(householdA.id, organizerA)
+      await disconnect(organizerA)
+      const second = await attempt(() => disconnect(organizerA))
+      expect(second.error).toBeNull()
+      expect(await countAsOwner('calendar_connections')).toBe(0)
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // The token table: unreachable, and unreachable twice over
   // -------------------------------------------------------------------------
 
   describe('AC 2 — no client can read the refresh token', () => {
     it.each(['authenticated', 'anon'])('%s holds NO privilege of any kind on it', async (role) => {
-      // The load-bearing assertion of this file. The stub grants `all` on every
-      // new table to every role, so an empty result here is only possible
-      // because `0011` revokes — delete that line and this goes red.
+      // One of the three assertions the revokes are load-bearing for (header,
+      // #334). The stub's default leaves `Dxtm` on a new table, which is not
+      // `[]`, so an empty result here is only possible because `0011` revokes —
+      // delete that line and this goes red, measured 2026-09-05.
       expect(await grantsFor(role, 'calendar_tokens')).toEqual([])
       expect(await readableColumns(role, 'calendar_tokens')).toEqual([])
     })
@@ -432,17 +626,19 @@ describe('connecting a calendar, run against a real Postgres', () => {
 
     it('names both tables in an explicit grant to service_role', async () => {
       // A SOURCE assertion, and weaker than everything above — stated plainly
-      // rather than dressed up. Postgres cannot testify to it in this harness:
-      // the stub grants `all` to every role by default, so `service_role` has
-      // these privileges whether or not the migration says so, and the runtime
-      // check would pass with both lines deleted.
+      // rather than dressed up. It used to say Postgres could not testify to
+      // this in the harness because the stub granted `all` by default; since
+      // #91 it can and does, in grants.pglite.test.js's catalog read (header,
+      // #334). This scan stays because it asks a different question: that the
+      // grant is WRITTEN, in the file a human pastes, which no catalog built
+      // from that file can distinguish from the grant arriving some other way.
       //
-      // It still earns its place, because the platform disagrees with the stub
-      // in the direction that breaks the app. On a current Supabase project a
-      // new table gives every Data API role `Dxtm` and nothing else — no select,
-      // no insert — so an Edge Function holding the service_role key is refused
-      // 42501 on its own table. `service_role` bypasses row-level security; it
-      // does NOT bypass grants.
+      // It still earns its place, because the platform is the thing that breaks
+      // the app. On a current Supabase project a new table gives every Data API
+      // role `Dxtm` and nothing else — no select, no insert — so an Edge
+      // Function holding the service_role key is refused 42501 on its own
+      // table. `service_role` bypasses row-level security; it does NOT bypass
+      // grants.
       for (const table of ['calendar_connections', 'calendar_tokens']) {
         expect(sql).toMatch(new RegExp(`grant[^;]*on public\\.${table}[^;]*to service_role`))
       }

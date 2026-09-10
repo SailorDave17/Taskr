@@ -234,6 +234,46 @@ raised this as an open question on #34 rather than deciding it, and the owner to
   a 2-day platform decision that was already taken; #56 closed superseded 2026-08-27, #208 is the
   live endpoint story.)*
 
+### The verdict — 2026-09-07, owner decision (#207)
+
+**NARROW.** The bet is neither killed nor taken whole. Full evidence and every figure in
+[`extraction-verdict.md`](extraction-verdict.md); this is the decision, recorded here because the
+charter is where the bet was made.
+
+- **Chore capture PROCEEDS**, on `claude-haiku-4-5`, subject to three conditions: the contract gains
+  **recurrence** and **assignee**; the capture surface renders `expectedMinutes: 0` as an **empty
+  field** rather than a zero; and the surface **asks a direct question** rather than offering a free
+  text box.
+- **Capacity capture HOLDS** — not proceed, not stop. Its correction rate failed at 33.3%, but on
+  **one correction out of three figures**, which settles nothing in either direction.
+
+**Every kill number the corpus measures cleared** on both configurations — accuracy, refusals,
+overconfidence, due dates, cost — and the deployed-path p95 clears on Haiku as an *estimate*
+(2,626 ms of a 3,000 ms budget; `claude-opus-5` at effort low fails it at every condition measured).
+**The one axis that failed is capacity's correction rate, the axis measured against sentences a real
+household member wrote rather than against a corpus written for the extractor.** It reads 33.3% —
+**one correction out of three figures**, a denominator far too small to settle a kill number in
+either direction, which is exactly why capacity holds rather than stopping. The run-level rate is
+9 of 30, landing **exactly on the 30% ceiling** and passing by nothing at all.
+
+Three things the measurement established that no score expresses, and they are why the verdict is a
+narrow rather than a pass or a stop:
+
+1. **Members describe recurring chores by cadence and one-off chores by duration** — twelve of twelve
+   and four of four, both unprompted. The contract asks only for duration and has nowhere to put a
+   recurrence, though the schema has carried `repeat_kind` since migration `0012`.
+2. **Capacity language exists but is never volunteered.** Asked three times for a description of
+   available time, the owner wrote 25 chore sentences and none about capacity; asked a direct
+   question, they answered immediately and in numbers. A blank "describe your week" box would have
+   collected nothing.
+3. **The contract cannot say who is speaking.** The one successful capacity extraction returned the
+   person as `I`. Attaching the prompting question to the answer was tested and **changed nothing** —
+   the missing field is the speaker, not the question.
+
+This does not disturb the fallback rule above. The manual path exists and works, #52 measured it
+reaching a fair split in one sitting, and the owner recorded there that it **meets ambition 2** — so
+the bet remains an accelerator and a stop verdict would have cost speed rather than the product.
+
 Everything outside that path is deliberately boring, proven technology (owner directive: selectively
 bleeding-edge, one bet).
 
@@ -520,6 +560,17 @@ considered and rejected was to guard `create_household` and stay single-househol
 and closes the gap just as well; it was rejected because the household this app is built for has
 members who belong to a second one.
 
+***The client has caught up, and this paragraph's present tense stopped being true on 2026-09-09.***
+#159 scoped every read to a named household, #160 resolved identity within it, and #163 put its name
+on the shell — each landing while there was still no way to reach a second household, deliberately,
+so the scoping was proven before anything made one reachable. #164, #165 and #166 close it: the name
+becomes a control listing every household the person belongs to, this device remembers which one was
+chosen, and a person already in a household can start another without signing out. The default when
+nothing is remembered is **oldest by `households.created_at`** — the decision below, taken against
+most-recently-joined because the set a person belongs to grows and "most recently joined" names a
+different household the day they join one. The sentence above is left standing rather than rewritten:
+it is the state that made the goal urgent, and what it describes is what the three stories were for.
+
 **Admission changes for the third time, and this is the reversal.** `access-model.md` records the
 chain: 2026-08-05 → 2026-08-06 → 2026-08-11 (#62, *"The join code is gone. Not repurposed —
 dropped"*). Admission is now **an invitation**: a code an organizer creates and can withdraw, and an
@@ -578,6 +629,12 @@ half turns out not to be worth its days.
 - **Leaving does not revoke the Google grant**, because #99 owns the revoke. The screen says so
   plainly and names it; the alternative coupled an irreversible household action to a calendar
   story's schedule.
+  *(#99 shipped 2026-09-08 and this
+  bullet still holds as written — the two are different acts, and
+  the sentence naming #99 is now naming something that exists rather than something planned.
+  Disconnect asks Google to revoke; LEAVING a household still does not, so a member who wants the
+  grant gone presses Disconnect before they leave. #99's revoke is best-effort besides, so even that
+  act can leave Google holding a grant it says so on screen.)*
 
 **What is not decided here.** How the client scopes a read to one household is deliberately left to a
 measurement story — `members` and `chores` both withhold `household_id` from the client select
@@ -880,6 +937,278 @@ confirmation story under #257).
   out of scope at $0. A member on a synthetic `<id>@taskr.invalid` address cannot use this route and
   keeps their PIN. Linking a Google identity to an already-signed-in password account is a different
   surface with a known library hazard and is not here.
+
+## Decision taken 2026-09-05 — the busy figure's staleness bound is TWELVE hours
+
+Taken at the pickup of #98, which required the bound to be "a named constant, default 12 hours".
+This is that record, in the same shape as the catch-up bound's above.
+
+- **`BUSY_STALE_AFTER_HOURS = 12`.** When the app opens and the signed-in member's derived busy row
+  for this week is older than twelve hours, the client asks the `calendar-busy` Edge Function to
+  read the week again; a row younger than that is drawn as it is. The authority is the constant of
+  that name in `src/lib/calendar.js`; `isBusyWeekStale` beside it is the only comparison, strictly
+  older-than, with an unparsable timestamp read as stale rather than as current.
+- **Why twelve**: a member's free/busy is read on their behalf at most twice a day — a morning open
+  and an evening open each see what today has become, and a phone opened six times between them
+  spends nothing. Rejected: **one hour** (a Google read, and the function's two round trips, on
+  nearly every open — the cost #96 declined to pay even once at boot) and **twenty-four hours** (a
+  figure read Monday morning still says Monday morning on Tuesday morning, a whole day stale on
+  the day the week's capacity is being set). Wall-clock age, not calendar day: a figure read at
+  23:00 is not stale at 00:01.
+- **On app open, not on the capacity screen — and the two triggers stay disjoint.** #96 fires when
+  there is NO row and keys on the roster being on screen, because it declined to spend a
+  credential at boot for a figure nobody had asked to see. #98 fires when a row exists and is
+  stale, and keys on the app being open, because the member already has the figure, the week it
+  describes is the week the split reacts to, and #98's own third criterion — a refresh landing
+  while the capacity screen is open updates it in place — only means something if the refresh was
+  started somewhere else. Each trigger asks once a session per (member, week), under its own key.
+- **A failed refresh keeps the figure, its date, and says why.** The Edge Function's own sentence
+  is drawn beside the stale figure through the surface #96 AC 5 built — a polite status, not the
+  app's error strip, and the manual capacity path untouched underneath. Found in band: `refresh()`
+  had cleared that sentence whenever a row for the member existed, which was the same test as "a
+  read has arrived" while the only fetch was the no-row one; it now clears on a row younger than
+  the bound, so re-reading the same stale row leaves the sentence standing.
+- **Client-triggered only, held by a test.** #53 settled that the free plan's pg_cron stops silently
+  when a project pauses; `gate.test.js` now scans `src/`, `supabase/`, `scripts/`, the workflow and
+  the config files for pg_cron, the `cron.` schema, a Vercel `crons` block and an Actions
+  `schedule:` trigger, comments stripped, so the decision cannot be re-taken one story at a time.
+
+## Decision taken 2026-09-08 — a refreshed calendar suggestion applies itself within TWO HOURS
+
+Taken at the pickup of #106, which was filed **blocked on purpose** so that the one genuinely
+contested decision in the calendar epic — may the app change somebody's week with nobody tapping? —
+would be visible on the backlog instead of assumed inside a story. Its stated trigger was #100's
+live consent-friction and trust verdict; that verdict is still owed, and the owner chose to decide
+ahead of it with that stated. The full policy, the delta it measures and the rejected options are in
+`docs/capacity-model.md`'s section of the same date; this is the charter-level record.
+
+- **Auto-apply within a bound, and the bound is `AUTO_APPLY_BOUND_MINUTES = 120`.** When a calendar
+  read lands (#96's first read or #98's refresh) and the suggestion is within two hours of what the
+  week's capacity currently resolves to, the app writes it — `source = 'calendar_auto'`, with the
+  figure it replaced in `previous_minutes` — and re-assigns as a tap would. Larger moves only
+  propose, exactly as every refresh did before. Rejected: **never** (zero build cost, and the
+  signature moment — "re-balances without anyone having to negotiate it" — needs a tap forever) and
+  **announcement only, no bound** (the cheapest build and the widest exposure; a wrong free/busy read
+  moves as much of the week as it likes before anyone sees it, which is this decision's own
+  trust-erosion kill condition by name). **60** and **240** were rejected as values for the reasons
+  the model doc gives.
+- **It never overwrites a person, and the database holds that, not only the client.** The
+  automatic path writes over no row or over a calendar-set row; a `manual` or `extraction` figure
+  is a person's and the refresh only proposes over it — checked by the client against a server
+  re-read, and refused by `0039`'s trigger for the one round trip the client check cannot see (the
+  review found the first draft holding this as a client predicate alone, with this bullet saying
+  *never* over exactly that hop). The charter's manual floor is what this protects, and it is the
+  reason the option was safe to take before the trust verdict: the worst case is a wrong figure a
+  person can overtype, on a week nobody had set by hand.
+- **The bound is measured from the last figure a person held, so automatic writes cannot chain.**
+  Decided at the review escalation the same day: with the bound measured from the current figure,
+  three refreshes could move a week six hours in two-hour steps, each inside the bound, while *(was
+  N min)* named only the last step. The anchor (`humanFigureFor`) caps cumulative drift at one bound
+  and keeps *(was N min)* a person's figure; the cost is that a calendar which keeps filling stops
+  at the bound until somebody taps. Rejected: accept-and-document (the kill condition as written is
+  per read while the behaviour would have been cumulative) and automatic-over-confirmed-only (the
+  near-identical *no row only*, already rejected).
+- **What kills it, restated for this step.** The 2026-08-16 decision's second kill condition —
+  inference wrong often enough that members stop trusting the split — now has a sharper trigger:
+  an automatic write that a member reverts by hand is the observation to count. A week that keeps
+  needing to be corrected is a week the calendar should not have been allowed to set, and the
+  remedy is to lower the bound or return to propose-only, both of which are one constant and one
+  decision away.
+- **Visibility is not optional.** The roster names the week as set automatically with the figure
+  it replaced; #50's announcement carries the cause on every member's next look, saying the week
+  was set from that member's calendar; and a read that confirms the figure already there writes
+  nothing, so nothing is announced for nothing.
+
+## Decision taken 2026-09-05 — the shopping list is a standalone household utility, on a fifth tab
+
+Owner decisions taken at the clarifying gate before grooming and at the grooming gate after it
+(epic #349, thirteen decisions, recorded there with their numbering). This is the charter-level
+record: what was admitted, why it belongs here at all, what was rejected, and what the admission
+costs.
+
+**What was admitted.** A shared shopping list: everyone in the household adds to it, whoever goes
+shopping has the whole list on one phone, items bought in the store drop below the rest, one
+confirmed tap closes the run and the next list already holds what was missed. Several named lists
+per household, each with its own run (decision 5, taken *against* the one-list recommendation).
+An item carries its name, an optional note, who added it, and who bought it and when, stamped by
+the database clock (decision 4). Any member adds, ticks, un-ticks, removes an unbought item and
+finishes a run — no organizer gate anywhere in the feature (decision 2). Finished runs are kept and
+viewable behind a disclosure inside the Shop tab (decision 6; built in #359 on 2026-09-06, and
+the paragraph below records what that surface decided). Any member archives a list; nothing
+is ever deleted (decision 10). The tab label is **Shop** (decision 13).
+
+**Why it belongs in Taskr despite the fairness charter.** The problem statement at the head of this
+file is about dividing chores fairly by time, and a shopping run completes no chore and counts no
+minutes — it is the first surface with *no fairness arithmetic behind it*. It is admitted anyway,
+as a **standalone household utility** (decision 1), because everything under it is already here and
+already protected: the same roster and per-member sign-in (`0007`), the same one-household scoping
+under multi-household membership (`0014`), the same database-clock stamp discipline (`0004`/`0029`),
+the same tab shell and re-read-on-open (decision 3: no Realtime, no polling). The household this app
+is built for has no shared place to say "we are out of milk", and a second app for that would carry
+a second roster. A chore tie-in — the trip counting toward the shopper's load — is recorded on the
+epic as a **future idea only**, and no story couples the two.
+
+**Rejected alternatives.**
+
+- **One list per household** (the recommendation). Simpler picker, simpler rollover, one open run to
+  reason about. Rejected by the owner because the household shops at more than one kind of store and
+  a hardware list mixed into groceries is the failure the feature exists to remove. The schema is
+  multi-list from `0032`; the picker and rename arrived in #358 on 2026-09-06, and the paragraph
+  below records what that surface decided.
+- **Household-learned aisle locations** for the stretch (the recommendation: remember where each
+  item was found last time). Rejected in favour of **retailer APIs** (decision 7, Kroger, Walmart
+  and Target named), groomed behind a spike (#362) because API availability is unverified — and the
+  spike carries the kill condition that reopens the learned-locations route if the APIs do not
+  expose per-store aisle data.
+- **An undo on finish.** The mis-tap protection is an inline confirm naming the consequence
+  (decision 8), not an undo.
+
+**The in-store moment is online-only, and that is a known limit rather than a defect.** The app has
+no offline write path anywhere; every tick is a network round trip. #351 measured what one tick
+costs under the write-then-full-refresh discipline every other tab uses: **11 sequential round trips
+today, 6.5 s at the browser's Slow 4G preset against an owner-set bar of a median under 1 s** —
+and one round trip at the same preset is 0.585 s, so the bar is reachable only when the tick's
+re-read IS the write's response. The shape of that re-read was #355's, and the owner decided it at
+that story's pickup (decision 12): the tick's re-read is the write's own response, recorded in the
+paragraph below. A departure from the mutate discipline of the 2026-08-25 tab decision is a charter
+change rather than a story detail, which is why it is written here and not only in the story.
+
+**Coordination recorded, not owed.** #342 (Realtime over an enumerated table list, open) sits
+against decision 3 and is not a dependency; **if it ships, its publication list must add
+`shopping_lists`, `shopping_runs` and `shopping_items`**, and the recommendation on the epic is that
+it derive that list from `LIVE_SCHEMA` rather than hand-write it.
+
+**Decision 3 is reversed — 2026-09-08, #342, on the owner's direction of 2026-09-04** (*"i want
+the project to refresh automatically, the user should not have to refresh to receive updates"*).
+"Re-read on open, no Realtime, no polling" was the whole app's freshness model, stated here for the
+shopping surface because the surface inherited it. Two of its three words survive: there is still
+**no polling**, and arrival on a tab still re-reads. What changed is that a phone now also re-reads
+when its tab becomes visible again, and holds **one Realtime channel per household** on every table
+`refresh()` reads — derived from `LIVE_SCHEMA` exactly as the paragraph above asked, so the three
+shopping tables are in the `supabase_realtime` publication (`0037`) alongside the other eight. The
+consequence for the paragraphs below: "another phone's ticks appear on the next arrival on the tab"
+is now "within seconds, as a background re-read"; the tick itself still does not re-read, so
+decision 12 stands. The one place the old sentence stays true by design is the past-runs history
+(#359), which is read only when its disclosure is opened and is not on the channel. The arithmetic
+that says the Free plan carries this for a household of ten phones, and the kill condition that
+would reopen the question, are in `docs/hosting-decision.md`; the read-path consequences — which
+column each table is filtered on and why a delete is broadcast unfiltered — are in
+`docs/access-model.md`.
+
+**The strip measurement, by number (#350, 2026-09-05, at `13a4477`).** Five tabs do **not** fit a
+360 px viewport on one row as shipped: the four existing tabs sum to 279 px of natural width in a
+320 px content row, the fifth adds 61.9 px plus a 6 px gap and overshoots by **21 px**, and *Shop*
+drops to a second 44 px row, taking the strip from 44 px to 102.8 px tall. They **do** fit once
+`.tab`'s horizontal padding drops from 0.75 rem to 0.5 rem (12 px to 8 px per side): Σ natural
+301 px, **+19 px of slack**, every tab one line, nothing truncated, narrowest rendered tab 52.5 px
+on the 44 px hit-target floor. The boundary value 0.625 rem misses by 0.8 px, so 0.5 rem is the
+smallest step that works, not merely one that does. Measured on the real `App` with a fifth
+`SURFACES` entry, real `index.css`, Chrome at 360×800; one width, one browser, system-ui as Segoe UI.
+That is decision 13's fallback taken in the order the owner set — tighter padding first, shorter
+labels not needed. #353 carries the padding change with the tab.
+
+**The tick is the first write in this app that does not re-read everything** (owner decision at
+#355's pickup, 2026-09-05): marking a shopping item bought sends `purchase_shopping_item` and puts
+the stamped row it returns straight into the list on screen — one round trip — instead of running
+the full `refresh()` every other write here runs, because #351 measured that route at **6.5 s on
+Slow 4G against the 1 s bar a person taps at**, one round trip at 0.585 s and two at 1.17 s. What it
+costs is stated rather than hidden: another phone's ticks appear on the next arrival on the tab,
+which is exactly what decision 3 (re-read on open, no Realtime) already says about every other row
+on this surface. A **refused** tick keeps the full re-read, because a refusal is the one moment the
+phone knows its picture is stale. The alternatives rejected were a `0034` making the RPCs return the
+whole run (the same round-trip cost, plus a migration and a return-type change on the two bodies
+`0033` had replaced the day before) and keeping the full refresh (six to eight times over the bar).
+No migration was needed for the route taken: `0032`'s RPCs already return the whole stamped row, and
+`0033` kept that return type when it re-ordered their locks. The
+write-then-full-refresh discipline stands everywhere else, and departing from it a second time is a
+decision to be taken again rather than a precedent set here.
+
+**The mis-tap protection on finishing a run is an inline confirm naming the consequence, and not an
+undo** (decision 8, built in #357 on 2026-09-06): "Done shopping" is replaced in place by *"Finish
+this run? 3 items not bought will carry over to the next list"* with **Finish** and **Keep
+shopping**, focus landing on **Keep shopping** so an accidental Enter costs a tap rather than a
+trip. The reason it is not an undo is that an undo here would be **the app's first** — every other
+reversible action in Taskr is a second tap on the thing itself ("Not bought after all", un-complete
+a chore), which works because nothing else has happened in between — and reversing a finish would
+need semantics for the items somebody has already added to the **new** run, a question the feature
+has no answer to and no reason to invent. The confirm is the same in-place idiom the roster uses for
+Remove and for signing every device out; `window.confirm` is used nowhere in this app. What it
+costs is stated rather than hidden: a confirmed mis-tap is not reversible, and the sentence naming
+what carries over is the whole of the protection.
+
+**Several named lists are reached by a picker, and the tab draws exactly one of them** (the
+rejected one-list alternative above, built in #358 on 2026-09-06). A household shops at more than
+one kind of store, so choosing which list an item goes on is choosing the list you are on: there is
+no per-item list menu, the add form under a list can only aim at that list's open run, and "Done
+shopping" can only finish that list's run. Four decisions inside it are worth keeping because each
+was a fork:
+
+- **The picker appears only with a second list.** A segmented control holding one button offers no
+  choice, and this surface already refuses to draw a control whose only outcome is nothing (Remove
+  on a bought row, Done shopping on an empty run). A household with one list sees what it saw
+  before, plus a quiet "New list".
+- **Each picker button carries its own count, and the standalone count line stands down while it
+  does.** The other lists' counts are the whole reason to look at the picker; the selected list's
+  count printed twice would be two representations of one number.
+- **Which list is on screen is app state, not a device setting.** It is held in `App.jsx` beside
+  the current tab and resolved through one pure rule — honour a choice that still names a list on
+  screen, otherwise the first list by name — so a household change, a removed list and a first
+  arrival are one case rather than three. Nothing is written to the server and nothing to browser
+  storage: which list a phone is looking at is not a fact about the household.
+- **Renaming rides here and archiving does not.** `0032` grants `update (name)` and nothing else,
+  so a rename is the one direct write the client holds on a list and it destroys nothing; ending a
+  list needs its own column, its own RPCs and an answer about its runs, which is #360. There is no
+  delete or archive control anywhere on the tab.
+
+A duplicate name is the one refusal on this surface a person can act on, and it is mapped from
+**SQLSTATE 23505** on the error object rather than from the message text — Postgres's own sentence
+is about an index, and it is free to reword it.
+
+**What the household already bought** (decision 6, built in #359 on 2026-09-06). Every finished run
+is kept — `0033` closes a run and deletes nothing — and the Shop tab is the only screen that reads
+one, behind a "Past runs" disclosure at the foot of the list. Three decisions inside it were forks:
+
+- **It is read when it is opened, and never on arrival.** Everything else on this surface is
+  re-read on every tab press because what it returns is bounded by the week a household is having;
+  closed runs grow by one per trip forever, so paying for them on every arrival would make the tab
+  slower every week whether or not anybody ever looks. It is the one deliberate departure from
+  decision 3's re-read-on-open, and it is asserted in a test so it stays a decision rather than
+  becoming a drift. What it costs is stated where it bites: a run another phone finished after the
+  disclosure was opened is not there until it is opened again.
+- **Each run is its own disclosure and only the newest opens** — `Done.jsx`'s idiom, taken on the
+  same kind of measurement. *Measured at 360x800 on the real components with eight closed runs of
+  fifteen items*: **3.35 screens** with the newest open against **10.47** with all eight open.
+- **A row is a record, not a working row struck through** (the #302 verdict and #308's direction):
+  one compact line carrying the name, its note, and either who bought it and when or the fact that
+  it went forward. No tick, no Remove, and no figure about a person anywhere — #35 AC 9 binds this
+  region as it binds Done.
+
+The design pass added a disclosure marker this app had not needed before. `display: flex` on a
+`<summary>` suppresses the browser's own triangle, so both levels read as plain labels with nothing
+saying they open; the owner's call was to draw one here and leave the Done tab's week disclosures
+as they are, which is the one place the two surfaces now differ.
+
+**The 2026-08-25 tab decision above now reads five surfaces rather than four, and stands
+otherwise** — the way the 2026-09-01 section re-read it as four. Arrival on Shop performs the same
+full re-read every tab does; #355 changed the tick alone, as the paragraph above records. Nothing here adds a
+sentence about routing: #175 (react-router, sequenced last in #253) is coordinated on the epic, and
+whichever of #175 and #353 lands second re-reads the other's diff.
+
+**What `0032` (#352) put underneath it**, so the reasoning is here and not only in the migration's
+header: three tables under the one-household predicate every table since `0007` uses; every column
+readable by name including `household_id` (the `0014` route — the Shop tab names the household it
+reads, three plain filters, never an embed filter); **no client insert grant on any of the three**,
+because a list is created together with its first open run and a direct insert would produce a
+runless list; no client write on any stamp column; one open run per list as a partial unique index
+rather than a convention; list names unique per household case-insensitively; attribution foreign
+keys `set null` so a removed member's items and closes stand with the who blanked, structural ones
+`cascade`. One correction taken in band, and it was a recurrence rather than a finding: a composite
+foreign key's `on delete set null` nulls *every* column in the key, `household_id` included, so the
+attribution FKs name the column to null (Postgres 15+) — the form `0006`, `0012` and `0018` already
+use and `0006`'s comment already explains. The draft copied `0030`'s cascading shape instead and the
+pglite suite refused the member delete on the first run. The whole-stamp check constraints are
+one-directional for the same reason — a closer implies a close, never the converse — or removing a
+member would fail on every run they ever closed.
 
 ## Open decisions (still owed)
 

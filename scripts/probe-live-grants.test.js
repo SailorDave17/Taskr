@@ -147,6 +147,17 @@ describe('what it asks for — AC 3', () => {
       // create: a table reaching the client without anybody deciding what
       // `authenticated` should hold on it is the thing being prevented.
       'calendar_busy',
+      // #352 — the three shopping tables, in the same change that adds them to
+      // LIVE_SCHEMA, for the same reason: what `authenticated` holds on each
+      // is decided in `0032` and asserted in `MEASURED_TABLE_ACLS`.
+      'shopping_lists',
+      'shopping_runs',
+      'shopping_items',
+      // #101 — the import ledger, in the same change that adds it to
+      // LIVE_SCHEMA. What `authenticated` holds on it is decided in `0038`
+      // (select and insert, both by column) and asserted in
+      // `MEASURED_TABLE_ACLS` as an absence at table level.
+      'calendar_imports',
     ])
   })
 
@@ -302,14 +313,19 @@ describe('reconciling against what #150 measured — AC 4', () => {
     // wrong grant means one ran and did something else.
     const rows = agreeing.filter((row) => row.column_name !== 'household_id')
     const differing = reconcile(rows).filter((verdict) => !verdict.agrees)
-    expect(differing).toHaveLength(3)
+    expect(differing).toHaveLength(6)
     expect(differing.every((verdict) => verdict.note === 'the column is not there')).toBe(true)
     // `member_capacity.household_id` joined the expectation set in 0022 — the
-    // column PostgREST's upsert reads through `EXCLUDED."household_id"`.
+    // column PostgREST's upsert reads through `EXCLUDED."household_id"` — and
+    // the three shopping tables' in 0032 (#352), one row each on the scoping
+    // column. SIX since then; it read three until that story.
     expect(differing.map((verdict) => verdict.key).sort()).toEqual([
       'chores.household_id',
       'member_capacity.household_id',
       'members.household_id',
+      'shopping_items.household_id',
+      'shopping_lists.household_id',
+      'shopping_runs.household_id',
     ])
   })
 
@@ -334,6 +350,11 @@ describe('reconciling against what #150 measured — AC 4', () => {
       'member_capacity.household_id=arw',
       'member_capacity.member_id=arw',
       'member_capacity.period_start=arw',
+      // 0039, story #106. The figure an automatic calendar write replaced; all
+      // three letters are that file's and all three are the upsert's (SET
+      // target, `EXCLUDED` read, first write). `check:live` sees the column and
+      // nothing of the grant, so this row is the instrument for that half.
+      'member_capacity.previous_minutes=arw',
       // 0023, 2026-08-28 (#211). The one row here whose migration `check:live`
       // is NOT blind to — it caught the SELECT half as a 42703 before the apply.
       // It earns its place on the INSERT half, which only reads and so cannot
@@ -355,6 +376,22 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // `check:live` sees the select half (42703 until the apply); the ABSENCE
       // of `a` and `w` is this probe's alone.
       'chores.missed_at=r',
+      // 0032, story #352. One row per shopping table on `household_id`, the
+      // column the read model rests on (the 0014 route); `r` alone, because
+      // no client role inserts a row on any of the three and a list does not
+      // move house. `check:live` sees the select half; the absences are this
+      // probe's.
+      'shopping_lists.household_id=r',
+      'shopping_runs.household_id=r',
+      'shopping_items.household_id=r',
+      // 0035, story #360. `chores.missed_at`'s shape exactly: the archive stamp
+      // is written by `archive_shopping_list` from the database clock and by no
+      // client role, so `r` is what is granted and the absence of `a` and `w`
+      // is the whole content of the row. `check:live` sees the select half
+      // (42703 until the apply) and can never see that the client may not set
+      // the column — a probe that only ever reads cannot report being allowed a
+      // write it never attempts.
+      'shopping_lists.archived_at=r',
     ])
   })
 })
@@ -512,5 +549,8 @@ describe('reconcileTableAcls is the control on the role a revoke could hit by mi
     const covered = MEASURED_TABLE_ACLS.map((entry) => entry.table)
     for (const table of LIVE_TABLES) expect(covered).toContain(table)
     expect(covered).toContain('calendar_tokens')
+    // #208 — the second table the client cannot name, and the same reasoning.
+    expect(covered).toContain('extraction_calls')
+    expect(LIVE_TABLES).not.toContain('extraction_calls')
   })
 })

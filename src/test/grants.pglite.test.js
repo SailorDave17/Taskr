@@ -83,7 +83,7 @@ const CLIENT_OPERATIONS = [
   {
     table: 'households',
     op: 'select *',
-    site: 'household.js:197 currentHousehold()',
+    site: 'household.js listHouseholds()',
     sql: 'select * from public.households limit 1',
   },
   {
@@ -144,13 +144,13 @@ const CLIENT_OPERATIONS = [
     table: 'member_capacity',
     op: 'select',
     site: 'capacity.js:169 listCapacity()',
-    sql: 'select id, member_id, period_start, minutes, note, source, created_at from public.member_capacity limit 0',
+    sql: 'select id, member_id, period_start, minutes, note, source, previous_minutes, created_at from public.member_capacity limit 0',
   },
   {
     table: 'member_capacity',
     op: 'insert',
     site: 'capacity.js:192 setCapacity() upsert',
-    sql: "insert into public.member_capacity (household_id, member_id, period_start, minutes, note, source) select gen_random_uuid(), gen_random_uuid(), current_date, 0, null, 'manual' where false",
+    sql: "insert into public.member_capacity (household_id, member_id, period_start, minutes, note, source, previous_minutes) select gen_random_uuid(), gen_random_uuid(), current_date, 0, null, 'manual', null where false",
   },
   {
     table: 'member_capacity',
@@ -238,6 +238,62 @@ const CLIENT_OPERATIONS = [
     site: 'calendar.js listBusyWeeks()',
     sql: 'select id, member_id, period_start, busy_minutes, event_count, computed_at from public.calendar_busy limit 0',
   },
+  // #352 — the shopping tables. Every column of all three is readable,
+  // `household_id` included (the 0014 route: the Shop tab names the household
+  // it reads). The client's only writes are a rename and a whole-row delete;
+  // there is NO insert on any of the three — creation and every stamp go
+  // through the four RPCs in `0032` — and shopping.pglite.test.js asserts the
+  // absences, which is this list's mirror image for RPC-written tables.
+  {
+    table: 'shopping_lists',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, household_id, name, created_at from public.shopping_lists limit 0',
+  },
+  {
+    table: 'shopping_lists',
+    op: 'update',
+    site: 'shopping.js renameList()',
+    sql: "update public.shopping_lists set name = 'Placeholder' where false",
+  },
+  {
+    table: 'shopping_runs',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, list_id, household_id, opened_at, closed_at, closed_by_member_id from public.shopping_runs limit 0',
+  },
+  {
+    table: 'shopping_items',
+    op: 'select',
+    site: 'shopping.js readShopping()',
+    sql: 'select id, run_id, household_id, name, note, added_by_member_id, added_at, purchased_at, purchased_by_member_id, carried_from_item_id from public.shopping_items limit 0',
+  },
+  // #101 — the import ledger, and the first calendar table with a CLIENT write.
+  // Read by household (`0038` grants `household_id`, the 0014 route), and
+  // inserted after `addChore` with the four columns the client knows; `id` and
+  // `imported_at` are the database's. No update and no delete — a ledger row
+  // has no editable content and leaves only with its chore —
+  // calendarImport.pglite.test.js asserts both refusals, this list's mirror
+  // image.
+  {
+    table: 'calendar_imports',
+    op: 'select',
+    site: 'calendar.js listCalendarImports()',
+    sql: 'select id, household_id, member_id, calendar_event_id, chore_id, imported_at from public.calendar_imports limit 0',
+  },
+  {
+    table: 'calendar_imports',
+    op: 'insert',
+    site: 'calendar.js recordCalendarImport()',
+    sql: "insert into public.calendar_imports (household_id, member_id, calendar_event_id, chore_id) select gen_random_uuid(), gen_random_uuid(), 'placeholder-event', gen_random_uuid() where false",
+  },
+  // #368 — `shopping_items` 'delete' / 'shopping.js removeItem()' stood here
+  // until `0034`. The privilege is gone (the remove is an RPC now), so the row
+  // cannot stay: every entry in this list is a statement the client must be
+  // ABLE to issue. Its absence is not left implicit — shopping.pglite.test.js
+  // AC 8 asserts the direct delete is refused by the grant, and
+  // finish-shopping-run.pglite.test.js asserts the table carries no client DML
+  // at all.
 ]
 
 describe('#91 — the client privileges come from a migration, not from a default', () => {
@@ -329,7 +385,7 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   // AC 2 — the households grant covers every column, because the client reads *
   // ---------------------------------------------------------------------------
 
-  it('grants select on EVERY column of households, because currentHousehold reads select(*)', async () => {
+  it('grants select on EVERY column of households, because listHouseholds reads select(*)', async () => {
     // 0013 grants `households` by column list rather than at table level, so
     // that adding a column is a decision rather than an automatic exposure. The
     // cost of that choice is a way to forget, and this is the guard for it: a
@@ -446,11 +502,13 @@ describe('#91 — the client privileges come from a migration, not from a defaul
   it('and service_role reaches only what the Edge Functions need', async () => {
     // Not an audit of every role, which would be a list nobody maintains. This
     // is the one role that bypasses row-level security, so a privilege it holds
-    // is a privilege with nothing else behind it. 0008, 0011 and — since #96 —
-    // 0030 are the only files that grant it anything; this asserts they still
-    // are. Every table on this list is one an Edge Function writes and no client
-    // can, which is why the list is short and why each addition to it is a
-    // decision rather than bookkeeping.
+    // is a privilege with nothing else behind it. 0008, 0011, 0030 and — since
+    // #208 — 0036 are the only files that grant it anything; this asserts they
+    // still are. Every table on this list is one an Edge Function writes and no
+    // client can, which is why the list is short and why each addition to it is
+    // a decision rather than bookkeeping. `extraction_calls` is the first with
+    // fewer than four letters: the function reads the window and appends to
+    // it, and holds neither UPDATE nor DELETE because it does neither.
     const { rows } = await db.query(
       `select table_name, string_agg(distinct privilege_type, ',' order by privilege_type) as privs
         from information_schema.table_privileges
@@ -462,6 +520,7 @@ describe('#91 — the client privileges come from a migration, not from a defaul
       { table_name: 'calendar_busy', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_connections', privs: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'calendar_tokens', privs: 'DELETE,INSERT,SELECT,UPDATE' },
+      { table_name: 'extraction_calls', privs: 'INSERT,SELECT' },
     ])
 
     const { rows: memberColumns } = await db.query(

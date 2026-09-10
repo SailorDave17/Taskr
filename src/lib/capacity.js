@@ -43,12 +43,182 @@ export const WEEK_START_ISO_DOW = 1
 // no longer necessarily one. This table does not need the column anyway — it is
 // scoped from an already-scoped MEMBER set, which is why #157 measured it as
 // needing no grant change.
+//
+// `previous_minutes` is `0039`'s (#106): the figure an automatic calendar
+// write replaced, null on every row a person wrote. Naming it here is what
+// makes `check:live` see that migration — the probe reads this list.
 export const CAPACITY_COLUMNS =
-  'id, member_id, period_start, minutes, note, source, created_at'
+  'id, member_id, period_start, minutes, note, source, previous_minutes, created_at'
 
 /** The bounds of `member_capacity_minutes_range`, named so the UI can say them. */
 export const MIN_CAPACITY_MINUTES = 0
 export const MAX_CAPACITY_MINUTES = 10080
+
+/**
+ * Every word `member_capacity.source` may hold — the set
+ * `member_capacity_source_known` enforces since `0039`, in the order they
+ * arrived: typed (#46), proposed from a description (#210), confirmed from a
+ * calendar (#97), applied from a calendar with nobody tapping (#106). A test
+ * reads the constraint out of the migration and holds this list equal to it,
+ * so a fifth word has to arrive in both places.
+ */
+export const CAPACITY_SOURCES = Object.freeze(['manual', 'extraction', 'calendar', 'calendar_auto'])
+
+/**
+ * Is this row's figure the calendar's — confirmed by a tap or applied without
+ * one? The two words the automatic path may write over (docs/capacity-model.md,
+ * owner decision 2026-09-08); every other word is a person's and is never
+ * overwritten by a machine. Named so the decision below holds the manual floor
+ * as ONE predicate with its own test, rather than a pair spelled inline. The
+ * roster does not use it — the roster asks per-word questions (an automatic
+ * week reads differently from a confirmed one), and `0039`'s trigger asks the
+ * complementary question server-side (`AUTO_APPLY_REFUSED_CODE`).
+ */
+export function isCalendarSourced(source) {
+  return source === 'calendar' || source === 'calendar_auto'
+}
+
+/**
+ * The errcode `0039`'s trigger raises when an automatic write would replace a
+ * figure a person set — `member_capacity_automatic_never_overtypes`, the
+ * server-side half of the manual floor. The client's own check
+ * (`autoApplyDecision`) reads a server row and then writes, and a typed figure
+ * landing in that one round trip is what the trigger catches; the App treats
+ * this code as a quiet refusal (a person won, nothing is wrong) rather than as
+ * the app being broken. Held equal to the migration by a test.
+ */
+export const AUTO_APPLY_REFUSED_CODE = 'TA106'
+
+/**
+ * The last figure a PERSON held for this week — the anchor the automatic
+ * path measures its bound from and records as `previous_minutes` (#106, owner
+ * decision at the review escalation, 2026-09-08).
+ *
+ *   - no row → the baseline, `weekly_minutes`;
+ *   - `manual`, `extraction` or `calendar` → that row's figure. A tap-confirmed
+ *     calendar figure is a person's act;
+ *   - `calendar_auto` → the row's `previous_minutes`, which IS the last human
+ *     figure carried forward from the write before it — never the automatic
+ *     figure itself, so a chain of automatic writes cannot walk a week further
+ *     than one bound from what a person last held. A `calendar_auto` row with
+ *     no previous figure (legal, never written by this client) falls back to
+ *     its own minutes rather than to nothing.
+ *
+ * Reads `weekly_minutes` here, in the one module allowed to (capacity.test.js's
+ * reader allowlist), through `effectiveCapacity` for the no-row case.
+ */
+export function humanFigureFor(member, override) {
+  if (override == null || override.minutes == null) return effectiveCapacity(member, null)
+  if (override.source === 'calendar_auto' && override.previous_minutes != null) {
+    return Number(override.previous_minutes)
+  }
+  return Number(override.minutes)
+}
+
+/**
+ * How far a refreshed calendar suggestion may move this week's capacity
+ * without anybody tapping — #106, owner decision 2026-09-08.
+ *
+ * Two hours. A meeting or two of drift between one twelve-hour refresh
+ * (`BUSY_STALE_AFTER_HOURS`) and the next applies itself; a trip, a sick day
+ * or a cleared calendar is a larger move and only proposes, exactly as every
+ * refresh did before this story. The value and the two rejected beside it
+ * (60, 240) are recorded in docs/capacity-model.md and docs/refresh-charter.md;
+ * `autoApplyDecision` below is the only comparison. A delta on the WEEK'S
+ * CAPACITY — never on the busy figure and never on the previous suggestion —
+ * for the reason the model doc gives: a week at its baseline could otherwise
+ * be moved six hours by a read whose suggestion had crept thirty minutes.
+ */
+export const AUTO_APPLY_BOUND_MINUTES = 120
+
+/**
+ * Should a calendar read that just landed write this member's week — #106.
+ *
+ * Pure, and the whole policy is in the order of the returns:
+ *
+ *   - nothing to suggest (no derived row, or a figure that is not a number)
+ *     → nothing to do; `calendarSuggestion`'s null carried through;
+ *   - the suggestion IS the week's current figure → nothing to write, so
+ *     nothing to re-assign and nothing to announce (#50 AC 8's rule);
+ *   - the week's row is a PERSON'S (`manual`, `extraction`, or a word this
+ *     module does not know) → refuse whatever the delta. The manual floor:
+ *     the automatic path writes over no row or over a calendar-set row, and
+ *     never overtypes somebody;
+ *   - the move is larger than the bound → refuse; the readout keeps offering
+ *     "Use this", which is the propose-only path #97 built;
+ *   - otherwise apply.
+ *
+ * TWO figures, and they differ exactly when the standing row is automatic:
+ *
+ *   - `current` is what the week resolves to NOW through `effectiveCapacity`,
+ *     and decides NO-CHANGE — a suggestion equal to what is on screen writes
+ *     nothing, whatever the anchor says;
+ *   - `from` is the HUMAN figure (`humanFigureFor`): the bound is measured
+ *     from it, and it is what the write stores as `previous_minutes`. Owner
+ *     decision at the review escalation (2026-09-08): with the bound measured
+ *     from the current figure, automatic writes over automatic rows could walk
+ *     a week arbitrarily far in 120-minute steps while "(was N min)" named only
+ *     the last step. Anchoring on the human figure caps cumulative drift at one
+ *     bound and makes "(was N min)" always a figure a person held. The cost,
+ *     stated: a week whose calendar keeps filling stops at the bound until
+ *     somebody taps.
+ *
+ * The caller re-reads the override AND the member row from the server before
+ * asking, so both are what the database holds and not what the screen
+ * remembered (App.jsx, the calendar read seam).
+ *
+ * Strictly GREATER than the bound refuses: a move of exactly the bound applies,
+ * so the boundary is pinned in one direction rather than left to whichever
+ * comparison somebody writes next. A test holds it there.
+ */
+export function autoApplyDecision({ member, override, suggestion }) {
+  if (suggestion == null || !Number.isFinite(Number(suggestion))) {
+    return { apply: false, reason: 'nothing-to-suggest', from: null, to: null, delta: null, current: null }
+  }
+  const current = effectiveCapacity(member, override)
+  const from = humanFigureFor(member, override)
+  const to = Number(suggestion)
+  const delta = Math.abs(to - from)
+  if (to === current) return { apply: false, reason: 'no-change', from, to, delta, current }
+  if (override != null && !isCalendarSourced(override.source)) {
+    return { apply: false, reason: 'person-set', from, to, delta, current }
+  }
+  if (delta > AUTO_APPLY_BOUND_MINUTES) {
+    return { apply: false, reason: 'outside-bound', from, to, delta, current }
+  }
+  return { apply: true, reason: 'within-bound', from, to, delta, current }
+}
+
+/**
+ * What a member's calendar suggests their capacity is — #97's prefill.
+ *
+ * `max(0, baseline − busy_minutes)`: the week they usually have, less what the
+ * calendar says is already spoken for, floored at zero. Owner decision at the
+ * groom gate, 2026-08-16, taken knowing it is crude for a member whose nine-to-
+ * five is already priced into their baseline — it is a PREFILL the member sees
+ * and can overtype, so a wrong formula costs an edit, not trust. The working-
+ * window variant was rejected as needing a per-member setting nobody had asked
+ * for.
+ *
+ * `null` when there is nothing to suggest — no derived row for the week, or a
+ * figure that is not a number — so the control that offers it can offer
+ * nothing rather than offer zero. A confident zero is the harmful version:
+ * "no time this week" is a perfectly plausible answer nobody would question.
+ *
+ * Reads `weekly_minutes` here, in the one module allowed to (capacity.test.js's
+ * reader allowlist): the roster hands this a member row and a busy row and gets
+ * a number back, and never does the subtraction itself.
+ */
+export function calendarSuggestion(member, busyWeek) {
+  // `== null` BEFORE `Number()`: `Number(null)` is 0, so without this line a
+  // row with no figure would suggest the whole baseline as though the
+  // calendar had answered "empty week". Caught by the test for exactly that.
+  if (!busyWeek || busyWeek.busy_minutes == null) return null
+  const busy = Number(busyWeek.busy_minutes)
+  if (!Number.isFinite(busy)) return null
+  const baseline = Number(member?.weekly_minutes ?? 0)
+  return Math.max(MIN_CAPACITY_MINUTES, baseline - busy)
+}
 
 function unwrap({ data, error }, whatWeWereDoing) {
   if (error) {
@@ -225,9 +395,23 @@ export async function listCapacity(periodStart, memberIds) {
  * same week is a correction rather than a second fact — the unique constraint in
  * 0005 says so and this is the client half of it.
  */
-export async function setCapacity({ memberId, periodStart, minutes, note = null, source = 'manual', householdId }) {
+export async function setCapacity({
+  memberId,
+  periodStart,
+  minutes,
+  note = null,
+  source = 'manual',
+  previousMinutes = null,
+  householdId,
+}) {
   const value = normalizeCapacityMinutes(minutes)
   if (!householdId) throw new Error('Which household? Saving capacity must name one.')
+  // #106 — the figure an automatic write replaced. ALWAYS in the payload, null
+  // by default, because the upsert sets every column it names: a person's
+  // confirm or edit of an automatic week is what clears it, and a payload that
+  // omitted the column would leave the old value standing under the new word
+  // (0039's second constraint would then refuse the row rather than store it).
+  const previous = previousMinutes == null ? null : normalizeCapacityMinutes(previousMinutes)
 
   return unwrap(
     await getSupabase()
@@ -240,6 +424,7 @@ export async function setCapacity({ memberId, periodStart, minutes, note = null,
           minutes: value,
           note,
           source,
+          previous_minutes: previous,
         },
         { onConflict: 'member_id,period_start' },
       )

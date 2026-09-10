@@ -159,6 +159,18 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'arw',
     source: '0022 — `w` is 0022’s; `ar` is 0005’s',
   }),
+  // `0039` (#106): the figure an automatic calendar write replaced. All three
+  // letters are that file's, and they are the upsert's for `0022`'s reason —
+  // SET target, `EXCLUDED` read, first write. `check:live` sees the COLUMN
+  // (it is in `CAPACITY_COLUMNS`) and nothing of the grant, so this row is the
+  // instrument for the half that check cannot read: RED until `0039` is
+  // applied, the deliberate red this table's docblock describes.
+  Object.freeze({
+    table: 'member_capacity',
+    column: 'previous_minutes',
+    privileges: 'arw',
+    source: '0039 (#106) — all three are 0039’s',
+  }),
   // `0023`, 2026-08-28 (#211). Chore provenance, and this row exists for HALF a
   // reason rather than the whole one — which is worth stating, because every
   // other row above is here because `check:live` is blind to its migration and
@@ -235,6 +247,49 @@ export const MEASURED_GRANTS = Object.freeze([
     column: 'missed_at',
     privileges: 'r',
     source: '0027 (#305) — `r` only; `a` and `w` withheld, the whole point',
+  }),
+  // `0032` (#352): the three shopping tables, one row each on the column the
+  // whole read model rests on. `household_id` is granted for SELECT on all
+  // three — the `0014` route, so the Shop tab can name the household it reads
+  // rather than filter through an embed — and `r` alone is the content: no
+  // client role may insert a row (creation is `create_shopping_list`'s, which
+  // opens the first run in the same transaction) and a list does not move
+  // house, so `a` and `w` are withheld everywhere. `check:live` sees the
+  // select half (each table answers `PGRST205` until the apply); the ABSENCE
+  // of `a` and `w` is this probe's alone. RED until `0032` is applied, the
+  // deliberate red this table's own docblock describes.
+  Object.freeze({
+    table: 'shopping_lists',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; no client insert, and a list does not move house',
+  }),
+  Object.freeze({
+    table: 'shopping_runs',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; runs are opened by the RPCs and closed by #354’s',
+  }),
+  Object.freeze({
+    table: 'shopping_items',
+    column: 'household_id',
+    privileges: 'r',
+    source: '0032 (#352) — `r` only; items arrive through add_shopping_item',
+  }),
+  // `0035` (#360): the archive stamp, and the row is here for `missed_at`'s
+  // reason — `r` is what it grants and `a`/`w` are the whole point. The client
+  // must READ the stamp, because hiding an archived list from the picker is a
+  // decision it makes; it must never WRITE it, or a list could be put away
+  // without the RPC that refuses an archive over a run holding items. This
+  // check is the only instrument for that absence: `check:live` sees the column
+  // is readable and cannot see that no client role may set it. RED until `0035`
+  // is applied — `the column is not there`, the same deliberate window
+  // `household_id` had before `0032`.
+  Object.freeze({
+    table: 'shopping_lists',
+    column: 'archived_at',
+    privileges: 'r',
+    source: '0035 (#360) — `r` only; the stamp is archive_shopping_list’s to write',
   }),
 ])
 
@@ -478,6 +533,13 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // is what this control exists to report.
   Object.freeze({ table: 'calendar_busy', authenticated: null }),
   Object.freeze({ table: 'calendar_connections', authenticated: null }),
+  // #101, arriving with `0038` — the import ledger, and the first calendar
+  // table the CLIENT writes: select and insert are both granted BY COLUMN, so
+  // the table-level reading is an absence like the two rows above it, and a
+  // letter appearing here for `authenticated` would mean a later migration
+  // granted a whole-row privilege nobody decided on. Red as *not there* until
+  // the apply, the same way `extraction_calls` was for `0036`.
+  Object.freeze({ table: 'calendar_imports', authenticated: null }),
   Object.freeze({ table: 'calendar_tokens', authenticated: null }),
   Object.freeze({ table: 'chore_exclusions', authenticated: 'd' }),
   // The three below moved with `0019` (#227), and it has been APPLIED —
@@ -499,6 +561,16 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // exists to report.
   Object.freeze({ table: 'chore_repeat_exceptions', authenticated: null }),
   Object.freeze({ table: 'chores', authenticated: 'd' }),
+  // #208, arriving with `0036` — the extraction endpoint's call ledger, which
+  // no client can name: `calendar_tokens`' shape exactly, and RED until the
+  // file is applied (the reconciler reports a table that is not there apart
+  // from one carrying no grant). The client holds nothing here and never will;
+  // the function reads and appends as service_role. A table-level letter
+  // appearing for `authenticated` would mean a later migration widened a
+  // write model that has exactly one writer, which is what this control
+  // reports. Like `calendar_tokens`, deliberately absent from `LIVE_SCHEMA`
+  // and present here.
+  Object.freeze({ table: 'extraction_calls', authenticated: null }),
   Object.freeze({ table: 'households', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
   // #50, arriving with `0020`, which revokes wholesale and grants by column —
@@ -509,6 +581,19 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // way once the columns are granted).
   Object.freeze({ table: 'member_split_seen', authenticated: null }),
   Object.freeze({ table: 'members', authenticated: 'd' }),
+  // #352, arriving with `0032`, and amended by #368. THREE absences now, and
+  // each is the write model stated at table level: `shopping_lists` is read and
+  // renamed by column and never inserted (no table-level grant at all);
+  // `shopping_runs` is read by column and written by nothing but the RPCs
+  // (none); and `shopping_items` — which carried `d` until `0034` — now carries
+  // nothing either, because the remove became an RPC and the client's DELETE
+  // grant went with the policy that bounded it. ANY letter on any of the three
+  // means a later migration widened the write model, which is what this control
+  // reports; before #368 the third row read `d` and this comment explained why
+  // the client held one whole-row privilege.
+  Object.freeze({ table: 'shopping_items', authenticated: null }),
+  Object.freeze({ table: 'shopping_lists', authenticated: null }),
+  Object.freeze({ table: 'shopping_runs', authenticated: null }),
 ])
 
 /**

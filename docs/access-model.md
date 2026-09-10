@@ -7,10 +7,51 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0030` are ALL applied to the live project, and the expected-red set is EMPTY —
-  *measured 2026-09-04 at 36 of 36* in #100's session, after `0030` was applied and `calendar-busy`
-  deployed there (34 of 36 immediately before, exactly #96's two rows red; see the `0030` entry
-  below).** Up to `0029`, and at the moment `0029` landed, that set was EMPTY too —
+- Status: **`0001`–`0039` are ALL applied to the live project (`0039` on 2026-09-08 in #106's own
+  session, at md5 `798a49fea4559ee5f1caa3c261907d7e` (`11592 characters, 17 statements`), read back
+  identical — see its entry below; *measured* `check:live` **64 of 65**
+  immediately before the apply and **65 of 65** immediately after, the
+  denominator unmoved because a COLUMN adds no row and reddens the existing `member_capacity` row
+  instead (`0035`'s shape); `probe:live-grants` **19 of 20** before and
+  **20 of 20** after on the new `previous_minutes` control row; and the read-only
+  catalog query for the half neither can see, `member_capacity_source_known` at
+  `manual, extraction, calendar` before and `manual, extraction, calendar, calendar_auto` after; `0038` on 2026-09-08 in #101's own
+  session, at md5 `04584d87e7b84da232a1eec74a200eea` (`17096 characters, 15 statements`), read back identical — see its
+  entry below, and the `calendar-events` Edge Function it pairs with was deployed the same session,
+  *measured* `check:live` **62 of 65** immediately before the apply,
+  **64 of 65** after it and **65 of 65**
+  after the deploy, the denominator having moved from 62 to 65 on the table row, its publication row
+  and the function row; `0037` on 2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical — see its entry below; `0036` on 2026-09-07
+  in #208's own session, at md5 `d65fb95c299101c5ca9d3c6cc01b0584` (`6082 characters, 6 statements`), read back identical
+  — see its entry below; `0035` on 2026-09-06 in #360's own
+  session, at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back
+  identical — see its entry below; `0034` on 2026-09-06 in #368's own
+  session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
+  identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
+  EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
+  opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
+  joining a Realtime channel the way a phone does, red on purpose until `0037` was applied in its
+  own session; its whole history is the #342 bullet in the excused-red table below. Before that the
+  set was EMPTY as of 2026-09-08 — #99 adds
+  NO migration and one Edge Function, `calendar-disconnect`, so its row is a deploy's and never a
+  paste's: *measured **48 of 49** immediately before `npm run deploy:function` and
+  **49 of 49** immediately after* in #99's own session, the denominator having moved
+  from 48 to 49 on the one new function. Its whole history is the #99 bullet in the excused-red
+  table below. Every red, on any subject, is real.** Before that the set was
+  EMPTY as of 2026-09-07 — *measured **47 of 48** immediately before
+  `npm run deploy:function` shipped `extract-description` in #209's own session and **48 of 48**
+  immediately after*, the denominator unmoved because that row had existed since #210 listed the
+  name. Its whole history is the #210 bullet in the excused-red table below, now closed. Before that the set held ONE
+  row — `extract-description`, the Edge Function #210's capture flow invokes, WRITTEN by #208 on
+  2026-09-07 and DEPLOYED by #209 on 2026-09-07: *measured 2026-09-04 at 36 of 36 immediately before
+  the name was listed and 36 of 37 immediately after*, in #210's own session, and *measured 47 of 48
+  on both sides of
+  `0036`'s apply* in #208's, that file adding no row the check has (its table is one no client
+  reads). Before #210, the set was EMPTY — *measured 2026-09-04 at 36 of 36*
+  in #100's session, after `0030` was applied and `calendar-busy` deployed there (34 of 36
+  immediately before, exactly #96's two rows red; see the `0030` entry below). Up to `0029`, and at
+  the moment `0029` landed, that set was EMPTY too —
   *measured 2026-09-02 at 32 of 32*, on both sides of `0029`'s apply in its own story's session
   (below), and at the same figure on both sides of `0028`'s earlier the same day, and on 2026-09-01
   after `0027` was applied in its.
@@ -20,6 +61,140 @@
   history: it moved to 28 when #250 added two rows asking whether the SEEDED TEST ACCOUNT can still
   sign in — the first time it moved on something a migration cannot change, and nothing became
   excusable: those rows are green whenever the account works.
+  **`0035` on 2026-09-06 (#360, archiving a shopping list)**, applied with `npm run migrate:live`
+  in the story's own session, before the merge and the `release` promotion — `0020`'s safe order —
+  at md5 `50a3d5426afb4a55520b16940fd95349` (`21827 characters, 15 statements`), read back identical.
+  One nullable COLUMN (`shopping_lists.archived_at`) with a SELECT grant for `authenticated` and
+  no write grant for anybody, two NEW `security definer` functions with `search_path` emptied
+  (`archive_shopping_list`, `unarchive_shopping_list`) executable by `authenticated` and not by
+  `anon`, and `0032`/`0033`'s `add_shopping_item` and `0033`'s `finish_shopping_run` REPLACED at
+  their exact signatures to refuse an archived list. No policy changes and no other grant moves.
+  **`check:live` is NOT blind to this one, in two ways at once**: two new argument sets moved the
+  denominator from 46 to **48** and both rows were red on purpose, and the new column turned the
+  EXISTING `shopping_lists` table row red (`42703`) without moving the denominator, because a table
+  is probed once with every column the app selects — *measured
+  **44 of 48** immediately before* (three reds of `0035`'s making plus
+  the standing `extract-description`) and *measured **47 of 48**
+  immediately after*. What it cannot see is the half that matters most here — that the stamp is
+  readable and writable by NO client role, which is what makes the archive's precondition
+  unbypassable — so `npm run probe:live-grants` gained a row on `chores.missed_at`'s reasoning,
+  reading **18 of 19** before and
+  **19 of 19** after. And what neither can see — the bodies, the
+  archive's `for update` on the run row, the ACLs and the comments — a read-only catalog query over
+  the Management API carries, taken on both sides in the same session:
+  **before** (*measured*), PostgreSQL 17.6, no `archived_at` column on
+  `shopping_lists` and no grant for it, no function named `archive_shopping_list` or
+  `unarchive_shopping_list`, `add_shopping_item`'s body md5 `078c3b833c31e8f35f736ab8142bc250` and
+  `finish_shopping_run`'s `f8407233ccd48d4e3a3677b610bd13a2` with neither mentioning `archived_at`,
+  `finish_shopping_run`'s comment naming #354 only, and six functions matching `%shopping%`;
+  **after**, one nullable `timestamptz` column carrying #360's comment, `authenticated` holding
+  **SELECT and only SELECT** on it, both new functions present at `list uuid` with `secdef=true`,
+  `search_path=""`, executable by `authenticated` and not by `anon`, the two replaced bodies moved to
+  `6a61b75969bf18dc680019ded154cc42` and `4fb0ec0bbc8e0b1919a9efa3796a6fc3` and both now mentioning
+  `archived_at`, `finish_shopping_run`'s comment gaining "Refuses an archived list (#360)", and eight
+  functions matching `%shopping%`.
+
+  **The controls held on both sides**, and the first is the one the design rests on: the columns
+  `authenticated` may UPDATE on `shopping_lists` read `name` before and `name` after — so the client
+  still cannot write the stamp, and the archive's precondition cannot be bypassed by a direct
+  `update`. Policies on `shopping_lists` stayed at 2, `shopping_items` held no table-level privilege
+  for `authenticated` or `anon` on either side (`0034`'s revoke, intact), and the table comment is
+  unchanged.
+
+  **`0035` was applied TWICE in this session, and the second apply is the one that counts.** The
+  readings above are the first. A review fan-out then found that the first draft's
+  `archive_shopping_list` took its lock through the MUTABLE predicate `closed_at is null … for update
+  of r`: a `finish_shopping_run` committing during the lock wait retires the matched row, READ
+  COMMITTED's recheck drops it, the successor run is outside the archive statement's snapshot, so
+  `found` is false, **the emptiness check is skipped whole**, and the list is archived holding the
+  items the finish carried forward — falsifying this entry's own "empty by the archive precondition",
+  which is the stated reason the other three item writers carry no archive check. The fix moves the
+  lock to the row whose identity cannot change: `for update` on `shopping_lists`, with
+  `add_shopping_item` and `finish_shopping_run` taking `for key share` on the same row before their
+  run lock, so the order is **list → run → item**.
+
+  Re-applied at md5 `715b22131f51be676cdbc818cdb04bee` (26208 characters, 15 statements), read back
+  identical. Only the three function bodies moved: `add_shopping_item` from
+  `6a61b75969bf18dc680019ded154cc42` to `6c44e92e3005db85fb357e644205e17f`, `finish_shopping_run`
+  from `4fb0ec0bbc8e0b1919a9efa3796a6fc3` to `c3515cea2026f1d969bd090a5fe6095c`, and
+  `archive_shopping_list` rewritten; the column, its comment, its grant, the two function ACLs and
+  every control above read identically on both applies.
+
+  **The lock order is verified on the live bodies rather than inferred from a moved hash** — a
+  changed md5 says a replace landed and nothing about what landed. *Measured* by
+  `pg_get_functiondef` through the Management API immediately after the second apply:
+  `archive_shopping_list` carries `for update;` on the list and **no run lock of either mode**, and
+  reaches the items by joining `shopping_runs` through the list; `add_shopping_item` carries
+  `for key share;` at offset 1524, `for key share of r;` at 1842 and its `archived_at` read at 2263;
+  `finish_shopping_run` carries them at 1380, `for update of r;` at 1874 and its read at 2370 — so
+  **list before run before stamp in both**. `purchase_shopping_item`, `unpurchase_shopping_item` and
+  `remove_shopping_item` carry the run's key share and no list lock, which is the intended
+  asymmetry; `unarchive_shopping_list` carries none at all.
+
+  Re-runnable by construction, which is what made a second apply safe rather than alarming — the
+  same shape `0034` records, and for the same reason: the first apply is what surfaced the defect.
+  **`0033` on 2026-09-05 (#354, `finish_shopping_run`)**, applied with `npm run migrate:live` in
+  the story's own session, before the merge and the `release` promotion — `0020`'s safe order —
+  at md5 `70af1c0af2dc5fbec17f927dcee9452b` (19651 characters, 10 statements),
+  read back identical. One NEW `security definer` function with `search_path` emptied, executable
+  by `authenticated` and not by `anon`, plus `0032`'s three item writers REPLACED at their exact
+  signatures to take a key-share lock on the run row before they touch an item (the `0033` entry
+  below says why), and NO table, column, policy or grant change — the file touches nothing a
+  client can reach directly, and `create or replace` keeps the ACLs `0032` set on the three.
+  **`check:live` is NOT blind to this one**: a new
+  function with a new argument set is exactly the row it probes, so the denominator moved from 44
+  to **45** and the row was red on purpose until the apply — *measured **43 of 45** immediately
+  before* (`PGRST202` on `finish_shopping_run(run_id)`, the other red the standing
+  `extract-description` row) and *measured **44 of 45** immediately after*.
+  `npm run probe:live-grants` has no row for it and needs none. What neither can see — the body,
+  the row lock, the ACL and the comment — a read-only catalog query over the Management API
+  carries, taken on both sides in the same session: **before** (*measured*), PostgreSQL 17.6, no
+  function named `finish_shopping_run`, `purchase_shopping_item`'s body carrying no
+  `for key share`, `shopping_runs_one_open_per_list` reading `UNIQUE … WHERE (closed_at IS NULL)`,
+  and `authenticated`'s grants on `shopping_runs` reading SELECT on six columns and nothing at
+  table level; **after**, one function `finish_shopping_run(run_id uuid)`, `secdef=true`, `search_path=""`, executable by `authenticated` and not by `anon`, its body carrying `for update of r` and `carried_from_item_id`, its comment naming #354; `purchase_shopping_item`'s body md5 moved from `b1d51c58…` to `2f128078…` with its signature `item uuid`, its ACL and its comment prefix unchanged — the replaced body, which is the only way the catalog shows a `create or replace` landed; the index and `authenticated`'s grants on `shopping_runs` byte-identical to the before-reading, which is the "no grant moves" half measured rather than claimed; and the project still holding 0 open runs, 0 closed runs and 0 carried items, so nothing existing was touched.
+  **`0032` on 2026-09-05 (#352, the shopping schema with stamped RPCs)**, applied with
+  `npm run migrate:live` in the story's own session, before the merge and the `release`
+  promotion — `0020`'s safe order — at md5 `0ee0b917e6a5a3d8ab6e50b7370068bc` (28001 characters, 48 statements), read back identical. Three tables (`shopping_lists`,
+  `shopping_runs`, `shopping_items`), row-level security on each with every policy keyed on
+  `current_household_ids()`, four `security definer` RPCs (`create_shopping_list`,
+  `add_shopping_item`, `purchase_shopping_item`, `unpurchase_shopping_item`) executable by
+  `authenticated` and not by `anon`, and the grants the entry below records. **`check:live` is NOT
+  blind to this one** — it moved the denominator from 37 to **44** (three table probes and four RPC
+  probes) and every one of the seven was red on purpose until the apply: *measured **36 of 44**
+  immediately before*, the three tables answering `PGRST205` and the four functions `PGRST202`, the
+  eighth red the standing `extract-description` row — and *measured **43 of 44** immediately after*, the one red the `extract-description` row.
+  `npm run probe:live-grants` gained three rows, one per table on `household_id` (`r` alone — the
+  `0014` route on the read side, and the absence of `a` and `w` on the write side, which is the
+  half `check:live` cannot see), and three table-level control rows (`shopping_items`
+  `authenticated=d`, the other two no table-level grant at all): *measured **15 of 18** before*,
+  the three new rows reporting `the column is not there`, and *measured **18 of 18** after, negative control included*, the three table-level controls reading `shopping_items authenticated=d` and no table-level grant on the other two. What
+  testifies beyond both is a read-only catalog query over the Management API taken on both sides in
+  the same session: **before**, `version()` read PostgreSQL 17.6 and no relation, function, policy
+  or constraint named `shopping` existed; **after**, 32 rows — the three tables `rls=true`; the four functions at `household uuid, name text`, `run uuid, name text, note text`, `item uuid` and `item uuid`, each executable by `authenticated` and not by `anon`; the five policies with `current_household_ids` in every predicate and the delete policy carrying `purchased_at IS NULL` and `r.closed_at IS NULL`; both unique indexes, the run one `WHERE (closed_at IS NULL)`; every attribution FK reading `ON DELETE SET NULL (<column>)` and the two whole-stamp checks one-directional. The version
+  reading is load-bearing rather than decorative: the attribution foreign keys use the column-list
+  form `on delete set null (added_by_member_id)`, which is Postgres 15+, and the whole reason it is
+  there is recorded in the migration's header and the entry below.
+  **`0031` on 2026-09-05 (#97, a confirmed calendar suggestion is a capacity source)**, applied
+  with `npm run migrate:live` in the story's own session, before the merge and the `release`
+  promotion — `0020`'s safe order — at md5 `76868d316606f673c8c116cdd91f8cf5` (4415 characters,
+  3 statements), read back identical. One constraint dropped and re-added to admit a third
+  `member_capacity.source` value (`calendar`, beside `manual` and `extraction`), and one
+  `comment on column`. **It issues no privilege statement** and touches no column, policy or
+  function: `source` is already in every column list `0005` grants, and the client has written it
+  since #210. So `check:live` is structurally blind to it in BOTH directions, `0029`'s shape
+  without the function bodies — *measured at **36 of 37** immediately before AND immediately
+  after the apply, the one red the `extract-description` row this bullet already carries* — and
+  `npm run probe:live-grants` has no row for it and needs none. What testifies is the read-only
+  catalog query `0029` used, over the Management API, taken on both sides in the same session:
+  **before**, `member_capacity_source_known` admitted `'manual'` and `'extraction'` only and the
+  column carried no comment; **after**, the constraint admits `'calendar'` too and the comment
+  names #97 — with `authenticated`'s INSERT and UPDATE on `source` reading `true` on both sides,
+  which is the no-privilege-statement claim measured rather than believed. A phone on a
+  pre-`0031` project that tapped *Use this* and saved would have been refused by the constraint,
+  loudly and by name, with the typed path untouched; that window did not open, because the apply
+  landed before the merge.
+
   **`0029` on 2026-09-02 (#307, completing an unassigned chore assigns it to the completer)**,
   applied with `npm run migrate:live` in the story's own session, before the merge and the `release`
   promotion — `0020`'s safe order — at md5 `4215ca88a9d3e70b3656b4beb6874454` (12456 characters,
@@ -310,8 +485,474 @@
     default is `Dxtm` with no DML, so deleting `0030`'s `service_role` grant reddens
     `grants.pglite.test.js` — predicted 1, actual 1. What no local suite can say is whether the
     **live** project has had the migration applied at all, because the harness builds the schema
-    it certifies; that is what #100 owns. The superseded sentence still stands in `0011`'s comment
-    and in `calendar.pglite.test.js`, tracked by #334.
+    it certifies; that is what #100 owns. The superseded sentence stood in `0011`'s comment and
+    in `calendar.pglite.test.js` until #334 corrected both against measurements of their own
+    (2026-09-05: `0011`'s revokes redden 3 of 23, its `service_role` grants 1 in
+    `grants.pglite.test.js`).
+  - **`0031`** (#97) — `member_capacity_source_known` admits `calendar`, so a figure a member
+    took from their calendar's suggestion and confirmed unedited is stored with that word; an
+    edited one is `manual` (the mirror of #210's rule for `extraction`, and the issue's own). No
+    grant, no policy, no function — the row was already writable with a `source` since `0005`, and
+    the only thing a pre-`0031` project does differently is refuse the third word by name. The
+    pglite suite proves both directions (`calendarCapacity.pglite.test.js`: a database built
+    through `0030` refuses a calendar row naming the constraint, one built through `0031` accepts
+    it), which is what a widening test has to do — the accepted arm alone would be green against a
+    constraint that never bit. Applied 2026-09-05 in #97's own session; the readings are in the
+    Status bullet above, the one place this page records live state.
+  - **`0032`** (#352) — the shopping schema: `shopping_lists`, `shopping_runs` and
+    `shopping_items`, the first tables here with no fairness arithmetic behind them (charter,
+    2026-09-05: a standalone household utility). Applied 2026-09-05 in #352's own session; the
+    readings are in the Status bullet above. What this entry records is the ACCESS model, which
+    is the half a check cannot carry:
+    - **The stamp columns are withheld from every client write.** `added_by_member_id`,
+      `added_at`, `purchased_at`, `purchased_by_member_id`, `closed_at` and
+      `closed_by_member_id` carry no UPDATE grant for `authenticated` (the only UPDATE grant on
+      the three tables is `shopping_lists(name)`), for `0004`'s clock reason and its who reason:
+      a timestamp says WHEN and is written from `now()` inside a definer function, never accepted
+      from a phone; a member id says WHO and is resolved by `acting_member()` from the caller,
+      never named by them. `shopping.pglite.test.js` asserts the exact UPDATE column set and the
+      behavioural refusal, and the AC 4 mutation — adding `grant update (purchased_at)` — reddened
+      the three tests predicted.
+    - **There is NO client INSERT grant on any of the three tables**, table-level or column-level,
+      and the reason is structural rather than cautious: `create_shopping_list` opens the list's
+      first run in the same transaction, so a direct insert would produce a runless list, a state
+      the Shop tab cannot draw; `add_shopping_item` is the only way an item arrives before #354's
+      rollover, because the stamps have to be written in the same statement as the row. Creation
+      is the RPCs' alone, and the four are granted `execute` to `authenticated` with `public` and
+      `anon` revoked, `0010`'s shape.
+    - **`household_id` is granted for SELECT on all three** — the `0014` route, and the one
+      grant that decides the read model: the Shop tab reads *this household's* lists by naming the
+      household, then the open run of each list by list id, then the items by run id — three plain
+      filters, never a filter through a PostgREST embed (cairn's
+      `postgrest-filtering-on-an-embedded-resource`: an embed filter nulls the embed and keeps the
+      parent, so the row count never moves). Every column of all three is readable, so
+      `select('*')` succeeds on them as it does on `members` since `0014`; what survives is the
+      per-column grant shape (no table-level SELECT), asserted in pglite.
+    - **The delete policy's predicate** — the only client-side row delete in the feature (owner
+      decision, 2026-09-05: any member may remove an unbought item from an open run):
+      `household_id in (select public.current_household_ids()) and purchased_at is null and
+      exists (select 1 from public.shopping_runs r where r.id = shopping_items.run_id and
+      r.closed_at is null)`. A delete matching a bought item or an item on a closed run affects
+      zero rows rather than raising, which is how row-level security refuses; pglite asserts the
+      count both ways, and dropping the `purchased_at` clause reddened the two tests predicted.
+    - **One correction taken in band, and it is a RECURRENCE of a rule this schema already
+      carries three times.** The first draft wrote the attribution foreign keys as composite
+      `(member_id, household_id) references members (id, household_id) on delete set null` —
+      `0030`'s shape with the delete rule changed — and paired them with symmetric whole-stamp
+      check constraints (`(closed_at is null) = (closed_by_member_id is null)`). *Measured in
+      pglite before the file reached any project*: removing a member was REFUSED with `null value
+      in column "household_id"`, because a composite FK's `set null` nulls **every** referencing
+      column, the scoping column included. `0006` writes the column-list form `on delete set null
+      (assigned_member_id)` and its comment says exactly this; `0012` and `0018` repeat it; cairn
+      records it twice. The draft did not meet it because `0030` — the nearest migration that
+      CREATES a table with a composite member FK — cascades, and the three files carrying the rule
+      are column additions. The suite caught it, not the reading. The fix is that column list,
+      `on delete set null (closed_by_member_id)`, and one-directional checks — a closer implies a
+      close, a buyer implies a purchase, never the converse — so a removed member leaves the WHEN
+      and loses the WHO, which is the charter's 2026-08-26 leave/close decision applied. The live
+      project is PostgreSQL 17.6 (read before the apply); a mutation back to the bare `set null`
+      reddens the member-delete test, predicted 1.
+  - **`0038`** (#101) — `chores_source_known` admits `calendar`, and `calendar_imports`, the import
+    ledger: one row per calendar event imported as a chore — household, importer, the Google event
+    id and the chore it became. Applied 2026-09-08 in #101's own session, before the merge (`0020`'s
+    safe order), at md5 `04584d87e7b84da232a1eec74a200eea` (`17096 characters, 15 statements`), read back identical —
+    **applied twice**, `0034`'s shape for a gentler reason: the first apply (md5
+    `3672dec4c67d997cb0f59c04e1eaa575`, 16374 characters) was followed by a header-only edit
+    correcting the `service_role` sentence below against what the live ACL had just shown, and the
+    file was re-applied so the md5 on record is the committed file's; nothing but comments moved
+    between the two, and the re-run is the idempotency `calendarImport.pglite.test.js` asserts;
+    *measured* `check:live` **62 of 65** immediately before and
+    **64 of 65** immediately after, the one remaining red the
+    `calendar-events` function until `npm run deploy:function` shipped it the same session
+    (**65 of 65**); `probe:live-grants`
+    **the `calendar_imports` table control row MOVED (*not there*) and every other row agreeing** before, the new `calendar_imports` control row
+    reading *not there*, and **19 of 19 agree, negative control included** after; and the read-only
+    catalog query for the half no probe can see: `chores_source_known` at
+    **`manual, extraction`** before the apply and **`manual, extraction, calendar`**
+    after. What this entry records is the access model:
+    - **The event id is the ONLY calendar datum the schema retains, and this table is where.** Titles
+      transit the `calendar-events` Edge Function per request and reach the phone; there is no column
+      here or anywhere that could hold one, an attendee, a location or a time, and the function's
+      test records every write its fake client is offered and asserts none. `0030`'s rule, applied
+      again: a rule written as an absent column cannot be broken without a migration somebody reviews.
+      The id is kept for one reason — so a second import of the same event is refused
+      (`calendar_imports_one_per_event`, **unique per household**, owner decision 2026-09-08: a
+      shared event is one chore per household, and the second housemate sees *already imported*).
+    - **The first calendar table the CLIENT writes.** `calendar_tokens`, `calendar_connections` and
+      `calendar_busy` are `service_role`-only because each holds or derives from a credential; this
+      holds an id the member was just shown on their own phone beside a chore they just created. So
+      `authenticated` holds INSERT by column (`household_id, member_id, calendar_event_id, chore_id`)
+      under `calendar_imports_insert_own_row`, which pins the row to the caller's OWN member row in a
+      household they belong to — a member cannot record an import as a housemate, and a row with no
+      importer is refused, because null there MEANS "the importer has since left" — and SELECT on
+      every column, `household_id` included (the `0014` route the shopping tables take, because the
+      read is by household: an import whose member left must still be refused a second time). No
+      UPDATE and no DELETE grant. The file grants `service_role` nothing, since no function
+      touches the table — and the live project hands it `arwdDxtm` anyway, through the inherited
+      default privileges that give that role full DML on every table in `public` here
+      (*measured 2026-09-08*, the same reading on `chore_exclusions`, `households` and every other
+      row of `probe:live-grants`' whole-schema list), where the pglite harness's default gives it
+      no DML at all. Unused rather than dangerous, and recorded so the ACL is not read as this
+      file's statement. `calendarImport.pglite.test.js` asserts each half of what the FILE grants,
+      and `grants.pglite.test.js` drives the two client operations.
+    - **Two writes, two statements, and why this is not a transaction.** The client creates the chore
+      through `addChore` — #101 AC 3 forbids a second write path, and an RPC inserting into `chores`
+      would be one — and then records the import. The unique constraint serialises two phones
+      importing the same event in the same second: the second ledger insert is refused `23505`, and
+      the client removes the chore it just created on THAT refusal and no other. The window between
+      the two statements is one round trip wide and its cost is a duplicate the losing phone's
+      refusal reports rather than hides.
+    - **What a removed member and a disconnect leave.** `member_id` is nullable with `on delete set
+      null (member_id)` — the column-list form `0032`'s correction records, so the scoping column
+      survives — and the row stays: the chore is the household's, so the record that it was imported
+      is too (the charter's leave/close decision). `calendar-disconnect` does NOT delete from this
+      table (owner decision 2026-09-08): the chore survives a disconnect, so its ledger row survives
+      with it and a reconnect cannot import the same event twice. The chore FK cascades — removing the
+      chore is the household saying the import was wrong, and after it the event may be imported again.
+    - **`chores` gained no column.** The provenance is the WORD: `chores_source_known` is dropped and
+      re-added at three values, `0031`'s shape for `0031`'s reason (an `if not exists` guard would read
+      the old constraint as present), and the imported chore is written with `source: 'calendar'`
+      through the same `addChore`. #101 was filed saying the table had no provenance column and #68
+      was open; `0023` had given it one, and this widens it exactly as `0023`'s comment said an import
+      would.
+    - **The publication gains the table**, with `0037`'s guarded shape, so a second phone's import
+      moves this phone's *already imported* marks without a reload. `WATCHED_TABLES` derives it from
+      `LIVE_SCHEMA` and `realtime.pglite.test.js` holds the publication equal — twelve tables now.
+  - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
+    `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
+    client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with
+    NOBODY tapping, and the row carries the figure it replaced so the roster can show both (#106
+    AC 4). The policy — the bound, the delta it measures, and that it never writes over a `manual`
+    or `extraction` row — is the client's and is in `docs/capacity-model.md`'s 2026-09-08 section;
+    this entry records the ACCESS model. Applied 2026-09-08 in #106's own session, before the
+    merge (`0020`'s safe order), at md5 `798a49fea4559ee5f1caa3c261907d7e`
+    (`11592 characters, 17 statements`), read back identical.
+    - **Three column grants, all the upsert's.** `select`, `insert` and `update` on
+      `previous_minutes` for `authenticated`, additive on `0005`'s and `0022`'s sets, for `0022`'s
+      reason exactly: PostgREST names every payload column in `DO UPDATE SET` and reads each through
+      `EXCLUDED`. The column is provenance, not privilege — a client that lies about the previous
+      figure lies only to the roster it reads itself. `anon` holds nothing on it (`0017`'s revoke
+      stands, asserted). No policy, no RPC.
+    - **One trigger, and it is the manual floor's server half.** `member_capacity_automatic_never_overtypes`
+      (`before update`, `0022`'s shape, executable by nobody) refuses `source = 'calendar_auto'`
+      over a `manual` or `extraction` row with errcode `TA106`, and never refuses a person's word
+      over anything. It exists because the client's floor is a read followed by a write, and a
+      person's figure saved in the one round trip between them would otherwise be overwritten with
+      nobody tapping — the review fan-out on this story's first draft found that hop, and the
+      header's *"a decision the database cannot see"* false for exactly this half. The App reads
+      `TA106` as *a person won*: no error strip, no re-assignment, a re-read. `check:live` cannot
+      see a trigger (it probes tables, columns and RPC signatures), and `probe:live-grants` has no
+      row for one; the catalog query below reads it on both sides.
+    - **Two constraints on the column, and the second is the one that matters.**
+      `member_capacity_previous_minutes_range` is `minutes`' range; `member_capacity_previous_only_when_auto`
+      refuses a non-null previous figure on any row whose word is not `calendar_auto`, so a person's
+      confirm or edit of an automatic week — which the client upserts as `calendar` or `manual`
+      with the column null — cannot leave the old history standing under the new word by forgetting
+      the column. The pglite suite proves every arm (`calendarAutoApply.pglite.test.js`).
+    - **Three instruments, one each.** `check:live` SEES this file, unlike `0031`: `CAPACITY_COLUMNS`
+      names the column, so the `member_capacity` row answered `42703` until the apply — one honest
+      red, and NO new row, `0035`'s shape (*measured* **64 of 65** before,
+      **65 of 65** after). `npm run probe:live-grants` gained a control row
+      for the column's `arw` (*measured* **19 of 20** before,
+      **20 of 20** after). Neither can see the constraint widening, for `0031`'s
+      reason, so the read-only catalog query over the Management API is the instrument for that
+      half, taken on both sides: `member_capacity_source_known` admitting
+      `manual, extraction, calendar` before and `manual, extraction, calendar, calendar_auto` after, the
+      `previous_minutes` column, its two constraints and the trigger absent before and present
+      after — the trigger reading `enabled=O`, its function `secdef=false` with
+      `has_function_privilege` **false for both `anon` and `authenticated`** (the ACL carries
+      `service_role=X` through the platform's inherited default, `0038`'s reading on every
+      function here, unused rather than dangerous), the column grants exactly
+      `authenticated=INSERT,SELECT,UPDATE`, and both column comments naming #106.
+    - **A later paste of `0031` NARROWS the constraint back** — the `0012`/`0025`/`0026`-on-`0028`
+      hazard, on a constraint for the first time: `0031` drops it by name and re-adds its own
+      three-word list. On an empty table that is silent; while any `calendar_auto` row exists the
+      re-add fails validation and the whole paste errors. Both arms are asserted, and re-pasting
+      `0039` restores the word. `calendarCapacity.pglite.test.js`'s own re-run test moved from HEAD
+      to a database built through `0031` for the same reason — a migration is re-runnable only
+      against its own schema.
+  - **`0037`** (#342) — the `supabase_realtime` publication gains the eleven tables the client
+    reads and now WATCHES: `households`, `members`, `chores`, `member_capacity`,
+    `chore_exclusions`, `calendar_connections`, `chore_repeat_exceptions`, `calendar_busy`,
+    `shopping_lists`, `shopping_runs`, `shopping_items` — every `LIVE_SCHEMA` table but
+    `member_split_seen`, which is self-scoped and written by the re-read itself. No grant, no
+    policy, no column moves; what changes is that a committed change to any of these is now SENT,
+    to each subscriber the table's policies admit. The list is derived in `src/lib/realtime.js`
+    and held equal to this file by `src/test/realtime.pglite.test.js`; the read-path consequences
+    are the *A subscription is a read path* section below. Applied
+    2026-09-08 in #342's own session, at md5 `0cf3cdc9f6e2cd3f5141dfb049cdd1ab` (4941 characters, 2 statements), read back identical;
+    *measured* `check:live` **51 of 62** immediately before and
+    **62 of 62** immediately after, the denominator having moved from 49 to
+    62 on the eleven publication rows, their floor and the live negative control on
+    `member_split_seen` — which passes only while the server REFUSES that table, and did on both
+    sides. *Measured before the apply, through the read-only catalog*: the live publication existed
+    with `puballtables = false` and held **no `public` table at all**, so every one of the eleven
+    rows was a real red rather than an inherited green, and the `for all tables` shape the
+    migration's header allows for is not this project's. What `probe:live-grants` sees of this
+    file: nothing, and correctly — it audits grants, and this grants nothing. The publication
+    catalog after the apply is the eleven tables above and nothing else, `puballtables` still false, read back through the same catalog query — and the `system` frame on a published table now reads `Subscribed to PostgreSQL`, `status: ok`, which is the positive answer the probe accepts.
+  - **`0036`** (#208) — `extraction_calls`: the extraction endpoint's call ledger, one row per
+    provider call, written as `service_role` by `supabase/functions/extract-description` BEFORE
+    the provider is asked and counted over a rolling window to refuse a household past the bound
+    (`RATE_LIMIT` in that function's `handler.ts`, the one place the constant is written). Applied
+    2026-09-07 in #208's own session; *measured* `check:live`
+    **47 of 48** immediately before and
+    **47 of 48** immediately after — the same figure on both sides BY
+    CONSTRUCTION, because no client reads this table and the check has no row for it, the one red
+    on both sides being the excused `extract-description`, which #209 then drained on 2026-09-07; and
+    `probe:live-grants` **19 of 19 column rows, with the `extraction_calls` table control row MOVED** immediately before, the new
+    `extraction_calls` control row reading *not there*, and **19 of 19, every table control row agreeing**
+    immediately after. What this entry records is the access model:
+    - **No client can NAME it.** `0011`'s device for `calendar_tokens`, and for `0011`'s reason:
+      nothing here is shown on a screen, so the table gets no column list a client may read part
+      of — `revoke all … from authenticated, anon, public`, row-level security ON with no policy
+      at all, and `service_role` granted SELECT and INSERT and nothing more, the two verbs the
+      function uses. A grant added by accident later still reaches no row; two independent
+      mistakes would be needed rather than one. `src/test/extraction-calls.pglite.test.js` asserts
+      each half, and `grants.pglite.test.js`'s audit of every `service_role` table carries the
+      first two-letter row.
+    - **Why a table, and not a counter in the function's memory.** An isolate's `Map` is one
+      count PER ISOLATE, reset on every cold start — and #205 measured cold starts between one tap
+      and the next — so a bound held that way is green in every test this repo can write and
+      holds nothing a bill would notice. Owner decision at #208's pickup, 2026-09-07: the count is
+      durable, so the bound is one bound. The row is written before the call rather than after,
+      so an attempt the provider refuses or times out on still spent the window.
+    - **The composite foreign key is `0010`'s**: `(member_id, household_id)` references
+      `members (id, household_id)`, so a row pairing one family's person with another family's id
+      cannot exist. `on delete cascade` means a removed member takes their rows with them, which
+      loosens that household's bound by however many calls they made this hour and nothing else.
+    - **Which instrument sees which half.** `check:live` sees NONE of this file and never will —
+      it probes what the client asks for. `probe:live-grants` is the instrument for the grant
+      half: its control list gained an `extraction_calls: null` row, `calendar_tokens`' shape,
+      red as *not there* until the apply. The deploy of the function that writes here was #209's,
+      on 2026-09-07, and its row is the drained excused red above — so this table had a working
+      writer only from that date, a day after the table itself existed.
+  - **`0035`** (#360) — `shopping_lists.archived_at`, `archive_shopping_list(list)` and
+    `unarchive_shopping_list(list)`: put a list away so the picker stops drawing it, and bring it
+    back, without deleting a row. Applied 2026-09-06 in #360's own session;
+    *measured* **44 of 48** on `check:live` immediately before and
+    **47 of 48** immediately after, the one remaining red being the
+    excused `extract-description`; and `probe:live-grants`
+    **19 of 19**, negative control included. What this entry
+    records is the access model:
+    - **The stamp is read by the client and written by nobody but the two RPCs.** `archived_at`
+      joins the SELECT grant `0032` set per column, and joins no UPDATE grant — the client still
+      holds `update (name)` on `shopping_lists` and nothing else. That is not a convenience: the
+      archive is refused while the list's open run holds any item, and that check is a read
+      followed by a write, so it is only sound taken under a lock. A client `update` could take
+      none. `probe:live-grants` is the only instrument that can see the absence, on
+      `chores.missed_at`'s reasoning — a check that only ever reads cannot report being allowed a
+      write it never attempts.
+    - **The archive takes the RUN row `for update`, and that is the schema's existing lock order.**
+      `0033` gave the three item writers `for key share` on the run row before they touch an item,
+      and `0034` gave the fourth the same; `for update` conflicts with all of them, so an add
+      arriving while an archive is in flight waits and is then refused by the stamp, and an archive
+      arriving while an add is in flight waits and then counts the item it added. Nothing new is
+      lockable: the list row is deliberately NOT locked, because the state being protected — "the
+      open run is empty" — lives on the run.
+    - **Two writers can reach an archived list and both are replaced here**, at their exact
+      signatures so neither becomes an overload (`PGRST203`): `add_shopping_item`, which would
+      otherwise put an item on a list nobody can see, and `finish_shopping_run`, which would
+      otherwise CLOSE an archived list's empty run and OPEN a fresh one. The other three item
+      writers are untouched, and the reason is structural rather than an omission — an archived
+      list's open run is empty by the archive's own precondition, so a purchase, an un-purchase and
+      a remove have no item to name.
+    - **The refusal is stricter than the story's AC said, and the owner chose it at pickup**
+      (2026-09-06). AC 1 said "unbought items"; the story's own rationale called an archived list's
+      open run "empty". Under the looser rule a list whose open run held only BOUGHT items could be
+      archived, and those rows would be reachable from nowhere — an open run is not history
+      (`readClosedRuns` is `closed_at is not null`) and an archived list draws its finished runs
+      only. The stricter rule makes "there is nothing here to draw" a fact about the database.
+    - **The re-paste hazard is two files deep and both directions are asserted.** Re-applying
+      `0033` alone silently restores the pre-archive bodies of both replaced functions, so an
+      archived list becomes writable with nothing erroring. Re-applying `0032` is worse in kind: it
+      opens with `revoke all on public.shopping_lists from authenticated, anon` and re-grants four
+      columns by name, so the client stops being able to READ the stamp — every list comes back
+      looking active, the picker draws the ones the household put away, and nothing refuses
+      anything. The safe re-paste order is the whole sequence and now ends on `0035`;
+      `archive-shopping-list.pglite.test.js` asserts both.
+    - **An archived name stays taken.** The unique index is `(household_id, lower(name))` and
+      `0035` does not exclude archived rows from it, so a new "Groceries" beside an archived one is
+      refused with #358's own sentence. The better of the two failures: the alternative is a
+      household holding two lists it cannot tell apart in a picker that shows the name and nothing
+      else.
+  - **`0034`** (#368) — `remove_shopping_item(item)`: delete an unbought item from an open run,
+    holding the run row `for key share` FIRST, and the withdrawal of the client DELETE grant and
+    the policy `0032` created for it. Applied 2026-09-06 in #368's own session;
+*measured* **44 of 46** on `check:live` immediately before and
+    **45 of 46** immediately after, the one remaining red being the excused `extract-description`;
+    and `probe:live-grants` **18 of 18, negative control included, anon reaching nothing**. What
+    this entry records is the access model:
+    - **The client no longer writes `shopping_items` at all.** `0032` granted `delete` and wrote
+      `shopping_items_delete_unbought_on_open_run` to bound it: household, `purchased_at is null`,
+      and the item's run open. That policy is correct about WHICH ROWS and can say nothing about
+      WHEN, because **a policy cannot take a lock**. `0033` gave the other three writers the run's
+      `for key share` and could not give it to this one — the header of `0033` said so and filed
+      it here. After `0034`: `authenticated` holds SELECT on every column of `shopping_items`,
+      `UPDATE (name)` on `shopping_lists`, and no INSERT, UPDATE or DELETE anywhere in the
+      feature; the four writers of the item table are four `security definer` functions with one
+      lock order between them.
+    - **The window it closes is a LOST RECORD, not a lost delete.** A finish holds an unbought item
+      as a carry source; a remove of that item waits, the finish commits (run closed, copy made
+      with `carried_from_item_id` set), and the delete then proceeds against the ORIGINAL under a
+      predicate evaluated on its own older snapshot, where the run still read as open. The closed
+      run loses its record of an item it held — `0032`'s "a closed run is the record", broken —
+      and the copy survives with `carried_from_item_id` nulled by `on delete set null`, so it is
+      indistinguishable from an item somebody typed. Nothing raises. Found by #354's review
+      fan-out before `0033` reached any project, and unreachable by every instrument here: pglite
+      is one connection and #356's live harness is finish-against-finish.
+    - **It refuses by name** — `run already closed` and `item already bought`, the family's own
+      sentences (owner decision, 2026-09-06, taken against preserving the DELETE's silence). The
+      catalogue tests assert the clause and its ORDER for all four writers now, anchored on the
+      statement's terminator so a body's own prose about the clause cannot satisfy them.
+    - **The re-paste hazard is sharper than `0033`'s and is asserted.** Re-applying `0032` over
+      the top restores the delete grant AND the policy, handing the client back the writer that
+      cannot lock — and re-applying `0033` does not fix it, because `0033` never touched a grant.
+      The safe re-paste order ends on `0034`.
+    - **This file was applied TWICE, and the second apply is the record worth keeping.** Its first
+      draft revoked `from public` where `0032` and `0033` both write `from public, anon`, and
+      `probe:live-grants` read **anon still holding execute on `remove_shopping_item`** — a stray,
+      on a project where `0017` exists precisely to keep anon at nothing. The obvious repair is a
+      pglite assertion so the harness catches it next time, and it is **wrong**: putting the first
+      draft back and running that assertion reddens NOTHING (*measured*, 0 of 1), because a bare
+      `revoke … from public` removes the PUBLIC default and this harness's `anon` holds nothing
+      else, while the live project's does. **The catalog probe is the only instrument for this
+      class**, which is what it was built for, and the pglite assertion added here is a regression
+      guard on the definer/search_path/authenticated shape and says so in its own comment.
+    - **One control row in `probe:live-grants` moved, deliberately.** It recorded
+      `shopping_items authenticated=d` — the one whole-row privilege the client held — and `0034`
+      withdraws it, so the recorded expectation is now `null` in the same change. Left alone it
+      would have made that probe red forever on a change somebody chose, which is how an
+      instrument stops being read.
+  - **`0033`** (#354) — `finish_shopping_run(run_id)`: close the named open run and open the
+    list's next one with every unbought item copied forward, as ONE transaction under
+    `select … for update`, returning the new run. Applied 2026-09-05 in #354's own session; the
+    readings are in the Status bullet above. What this entry records is the access model:
+    - **The argument is the RUN and never the list, and that is the whole safety of the thing.**
+      Two phones showing the same open run, both pressing Done: with `list_id` the second call
+      would resolve the list's open run AFRESH — the run the first call just opened — close it
+      and carry every item forward twice. With `run_id` the second call names the run its screen
+      showed, waits on the row lock, re-reads the close the first call wrote, and raises
+      `run already closed` having written nothing. A stale screen cannot finish a run it has not
+      seen. `finish-shopping-run.pglite.test.js` proves the SEQUENTIAL form (second call refused,
+      exactly one open run, no item carried twice, the whole table byte-equal before and after
+      the refusal); pglite is one connection, so the interleaving itself is #356's, on the live
+      project. `shopping_runs_one_open_per_list` (`0032`) stands behind the lock: any path that
+      reached the second insert with an open run already on the list is refused by the index and
+      the whole call rolls back — and deleting the `run already closed` guard reddens the two
+      tests that assert the refusal's WORDING, which is how the suite tells the guard from the
+      index (predicted 2, actual 2).
+    - **No grant moves, and the function is the only writer of `closed_at`, `closed_by_member_id`
+      and a carried item.** `authenticated` still holds no INSERT and no UPDATE on `shopping_runs`
+      at table or column level (SELECT on its six columns is everything) and no INSERT on
+      `shopping_items`; the suite asserts the exact sets and the behavioural refusal of a direct
+      write to either stamp column. The close is stamped from `now()` and the closer from
+      `acting_member(household)` — the caller's member row IN THAT household, which the
+      two-household fixture makes a real assertion (a mutation stamping nobody reddens 2). The
+      signature is exactly `run_id uuid`: the AC 4 mutation replacing `now()` with a client-supplied
+      timestamp PARAMETER reddened the signature test, the second-apply test and the
+      `LIVE_RPCS`-versus-`pg_proc` comparison, plus every call in the suite by coupling
+      (predicted 18, actual 19 (one over: the execute-privilege test names the one-argument signature too)); the narrower form — `closed_at` written from a
+      smuggled constant — reddened the three clock tests and nothing else (predicted 3, actual
+      3). Withholding `grant execute … to authenticated` reddens the privilege test,
+      the second-apply test and, by coupling, every call (predicted 17, actual 17).
+    - **A carried item keeps its original adder and `added_at`, plus `carried_from_item_id`**
+      (owner decision, 2026-09-05, recorded on the epic and on #354). The finisher is the one
+      member known NOT to have added the item, and preserving `added_at` keeps carried items at
+      the top of the next run's unbought order. The originals are COPIED, never moved: the closed
+      run keeps all five of the fixture's rows as the record of what that trip did not manage,
+      which is what #359's past runs show — it reads exactly those rows back, through the
+      client grants `0032` already gives, adding no table, no grant and no migration. Each of the three copy fields has its own
+      mutation — the finisher as adder, `now()` as `added_at`, `null` as the origin — and each
+      reddened the carry test alone or with the two AC 2 tests that count origins (predicted
+      1 / 1 / 3, actual 1 / 1 / 3). Dropping the
+      `purchased_at is null` filter carries the bought items too and reddens six (actual
+      6).
+    - **`closed_at` and the new run's `opened_at` are the same transaction-start clock reading**
+      — asserted as SQL equality between the two rows. It pins `now()` (transaction start) over
+      `clock_timestamp()` on both stamps; it does NOT prove atomicity, which a plpgsql body has by
+      construction and no mutation of the file could remove — the review's test-vacuity lens
+      corrected a first draft that titled it the proof of one transaction.
+    - **The finish lock covers finish-against-finish only, and `0032`'s three item writers are
+      replaced here to close the rest** — found by the same review before the file reached any
+      project. `add_shopping_item`, `purchase_shopping_item` and `unpurchase_shopping_item` read
+      `closed_at` with no lock on the run row, so an add or un-purchase overlapping a finish would
+      land an unbought item on the just-closed run (never carried, "nothing lost" false), and a
+      purchase overlapping a finish would, in one of the two orderings, leave the item bought on
+      the closed run AND copied unbought onto the next. Two clauses close it, belt and braces:
+      the three writers take `for key share` on the run row BEFORE they touch the item — a key
+      share conflicts with the finish's `for update`, so a writer arriving during a finish waits
+      and re-reads the close; one arriving first holds the run until it commits so the finish's
+      carry sees the write — and the carry's `insert … select` locks its source rows
+      `for update`, so an item a purchase or a remove already holds makes the copy wait and the
+      re-check skips a row that is bought or gone rather than copying or referencing it (which is
+      what stood between a concurrent remove and a raw `23503` aborting the whole finish). The
+      lock ORDER is load-bearing and is the same in every writer — run, then item — because a
+      purchase that locked the item first and the run second would deadlock with a finish holding
+      the run and waiting on the item. Signatures, refusals and stamps of the three are unchanged
+      and `shopping.pglite.test.js` passes against them unedited; what a single pglite connection
+      can observe of the clauses is the catalog, and `finish-shopping-run.pglite.test.js` reads
+      each body for its lock and its order (the mutations dropping the add's key-share, swapping
+      the purchase's order and dropping the carry's `for update` reddened 1, 1 and 2 as predicted — on a second run for the first: its first run reddened 0 because the assertion matched the body's own comment naming the clause, so the regexes are anchored on the clause's terminator now, with a control that the comments alone match none).
+      **Not closed here, filed as #368**: a client `delete` that arrives after the
+      carry has locked the item waits for the finish and then proceeds against the original under
+      a policy evaluated on its own older snapshot — the closed run loses its record of the item
+      while the copy survives on the next run. The delete path is `0032`'s policy and a policy
+      cannot lock the run. And the mirror hazard, stated: re-pasting `0032` on top of this file
+      puts the three UNLOCKED bodies back (cairn's `0004`-over-`0007` shape); the suite asserts
+      that direction so it is written down rather than discovered.
+    - **The interleaving is PROVED against this project, not inferred from the source** — #356,
+      `npm run prove:finish-race`, measured 2026-09-06. Everything above about the lock is a claim
+      about two transactions being open at once, and until this story **no instrument here could
+      reach it**: pglite is one connection, so `finish-shopping-run.pglite.test.js` runs the two
+      calls back to back and what it proves is the stale-screen guard, never the contended lock.
+      *What pglite could not prove and this did*, in one line each:
+      - **The outcome, ten times.** Two independent authenticated clients on the seeded account,
+        both `finish_shopping_run(run_id)` inside one `Promise.all` against a fresh list each time
+        (one open run, three unbought items, confirmed by a read first): **10 of 10** gave exactly
+        one new run and exactly one refusal, and the read-back was identical every time — two runs
+        on the list, three items on the new one each carrying exactly once from an original the
+        closed run still holds, none bought, none moved. **40 of 40 over four runs of the script.**
+      - **Which refusal path, which #357 needs.** All ten took the RPC's own `run already closed`,
+        **none** the `shopping_runs_one_open_per_list` violation and **none any other path** — so
+        the second caller waited on the row lock and re-read the close, exactly as the header above
+        says, and the index stayed the belt under the braces rather than the thing doing the work.
+        #357's error copy therefore has one SQLSTATE to map (`P0001`) on this evidence, not two.
+        The third count is not a formality: a loser cancelled behind a slow winner comes back
+        **57014**, having never reached the lock, and a repetition like that proves nothing while
+        looking identical in every other column — so it is a fault rather than a footnote.
+      - **The interleaving itself, read out of the server, and it is the ONLY evidence of it.** The
+        outcome alone is not evidence — a platform that ran the two calls end to end produces the
+        same one winner and one refusal, which is what pglite already shows — so the script carries
+        a witness: a race over **8,000** bulk-loaded rows, slow enough to sample while it happens.
+        **Eight of eight samples taken, none failed, every one showing two `active` backends inside
+        `finish_shopping_run` with a `transactionid` lock wait among them — witnessed in sample 1**
+        (winner 5,652 ms, loser 5,687 ms, 8,000 carried and 8,000 kept). That is the second caller
+        blocked on the first's `for update`, observed rather than argued. A miss is reported as a
+        miss, and a FAILED sample is counted apart from an empty one.
+      - **The `for key share` clauses, on live.** Twenty purchase-versus-finish races across the
+        four runs, **both orderings observed** — the tick committing first and the carry then
+        skipping the bought row, and the tick arriving during a finish and being refused
+        `run already closed`. No item was ever bought on the closed run AND carried forward, which
+        is the double-buy the clauses exist to make unreachable. **Not** covered, and unchanged:
+        the client `delete`, which is #368.
+      - **Four bounds on the instrument — two found by running it, two by review, none by reading
+        the code.** A client read-back of the witness run is silently capped at PostgREST's
+        `db-max-rows` (**475 of 20,000 rows, no error and no gap in the response**), so the count
+        goes through `head: true`; at 20,000 items the carry ran past `authenticated`'s **8 s
+        `statement_timeout`** on one run of two, killing the WINNER mid-carry so both callers came
+        back refused, which is why the fixture is 8,000 and the phase retries. Review then found
+        two more: the retry loop reported the **last** attempt rather than the one that stands, so
+        a machine-killed final attempt could fail a proof two clean attempts had already made —
+        repaired by fault KIND rather than by preferring clean attempts, because an attempt that
+        saw **two winners** is the epic's own defect and must reach the report from wherever it
+        happened; and the verdict was computed as a max and a sum **across** samples, so the two
+        halves of the sentence could come from different instants. **The final run used the
+        corrected instrument and reached the same verdict as the run before it** — which is why the
+        figures here were re-measured rather than carried across.
+    - **What is NOT here, on purpose**: no `list_id` overload, no undo (owner decision 8: an
+      inline confirm, no undo), no client-side close of any kind, and no backfill — every run
+      open before this file stays open until somebody finishes it from a phone.
   - **`0011` also needed a DEPLOY, not only a paste**, and it was the only migration on this page
     that did until `0030`: `calendar-connect` is an Edge Function, and `npm run deploy:function` is what puts it
     there. Two actions, two expected reds — and, as this page said it would, **the paste cleared
@@ -363,7 +1004,104 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
-- **The excused-red set is EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
+- **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
+  One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
+  as the seeded account and reading the `system` frame the server sends after the join — never
+  the join itself, which the server acknowledges for any table name (*measured*, including one
+  that does not exist). Red from the moment `WATCHED_TABLES` listed them until `npm run
+  migrate:live` applied `0037`: *measured **51 of 62** immediately before
+  and **62 of 62** immediately after*, the denominator having moved from 49
+  to 62. The twelfth new row is a live NEGATIVE CONTROL on `member_split_seen`, the one table the
+  client reads and deliberately does not watch: it passes only while the server refuses that
+  table, so it is also the assertion that the self-scoped table stays unpublished, and it was
+  green on both sides. Written down here and in README's `check:live` cell in the same change
+  that created the rows, for the reason the #352 bullet below gives.
+
+  **What the first draft of the probe would have recorded here, kept because it is the finding.**
+  Resolving on the join's `SUBSCRIBED` read **61 of 62 green against an empty publication** — every
+  table row green and the negative control the one red. The control existed because the check
+  above it could not be trusted without one, and it is the only thing that said so.
+- **#99 opened ONE row on 2026-09-08 — a DEPLOY's row, not a paste's — and drained it in its own
+  session.** `calendar-disconnect` is the Edge Function that deletes a member's token row, every
+  derived busy row and the connection row, and asks Google to revoke the grant best-effort. It
+  arrives with **no migration at all**: `0011` and `0030` already created the three tables it deletes
+  from and already grant `service_role` the DELETE it uses, so there is nothing to paste and nothing
+  a paste could clear. The row was red from the moment `LIVE_EDGE_FUNCTIONS` listed the name until
+  `npm run deploy:function` shipped it: *measured **48 of 49** immediately before the
+  deploy and **49 of 49** immediately after*, the denominator having moved from 48 to
+  49 on the one new function. Written down here and in README's `check:live` cell in the same change
+  that created the row, for the reason the #352 bullet below gives.
+
+  **What this check still cannot see about it, stated because the gap is wider here than usual.** A
+  preflight carries no body and invokes nothing, so a green row says the gateway has the function
+  and a browser could call it — and says nothing about whether the three deletions actually
+  succeed, which needs `service_role` to hold DELETE on all three tables. That half is
+  `npm run probe:live-grants`'s and `src/test/grants.pglite.test.js`'s, and it was already true
+  before this story: `0011` and `0030` grant it, and the catalog reading recorded under those two
+  entries is what says the live project agrees.
+- **#360 opened THREE reds on 2026-09-06 and drained all three in its own session** — the
+  `archive_shopping_list` and `unarchive_shopping_list` RPC probes, red from the moment `LIVE_RPCS`
+  listed them, and the `shopping_lists` TABLE probe, which went red the moment `archived_at` joined
+  `SHOPPING_LIST_COLUMNS`. All three until `npm run migrate:live` applied `0035`: *measured
+  **44 of 48** before and **47 of 48** after*,
+  the denominator having moved from 46 to 48 on the two new functions and NOT on the column — a
+  table is probed once, with every column the app selects, so a new column reddens an existing row
+  rather than adding one. Written down here and in README's `check:live` cell in the same change
+  that created the rows, for the reason the #352 bullet below gives. The set is back to the one row
+  below.
+- **#368 opened ONE row on 2026-09-06 and drained it in its own session** — the
+  `remove_shopping_item` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
+  `npm run migrate:live` applied `0034`: *measured **44 of 46** before and
+  **45 of 46** after*, the denominator having moved from 45 to 46 on the one new
+  function. Written down here and in README's `check:live` cell in the same change that created
+  the row, for the reason the #352 bullet below gives.
+- **#354 opened ONE row on 2026-09-05 and drained it in its own session** — the
+  `finish_shopping_run` RPC probe, red on purpose from the moment `LIVE_RPCS` listed it until
+  `npm run migrate:live` applied `0033`: *measured **43 of 45** before and
+  **44 of 45** after*, the denominator having moved from 44 to 45 on the one new
+  function. Written down here and in README's `check:live` cell in the same change that created
+  the row, for the reason the #352 bullet below gives. The set is back to the one row below.
+- **#352 opened SEVEN rows on 2026-09-05 and drained all seven in its own session** — the three
+  `shopping_*` table probes and the four shopping RPC probes, red on purpose from the moment the
+  entries were listed until `npm run migrate:live` applied `0032`: *measured **36 of 44** before
+  and **43 of 44***. They were written down here and in README's
+  `check:live` cell in the same change that created them, for the reason the next bullet's history
+  gives. The set is back to the one row below.
+- **#210 opened ONE row on 2026-09-04 and #209 DRAINED it on 2026-09-07 — the set is EMPTY again,
+  and this is the longest any row here has stood: four days across five stories.** The
+  plain-language capacity flow (`src/lib/capture.js`) invokes `extract-description` by name ahead of
+  #208 writing it — owner decision at #210's pickup — and `LIVE_EDGE_FUNCTIONS` lists what the app
+  invokes, so the probe answered NOT DEPLOYED: *measured 2026-09-04 at 36 of 36 immediately before
+  the name was listed and 36 of 37 immediately after*, in #210's own session, the one red naming
+  exactly that function. Not a migration's row and not a paste's: the action that cleared it was
+  `npm run deploy:function`, and nothing else could have. **#208 wrote the function on 2026-09-07**
+  (`supabase/functions/extract-description`, with `0036` for its call ledger), moving the name from
+  `PENDING_FUNCTIONS` into `FUNCTION_NAMES` in `scripts/deploy-function.mjs` — that list's own test
+  went red on the new directory, which is what it is for. **#209 ran the deploy on 2026-09-07**:
+  *measured **47 of 48** immediately before and **48 of 48** immediately after*, the denominator
+  unmoved, the one red naming exactly that function on the before side and no red at all on the
+  after side. Deployment **v2**, `ezbr_sha256`
+  `46499420bb93ab3e9988b20485db12a9e648eaaaa3600a496bc2cf86aa57787a`, 2026-09-08T01:47:25.642Z.
+  Every red, on any subject, is real again.
+
+  **Two things this row is worth remembering for, neither of which is the reading.** It is the first
+  entry here whose clearing action was a **deploy** rather than a paste — `0036` went in on #208's
+  session and moved no figure at all, so a reader watching the migration entries would have seen
+  nothing happen for four days while the row sat red for a reason no migration could touch. And the
+  deploy it waited on is the first in this repo whose bundle carries files from **outside** the
+  function's own directory: `--use-api` uploaded `src/lib/extraction.js`, `src/lib/dueDates.js` and
+  `src/lib/extractionAdapter.js` alongside the two handler files, which #208 could only read off the
+  CLI's Go source and record as unmeasured. It is measured now, and the `_shared/` fallback
+  docs/deploy-runbook.md §3c step 1 held in reserve is not needed.
+
+  **`check:live` cannot see the half that made the function useful.** The row went green on the
+  deploy alone, and a deployed `extract-description` with no `ANTHROPIC_API_KEY` refuses every call
+  by name — a preflight carries no body and invokes nothing, so this instrument reads the same
+  either way. What proved the secret is a POST with a real session, and it is recorded on #209:
+  200 carrying the contract shape for both `capacity` and `chores`, against a 401 with no session,
+  the function's own 403 from a household the caller is not in as the control that the refusal is
+  not the gateway's, and two rows in `extraction_calls` for the two answered calls.
+- **Before #210 the set was EMPTY again; #96 had opened TWO and both drained on 2026-09-04**: the
   `calendar_busy` table probe on `0030`'s apply, and the `calendar-busy` Edge Function probe on
   its deploy, each on its own action and neither on the other's — *measured 2026-09-04 at 34 of
   36 before and 36 of 36 after*, in #100's session. They were written down here at the moment they
@@ -452,7 +1190,8 @@
   asking in one bit.
 
   **The excused-red set held nothing between `0018`'s application and #50, held `0020`'s one row
-  within #50's session, and is EMPTY again — see the head of this bullet.** *Measured 2026-08-27 at
+  within #50's session, and was EMPTY again until #210 opened the `extract-description` row on
+  2026-09-04 — see the head of this bullet.** *Measured 2026-08-27 at
   25 of 25* after `0018` was
   applied under
   #231. It held TWO rows between #49's merge and that application, and both are moved into
@@ -708,7 +1447,9 @@
   negative control. There is no excused moved row left, so any moved row now is a real finding.
 
   *The history of this bullet, which is the argument for keeping it in this form — and it has now
-  been inverted fifteen times: EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
+  been inverted many times; this list is the record and the count is not, because the count said
+  "fifteen" while the list stopped at #50 and four stories had inverted it since (#210, 2026-09-04):
+  EMPTY at 17 of 17, then ONE expected red at 19 of 20 when #115 gave the
   check its first sight of Edge Functions, then EMPTY again at 20 of 20, then ONE again at 20 of 21
   with #37's unpasted table, then TWO at a **measured** 21 of 23 with #37's table still unpasted and
   #95's function undeployed, then **EMPTY at 23 of 23** with both actions taken, then **TWO again
@@ -722,13 +1463,21 @@
   later that day when `0018` was applied under #231 — the first inversion cleared by
   `npm run migrate:live` rather than by a hand paste — then **ONE at a measured 25 of 26** with
   #50's `0020` in the repo and unapplied, and **EMPTY again at a measured 26 of 26** when `0020`
-  was applied by `migrate:live` in the same session, the shortest-lived population yet.
-  **#250 is deliberately NOT a sixteenth inversion either, and for the opposite reason to `0016`'s.**
+  was applied by `migrate:live` in the same session, the shortest-lived population yet — then
+  **TWO at a measured 28 of 30** with #105's `0025` unapplied and **EMPTY at 30 of 30** the same
+  hour, **THREE at 29 of 32** with #305's `0027` unapplied and **EMPTY at 32 of 32** in that
+  session, **TWO at 34 of 36** with #96's `0030` unapplied and `calendar-busy` undeployed and
+  **EMPTY at 36 of 36** when #100 took both actions, and **ONE at 36 of 37** when #210 listed
+  `extract-description` ahead of its function existing — **EMPTY again at 48 of 48** when #209
+  deployed that function on 2026-09-07, which is the only action that could have cleared it.
+  That row is the longest-lived of the lot: four days, across five stories, and the only one no
+  paste could touch.
+  **#250 is deliberately NOT an inversion either, and for the opposite reason to `0016`'s.**
   It moved the denominator 26 → 28 while the set stayed EMPTY, because its two rows are about the
   seeded test account rather than about the live project — the first time this number has moved on
   something no migration could ever change. A denominator that moves is not an inversion; a
   population that moves is.
-  **`0016` (#198) is deliberately NOT one of the fifteen
+  **`0016` (#198) is deliberately NOT one of the
   inversions**, and saying so is the point: it was in the repo unpasted for most of 2026-08-27 and
   the set stayed EMPTY throughout, because a migration made only of a policy has no probe that
   could go red. The check was *re-measured* at 24 of 24 on 2026-08-27 after that paste — a
@@ -1221,6 +1970,76 @@ That last point is not tidiness. Anonymous sessions expire after **30 days of in
 comes back with a **new auth id**. A rarely-active family member would silently become a stranger to
 their own history if membership were keyed to the auth id, and it would not show up for months.
 
+## A subscription is a read path — #342, 2026-09-08
+
+Everything above describes what a phone can **ask for**. Since #342 a phone also **listens**: it
+holds one Supabase Realtime channel per household, subscribed to `postgres_changes` on the tables
+`refresh()` reads (`WATCHED_TABLES` in `src/lib/realtime.js`, derived from `LIVE_SCHEMA`;
+`0037` put the first eleven in the `supabase_realtime` publication, `0038` added
+`calendar_imports` as the twelfth, and `src/test/realtime.pglite.test.js` holds the two lists
+equal). A change delivered over that channel
+is not shown to anyone — the phone re-reads through the grants and policies above, exactly as it
+would after its own write — but the *delivery* is itself a read, and this section says what
+governs it. Read off `apply_rls.sql` and `subscription_check_filters.sql` in `supabase/realtime`
+on 2026-09-08, not assumed.
+
+- **INSERT and UPDATE are policy-checked per subscriber.** For every change, Realtime sets the
+  subscriber's role and JWT claims and asks whether that role can `select` the row by its primary
+  key; only subscribers whose policies say yes receive it, and a column the role lacks column-level
+  SELECT on is stripped from what they receive. So a member hears about the rows a reload would
+  show them and no others, and a channel filtered to the wrong household — by mistake or on
+  purpose — is a wasted message, not a leak. This is the premise #342 was filed on, and it holds
+  for these two verbs.
+- **A filter is allowed only on a column the role may SELECT.** The join is refused with `invalid
+  column for filter` otherwise. That is why the filter column is taken from each table's own
+  client column list rather than from the schema: `household_id=eq.<id>` on `members`, `chores`,
+  the three `shopping_*` tables and (since `0038`) `calendar_imports`; `member_id=in.(<roster>)` on `member_capacity`,
+  `chore_exclusions`, `calendar_connections` and `calendar_busy`, the tables whose grants withhold
+  `household_id` (`0005`, `0010`, `0011`, `0030`); `id=eq.<id>` on `households`; and **no filter** on
+  `chore_repeat_exceptions`, whose client columns are a chore id and a date (`0025`) — its policies
+  are its only scope, and that is sufficient because of the first bullet.
+- **DELETE is policy-checked for nobody, and that is the platform's rule.** There is no row left to
+  evaluate a policy against, so Realtime applies no RLS to a delete, and by default the old record
+  carries **only the primary key**. Two consequences, and the design follows from both:
+  - a channel filtered on `household_id` or `member_id` **never hears a delete at all** — the
+    column it filters on is absent from what a delete carries — so a phone would keep showing a
+    chore another phone removed until its next visibility read;
+  - the way to make the filter match, `alter table … replica identity full`, would send the
+    deleted row's **every column** to any authenticated subscriber whose filter matched, with no
+    policy in the way, which is a leak of exactly the content the policies protect.
+
+  So `0037` sets no replica identity (asserted in `realtime.pglite.test.js`), and each scoped table
+  carries a second binding, **`DELETE` with no filter**. What that binding delivers is the deleted
+  row's id and nothing else, to every subscriber of that table under `authenticated` — across
+  households, on a project holding several. What the phone does with it is re-read through its own
+  policies. A uuid of a row that no longer exists is what is disclosed, and it is disclosed to
+  signed-in members of *some* household on this project; nothing about the row, the household or the
+  member travels with it. `households` needs no second binding: its filter is the primary key, the
+  one column a delete always carries.
+- **The subscriber is the signed-in member.** `supabase-js` forwards every auth state change to
+  `realtime.setAuth`, so the role the server checks policies for is the one holding the session,
+  never `anon` — and `anon` holds nothing in `public` since `0017`, so an unsigned socket would be
+  refused at the join.
+- **What `check:live` sees of this, and which frame it reads.** A channel that never receives an
+  event is indistinguishable from one nothing happened on, so the instrument is the subscription
+  itself: `npm run check:live` joins a channel on each watched table as the seeded account and
+  reads the server's answer. **The answer is not the join.** *Measured 2026-09-08 against the live
+  project with its publication empty*: the server acknowledges a join on **any** table name —
+  `chores`, `member_split_seen` and `taskr_no_such_table_342` all answered `phx_reply ok` and
+  reported `SUBSCRIBED` — and only then sends a `system` frame for the `postgres_changes`
+  extension: `status: error` with `Unable to subscribe to changes with given parameters …`, naming
+  the table, or `status: ok`. A first draft of the probe resolved on the join and read **61 of 62
+  green with nothing published**, its own negative control the one red; the control is what caught
+  it, and the probe now reads the `system` frame and reports a join followed by silence as *no
+  evidence*, never as a pass. One row per table, red on purpose until `0037` is applied, plus the
+  live negative control on `member_split_seen`, the one table the client reads and does not watch,
+  which passes only while the server *refuses* it — so it is also the assertion that the
+  self-scoped table stays unpublished. Joining reads no row; the server records the subscription
+  in its own `realtime` schema and drops it when the channel is removed.
+
+The cost side — the Free plan's 200 connections and 2,000,000 messages a month against a household
+of ten phones, and the kill condition — is in `docs/hosting-decision.md`.
+
 ## How the rules are enforced
 
 Everything is in `supabase/migrations/0001_household_and_roster.sql`. Row-level security is on for all
@@ -1524,7 +2343,10 @@ outstanding is narrower:
     `name, timezone` only. Without that bound, any member could rewrite `join_code` or reassign
     `organizer_member_id` — the hole 0002 measured, reopened. **`SELECT` on `households` is
     deliberately left un-granted-per-column**: `currentHousehold()` issues `select('*')`, which a
-    column grant makes fail outright.
+    column grant makes fail outright. *(The function was replaced by `listHouseholds()` in #164 —
+    the name is left as it was written here because this entry records what 0002 was reasoning
+    about at the time. The `select('*')` moved to the new function unchanged, so the constraint on
+    the grant still binds; `capacity-model.md` carries it under the current name.)*
 - **The existing test households are unusable under 0002.** They have no `organizer_member_id`, so
   `is_household_organizer()` returns false for them and no PIN can ever be set. They are `TEST …` rows
   and the cleanup statement in *Running it* removes them.

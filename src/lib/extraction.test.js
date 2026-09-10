@@ -888,6 +888,27 @@ describe('#202 — the due-date axis is graded on stated forms and never folded 
     expect(gradeItem(bins, binsAnswerWith(new Date())).outcome).toBe(OUTCOMES.MALFORMED)
   })
 
+  it('#208 — repeat and assignee ride along ungraded, and are refused only for their TYPE', () => {
+    // The widening must not move a corpus figure: a chores answer carrying the
+    // two new stated-form fields grades exactly as one without them.
+    const widened = {
+      kind: 'chores',
+      chores: [
+        { title: 'Take the bins out', expectedMinutes: 5, dueDate: 'Tuesday', repeat: 'every week', assignee: 'Alex' },
+      ],
+    }
+    const bare = { kind: 'chores', chores: [{ title: 'Take the bins out', expectedMinutes: 5, dueDate: 'Tuesday' }] }
+    expect(gradeItem(bins, widened)).toEqual(gradeItem(bins, bare))
+    // Same type rule as dueDate: a string or absent, and anything else is the
+    // shape being wrong rather than a value being wrong.
+    for (const field of ['repeat', 'assignee']) {
+      const wrong = { kind: 'chores', chores: [{ ...bare.chores[0], [field]: 7 }] }
+      expect(gradeItem(bins, wrong).outcome, `${field}: 7 should be malformed`).toBe(OUTCOMES.MALFORMED)
+      const nulled = { kind: 'chores', chores: [{ ...bare.chores[0], [field]: null }] }
+      expect(gradeItem(bins, nulled).outcome).toBe(gradeItem(bins, bare).outcome)
+    }
+  })
+
   it('scores a refusal of an answerable chore as a date miss in the denominator', async () => {
     // Same rule as the within-tolerance denominator: divide by what was
     // answerable, never by what the extractor chose to answer. A refusal on

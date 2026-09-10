@@ -55,7 +55,47 @@ export const FUNCTION_NAMES = Object.freeze([
   // table this function is the only writer of, and neither action does anything
   // useful without the other.
   'calendar-busy',
+  // #208. The extraction endpoint, and the first function here whose deploy
+  // (#209) needs a secret Supabase does not inject: `ANTHROPIC_API_KEY`. The
+  // function refuses by name when it is missing, and docs/deploy-runbook.md
+  // section 3c is where it is set. Deploying it is also the other half of
+  // `0036`, which creates the call ledger the function's rate bound counts in.
+  'extract-description',
+  // #99. The exit from #95's connection: it deletes the token row, every
+  // derived busy row and the connection row, and asks Google to revoke the
+  // grant best-effort. It needs NO secret beyond the three Supabase injects —
+  // unlike the two calendar functions beside it, which refuse without
+  // `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` — because Google's revocation
+  // endpoint takes the token alone, and an exit must not be narrower than the
+  // way in.
+  'calendar-disconnect',
+  // #101. The event list behind "Import from calendar": spends the stored
+  // token against Google's events endpoint and returns the week's upcoming
+  // events to the phone, writing nothing. Needs the same two Google secrets
+  // `calendar-connect` and `calendar-busy` need, and imports the token
+  // exchange from `calendar-busy/handler.ts` — so `check:deployed` walks that
+  // import and reads a change to either file as this function going stale.
+  'calendar-events',
 ])
+
+/**
+ * Functions the CLIENT already invokes that the tree does not carry yet.
+ *
+ * EMPTY since #208, and kept rather than deleted because the mechanism is the
+ * keeper: #210 wired the capacity capture flow to `extract-description` ahead
+ * of #208 writing it (owner decision, 2026-09-04), and this list is what let
+ * `LIVE_EDGE_FUNCTIONS` carry the name — so `check:live` read one honest red —
+ * without a bare `npm run deploy:function` trying to ship a directory that
+ * was not there. The next story that names a function before writing it puts
+ * the name here.
+ *
+ * SELF-EXPIRING. `deploy-function.test.js` refuses an entry here whose
+ * directory EXISTS, so the day the function lands the suite reddens until the
+ * name moves up into `FUNCTION_NAMES` — the exemption cannot outlive the gap it
+ * was written for. That is exactly how #208's landing was announced: the test
+ * went red on the new directory, and the name moved.
+ */
+export const PENDING_FUNCTIONS = Object.freeze([])
 
 /**
  * Which functions this invocation should deploy.
@@ -65,9 +105,21 @@ export const FUNCTION_NAMES = Object.freeze([
  * about a directory — sending somebody to look at the filesystem rather than at
  * what they typed.
  */
-export function functionsToDeploy(argv, known = FUNCTION_NAMES) {
+export function functionsToDeploy(argv, known = FUNCTION_NAMES, pending = PENDING_FUNCTIONS) {
   const named = argv.filter((arg) => !arg.startsWith('-'))
   if (named.length === 0) return [...known]
+
+  // #210 — a name the client calls and the tree does not carry. Refused with
+  // the reason rather than folded into "no such function", because the person
+  // typing it has just read that name in `check:live`'s red line.
+  const notYet = named.filter((name) => pending.includes(name))
+  if (notYet.length) {
+    throw new Error(
+      `${notYet.join(', ')}: named by the client but not in this tree yet — ` +
+        'see PENDING_FUNCTIONS in scripts/deploy-function.mjs for the story that writes it. ' +
+        'Nothing to deploy.',
+    )
+  }
 
   const unknown = named.filter((name) => !known.includes(name))
   if (unknown.length) {

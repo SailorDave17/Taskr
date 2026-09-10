@@ -42,6 +42,7 @@
 // configuration outside git, for no behaviour. Owner decision at pickup.
 
 import { getSupabase } from './supabase.js'
+import { MAX_EXPECTED_MINUTES, MIN_EXPECTED_MINUTES } from './chores.js'
 
 /**
  * The ONLY scope this story asks for.
@@ -57,6 +58,38 @@ import { getSupabase } from './supabase.js'
  * read access to what their week actually contains. #95 AC 3 makes it a check.
  */
 export const GOOGLE_FREEBUSY_SCOPE = 'https://www.googleapis.com/auth/calendar.freebusy'
+
+/**
+ * The scope event import needs, and the SECOND consent a member gives — #101 AC 1.
+ *
+ * Free/busy cannot say what an event is called, and an import without a title
+ * is a chore the member types anyway. So the first time a connected member
+ * opens "Import from calendar", the app asks Google for this scope through
+ * incremental consent (`include_granted_scopes=true` on the same consent URL,
+ * so it is added to the free/busy grant rather than replacing it). The
+ * widening is a consequence of the minimization decision, not a reopening of
+ * it: the decision is about what is STORED, and titles still reach a phone per
+ * request and no table — `0038`'s ledger keeps the event id and nothing else.
+ *
+ * `calendar.readonly` rather than `calendar.events.readonly`, because the
+ * events list is read from the member's primary calendar and the narrower
+ * events scope does not cover the calendar-list metadata some accounts answer
+ * with. Both are read-only; neither can write an event.
+ */
+export const GOOGLE_CALENDAR_READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
+
+/**
+ * Every Google scope under which the events endpoint answers. The wider two
+ * are here because a member who granted Taskr full calendar access through
+ * some other route is not asked to grant less; nothing in this app REQUESTS
+ * them.
+ */
+export const EVENT_READ_SCOPES = Object.freeze([
+  GOOGLE_CALENDAR_READONLY_SCOPE,
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar',
+])
 
 /** Google's OAuth 2.0 consent endpoint. */
 export const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -146,20 +179,32 @@ export function newConsentState() {
  *   after a re-install would fail in a way the member cannot fix. The handler
  *   has a dedicated sentence for exactly that state.
  *
- * `include_granted_scopes=true` is what makes #101's later widening incremental:
- * the second consent adds `calendar.readonly` to what is already held rather
- * than replacing it.
+ * `include_granted_scopes=true` is what makes #101's widening incremental: the
+ * second consent adds `calendar.readonly` to what is already held rather than
+ * replacing it.
+ *
+ * `scope` DEFAULTS to free/busy and nothing widens it but a caller that names
+ * the wider one — #101's `startConnect({ scope })` from the import control. The
+ * default is the initial ask #95 AC 3 pins, and `calendar.test.js` asserts the
+ * URL built with no scope argument still carries exactly one scope, the narrow
+ * one.
  */
-export function consentUrl({ redirectUri, state, clientId: id = clientId }) {
+export function consentUrl({
+  redirectUri,
+  state,
+  clientId: id = clientId,
+  scope = GOOGLE_FREEBUSY_SCOPE,
+}) {
   if (!id) throw new Error('This app has no Google client id: set VITE_GOOGLE_CLIENT_ID.')
   if (!redirectUri) throw new Error('A consent request needs a redirect address.')
   if (!state) throw new Error('A consent request needs a state token.')
+  if (!scope) throw new Error('A consent request needs a scope.')
 
   const params = new URLSearchParams({
     client_id: id,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: GOOGLE_FREEBUSY_SCOPE,
+    scope,
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
@@ -212,8 +257,21 @@ export function readConsentReturn(search) {
  * CSRF token whose whole life is this tab's trip to Google and back; storing it
  * server-side would add a table, a write and a cleanup problem to defend a value
  * that is worthless the moment the tab is closed.
+ *
+ * `scope` is #101's: the import control starts the SAME flow with the wider
+ * scope, and the return is handled by the same `completeConnect` — Google
+ * answers with the union of what is now granted, `calendar-connect` upserts
+ * the token and the connection row with it, and `hasEventReadScope` reads it
+ * back off the row. One flow, two asks; a second flow would be a second CSRF
+ * state, a second return handler and a second place for the household to be
+ * forgotten.
  */
-export function startConnect({ householdId, storage = globalThis.sessionStorage, location } = {}) {
+export function startConnect({
+  householdId,
+  scope = GOOGLE_FREEBUSY_SCOPE,
+  storage = globalThis.sessionStorage,
+  location,
+} = {}) {
   if (!householdId) throw new Error('Which household? A calendar connection must name one.')
   const state = newConsentState()
   storage.setItem(CONSENT_STATE_KEY, state)
@@ -221,7 +279,23 @@ export function startConnect({ householdId, storage = globalThis.sessionStorage,
   // operations on two keys that must not drift apart, which is why they sit
   // next to each other in both functions rather than in a tidier place.
   storage.setItem(CONSENT_HOUSEHOLD_KEY, householdId)
-  return consentUrl({ redirectUri: redirectUriFor(location), state })
+  return consentUrl({ redirectUri: redirectUriFor(location), state, scope })
+}
+
+/**
+ * Does this connection let Taskr read what an event IS? — #101 AC 1.
+ *
+ * Read off `calendar_connections.scope`, which `0011` stores as what Google
+ * GRANTED (the token response, space-separated), never what was asked for. A
+ * connection made through #95 holds free/busy alone and answers false here;
+ * one widened through the import control holds both and answers true. The
+ * import control shows the consent step while this is false and the event
+ * list once it is true, and `calendar-events` refuses a token whose scope
+ * fails the same test — this is manners, that is the boundary.
+ */
+export function hasEventReadScope(connection) {
+  const granted = String(connection?.scope ?? '').split(/\s+/).filter(Boolean)
+  return granted.some((scope) => EVENT_READ_SCOPES.includes(scope))
 }
 
 /**
@@ -276,6 +350,70 @@ export async function completeConnect(
 }
 
 /**
+ * Ask the Edge Function to forget this member's calendar — #99 AC 1.
+ *
+ * The function acts on the CALLER's own member row, so the body names only
+ * which household: who it is about is `auth.uid()` off the JWT, exactly as
+ * `completeConnect` sends no member id and `fetchBusyWeek` sends none. There is
+ * no version of this call that could disconnect somebody else.
+ *
+ * WHAT COMES BACK, AND WHY IT IS THREE-VALUED. `revoked` is `true` when Google
+ * accepted the revocation, `false` when Taskr asked and could not tell, and
+ * `null` when there was no stored credential to revoke at all. The screen shows
+ * a sentence for exactly one of the three (#99 AC 4), and collapsing `null` into
+ * `false` would put "Google may still list Taskr" on a member who never had a
+ * grant outstanding — the opposite of what this story is for.
+ *
+ * The failure sentence is read off the function's own body for #112's reason,
+ * the same as the two calls above it: `functions.invoke` collapses everything
+ * into "Edge Function returned a non-2xx status code", and the handler
+ * deliberately distinguishes a partial deletion the member should retry from a
+ * household they are not in.
+ */
+export async function disconnectCalendar({ householdId }) {
+  if (!householdId) throw new Error('Which household? A disconnect must name one.')
+
+  const { data, error } = await getSupabase().functions.invoke('calendar-disconnect', {
+    body: { householdId },
+  })
+
+  if (error) {
+    let detail = ''
+    try {
+      detail = (await error.context?.json?.())?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    throw new Error(detail || `Could not disconnect that calendar: ${error.message}`)
+  }
+
+  return data
+}
+
+/**
+ * What to say after a disconnect, or null when there is nothing to add — AC 4.
+ *
+ * Owner decision at #99's pickup, 2026-09-08, over reporting the revoke outcome
+ * silently: a member who disconnected for privacy reasons and was told only
+ * "done" is left believing Google no longer holds a grant it may still hold.
+ * So the one state Taskr cannot vouch for gets a sentence, and the two it can
+ * get none — a note on every disconnect would be noise that hides the one that
+ * matters.
+ *
+ * Deliberately a pure function over the response rather than a sentence built at
+ * the call site: it is the whole of the decision "which of the three states is
+ * worth saying", it is tested here, and the component that draws it holds no
+ * copy of the rule.
+ */
+export function revokeNoteFor(result) {
+  if (result?.revoked !== false) return null
+  return (
+    'Taskr has forgotten this calendar. Google may still list Taskr — remove it under ' +
+    'Third-party apps & services in your Google account.'
+  )
+}
+
+/**
  * Every calendar connection ONE household has — #159 AC 1.
  *
  * Scoped by `memberIds`, like capacity and exclusions: `calendar_connections`
@@ -321,6 +459,45 @@ export function busyWeekFor(busyWeeks, memberId, periodStart) {
   return (
     busyWeeks.find((row) => row.member_id === memberId && row.period_start === periodStart) ?? null
   )
+}
+
+/**
+ * How old a derived figure may be before an app open reads the week again —
+ * #98 AC 1's "staleness bound, a named constant".
+ *
+ * Twelve hours, so a member's free/busy is read on their behalf at most twice
+ * a day: a morning open and an evening open each see what today has become,
+ * and a phone opened six times between them spends nothing. The decision and
+ * the two values rejected beside it (one hour, one day) are recorded in
+ * `docs/refresh-charter.md`, "Decision taken 2026-09-05". WALL-CLOCK age, not
+ * calendar day: a figure read at 23:00 is not stale at 00:01.
+ *
+ * Client-triggered, and only ever client-triggered. #53 settled why for every
+ * periodic read this app will ever do — the free plan's pg_cron stops silently
+ * when the project pauses — and `gate.test.js` refuses a scheduler anywhere in
+ * the tree so that decision cannot be quietly re-taken one story at a time.
+ * What "on app open" can cost is bounded twice: by this constant, and by the
+ * once-per-session key in App.jsx. Nothing here loops.
+ */
+export const BUSY_STALE_AFTER_HOURS = 12
+export const BUSY_STALE_AFTER_MS = BUSY_STALE_AFTER_HOURS * 60 * 60 * 1000
+
+/**
+ * Is a derived row old enough that an app open should read the week again?
+ *
+ * Strictly OLDER than the bound: a row exactly twelve hours old is fresh, so
+ * the boundary is pinned in one direction rather than left to whichever
+ * comparison somebody writes next. A row whose `computed_at` nothing can parse
+ * is reported STALE, not fresh — its age is unknown, and a bounded refresh is
+ * cheap where a figure of unknown age presented as current is not. No row at
+ * all is NOT stale: that is #96's trigger, and this predicate is the other
+ * half of the boundary the two stories draw between them.
+ */
+export function isBusyWeekStale(busyWeek, now = Date.now()) {
+  if (!busyWeek) return false
+  const at = new Date(busyWeek.computed_at).getTime()
+  if (Number.isNaN(at)) return true
+  return now - at > BUSY_STALE_AFTER_MS
 }
 
 /**
@@ -408,6 +585,189 @@ export function busyComputedLabel(computedAt, timeZone) {
   if (Number.isNaN(at.getTime())) return null
   try {
     return new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(at)
+  } catch {
+    return null
+  }
+}
+
+// ===========================================================================
+// Event import — story #101
+// ===========================================================================
+
+/**
+ * Matches the select grant in `0038` exactly. `household_id` IS here — the
+ * `0014` route the shopping tables take rather than the withheld-column route
+ * the three calendar tables above take — because the ledger is read BY
+ * HOUSEHOLD: "already imported" is a fact about the household's list, and a
+ * row whose importer has since left (`member_id` null) must still be read.
+ */
+export const CALENDAR_IMPORT_COLUMNS =
+  'id, household_id, member_id, calendar_event_id, chore_id, imported_at'
+
+/** The sentence a second import of the same event is refused with — AC 5. */
+export const ALREADY_IMPORTED_SENTENCE = 'That event is already on the list as a chore.'
+
+/**
+ * Every import ONE household has recorded — the "already imported" marks.
+ *
+ * By household id, not by member set, for the column list's reason above. The
+ * rows carry an event id and a chore id and nothing out of anybody's calendar:
+ * `0038`'s column list is where that is enforced.
+ */
+export async function listCalendarImports(householdId) {
+  if (!householdId) throw new Error('Which household? An import read must name one.')
+  const { data, error } = await getSupabase()
+    .from('calendar_imports')
+    .select(CALENDAR_IMPORT_COLUMNS)
+    .eq('household_id', householdId)
+
+  if (error) {
+    const err = new Error(`loading calendar imports: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data ?? []
+}
+
+/**
+ * Record that an event became a chore — the second of the two writes an import
+ * makes, after `addChore` (AC 3, AC 4).
+ *
+ * The unique constraint `calendar_imports_one_per_event` is what refuses a
+ * second import of the same event, and its refusal is turned into a sentence
+ * here and MARKED (`alreadyImported`) so the caller can tell it from a network
+ * failure: App removes the chore it just created on this one refusal and on no
+ * other, because a chore that landed and a ledger row that could not be written
+ * for any other reason is a chore the household still wants.
+ *
+ * Two phones importing the same event in the same second both create a chore
+ * and one of them is refused here — the compensation above is the whole of how
+ * that race resolves, and `0038`'s header says why it is not a transaction.
+ */
+export async function recordCalendarImport({ householdId, memberId, calendarEventId, choreId }) {
+  if (!householdId) throw new Error('Which household? Recording an import must name one.')
+  if (!memberId) throw new Error('Who imported it? Recording an import must name the member.')
+  if (!calendarEventId) throw new Error('Which event? Recording an import must name its id.')
+  if (!choreId) throw new Error('Which chore? Recording an import must name the chore it became.')
+
+  const { data, error } = await getSupabase()
+    .from('calendar_imports')
+    .insert({
+      household_id: householdId,
+      member_id: memberId,
+      calendar_event_id: calendarEventId,
+      chore_id: choreId,
+    })
+    .select(CALENDAR_IMPORT_COLUMNS)
+    .single()
+
+  if (error) {
+    const duplicate = error.code === '23505'
+    const err = new Error(duplicate ? ALREADY_IMPORTED_SENTENCE : `recording the import: ${error.message}`)
+    err.cause = error
+    err.alreadyImported = duplicate
+    throw err
+  }
+  return data
+}
+
+/** The event ids a household has already imported, for a fast "is this one" test. */
+export function importedEventIds(imports) {
+  return new Set((imports ?? []).map((row) => row.calendar_event_id))
+}
+
+/**
+ * Ask the Edge Function for this week's upcoming events — AC 2.
+ *
+ * Nothing is written by this call, on either end: the function lists and
+ * returns, and this resolves to what it returned. The body names only which
+ * household and which week, `fetchBusyWeek`'s shape — who it is about is
+ * `auth.uid()` off the JWT.
+ *
+ * The failure sentence is read off the function's own body for #112's reason,
+ * and one refusal is MARKED: `needsScope` is true when the stored token cannot
+ * read events, so the control can offer the consent step rather than a
+ * sentence about Google. The screen decides that from the connection row
+ * first; this is the server saying the same thing when the row is stale.
+ */
+export async function fetchCalendarEvents({ householdId, periodStart }) {
+  if (!householdId) throw new Error('Which household? A calendar read must name one.')
+  if (!periodStart) throw new Error('Which week? A calendar read must name one.')
+
+  const { data, error } = await getSupabase().functions.invoke('calendar-events', {
+    body: { householdId, periodStart },
+  })
+
+  if (error) {
+    let body = null
+    try {
+      body = await error.context?.json?.()
+    } catch {
+      body = null
+    }
+    const err = new Error(body?.error || `Could not read that calendar: ${error.message}`)
+    err.needsScope = Boolean(body?.needsScope)
+    throw err
+  }
+
+  return data
+}
+
+/**
+ * What the chore form is prefilled with when an event is picked — AC 3.
+ *
+ * Title from the event's, minutes from its duration held to the chore column's
+ * own bounds, due date the event's local date. An ALL-DAY event has no duration
+ * a chore could mean (a day is not how long a dentist appointment takes), so
+ * its minutes are left BLANK for the member to type — editable is the
+ * criterion, and a blank field is the honest prefill for a number the
+ * calendar does not know. Pure, so the form and the test share one rule.
+ */
+export function eventChorePrefill(event) {
+  const minutes = event?.durationMinutes
+  const hasMinutes = !event?.allDay && Number.isFinite(minutes) && minutes > 0
+  return {
+    title: String(event?.title ?? '').trim(),
+    expectedMinutes: hasMinutes
+      ? String(Math.min(MAX_EXPECTED_MINUTES, Math.max(MIN_EXPECTED_MINUTES, Math.round(minutes))))
+      : '',
+    dueOn: String(event?.dueOn ?? ''),
+  }
+}
+
+/**
+ * When an event happens, as a person reads it — "Tue, Sep 8 · 3:00 PM", or
+ * "Tue, Sep 8 · all day". In the HOUSEHOLD's zone, for `busyComputedLabel`'s
+ * reason: a start is an instant, and the honest day for it is the household's.
+ * Null for an unreadable start rather than throwing; this decorates a row.
+ */
+export function eventWhenLabel(event, timeZone) {
+  if (!event || !timeZone) return null
+  try {
+    if (event.allDay) {
+      if (!event.dueOn) return null
+      const day = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'UTC',
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      }).format(new Date(`${event.dueOn}T00:00:00Z`))
+      return `${day} · all day`
+    }
+    const at = new Date(event.start)
+    if (Number.isNaN(at.getTime())) return null
+    const day = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(at)
+    const time = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(at)
+    return `${day} · ${time}`
   } catch {
     return null
   }

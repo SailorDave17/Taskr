@@ -67,6 +67,21 @@ describe('the review list — #220 AC 7, rows as input', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument()
   })
 
+  it('#213: a row carrying a note says it above its fields, and a row without one says nothing', () => {
+    render(
+      <ChoreDraftList
+        rows={[
+          { key: 'a', title: 'mow the grass', minutes: '45', dueOn: '2026-08-29', problem: null, note: 'Read as “mow the grass”, 45 min, due “Saturday”.' },
+          { key: 'b', title: 'sweep', minutes: '5', dueOn: '2026-08-29', problem: null },
+        ]}
+        onChange={() => {}}
+        onRemove={() => {}}
+      />,
+    )
+    expect(screen.getByText('Read as “mow the grass”, 45 min, due “Saturday”.')).toBeInTheDocument()
+    expect(screen.getAllByText(/read as/i)).toHaveLength(1)
+  })
+
   it('holds no state of its own — a re-render with new rows shows exactly those rows', () => {
     const handlers = { onChange: vi.fn(), onRemove: vi.fn() }
     const view = render(<ChoreDraftList rows={rows} {...handlers} />)

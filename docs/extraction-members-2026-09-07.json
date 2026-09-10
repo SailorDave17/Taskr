@@ -1,0 +1,301 @@
+{
+  "collectedAt": "2026-09-07",
+  "author": "the owner — a real household member, who wrote neither the extractor, its prompt, nor the corpus",
+  "cast": "Real given names replaced by the corpus cast: the owner -> Alex, the second member -> Robin.",
+  "withheld": {
+    "count": 2,
+    "reason": "Two chore sentences describing the owner's child's bath and bedtime are withheld from this repository (owner decision, 2026-09-07). A substituted name does not make a real child's routine fit to publish. Their tallies are recorded below so the verdict's figures stay reproducible even though their text does not ship.",
+    "tallies": {
+      "note": "Scored under claude-haiku-4-5 with the owner's rulings, same as every other sentence.",
+      "kind": "chores",
+      "proposed": 0,
+      "supplied": 1,
+      "corrections": 1,
+      "byClass": {
+        "refusal": 1
+      },
+      "detail": "One was refused for stating no duration, which the owner ruled an honest blank and not a correction. The other was refused where a duration was derivable from the sentence, which the owner ruled a correction of class \"refusal\"."
+    }
+  },
+  "provenance": "cho-1..12 were written COLD — before any feedback, against a brief that explicitly asked for how long each job takes. Every one described cadence instead and none stated a duration. cho-13..21 were written AFTER the session told the owner that durations were missing, so they are COACHED: they exist because the gap was named. Their correction rate is reported separately and weighs less, because a sentence written to fill a field the member has been told about is not a sentence the extractor will meet in the wild.",
+  "sentences": [
+    {
+      "id": "cho-1",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "The grass needs mowed every week"
+    },
+    {
+      "id": "cho-2",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "Alex needs to do a smart home checkup every week"
+    },
+    {
+      "id": "cho-3",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "the refrigerator needs a deep clean every other week."
+    },
+    {
+      "id": "cho-5",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "We do the dishes evey day"
+    },
+    {
+      "id": "cho-6",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "Alex maintains the Robot Vaccum Water every day"
+    },
+    {
+      "id": "cho-7",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "We put away laundry every other day"
+    },
+    {
+      "id": "cho-8",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "the fans need dusted every two weeks"
+    },
+    {
+      "id": "cho-9",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "Robin scoops the cat little boxes every week on thursday"
+    },
+    {
+      "id": "cho-10",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "Alex need to take the trash to the curb every Thursday"
+    },
+    {
+      "id": "cho-11",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "The living room needs a deep clean every other week"
+    },
+    {
+      "id": "cho-12",
+      "kind": "chores",
+      "provenance": "cold",
+      "text": "The garage needs swept and organized once a week by alex"
+    },
+    {
+      "id": "cho-13",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "organizing the garage will take abocut an hour"
+    },
+    {
+      "id": "cho-15",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "Deep cleaning the fridge will take about an hour"
+    },
+    {
+      "id": "cho-16",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "takes about 45 min to mow the grass"
+    },
+    {
+      "id": "cho-17",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "putting away laundry is about 30 min"
+    },
+    {
+      "id": "cho-18",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "doing the dishes is about 30 min"
+    },
+    {
+      "id": "cho-19",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "dusting the fans will take abocut 25 min"
+    },
+    {
+      "id": "cho-20",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "it takes robin about an hour to take care of the litter boxes"
+    },
+    {
+      "id": "cho-21",
+      "kind": "chores",
+      "provenance": "coached",
+      "text": "the smart home checkup is about an hour each time"
+    },
+    {
+      "id": "cho-22",
+      "kind": "chores",
+      "provenance": "one-off",
+      "text": "Alex needs to deep clean the microwave, it should take about 30 min"
+    },
+    {
+      "id": "cho-23",
+      "kind": "chores",
+      "provenance": "one-off",
+      "text": "Alex needs to clean up the mess in the garage, it should take about an hour"
+    },
+    {
+      "id": "cho-24",
+      "kind": "chores",
+      "provenance": "one-off",
+      "text": "Robin Needs put the litter box in a new place. should take about 10 min"
+    },
+    {
+      "id": "cho-25",
+      "kind": "chores",
+      "provenance": "one-off",
+      "text": "Alex needs to rebuild the outdoor fireplace, should take about 6 hours"
+    },
+    {
+      "id": "cap-1",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "I think I have about 8 hours",
+      "askedWhat": "How much time have you got for chores this week?"
+    },
+    {
+      "id": "cap-2",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "I think Robin has about 4 hours",
+      "askedWhat": "And Robin?"
+    },
+    {
+      "id": "cap-3",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "this is pretty normal",
+      "askedWhat": "Is that a normal week for both of you, or is this one different?"
+    },
+    {
+      "id": "cap-4",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "many things can change it, varies from week to week",
+      "askedWhat": "Does that change much week to week — and if it does, what changes it?"
+    },
+    {
+      "id": "cap-5",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "I can do chores any day",
+      "askedWhat": "Which days can you actually get chores done?"
+    },
+    {
+      "id": "cap-6",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "maybe 5 hours",
+      "askedWhat": "If this week went sideways, how little time might you end up with?"
+    },
+    {
+      "id": "cap-7",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+      "askedWhat": "Does the weekend look different from weekdays, for either of you?"
+    },
+    {
+      "id": "cap-8",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+      "askedWhat": "Is Robin's time steadier than yours, or the other way round?"
+    },
+    {
+      "id": "cap-9",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "I got through everything but deep clean the fridge",
+      "askedWhat": "Thinking back to last week — how much did you actually get through?"
+    },
+    {
+      "id": "cap-10",
+      "kind": "capacity",
+      "provenance": "prompted",
+      "text": "I do have a sailing event on friday eveneing",
+      "askedWhat": "Anything already in the diary for next week that'll eat into those 8 hours?"
+    },
+    {
+      "id": "cap-1a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "How much time have you got for chores this week? I think I have about 8 hours",
+      "variantOf": "cap-1"
+    },
+    {
+      "id": "cap-2a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "And Robin? I think Robin has about 4 hours",
+      "variantOf": "cap-2"
+    },
+    {
+      "id": "cap-3a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Is that a normal week for both of you, or is this one different? this is pretty normal",
+      "variantOf": "cap-3"
+    },
+    {
+      "id": "cap-4a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Does that change much week to week - and if it does, what changes it? many things can change it, varies from week to week",
+      "variantOf": "cap-4"
+    },
+    {
+      "id": "cap-5a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Which days can you actually get chores done? I can do chores any day",
+      "variantOf": "cap-5"
+    },
+    {
+      "id": "cap-6a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "If this week went sideways, how little time might you end up with? maybe 5 hours",
+      "variantOf": "cap-6"
+    },
+    {
+      "id": "cap-7a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Does the weekend look different from weekdays, for either of you? yes, we both have more time. We do Have our son with us (he is at daycare while we are at work)",
+      "variantOf": "cap-7"
+    },
+    {
+      "id": "cap-8a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Is Robin's time steadier than yours, or the other way round? Robins schedule is more predictable than mine, but I have more energy, so I can do more",
+      "variantOf": "cap-8"
+    },
+    {
+      "id": "cap-9a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Thinking back to last week - how much did you actually get through? I got through everything but deep clean the fridge",
+      "variantOf": "cap-9"
+    },
+    {
+      "id": "cap-10a",
+      "kind": "capacity",
+      "provenance": "prompted+question",
+      "text": "Anything already in the diary for next week that'll eat into those 8 hours? I do have a sailing event on friday eveneing",
+      "variantOf": "cap-10"
+    }
+  ]
+}

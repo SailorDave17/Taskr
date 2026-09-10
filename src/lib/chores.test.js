@@ -17,6 +17,7 @@ import {
   isCompleted,
   isMissed,
   isOutstanding,
+  isOverdue,
   MAX_EXPECTED_MINUTES,
   MIN_COMPLETIONS_FOR_ESTIMATE_UPDATE,
   MIN_EXPECTED_MINUTES,
@@ -195,7 +196,9 @@ describe('the readable column list', () => {
     const columns = CHORE_COLUMNS.split(',').map((c) => c.trim())
     expect(columns).toContain('source')
     expect(columns).toContain('assigned_source')
-    expect(CHORE_SOURCES).toEqual(['manual', 'extraction'])
+    // 'calendar' since #101 (`0038`), the same third word `member_capacity`
+    // learnt in `0031`, so the two provenance columns keep one vocabulary.
+    expect(CHORE_SOURCES).toEqual(['manual', 'extraction', 'calendar'])
     expect(CHORE_SOURCES).not.toContain('auto')
     expect(DEFAULT_CHORE_SOURCE).toBe('manual')
   })
@@ -724,6 +727,71 @@ describe('#305 AC 4 — a missed chore counts toward neither the outstanding tot
   })
 })
 
+// #101 AC 6 — "when #36's committed-minutes derivation runs for the week, the
+// imported chore's minutes count exactly as a typed one-time chore's do".
+//
+// #36's derivation moved to the Split surface at #47 and is `assess` over
+// `toAllocatorChores` now (the note at the foot of chores.js records the move).
+// So the claim is made where the derivation lives: two rows identical in every
+// column but `source`, and the allocator's picture of them identical too. The
+// mutation that would redden this is a `source` clause in `toAllocatorChores` —
+// which is exactly the clause nobody should ever add, because provenance is
+// never privilege and an imported hour is an hour.
+describe('#101 AC 6 — an imported chore counts exactly as a typed one', () => {
+  const row = (id, source, extra = {}) => ({
+    id,
+    expected_minutes: 45,
+    assigned_member_id: 'm1',
+    completed_at: null,
+    missed_at: null,
+    actual_minutes: null,
+    repeat_kind: 'none',
+    source,
+    ...extra,
+  })
+
+  it('normalises to the same allocator row, whatever the source says', () => {
+    const [typed] = toAllocatorChores([row('t', 'manual')])
+    const [imported] = toAllocatorChores([row('i', 'calendar')])
+    expect({ ...imported, id: 't' }).toEqual(typed)
+    // And the allocator row carries no provenance at all — there is nothing
+    // downstream that COULD treat the two differently.
+    expect(Object.keys(typed)).not.toContain('source')
+  })
+
+  it('reaches the same open, done and assigned minutes on the Split', () => {
+    const typedPicture = assess({
+      members: [{ id: 'm1', capacityMinutes: 300 }],
+      chores: toAllocatorChores([row('a', 'manual'), row('b', 'manual', { expected_minutes: 30 })]),
+    })
+    const importedPicture = assess({
+      members: [{ id: 'm1', capacityMinutes: 300 }],
+      chores: toAllocatorChores([row('a', 'calendar'), row('b', 'manual', { expected_minutes: 30 })]),
+    })
+    const typed = typedPicture.load.find((entry) => entry.memberId === 'm1')
+    const imported = importedPicture.load.find((entry) => entry.memberId === 'm1')
+    expect(imported.openMinutes).toBe(75)
+    expect(imported.openMinutes).toBe(typed.openMinutes)
+    expect(imported.assignedMinutes).toBe(typed.assignedMinutes)
+    expect(imported.doneMinutes).toBe(typed.doneMinutes)
+  })
+
+  it('and the outstanding total counts it like any other row', () => {
+    expect(outstandingMinutes([row('a', 'calendar'), row('b', 'manual')])).toBe(90)
+    // POSITIVE CONTROL: the total does move on something — a completion drops
+    // the imported row out, so the assertion above is not a constant.
+    expect(
+      outstandingMinutes([row('a', 'calendar', { completed_at: '2026-09-10T10:00:00Z' }), row('b', 'manual')]),
+    ).toBe(45)
+  })
+
+  it('is a word the constraint admits, so the write path a typed chore takes accepts it', () => {
+    // The client-side half of the vocabulary; chores.pglite.test.js holds the
+    // constant equal to what `chores_source_known` admits after `0038`.
+    expect(CHORE_SOURCES).toContain('calendar')
+  })
+})
+
 describe('#305 AC 5 — the actuals ignore a missed occurrence', () => {
   const anchor = {
     id: 'r1',
@@ -774,5 +842,91 @@ describe('#305 AC 5 — the actuals ignore a missed occurrence', () => {
       completed_at: '2026-08-24T10:00:00Z', missed_at: null, actual_minutes: 40,
     }
     expect(estimateSuggestion(anchor, [...all, third])).toBe(40)
+  })
+})
+
+// #345 — the predicate the Chores tab colours a row from.
+//
+// A pure function of (row, the household's day, the list), so the four
+// conditions can each be shown to matter one at a time. What this file CANNOT
+// answer is whether the row draws anything — that is Chores.test.jsx's — and
+// what neither can answer is what the colour looks like, which is why AC 5 is
+// asserted against the stylesheet in gate.test.js. Titles are lower case here
+// and so are not name-shaped — see #19.
+describe('#345 — an outstanding chore whose date has passed', () => {
+  const today = '2026-08-24'
+  const oneOff = { id: 'c1', title: 'gutters', due_on: '2026-08-20', completed_at: null, missed_at: null }
+
+  it('AC 1: a non-repeating row dated before today is overdue', () => {
+    expect(isOverdue(oneOff, today, [oneOff])).toBe(true)
+  })
+
+  it('AC 1: due TODAY is not overdue — the day is not over', () => {
+    // The `<` / `<=` mutation's target. A row dated exactly today must be
+    // false, and it is the only case that separates the two operators.
+    expect(isOverdue({ ...oneOff, due_on: today }, today, [])).toBe(false)
+  })
+
+  it('AC 1: due later is not overdue', () => {
+    expect(isOverdue({ ...oneOff, due_on: '2026-08-25' }, today, [])).toBe(false)
+  })
+
+  it('AC 2: a daily ANCHOR dated before today is never overdue', () => {
+    const daily = { ...oneOff, id: 'r1', repeat_kind: 'daily' }
+    expect(isOverdue(daily, today, [daily])).toBe(false)
+  })
+
+  it('AC 2: an occurrence GENERATED from a daily anchor is never overdue', () => {
+    // The case the row's own columns cannot answer: 0012's
+    // `chores_occurrence_does_not_repeat` forces an occurrence to
+    // `repeat_kind = 'none'`, so this is false only if the anchor is looked up.
+    const anchor = { id: 'r1', title: 'bins', due_on: '2026-08-01', repeat_kind: 'daily', completed_at: null, missed_at: null }
+    const occurrence = { id: 'o1', title: 'bins', due_on: '2026-08-20', repeat_kind: 'none', generated_from: 'r1', completed_at: null, missed_at: null }
+    expect(isOverdue(occurrence, today, [anchor, occurrence])).toBe(false)
+  })
+
+  it('AC 2: weekly and monthly are NOT excluded — anchors or occurrences', () => {
+    // The exclusion is the owner's rule about dailies alone, and this is what
+    // stops it being read as "repeats are exempt".
+    const weekly = { ...oneOff, id: 'r2', repeat_kind: 'weekly' }
+    const monthly = { ...oneOff, id: 'r3', repeat_kind: 'monthly' }
+    expect(isOverdue(weekly, today, [weekly])).toBe(true)
+    expect(isOverdue(monthly, today, [monthly])).toBe(true)
+
+    const weeklyOccurrence = { id: 'o2', title: 'bins', due_on: '2026-08-20', repeat_kind: 'none', generated_from: 'r2', completed_at: null, missed_at: null }
+    expect(isOverdue(weeklyOccurrence, today, [weekly, weeklyOccurrence])).toBe(true)
+  })
+
+  it('AC 3: reads the day it is GIVEN, never the clock', () => {
+    // The household is behind the device: it is still Aug 24 there while the
+    // phone says Aug 25. A chore due Aug 24 is due today for this household
+    // and must not be overdue — which is only true if the function reads
+    // `todayIso`. A `new Date()` in its place returns the device's day and
+    // this case flips, whatever the wall clock happens to be when it runs.
+    const dueOnTheirToday = { ...oneOff, due_on: '2026-08-24' }
+    expect(isOverdue(dueOnTheirToday, '2026-08-24', [])).toBe(false)
+    // POSITIVE CONTROL: the same row against a household one day ahead IS
+    // overdue, so the assertion above is about the argument and not about the
+    // function refusing everything.
+    expect(isOverdue(dueOnTheirToday, '2026-08-25', [])).toBe(true)
+  })
+
+  it('AC 4: a completed or missed row is never overdue, however old its date', () => {
+    expect(isOverdue({ ...oneOff, due_on: '2026-07-01', completed_at: '2026-07-02T10:00:00Z' }, today, [])).toBe(false)
+    expect(isOverdue({ ...oneOff, due_on: '2026-07-01', missed_at: '2026-07-02T10:00:00Z' }, today, [])).toBe(false)
+  })
+
+  it('answers false rather than throwing on a missing row, day or date', () => {
+    expect(isOverdue(null, today, [])).toBe(false)
+    expect(isOverdue(oneOff, null, [])).toBe(false)
+    expect(isOverdue({ ...oneOff, due_on: null }, today, [])).toBe(false)
+  })
+
+  it('an occurrence whose anchor is not in the list is treated as ordinary work', () => {
+    // 0012 nulls `generated_from` when an anchor is deleted, so this is the
+    // mid-refresh case. Colouring it is the safe direction: the alternative
+    // hides a slipping chore on the strength of a row nobody can see.
+    const orphan = { id: 'o3', title: 'bins', due_on: '2026-08-20', generated_from: 'gone', completed_at: null, missed_at: null }
+    expect(isOverdue(orphan, today, [orphan])).toBe(true)
   })
 })

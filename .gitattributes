@@ -29,6 +29,15 @@
 # visible. Beyond that story's acceptance criteria and inert either way.
 *.ts    text eol=lf
 
+# `.tsv` arrives with #205's `docs/phone-latency-2026-09-07.tsv`, the first
+# tab-separated data file in the tree. Added in the same commit as the file
+# rather than after it, because this is the `.ts` paragraph above repeating: the
+# list is correct for every extension the tree HAS, and a new one lands outside
+# it silently. *Measured before adding this line*: `git ls-files --eol` reported
+# the new file `attr/` empty and `git add` warned "LF will be replaced by CRLF",
+# which is the `i/lf w/crlf` state the header calls an incident.
+*.tsv   text eol=lf
+
 # Binary: never touched, never diffed as text.
 *.png   binary
 *.jpg   binary

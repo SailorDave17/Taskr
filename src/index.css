@@ -72,6 +72,71 @@ body {
   color: var(--ink-dim);
 }
 
+/* #163 — the household whose data is on screen, directly above the tab strip
+   it labels. Plain ink at body weight-and-a-half, no border, no chevron and no
+   hover state: it must read as a fact rather than a control, because under one
+   household there is nothing to switch to (AC 4). The negative bottom margin
+   eats most of the shell's 1.5rem column gap so the name sits with the tabs
+   rather than floating between the tagline and them. `overflow-wrap` for the
+   same reason the tabs carry it — a long household name at 360px wraps rather
+   than widening the page. */
+.shell__household {
+  margin: 0 0 -0.875rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* #164 — the same line, for somebody who belongs to more than one household.
+   It carries `.shell__household`'s type so the shell does not change shape when
+   a second household appears: same size, same weight, same colour, same
+   negative bottom margin holding the tab strip where it was.
+
+   What it adds is the 44px floor every other control on the phone uses and the
+   affordance that says it is one — a native select, so the picker itself is the
+   platform's. `max-width: 100%` rather than a width: a long household name must
+   not set the page width on a 360px phone, which is the same constraint
+   `.shell__household`'s `overflow-wrap` answers for the paragraph. */
+.shell__household-select {
+  margin: 0 0 -0.875rem;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 2rem 0 0.5rem;
+  font-family: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+  appearance: none;
+  /* The disclosure the `appearance: none` above removed, drawn rather than
+     imported: an inline SVG in a data URI is the one image this stylesheet can
+     carry without adding a file, and gate.test.js refuses a committed image
+     that is not the icon set. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23e9edf5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.625rem 0.375rem;
+  /* A long household name is SHORTENED, not cut. #163's paragraph wrapped —
+     `overflow-wrap: anywhere` above — and a `<select>` cannot, so without this
+     the one label saying which household you are looking at reads as broken.
+     *Measured at 360px*: a 37-character name wants 337.1px of text in 264.8px
+     of usable width and was cut mid-word at "…at Wint". The full name is still
+     one tap away, in the open list, and at 768px nothing clips at all.
+     `white-space` is already `pre` on a select in this engine; both other
+     properties are needed for the ellipsis to render. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell__household-select:disabled {
+  opacity: 0.6;
+}
+
 .shell__status {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -445,6 +510,24 @@ body {
   opacity: 0.75;
 }
 
+/* What a disconnect could not vouch for — story #99.
+
+   Its own block under the control, because it is a sentence rather than a label
+   and at 360px it wraps to two or three lines: sharing the line with
+   "Connect Google Calendar" would push that button off the row it belongs to.
+
+   Not the `.error` palette, deliberately, and this is the whole judgement in the
+   rule. Nothing went wrong: the member asked Taskr to forget a calendar and it
+   did. What the sentence adds is that the OTHER side of the connection may not
+   have, which is information rather than a fault — the same call
+   `.shell__notice` makes about the catch-up pass, and the opposite of what a red
+   strip would say. */
+.member__calendar-note {
+  display: block;
+  margin-top: 0.25rem;
+  line-height: 1.5;
+}
+
 /* This week's capacity — story #46.
 
    Sits directly under the baseline rather than replacing it: the override is
@@ -483,15 +566,20 @@ body {
    Under the week's minutes, in the same quiet register as `.member__access` and
    `.member__calendar` above: it is a SUGGESTION beside a number the person
    owns, and drawing it as loudly as the figure it informs would invert that.
-   #97 turns it into a control; today it is text.
+   #97 put one control on it — "Use this" — so it is a wrapping row now, in
+   `.member__week`'s shape: the figure and its quiet button share a line where
+   they fit and stack where they do not.
 
-   `display: block` and its own margin for `.member__calendar`'s reason — at
-   360px a name, a baseline, the week's figure and a Change button already fill
-   the row, and this drops beneath them rather than competing for the line. The
-   figure is tabular like `.member__week-figure` so the two numbers stack in
-   alignment down the roster. */
+   Its own margin for `.member__calendar`'s reason — at 360px a name, a
+   baseline, the week's figure and a Change button already fill the row, and
+   this drops beneath them rather than competing for the line. The figure is
+   tabular like `.member__week-figure` so the two numbers stack in alignment
+   down the roster. */
 .member__busy {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
   margin-top: 0.25rem;
   font-size: 0.85rem;
   color: var(--ink-dim);
@@ -514,6 +602,9 @@ body {
    above is still true of the last time the calendar could be read. */
 .member__busy-complaint {
   display: block;
+  /* The whole row of the flex parent, so the sentence still sits UNDER the
+     figure (and its button) now that the parent wraps instead of stacking. */
+  flex-basis: 100%;
   margin-top: 0.125rem;
   opacity: 0.75;
 }
@@ -533,6 +624,85 @@ body {
 
 .member__week-form .field__input {
   min-height: 44px;
+}
+
+/* #210 — the shared capture shell, inside the week form (and, with #213, the
+   chore form). A column, never a row: on a 360px phone the description box,
+   the proposal, the source line and the typed field stack and cost height
+   only, which is what AC 11 asks for — everything reachable by vertical scroll
+   with nothing setting the page width. `min-width: 0` on the column and
+   `box-sizing: border-box` on the textarea are the two rules that make
+   `width: 100%` mean the parent's width rather than the parent's width plus
+   padding; without the second, a full-width textarea overflows by its own
+   padding on every browser. */
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.capture__text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 5.5rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+/* A question, a pending line or a failure: the same quiet register as
+   `.member__busy-complaint`. Not styled as an error — nothing is broken, the
+   typed field is right there, and the sentence says so. */
+.capture__outcome {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.capture__proposal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.5rem;
+}
+
+.capture__figure {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.capture__derived {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.capture__failure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.capture__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+/* Where the figure in the field came from — AC 9. Under the field and above
+   Save, because it is a sentence about the number the member is about to
+   confirm, and reads in the same quiet register as the readouts above it. */
+.member__week-source {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
 }
 
 .error {
@@ -579,6 +749,21 @@ body {
   padding: 0.875rem;
   background: var(--bg);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  /* #345 — the left edge is RESERVED at its widest here, so `.chore--overdue`
+     only ever recolours it. This is the file's own idiom (`.button` at ~306,
+     and two more rules declare `border: 1px solid transparent` for exactly
+     this reason), and it exists because `box-sizing: border-box` takes a
+     widened border out of the CONTENT box: a modifier that set 3px directly
+     moved an overdue row's text 2px right of every neighbour and narrowed its
+     column by 2px — measured at 360px, title left edge 58px against 56px.
+     A ragged edge on the one row the feature exists to highlight.
+
+     The reserved edge keeps the hairline's own colour rather than going
+     transparent, so a plain row looks exactly as it did before #345 — the
+     three `transparent` reservations elsewhere sit on controls that have no
+     resting border at all, and copying that literal here would have erased
+     this card's left hairline for every row. */
+  border-left: 3px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.5rem;
 }
 
@@ -598,6 +783,19 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+}
+
+/* #345 — the title and the overdue marker share a line, so the word sits
+   where a scan starts rather than at the end of the cost line, where it
+   wrapped to a second row at 360px. Baseline-aligned so the smaller word sits
+   on the title's own line rather than floating against its cap height, and
+   wrapping is allowed: a long title with the marker after it is the case that
+   would otherwise set the row's width. */
+.chore__identity-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .chore__title {
@@ -623,6 +821,33 @@ body {
 
 .chore__due {
   opacity: 0.85;
+}
+
+/* An outstanding chore whose date has passed — story #345.
+
+   THE PALETTE DECISION, which is the whole judgement in this rule. The
+   stylesheet's standing rule is that red is for work and never for people
+   (.chore-list--done above, .split at #47, .announce at #50), and an overdue
+   chore is work — so a warning colour on this row is inside the rule, not an
+   exception to it. What it must NOT be is the `.error` palette: every other
+   `.error` comment in this file reserves that for something in the app having
+   failed, and a chore nobody has got to yet is the app working correctly. So
+   this is amber rather than red — a distinct hue with its own literals, far
+   enough from #7f2b2b that the two do not read as the same signal, and far
+   enough from --accent that neither reads as the other.
+
+   Warm, but still quiet. The marker sits on the row's left edge and on the
+   word, and the title, minutes and controls keep the ink they have on every
+   other row: a slipped chore is worth noticing on a scan, not worth shouting
+   at somebody about. And the word "overdue" rides beside the tint (Chores.jsx)
+   so colour is never the only carrier of the fact. */
+.chore--overdue {
+  border-left-color: #b5762a;
+}
+
+.chore__overdue {
+  color: #e0a458;
+  font-weight: 600;
 }
 
 /* Completed work — story #35.
@@ -803,6 +1028,89 @@ body {
   border-style: dashed;
 }
 
+/* #213 — what an extracted row was read from, above its fields: the same
+   quiet register as `.capture__derived`, because it is provenance and not a
+   problem. The problem, when there is one, is the red alert under the fields. */
+.chore-draft__note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* #213 — the proposal list inside the capture shell. The shell's proposal
+   box already draws the border; this only stacks the list, its notice and
+   the confirm row so a 360px phone costs height and never width. `width:
+   100%` because `.capture__proposal` aligns its children to the start, and a
+   form left at its content width would let a long draft row set the page
+   width. */
+.chore-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+/* #101 — importing a calendar event as a chore. A section under the chore form
+   in `.chore-batch`'s shape (a column, its own top margin), because it is the
+   same kind of thing: an addition behind its own control that prefills the
+   form above it and writes nothing of its own. The event list is a plain
+   column of rows — title, when, duration and one control — that cost height
+   and never width at 360px, which is the whole of the phone rule here. */
+.chore-import {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.chore-import__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chore-import__event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+}
+
+.chore-import__title {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* When the event is, in the same quiet register as `.chore__due`: it is the
+   event's time, not the chore's, and the chore's due date is what the form
+   shows once the event is picked. */
+.chore-import__when {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Already imported" stands where the Use control would be, in the dim ink a
+   settled state reads in — nothing is wrong, and nothing is offered. */
+.chore-import__done {
+  color: var(--ink-dim);
+}
+
+/* Where the figure in the form came from — `.member__week-source`'s reason:
+   a sentence about the chore the member is about to add, under the fields and
+   above Add, in the same quiet register as the readouts. */
+.chore-import__source {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
 /* The row's account of its schedule — same dim ink as the due date, because a
    repeat is a fact about the chore, not a state to be alarmed by. */
 .chore__repeat {
@@ -915,10 +1223,10 @@ body {
 
 /* ---------------------------------------------------------------------------
    The surfaces, and the way between them — story #47, criterion 11. Four
-   since #302 added Done.
+   since #302 added Done; five since #353 added Shop.
 
    Buttons rather than links, so they inherit nothing from `.button`: a tab is
-   not an action, and giving it the accent would make four call-to-actions sit
+   not an action, and giving it the accent would make five call-to-actions sit
    above every screen.
 
    `flex-wrap` is load-bearing rather than defensive: a nav that overflows
@@ -929,8 +1237,19 @@ body {
    275px against the 320px the shell leaves, so all four sit on one row with
    45px to spare — and at a 300px viewport (260px available) the same strip
    wraps to two rows with the page still 300px wide, which is the control
-   showing the rule can fire. A fifth surface, or a longer word than "Chores",
-   spends that 45px and then wraps rather than overflows.
+   showing the rule can fire.
+
+   THE FIFTH TAB SPENT THAT SLACK AND MORE, and the padding below is the
+   measured answer (#350, 2026-09-05, Chrome at 360×800 on the real App with a
+   fifth `SURFACES` entry): at the old `0 0.75rem` the five labels' natural
+   widths summed to 341px against the same 320px row, short by 21px, and Shop
+   dropped to a second 44px row — no label wrapped inside itself and nothing
+   overflowed; the strip simply grew from 44px to 103px tall. At `0 0.5rem`
+   (8px a side) the sum is 301px with 19px to spare, every tab one line and
+   still 44px tall, the narrowest 52.5px wide. The boundary value 0.625rem
+   misses by 0.8px, so 0.5rem is the smallest step that works. That is the
+   owner's pre-decided fallback taken in the order set — tighter padding
+   first, shorter labels not needed. Re-measured on this commit in #353's PR.
    --------------------------------------------------------------------------- */
 
 .tabs {
@@ -945,7 +1264,7 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 44px;
-  padding: 0 0.75rem;
+  padding: 0 0.5rem;
   border: 1px solid transparent;
   border-radius: 0.5rem;
   background: transparent;
@@ -974,6 +1293,543 @@ body {
 .tab:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Shop — story #353.
+
+   The same visual grammar as .chore and .member: an item is the third thing a
+   household edits, and a third card idiom would read as a third app. The item
+   NAME carries the weight here rather than a figure, because an item is not a
+   quantity of anything — the one surface with no minutes on it.
+
+   A row is name-and-note on the left and one quiet control on the right, and
+   it wraps rather than overflows: a long item name with no spaces breaks
+   (`overflow-wrap: anywhere`, #83's rule) and the button drops to its own line
+   at 360px if it must. The bought modifier dims the row the way a done chore
+   is dimmed, and is NOT struck through: #355 sinks a bought row to the bottom
+   of the list, which is where it says it is bought — dimming is the mark, the
+   POSITION is the state, and a strike-through on top of both would be a third
+   way of saying one thing.
+   --------------------------------------------------------------------------- */
+
+.shopping-list {
+  margin-top: 0.25rem;
+}
+
+.shopping-items {
+  list-style: none;
+  margin: 0 0 0.875rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shopping-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.shopping-item--bought {
+  opacity: 0.6;
+}
+
+/* #355 — the whole unbought row is the tap target, and the row's padding is
+   given to THIS element rather than kept outside it: a 44px control with the
+   row's padding around it would leave a dead border a thumb lands on and
+   nothing happens. `text-align: left` and the transparent background undo the
+   button defaults so it reads as a row and behaves as a control. */
+.shopping-item__tick {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin: -0.625rem -0.875rem;
+  padding: 0.625rem 0.875rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shopping-item__tick:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The affordance. Measured on the prototype at 360x800: with nothing drawn on
+   the tap target, the only visible control on an unbought row was Remove, so
+   the row read as one whose action is to delete the thing you came for. An
+   empty ring says "not yet"; the tick that replaces it says "in the cart".
+   Sized on the text so it lines up with the item's name, not centred on the
+   whole row, which a two- or three-line row would push out of alignment. */
+.shopping-item__mark {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 1.25rem;
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+.shopping-item__mark--done {
+  color: var(--accent);
+}
+
+/* The quiet control keeps to the right on its own line under the tap target,
+   so the two are never adjacent under a thumb: Remove and bought are opposite
+   intentions, and #353's measurement (a 92px control beside a 12rem body
+   overran 360px and wrapped anyway) says they do not fit on one line. It also
+   loses its border here: on the prototype a bordered 92px control was the
+   loudest thing on the row, which is the wrong order — the row is the action
+   and this is the way out of a mistake. The 44px target stays. */
+.shopping-item__actions {
+  flex: 1 1 100%;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.shopping-item__actions .button--quiet {
+  border-color: transparent;
+  color: var(--ink-dim);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding-inline: 0.5rem;
+}
+
+/* Basis ZERO, not a rem figure. Measured 2026-09-05 on the prototype at
+   360px: a 12rem basis plus the 92px Remove control overran the row's 250px
+   of inner width, so the control wrapped under EVERY item and a plain row
+   stood 116px tall — twelve items ran to 2,190px, two and a half screens.
+   With the body taking what is left beside the control a plain row is 66px
+   and a long name breaks inside the body (`overflow-wrap: anywhere`) rather
+   than pushing the control down. */
+.shopping-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.shopping-item__name {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.shopping-item__note {
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.shopping-item__meta {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+/* #357 — "from last run", on the meta line rather than on one of its own.
+   Every carried item is at the top of the next run's list, so a third line
+   would be paid on exactly the rows a person reads first. It carries weight
+   the rest of the line does not, because it answers a question ("why is this
+   here when I did not add it?") where the adder and the stamp only report. */
+.shopping-item__carried {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.shopping-add {
+  margin-top: 0.875rem;
+}
+
+/* #355 — "3 left to buy" under the list's name. Quiet, because it is a fact
+   about the list and not an instruction, and it is the ONE number on this
+   surface: #35 AC 9 holds the shopping tab free of any figure about a PERSON,
+   which this is not. */
+.shopping-count {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #357 — the end of the trip, directly under the list and separated from it by
+   a rule: everything above the line is the list, and this is the one control
+   that ends it. It sits ABOVE the add form, which is this surface's one
+   departure from the actions-after-everything order used everywhere else —
+   measured at 360x800, a bought row sinks, so the last row a shopper ticks is
+   near the top of the list, and with the control under the two-field form
+   finishing a twelve-item trip meant scrolling 1,700px back down.
+
+   Quiet in its resting state on purpose: a person walks a store tapping rows,
+   and the loudest thing on the tab should stay the row. */
+.shopping-finish {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* The consequence, named. This is the sentence decision 8 chose over an undo,
+   so it is full-strength text rather than the dimmed register the meta lines
+   use — it is the thing to read before the tap, not a footnote under it. */
+.shopping-finish__question {
+  margin: 0 0 0.5rem;
+  font-size: 0.9375rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Which list — story #358.
+
+   A row of toggle buttons above the list, drawn only when there is a second
+   one to choose. It borrows the tab strip's grammar deliberately — same
+   height, same rounded rectangle, same "the selected one is filled in and
+   bold" — because it is the same gesture one level down, and a second visual
+   idiom for choosing between things would read as a second app.
+
+   Two differences from `.tab`, and both are the reason it is not that class:
+   a picker button carries TWO lines (the name and its own count), and it wears
+   `aria-pressed` rather than `aria-current` — a toggle-button group, not
+   navigation. The styling hangs off the attribute a screen reader already
+   reads, for the reason `.tab[aria-current]` does: one state, one spelling.
+
+   It wraps rather than scrolls. A household with more lists than fit at 360px
+   gets a second 44px row, which is legible; a horizontally scrolling strip
+   hides its own contents and is the thing AC 7 measures against.
+   --------------------------------------------------------------------------- */
+
+.shopping-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.875rem;
+}
+
+.shopping-picker__list {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.125rem;
+  overflow-wrap: anywhere;
+}
+
+.shopping-picker__list:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.shopping-picker__list[aria-pressed='true'] {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+
+.shopping-picker__list:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.shopping-picker__name {
+  font-size: 1rem;
+}
+
+.shopping-picker__list[aria-pressed='true'] .shopping-picker__name {
+  font-weight: 600;
+}
+
+/* The same quiet register as `.shopping-count`, which is the same sentence:
+   with a picker on screen the count moves into it and the standalone line
+   stands down, so this number is drawn once however many lists there are. */
+.shopping-picker__count {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+/* The name and the way to change it, on one line — the heading keeps the room
+   and the control takes what it needs. `baseline` rather than `center` so a
+   wrapped two-line name still has its first line level with Rename. With a
+   picker on screen the name is absent and this row holds the control ALONE —
+   which is why the end is the anchor and the name pushes itself away from it,
+   rather than `space-between` doing the work: with one child, `space-between`
+   puts that child at the START, and the control landed on the left edge above
+   the first item where it read as part of that row. Measured on the prototype
+   at 360x800; the JSON said nothing, the screenshot said it. */
+.shopping-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+/* The list name as a SUBJECT, not a section label — owner decision at #358's
+   design pass, on a measurement: as `.card__subheading` it read 15px/600 in
+   `--ink-dim` beside a 16px/500 full-strength Rename in a 92x44 control, which
+   made the faintest text in the region the thing the region is about, with the
+   item names under it at 17px/600. These are `.member__name`'s values, and that
+   is the point — a member's name beside its quiet controls is the same
+   arrangement, and the app should answer it the same way. */
+.shopping-heading__name {
+  margin: 0;
+  margin-right: auto;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* #360 — the toggle that reveals the lists the household put away. It sits
+   under the picker so that pressing it extends the row above it rather than
+   changing something off screen, and it is drawn only once there is something
+   to reveal. Quiet and right-aligned, on `.shopping-new`'s reasoning: the
+   loudest control on this tab stays the row a shopper taps. The bottom margin
+   matches `.shopping-picker`'s so the gap above the list is the same whether
+   the picker, the toggle, or both are on screen. */
+.shopping-archived-toggle {
+  margin-bottom: 0.875rem;
+}
+
+/* What an archived list is, in one line. The dimmed register `.shopping-count`
+   and the meta lines use — it is a fact about the list rather than an
+   instruction — and the same top margin the count has, so the line under the
+   heading sits in one place whichever of the two is drawn. */
+.shopping-archived {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+}
+
+/* #360 — the list's controls, wrapping as a PAIR rather than as two siblings of
+   the heading row. Measured at 360x800: the name (72.3px for "Groceries"), a
+   92px Rename and an 87.6px Archive with two 8px gaps come to 267.9px against
+   263.2px of row, so as siblings the row broke between the two controls and
+   Archive landed alone underneath, reading as something else entirely. As one
+   flex child they go over together and the name keeps the line above them,
+   which is what a long name already did. */
+.shopping-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* The editor that replaces it. The top margin is the heading's, so the list
+   does not jump up the screen when the editor opens. */
+.shopping-rename {
+  margin: 0.875rem 0;
+}
+
+/* Another list. Under everything, quiet, and separated by the same rule the
+   finish control uses: below this line is what you do to the TAB, above it is
+   what you do to the list. */
+.shopping-new {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------------------
+   What the household already bought — story #359.
+
+   A disclosure at the foot of the list, closed on arrival, holding one
+   disclosure per finished run with only the newest open. That is `.chore-done`'s
+   grammar on the Done tab, borrowed rather than reinvented for the reason the
+   picker borrows the tab strip's: it is the same gesture about the same kind of
+   thing, and a second idiom for "there is more here if you want it" would read
+   as a second app.
+
+   The rows are NOT `.shopping-item`. A closed run is a record, so a row has no
+   tap target, no 44px floor and no controls — it is three lines of text at the
+   registers this file already uses for a name, a note and a meta line. The
+   height that buys is the point of the story: eight runs of fifteen items is
+   only readable because a closed run is a heading.
+   --------------------------------------------------------------------------- */
+
+.shopping-past {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* The 44px floor applies here and not to the rows inside: this IS a control. */
+.shopping-past__summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+/* THE MARKER IS DRAWN BY HAND, and that is a fix rather than decoration.
+   `display: flex` on a `<summary>` suppresses the browser's own disclosure
+   triangle — measured in Chrome at 360x800 on this surface: "Past runs" and
+   seven collapsed "Finished Sep 4, 2026 by Robin" rows read as plain labels
+   with nothing on screen saying they open, which is
+   `a-geometry-criterion-is-satisfied-by-an-invisible-control` one level up from
+   a tap target. Every number was inside its bar and the screenshot was what
+   said so (owner's call at this story's design pass, 2026-09-06).
+
+   A BORDER TRIANGLE, not a glyph in `content`. Text in a pseudo-element can be
+   announced, and the `<summary>` already tells a screen reader whether it is
+   expanded; an empty `content` says nothing to anybody. There is no transition:
+   this stylesheet carries no animation and no `prefers-reduced-motion` block,
+   and this is not the place to open either.
+
+   THE RUN'S MARKER RIDES ON ITS HEADING, not on the summary. On the summary it
+   is a flex item of its own, and a flex line is packed at each item's own
+   width before anything shrinks — so "Finished Aug 4, 2026 by Placeholder"
+   moved to the second line whole and left the triangle stranded alone on the
+   first, on two of the eight runs measured at 360px. Inside the heading it
+   cannot be separated from the words it points at. */
+.shopping-past__summary::before {
+  content: '';
+  flex: 0 0 auto;
+  align-self: center;
+  width: 0;
+  height: 0;
+  margin-right: 0.5rem;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.shopping-past__run-summary > .card__subheading::before {
+  content: '';
+  display: inline-block;
+  vertical-align: 0.1em;
+  width: 0;
+  height: 0;
+  margin-right: 0.5rem;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+details[open] > .shopping-past__summary::before,
+details[open] > .shopping-past__run-summary > .card__subheading::before {
+  transform: rotate(90deg);
+}
+
+/* The browsers that would still draw their own marker beside ours. */
+.shopping-past__summary,
+.shopping-past__run-summary {
+  list-style: none;
+}
+
+.shopping-past__summary::-webkit-details-marker,
+.shopping-past__run-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* One run is one thing, and a stack of collapsed headings needs to say where
+   each ends: without the rule, seven finished trips read as fourteen lines of
+   alternating text. Between adjacent runs only — the first sits under the Past
+   runs summary, which is its own separation. */
+.shopping-past__run {
+  margin: 0;
+}
+
+.shopping-past__run + .shopping-past__run {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* `.chore-done__summary`'s arrangement — the heading and its count on one
+   baseline — because it is the same summary answering the same two questions
+   ("when" and "how much"), and both are 44px for the same reason. */
+.shopping-past__run-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+/* The run's own heading is the SUBJECT of the region it heads, so it wears the
+   item-name grade rather than `.card__subheading`'s quiet one — the same call
+   #358 took for a list's name beside its Rename control. Measured before the
+   change: the heading was 15px/600 in `--ink-dim`, identical to the "Past runs"
+   label above it and dimmer than the 16px/600 full-ink item names inside it, so
+   the faintest text in the region was what the region is about. The class stays
+   for its margin and for what it says about the element's role. */
+.shopping-past__run-summary > .card__subheading {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+  /* It TAKES the line it is on and wraps inside itself. Without this the
+     heading is a flex item that moves to the next line whole the moment it
+     stops fitting, which left the marker stranded alone above it on two of the
+     eight runs measured at 360px — the marker beside nothing, and the heading
+     under it looking like a line of body text. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shopping-past__count {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+}
+
+.shopping-past__items {
+  list-style: none;
+  margin: 0 0 0.875rem;
+  padding: 0 0 0 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* One row, one column, no border and no background. A bordered card per item
+   would give a fifteen-item run the weight of the working list, which is the
+   surface a person is meant to act on. */
+.shopping-past__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+/* A shade quieter than `.shopping-item__name`'s 17px: on the working list the
+   name is the tap target's label, and here it is a line in a logbook. */
+.shopping-past__item-name {
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.shopping-past__item-note {
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Bought by whom and when, or carried over — the same register as
+   `.shopping-item__meta`, because it is the same sentence about the same row. */
+.shopping-past__item-fate {
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
 }
 
 /* ---------------------------------------------------------------------------

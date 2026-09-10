@@ -405,7 +405,8 @@ describe('weekly capacity, run against a real Postgres', () => {
       // doing rather than a feature's: SELECT on `household_id` because
       // `EXCLUDED.household_id` READS it, and UPDATE on the three identity
       // columns because they are SET targets. `created_at` and `id` stay out of
-      // both write sets, which is the line that has not moved.
+      // both write sets, which is the line that has not moved. 0039 (#106)
+      // added `previous_minutes` to all three, for the same upsert reason.
       expect(byPrivilege.SELECT.sort()).toEqual([
         'created_at',
         'household_id',
@@ -414,6 +415,7 @@ describe('weekly capacity, run against a real Postgres', () => {
         'minutes',
         'note',
         'period_start',
+        'previous_minutes',
         'source',
       ])
       expect(byPrivilege.INSERT.sort()).toEqual([
@@ -422,6 +424,7 @@ describe('weekly capacity, run against a real Postgres', () => {
         'minutes',
         'note',
         'period_start',
+        'previous_minutes',
         'source',
       ])
       expect(byPrivilege.UPDATE.sort()).toEqual([
@@ -430,6 +433,7 @@ describe('weekly capacity, run against a real Postgres', () => {
         'minutes',
         'note',
         'period_start',
+        'previous_minutes',
         'source',
       ])
     })
@@ -568,7 +572,7 @@ describe('weekly capacity, run against a real Postgres', () => {
       expect(changed).toBe(0)
     })
 
-    it('POSITIVE CONTROL: currentHousehold’s select(*) still works — the read grant was left alone', async () => {
+    it('POSITIVE CONTROL: listHouseholds’ select(*) still works — the read grant was left alone', async () => {
       // src/lib/household.js issues `select('*')` on households. A column grant
       // there would make it fail OUTRIGHT, breaking the shipped app; 0005
       // deliberately narrows UPDATE only. This is what keeps that decision true.

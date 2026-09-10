@@ -495,6 +495,16 @@ describe('#47 criterion 10 — nothing on the split surface can overflow a 360px
   it('keeps the 44px touch target every other control on the phone uses', () => {
     expect(css).toMatch(/\.tab\s*\{[^}]*min-height:\s*44px/)
   })
+
+  it('#353: five tabs fit a 360px row only at 8px of horizontal padding — the number #350 measured, pinned', () => {
+    // jsdom cannot see layout, so this pins the VALUE the browser measurement
+    // decided (#350, 2026-09-05, real App at 360×800): at 0.75rem the fifth
+    // tab dropped to a second row, at 0.625rem it missed by 0.8px, and at
+    // 0.5rem all five fit with 19px to spare. A rationale is a claim with no
+    // test; this is the test, and it reddens if the padding is widened back
+    // without the strip being measured again.
+    expect(css).toMatch(/\.tab\s*\{[^}]*padding:\s*0 0\.5rem/)
+  })
 })
 
 // #303 — the shell uses the whole screen above phone width.
@@ -641,6 +651,47 @@ describe('#303 — the shell is not a phone-width column on a wide screen', () =
 // MIGRATIONS array, and the same reason: a hand-maintained list that nothing
 // compares against its source drifts silently, and prose asking a human to keep
 // two lists in step is how it recurs.
+// #360 — the marker convention, gated.
+//
+// Stories that apply a migration write their after-readings as `<<PENDING:…>>`
+// tokens and fill them once the apply has actually happened, so the documents
+// never carry a past-tense sentence about a reading nobody took. `0033` (#354)
+// and `0034` (#368) both used it and both drained it by hand.
+//
+// Nothing enforced it. A review of #360 put the question the right way round:
+// the risk is not that a reader mistakes a marker for a reading — a marker is
+// loud and the sentence disagrees with itself — it is that **the unfinished
+// state can be merged**, because no test, no CI step and no script looks. So
+// this is the check that expires the exemption (cairn:
+// `an-exemption-should-carry-the-test-that-expires-it`): the convention stays
+// usable mid-story and cannot reach `develop`.
+describe('#360 — no PENDING marker survives into a merge', () => {
+  const MARKER = '<<PENDING'
+  const SUBJECTS = ['README.md', ...readdirSync(resolve(process.cwd(), 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)]
+
+  it('README.md and every docs/*.md are free of them', () => {
+    const carrying = SUBJECTS.filter((path) =>
+      readFileSync(resolve(process.cwd(), path), 'utf8').includes(MARKER),
+    )
+    expect(
+      carrying,
+      `${carrying.join(', ')} still carries a ${MARKER}…>> marker — take the reading and substitute it, ` +
+        'or reword the sentence to the future tense. A marker is a note to yourself mid-story, not a shippable state.',
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: there are documents to check, and the marker is what would be found', () => {
+    // Without the first half this passes vacuously the day somebody renames
+    // docs/; without the second it passes if the marker string is ever changed
+    // in the convention and not here, which is the drift it exists to stop.
+    expect(SUBJECTS.length).toBeGreaterThan(5)
+    expect(SUBJECTS).toContain('README.md')
+    expect(SUBJECTS).toContain('docs/access-model.md')
+    const seeded = `a reading of <<PENDING:check:live after 0035>> taken later`
+    expect(seeded.includes(MARKER)).toBe(true)
+  })
+})
+
 describe('the README lists nothing has fallen behind', () => {
   const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8')
 
@@ -753,6 +804,21 @@ describe('AC 10 — no component test proves an access rule', () => {
   it('finds component tests to check, so an empty pass is impossible', () => {
     expect(componentTests.length).toBeGreaterThan(2)
     expect(componentTests.map((f) => f.name)).toContain('Chores.test.jsx')
+  })
+
+  // #164 AC 7, and it is the half that would otherwise be true by luck.
+  //
+  // The criterion says the switcher's component test must obey this rule, "and
+  // if the component lands outside `src/components/` the guard's corpus is
+  // widened so it is still covered". It landed INSIDE, so no widening was
+  // needed — but "the corpus happens to include it" and "the corpus is asserted
+  // to include it" read identically while they agree, and diverge silently the
+  // day somebody moves the file. This is the assertion that turns a placement
+  // into a guarantee: move `HouseholdSwitcher.test.jsx` anywhere else and this
+  // goes red naming it, rather than the two assertions above quietly ceasing to
+  // cover it.
+  it('#164 AC 7: the household switcher’s test is inside that corpus, not merely beside it', () => {
+    expect(componentTests.map((f) => f.name)).toContain('HouseholdSwitcher.test.jsx')
   })
 
   it('none of them stands up a Supabase client, fake or real', () => {
@@ -1158,6 +1224,9 @@ describe('#19 — no real household name reaches version control', () => {
     // #161 — the caller's ordinary member row in a household they do not organise.
     'Housemate',
     'Placeholder Household', 'Placeholder Other Household', 'Placeholder Other Organizer',
+    // #163 — the same household after the organizer edits its name, so the
+    // shell can be shown following the rename through a re-read.
+    'Placeholder Household Renamed',
     'Other', 'Other Org', 'Other Household', 'Other Organizer',
     'Mutant Household', 'Mutant Organizer',
     'Ours', 'Theirs', 'Mine now', 'H',
@@ -1187,6 +1256,28 @@ describe('#19 — no real household name reaches version control', () => {
     // renamed titles are literals the assertions match by accessible name.
     'Placeholder Renamed Chore': 'a chore title',
     'Placeholder Renamed Occurrence': 'a chore title',
+    // #345 — the overdue fixtures. Each title names the case it exists to
+    // separate (due today, due later, the daily anchor and its occurrence, the
+    // weekly and monthly controls, the timezone row), because a screen full of
+    // 'Placeholder Chore' cannot tell a failing assertion which row it was
+    // about. NINE of the eleven are three words and match NAME_SHAPE, so their
+    // declarations are REQUIRED — remove one and the SHAPE scan below reddens.
+    // The two four-word ones ('Placeholder Old Done Chore' and 'Placeholder
+    // Old Missed Chore') slip past the three-word bound on their own and are
+    // declared anyway, deliberately: word count is not a reason to be
+    // undeclared, and letting a fixture through on it is the same wrong
+    // instinct the #37 chores above record.
+    'Placeholder Today Chore': 'a chore title — the row due on the household’s today',
+    'Placeholder Later Chore': 'a chore title — the row due after today',
+    'Placeholder Daily Chore': 'a chore title — the daily repeat anchor that is never coloured',
+    'Placeholder Daily Occurrence': 'a chore title — an occurrence generated from that daily anchor',
+    'Placeholder Weekly Chore': 'a chore title — the weekly anchor, which IS coloured',
+    'Placeholder Weekly Occurrence': 'a chore title — an occurrence of that weekly anchor',
+    'Placeholder Monthly Chore': 'a chore title — the monthly anchor, which IS coloured',
+    'Placeholder Monthly Occurrence': 'a chore title — an occurrence of that monthly anchor',
+    'Placeholder Zone Chore': 'a chore title — the row whose date is the household’s today in a zone behind the device',
+    'Placeholder Old Done Chore': 'a chore title — a completed row dated a month back, on the Done surface',
+    'Placeholder Old Missed Chore': 'a chore title — a missed row dated a month back, on the Done surface',
     // #49 — reassignment.pglite.test.js needs up to three distinguishable
     // chores per scenario. Declared rather than lower-cased, same instinct as
     // the #37 chores above: the vocabulary exists to put every name-shaped
@@ -1205,6 +1296,7 @@ describe('#19 — no real household name reaches version control', () => {
     Chores: 'a tab label — the chore surface',
     Who: 'a tab label — the roster surface',
     Done: 'a tab label — the completed-work surface (#302)',
+    Shop: 'a tab label — the shopping-list surface (#353), and its card heading',
     // #291 — the two sign-out controls and the confirm's back-out, asserted by
     // EXACT accessible name rather than /sign out/i. The exactness is the
     // point and is why they are literals at all: two controls on the roster
@@ -1215,6 +1307,29 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out': 'a button label — the this-device-only sign-out control',
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
+    // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
+    // tests because they find the control by that name, which is the point:
+    // the control's own text is the household's name, so the only stable way
+    // to reach it is the label a screen reader reads. Declared rather than
+    // lower-cased for the tab labels' reason — an accessible name is
+    // capitalised by design.
+    Household: 'the accessible name of the household switcher (#164)',
+    // #166 — the button on BOTH create paths: the onboarding card and the
+    // roster's "start another" card. Asserted by exact accessible name in the
+    // tests that tell the two apart, which is why it is a literal.
+    'Create household': 'a button label — the submit on both household-create forms',
+    // #166 AC 7 — the ONBOARDING card's heading, asserted by exact name to
+    // prove that path is unchanged. Distinct from the roster card's "Start
+    // another household", which is not name-shaped and needs no entry.
+    'Start a household': 'a heading — the onboarding household form (#154)',
+    // #165 AC 8 — DOMException names, thrown by the fixtures that reproduce a
+    // browser refusing storage. Platform vocabulary, not people: `SecurityError`
+    // is what a browser set to block site data raises from the localStorage
+    // accessor, and `QuotaExceededError` is what a full store raises from a
+    // write. Both are single capitalised words, which is the shape, and neither
+    // could be lower-cased without ceasing to be the name the platform uses.
+    SecurityError: 'a DOMException name — a browser refusing storage (#165 AC 8)',
+    QuotaExceededError: 'a DOMException name — a full store refusing a write (#165 AC 8)',
     Monday: 'the week boundary, asserted in capacity.test.js',
     // #53 — a weekday NAME is the wrong shape for `repeat_weekdays` (the
     // column takes ISO numbers), and the fixture proving that refusal has to
@@ -1263,6 +1378,74 @@ describe('#19 — no real household name reaches version control', () => {
     // schema.integration.test.js quotes it inside a template literal, where the
     // scan sees it standalone. Declared rather than re-quoted to slip past.
     'Auto Confirm User': 'the dashboard checkbox both live suites tell you to tick',
+    // #352 — the shopping fixtures. List names and item names are the shape
+    // the scan looks for, and declared rather than lower-cased for the tab
+    // labels' reason: a list called "Groceries" is what a household types,
+    // and the case-insensitive uniqueness test needs the capitalised form.
+    // #101 — the calendar event titles the import fixtures carry, in the Edge
+    // Function's handler test, the component test and the App test. Declared
+    // rather than lower-cased for the chore titles' reason: a title is what a
+    // calendar shows, and the tests assert it reaches the chore form verbatim.
+    'Placeholder Event': 'a calendar event title in the #101 import fixtures',
+    'Placeholder Other Event': 'a second calendar event title in the #101 import fixtures',
+    Groceries: 'a shopping list name in shopping.pglite.test.js — and the epic’s prefilled default, asserted by the #353 component and App tests',
+    Hardware: 'a second shopping list name in shopping.pglite.test.js and the #353 tests',
+    Milk: 'a shopping item name in shopping.pglite.test.js and the #353 tests',
+    Bread: 'a shopping item name in shopping.pglite.test.js and the #353 tests — the other household’s',
+    Eggs: 'a shopping item name in shopping.pglite.test.js and the #353 tests',
+    Late: 'a shopping item refused because its run is closed, in shopping.pglite.test.js',
+    // #354 — two more item names, so the finish fixture can hold two BOUGHT
+    // items beside three unbought ones and tell every row apart by name.
+    Butter: 'a shopping item bought before the run is finished, in finish-shopping-run.pglite.test.js',
+    Flour: 'a second bought item in finish-shopping-run.pglite.test.js',
+    // #355 — the sixth item name, needed because AC 5 names its own fixture:
+    // six items of which three are bought, every row told apart by name.
+    Rice: 'a shopping item name in the #355 six-item ordering fixture',
+    // #358 — a THIRD list name, and it has to be a third: the ordering tests
+    // need a name that sorts before "Groceries", and the rename tests need a
+    // target that is not the name already on the fixture.
+    Bakery: 'a third shopping list name in the #358 picker, ordering and rename tests',
+    'Rename Hardware': 'the rename control’s accessible name in the #358 picker tests — the control names its list when the picker has taken the heading’s place',
+    // #359 — the tick control's accessible name, asserted by its EXACT wording
+    // because the history and the open run both draw a row called Milk: what
+    // that test proves is that the tap target belongs to the working list and
+    // not to the record. Declared rather than matched by a lower-cased regex,
+    // for the tab labels' reason — the vocabulary exists to put every
+    // name-shaped literal in a diff somebody can look at.
+    'Mark Milk bought': 'the tick control’s accessible name in the #359 history tests',
+    'Placeholder List': 'a shopping list name in shopping.io.test.js',
+    'Placeholder List Renamed': 'the same list after renameList, in shopping.io.test.js',
+    'Placeholder Item': 'a shopping item name in shopping.io.test.js',
+    // #360 — three item names for the archive fixtures, because the refusal is
+    // about what is ON the open run and each case needs a row it can name: one
+    // unbought, one bought, and a third for the finished-run case that must NOT
+    // block an archive.
+    Screws: 'a shopping item name in archive-shopping-list.pglite.test.js',
+    Nails: 'a second item name there, added after a re-paste puts an older body back',
+    Glue: 'a third item name there, for the finished run that must not block an archive',
+    // The two archive controls' accessible names, asserted by their EXACT
+    // wording for `Rename Hardware`'s reason: with the picker up the heading
+    // stands down, so the control is what says WHICH list a tap is about, and
+    // a test matching a lower-cased regex would pass against a control naming
+    // the wrong one.
+    'Archive Hardware': 'the archive control’s accessible name in the #360 tests',
+    'Unarchive Hardware': 'the way back, on an archived list, in the #360 tests',
+    // The picker button's whole text content in the #360 picker test — the
+    // name and the word that replaces the count, concatenated by textContent
+    // with no separator, which is what makes it name-shaped.
+    HardwareArchived: 'the archived list’s picker button text in Shopping.test.jsx',
+    'Hide archived': 'the toggle’s label once the archived lists are showing, in Shopping.test.jsx',
+    // #360's pure ordering test needs a list name that sorts before every
+    // other one, so the split can be shown to preserve the caller's order
+    // rather than re-sorting.
+    Apples: 'a shopping list name in the partitionShoppingLists ordering test',
+    // The heading's two control LABELS, asserted as an exact list because that
+    // is the property a two-step archive confirm would break — the assertion
+    // that replaced a dead `/are you sure/i`. Bare capitalised words, so the
+    // shape scan reads them as name-shaped; declared rather than lower-cased,
+    // because the whole point is that they are the strings on the buttons.
+    Rename: 'the rename control’s visible label in the #360 gesture assertion',
+    Archive: 'the archive control’s visible label in the #360 gesture assertion',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])
@@ -1924,5 +2107,269 @@ describe('#243 — the CI triggers match the branch model', () => {
 
   it('no longer names the retired rebuild/v1 in either trigger — #243 AC 2', () => {
     expect([...push, ...pullRequest].filter((entry) => entry.startsWith('rebuild'))).toEqual([])
+  })
+})
+
+// #98 AC 5 — "no cron, pg_cron, or scheduled trigger exists anywhere: client-
+// triggered only". The criterion is written against a diff; this is written
+// against the TREE, so every later diff is held to the same decision. The
+// decision itself is #53's, recorded in docs/hosting-decision.md: pg_cron IS on
+// the free plan and stops silently when a project pauses after a week idle,
+// which is the failure that produces no error — so every periodic read this
+// app does is triggered by somebody opening it, and bounded by a constant
+// (`BUSY_STALE_AFTER_HOURS`) rather than a schedule.
+//
+// "Scheduled trigger" here means a SCHEDULER: pg_cron and its `cron.` schema,
+// a `crons` block for Vercel, an Actions `schedule:` trigger. The migrations'
+// row-level `create trigger` statements are not schedules and are not scanned.
+//
+// Comments are stripped before the scan, and that is what lets a migration or
+// a docblock EXPLAIN the decision without being refused by it — `0012`'s header
+// and calendar.js's constant both name pg_cron as the thing they are not. The
+// stripping can only remove text, so the worst it can do is miss a scheduler
+// hidden inside a comment, where it would not be executed either.
+describe('#98 AC 5 — nothing in the tree schedules work; every periodic read is client-triggered', () => {
+  const ROOTS = ['src', 'supabase', 'scripts', '.github/workflows']
+  const FILES = ['package.json', 'vite.config.js', 'vercel.json']
+  const SCANNED = /\.(js|jsx|mjs|cjs|ts|tsx|sql|json|toml|ya?ml)$/
+
+  // Each scheduler shape with the text that proves it fires, and the files it
+  // applies to. `schedule:` and `cron:` are YAML-only on purpose: "schedule"
+  // is a domain word in this app (a repeat has one), and an Actions trigger is
+  // the only place those two spellings mean a scheduler.
+  const SCHEDULERS = [
+    { pattern: /pg_cron/i, sample: 'create extension if not exists pg_cron;', files: SCANNED, ext: 'sql' },
+    {
+      pattern: /\bcron\.(schedule|job|unschedule)\b/i,
+      sample: "select cron.schedule('busy', '0 */12 * * *', $$select 1$$);",
+      files: SCANNED,
+      ext: 'sql',
+    },
+    {
+      pattern: /create\s+extension[^;]*\bcron\b/i,
+      sample: 'create extension cron with schema extensions;',
+      files: /\.sql$/,
+      ext: 'sql',
+    },
+    {
+      pattern: /"crons"\s*:/,
+      sample: '{ "crons": [{ "path": "/api/busy", "schedule": "0 */12 * * *" }] }',
+      files: /\.json$/,
+      ext: 'json',
+    },
+    {
+      pattern: /^\s*schedule:\s*$/m,
+      sample: 'on:\n  schedule:\n    - cron: "0 */12 * * *"\n',
+      files: /\.ya?ml$/,
+      ext: 'yml',
+    },
+    { pattern: /^\s*-?\s*cron:\s/m, sample: '    - cron: "0 */12 * * *"', files: /\.ya?ml$/, ext: 'yml' },
+  ]
+
+  // This file names every pattern above, in prose and in the samples, and a
+  // guard whose subject is source text cannot tell the hazard from the text
+  // that detects it (cairn: a-guard-that-reads-source-must-survive-its-own-docs).
+  const SELF = 'src/test/gate.test.js'
+
+  function stripComments(path, text) {
+    if (/\.sql$/.test(path)) return text.replace(/--[^\n]*/g, '')
+    if (/\.(toml|ya?ml)$/.test(path)) return text.replace(/#[^\n]*/g, '')
+    if (/\.(js|jsx|mjs|cjs|ts|tsx)$/.test(path)) {
+      return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    }
+    return text
+  }
+
+  function filesUnder(dir) {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    return entries.flatMap((entry) => {
+      if (entry.name === 'node_modules' || entry.name === '.temp') return []
+      const full = resolve(dir, entry.name)
+      return entry.isDirectory() ? filesUnder(full) : [full]
+    })
+  }
+
+  function repoPath(file) {
+    return file.slice(process.cwd().length + 1).split('\\').join('/')
+  }
+
+  function corpus() {
+    const files = [
+      ...ROOTS.flatMap((root) => filesUnder(resolve(process.cwd(), root))),
+      ...FILES.map((file) => resolve(process.cwd(), file)),
+    ]
+    const entries = []
+    for (const file of files) {
+      const path = repoPath(file)
+      if (!SCANNED.test(path) || path === SELF) continue
+      let text
+      try {
+        text = readFileSync(file, 'utf8')
+      } catch {
+        continue
+      }
+      entries.push({ path, text })
+    }
+    return entries
+  }
+
+  // Shared by the clean-tree assertion and every control below, so the
+  // controls exercise the scan that guards and not a copy of it.
+  function schedulerOffenders(entries) {
+    const offenders = []
+    for (const { path, text } of entries) {
+      const code = stripComments(path, text)
+      for (const { pattern, files } of SCHEDULERS) {
+        if (files.test(path) && pattern.test(code)) offenders.push(`${path}: ${pattern}`)
+      }
+    }
+    return offenders
+  }
+
+  it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
+    const paths = corpus().map((entry) => entry.path)
+    expect(paths.length).toBeGreaterThan(50)
+    // One of each root, and the workflow, so a renamed directory cannot hollow
+    // the scan out silently.
+    expect(paths.some((p) => p.startsWith('src/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('supabase/migrations/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('supabase/functions/'))).toBe(true)
+    expect(paths.some((p) => p.startsWith('scripts/'))).toBe(true)
+    expect(paths).toContain('.github/workflows/ci.yml')
+    expect(paths).toContain('package.json')
+  })
+
+  it('POSITIVE CONTROL: every scheduler shape is refused when planted', () => {
+    // "Among the offenders", not "the only one": a realistic Actions sample
+    // carries both `schedule:` and `- cron:`, and refusing it twice is right.
+    for (const { pattern, sample, ext } of SCHEDULERS) {
+      const planted = [{ path: `planted/probe.${ext}`, text: `\n${sample}\n` }]
+      expect(schedulerOffenders(planted), `pattern ${pattern} never fires`).toContain(
+        `planted/probe.${ext}: ${pattern}`,
+      )
+    }
+  })
+
+  it('POSITIVE CONTROL: a comment may name the scheduler the code does not use', () => {
+    // 0012 says "not pg_cron" in its header, and the constant's docblock says
+    // it again. Neither is a scheduler; both must survive. The same text with
+    // the comment marker removed is refused, so the stripping is what decides.
+    const explained = [
+      { path: 'supabase/migrations/probe.sql', text: '-- pg_cron stops silently when paused\nselect 1;\n' },
+      { path: 'src/lib/probe.js', text: '/** not pg_cron — see #53 */\nexport const x = 1\n' },
+      { path: 'src/lib/probe2.js', text: '// cron.schedule is what we do NOT do\nexport const y = 1\n' },
+    ]
+    expect(schedulerOffenders(explained)).toEqual([])
+    const executed = [{ path: 'supabase/migrations/probe.sql', text: 'select pg_cron;\n' }]
+    expect(schedulerOffenders(executed)).toHaveLength(1)
+  })
+
+  it('the tree carries no scheduler — the calendar read is client-triggered and nothing else is scheduled', () => {
+    expect(schedulerOffenders(corpus())).toEqual([])
+  })
+
+  it('the refresh trigger is reachable from the app, not just exported', () => {
+    // The mirror of the reachability blocks above: `isBusyWeekStale` deciding
+    // in App.jsx is what makes "client-triggered" a fact about the running app
+    // rather than about a library nobody calls.
+    const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+    expect(app).toMatch(/isBusyWeekStale\(/)
+    expect(app).toMatch(/import \{[^}]*\bisBusyWeekStale\b[^}]*\} from '\.\/lib\/calendar\.js'/)
+  })
+})
+
+// #345 AC 5 — the overdue row's colour, asserted against the stylesheet.
+//
+// Here rather than in a component test for the reason the describes above
+// give: jsdom applies no stylesheet and computes no colour, so a render test
+// for "the row is coloured" would pass identically with every rule below
+// deleted. What CAN be checked is that the rule exists, that it is not the
+// `.error` palette wearing a different name, and that the palette judgement is
+// written down beside it — which is the part that stops the next person
+// reaching for `.error` because it was already there.
+//
+// Two readings of the file, deliberately. The rules are matched against the
+// COMMENT-STRIPPED text, for the reason `.row--actions` gives above (a `{` in
+// prose ends a `[^}]*` scan early); the comment assertion needs the raw text,
+// because stripping is exactly what would delete its subject.
+describe('#345 — an overdue chore is warm, and it is not an error', () => {
+  const raw = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+  const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('POSITIVE CONTROL: the overdue rules are in the stylesheet at all', () => {
+    // Without this every assertion below passes the moment the class is
+    // renamed — the empty-pass shape this file keeps finding.
+    expect(css).toMatch(/\.chore--overdue\s*\{/)
+    expect(css).toMatch(/\.chore__overdue\s*\{/)
+  })
+
+  it('marks the row and the word with a colour, so the row reads as different', () => {
+    expect(css).toMatch(/\.chore--overdue\s*\{[^}]*border-left-color:\s*#[0-9a-f]{6}/i)
+    expect(css).toMatch(/\.chore__overdue\s*\{[^}]*color:\s*#[0-9a-f]{6}/i)
+  })
+
+  it('recolours a RESERVED edge rather than widening one — the file’s own idiom', () => {
+    // The design pass measured what a width change costs: `box-sizing:
+    // border-box` takes the extra 2px out of the CONTENT box, so an overdue
+    // row's title started 58px from the left against its neighbours' 56px and
+    // its column was 2px narrower — a ragged edge on the one row the feature
+    // exists to highlight. `.chore` reserves the edge at 3px and the modifier
+    // only ever names a colour, which is what every other state modifier in
+    // this file does (six of them change `border-color` alone).
+    expect(css).toMatch(/\.chore\s*\{[^}]*border-left:\s*3px solid/)
+    // And the modifier must not reintroduce a width — the assertion that
+    // reddens if somebody "simplifies" it back to the shorthand.
+    expect(css).not.toMatch(/\.chore--overdue\s*\{[^}]*border-left:\s*\d/)
+  })
+
+  it('is NOT the .error palette — an overdue chore is the app working', () => {
+    // The three literals `.error` and `.button--danger` own. Asserted on the
+    // overdue rules themselves rather than anywhere in the file, so an
+    // unrelated use of red elsewhere cannot redden this and, more to the
+    // point, so reusing one of them HERE cannot pass.
+    for (const literal of ['#7f2b2b', '#ffdada', '#ffeaea']) {
+      expect(css).not.toMatch(
+        new RegExp(`\\.chore--overdue\\s*\\{[^}]*${literal}`, 'i'),
+      )
+      expect(css).not.toMatch(
+        new RegExp(`\\.chore__overdue\\s*\\{[^}]*${literal}`, 'i'),
+      )
+    }
+    // And it is not the accent either, which would read as "the app did
+    // something" rather than "this has slipped".
+    expect(css).not.toMatch(/\.chore--overdue\s*\{[^}]*var\(--accent\)/)
+    expect(css).not.toMatch(/\.chore__overdue\s*\{[^}]*var\(--accent\)/)
+  })
+
+  it('records the palette decision beside the rule, in the comment', () => {
+    // Read off the RAW file: the standing rule (red is for work, never for
+    // people) and the judgement that an overdue chore is work and therefore
+    // inside it, plus the refusal of `.error`. The three other places in this
+    // stylesheet that touch the rule state it the same way, and a rule whose
+    // reasoning is not written down is the one somebody later "tidies" into
+    // `.error`.
+    // Located by the comment's OWN opening line rather than by "the last
+    // comment before the rule": the reserved-edge note added to `.chore` sits
+    // between the two, and a positional locator silently picked that up
+    // instead — the assertion reddened for the right reason and the wrong
+    // subject, which is the whole argument for anchoring on the text.
+    const start = raw.indexOf('/* An outstanding chore whose date has passed')
+    expect(start, 'the palette comment is not in the stylesheet at all').toBeGreaterThan(-1)
+    const comment = raw.slice(start, raw.indexOf('*/', start))
+    expect(comment).toMatch(/red is for work/i)
+    expect(comment).toMatch(/\.error/)
+  })
+
+  it('the marker is a WORD as well as a colour, so colour is not the only carrier', () => {
+    // The component's half of AC 1, asserted here beside the palette it is
+    // the counterweight to: a member who cannot separate the tint from the
+    // ink still reads the fact.
+    const chores = readFileSync(resolve(process.cwd(), 'src/components/Chores.jsx'), 'utf8')
+    expect(chores).toMatch(/className="chore__overdue">overdue</)
   })
 })

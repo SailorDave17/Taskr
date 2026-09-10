@@ -16,6 +16,7 @@ import {
   ADAPTER_OUTCOMES,
   DEFAULT_CONFIGS,
   DEFAULT_PROMPT,
+  DEPLOYED_CONFIG,
   attemptExtraction,
   buildRequest,
   createExtractor,
@@ -247,6 +248,30 @@ describe('#203 AC 3 — the prompt and the model are parameters, not module cons
     expect(userMessage({ kind: 'chores', text: 'x' })).toBe('input kind: chores\ndescription: x')
   })
 
+  it('#208 — a speaker is named between the kind and the description, and only when given', () => {
+    // The transcript key of every input recorded before #208 is the two-line
+    // form; a widening that changed it would make #206's transcript replay as
+    // all misses. So the three-line form exists only when a speaker is given,
+    // and an empty or blank speaker is the same as none.
+    expect(userMessage({ kind: 'capacity', text: 'I have five hours.', speaker: 'Alex' })).toBe(
+      'input kind: capacity\nspeaker: Alex\ndescription: I have five hours.',
+    )
+    expect(userMessage({ kind: 'capacity', text: 'x', speaker: '  ' })).toBe(
+      'input kind: capacity\ndescription: x',
+    )
+    expect(userMessage({ kind: 'capacity', text: 'x', speaker: undefined })).toBe(
+      userMessage({ kind: 'capacity', text: 'x' }),
+    )
+    const request = buildRequest(CONFIG, { kind: 'capacity', text: 'x', speaker: 'Robin' })
+    expect(request.messages[0].content).toContain('speaker: Robin')
+  })
+
+  it('#208 — createExtractor hands the speaker through to the request', async () => {
+    const { requests, transport } = capturing()
+    await createExtractor(CONFIG, transport)({ kind: 'capacity', text: 'x', speaker: 'Alex' })
+    expect(requests[0].messages[0].content).toContain('speaker: Alex')
+  })
+
   it('effort is sent only when the config carries one, because not every model takes it', () => {
     const withEffort = buildRequest({ ...CONFIG, effort: 'low' }, INPUT)
     const without = buildRequest(CONFIG, INPUT)
@@ -272,6 +297,29 @@ describe('#203 AC 3 — the prompt and the model are parameters, not module cons
     expect(DEFAULT_PROMPT).toMatch(/EXACTLY as the text states it/i)
     expect(DEFAULT_PROMPT).toMatch(/Never invent one/i)
     expect(DEFAULT_PROMPT).toMatch(/Refuse rather than guess/i)
+  })
+
+  it('#208 — the default prompt carries the three fields #207 measured missing', () => {
+    // Same rule as above: not a wording pin, a decision pin. The verdict's
+    // three contract gaps — recurrence, assignee, speaker — each get a sentence
+    // the prompt must keep, and the one product rule among them is that a
+    // cadence is never a due date, which is what six of seven cold corrections
+    // were.
+    expect(DEFAULT_PROMPT).toMatch(/"repeat"/)
+    expect(DEFAULT_PROMPT).toMatch(/"assignee"/)
+    expect(DEFAULT_PROMPT).toMatch(/speaker/)
+    expect(DEFAULT_PROMPT).toMatch(/A cadence is never a due\s+date/i)
+  })
+
+  it('#208 — the deployed configuration is the one the verdict left standing', () => {
+    // docs/extraction-verdict.md, condition 3: `claude-haiku-4-5`. Resolved by
+    // model rather than by position in DEFAULT_CONFIGS, and asserted to
+    // resolve at all — a `find` over a renamed list returns undefined, which
+    // the endpoint would then send as `model: undefined`.
+    expect(DEPLOYED_CONFIG).toBeTruthy()
+    expect(DEPLOYED_CONFIG.model).toBe('claude-haiku-4-5')
+    expect(DEPLOYED_CONFIG.prompt).toBe(DEFAULT_PROMPT)
+    expect(DEFAULT_CONFIGS).toContain(DEPLOYED_CONFIG)
   })
 })
 

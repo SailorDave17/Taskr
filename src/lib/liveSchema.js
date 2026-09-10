@@ -1,10 +1,19 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
 import { SPLIT_SEEN_COLUMNS } from './announce.js'
-import { CALENDAR_BUSY_COLUMNS, CALENDAR_CONNECTION_COLUMNS } from './calendar.js'
+import {
+  CALENDAR_BUSY_COLUMNS,
+  CALENDAR_CONNECTION_COLUMNS,
+  CALENDAR_IMPORT_COLUMNS,
+} from './calendar.js'
 import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import {
+  SHOPPING_ITEM_COLUMNS,
+  SHOPPING_LIST_COLUMNS,
+  SHOPPING_RUN_COLUMNS,
+} from './shopping.js'
 
 /**
  * What the client asks the live project for — story #78.
@@ -85,6 +94,28 @@ export const LIVE_SCHEMA = Object.freeze([
   // the derived figures are readable by the household, the refresh token is not,
   // and that split is the whole of the minimization decision.
   Object.freeze({ table: 'calendar_busy', columns: CALENDAR_BUSY_COLUMNS }),
+  // #352, arriving with `0032` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file. Three tables in one file and all three are here, because the client
+  // reads all three: lists by household, the OPEN run of each list, and the
+  // items on those runs — three plain filters, never an embed filter, which
+  // is why `household_id` is in every one of these column lists (the `0014`
+  // route). What the client does NOT hold — any insert, any stamp column's
+  // update — is `0032`'s and grants.pglite.test.js's to say; this list is what
+  // it reads.
+  Object.freeze({ table: 'shopping_lists', columns: SHOPPING_LIST_COLUMNS }),
+  Object.freeze({ table: 'shopping_runs', columns: SHOPPING_RUN_COLUMNS }),
+  Object.freeze({ table: 'shopping_items', columns: SHOPPING_ITEM_COLUMNS }),
+  // #101, arriving with `0038` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for its
+  // file. The fourth calendar table and the third the client reads: the import
+  // ledger, whose event id is the one calendar datum the schema retains, read
+  // by household so "already imported" can be drawn beside an event on every
+  // phone. It is also the first calendar table the client WRITES — an insert
+  // after `addChore`, under a policy pinning the row to the caller's own
+  // member row — which `grants.pglite.test.js` exercises and this list, being
+  // what the client reads, does not.
+  Object.freeze({ table: 'calendar_imports', columns: CALENDAR_IMPORT_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -211,6 +242,57 @@ export const LIVE_RPCS = Object.freeze([
     fn: 'skip_repeat_occurrence',
     args: Object.freeze({ chore_id: 'uuid', skip_date: 'date' }),
   }),
+  // #352, arriving with `0032` — red on purpose until that file is applied,
+  // the same deliberate window every migration-borne entry here has had. The
+  // four writers of a list, an item or a stamp; the client holds no insert
+  // grant on any shopping table, so these are the only way a row arrives.
+  // Argument names are the epic's, and PostgREST resolves by their SET: a
+  // `text` placeholder is the nil UUID, which `create_shopping_list` refuses
+  // at its household check (`P0001`) and `add_shopping_item` at its run check,
+  // both before any write — PRESENT, and nothing touched.
+  Object.freeze({
+    fn: 'create_shopping_list',
+    args: Object.freeze({ household: 'uuid', name: 'text' }),
+  }),
+  Object.freeze({
+    fn: 'add_shopping_item',
+    args: Object.freeze({ run: 'uuid', name: 'text', note: 'text' }),
+  }),
+  Object.freeze({ fn: 'purchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  Object.freeze({ fn: 'unpurchase_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  // #354, arriving with `0033` — red on purpose until that file is applied,
+  // the same deliberate window as the four above. The argument is the RUN and
+  // not the list, and the name is the contract: with `list_id` a stale second
+  // phone would finish the FRESH run and carry every item twice. The body's
+  // first act after the auth check is a row lock (`select … for update`), so
+  // the read-only GET refuses it at executor start with `25006` — the shape
+  // `complete_chore` and `purchase_shopping_item` answer, NOT the `P0001` the
+  // two lock-free writers above answer — which classifies as PRESENT with
+  // nothing touched. Predicted from the body, not measured, until the apply.
+  Object.freeze({ fn: 'finish_shopping_run', args: Object.freeze({ run_id: 'uuid' }) }),
+  // #368, arriving with `0034` — red on purpose until that file is applied.
+  // The fourth writer of `shopping_items`, and the one that used to be the
+  // client's own DELETE: `0034` withdraws that grant and its policy in the
+  // same file, so after the apply there is no client DML on the table at all.
+  // Its body's first act after the auth check is an unlocked read, then the
+  // RUN row `for key share` — a lock, so the read-only GET refuses it at
+  // executor start with `25006` like `finish_shopping_run` above, not the
+  // `P0001` a lock-free writer answers. Predicted from the body, not measured,
+  // until the apply.
+  Object.freeze({ fn: 'remove_shopping_item', args: Object.freeze({ item: 'uuid' }) }),
+  // #360, arriving with `0035` — red on purpose until that file is applied.
+  // Putting a list away and bringing it back; the only writers of
+  // `shopping_lists.archived_at`, which the client may read and not write.
+  //
+  // The two answer the read-only GET DIFFERENTLY, and both classify as
+  // PRESENT. `archive_shopping_list` takes the run row `for update` after its
+  // list check, so a list id that names nothing is refused at `P0001` before
+  // any lock — which is the shape the two lock-free `0032` writers answer —
+  // while a real list would reach the lock and answer `25006`. The nil UUID
+  // this probe sends names nothing, so `P0001` is the predicted reading for
+  // both. Predicted from the bodies, not measured, until the apply.
+  Object.freeze({ fn: 'archive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
+  Object.freeze({ fn: 'unarchive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */
@@ -403,6 +485,35 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // is separate from `LIVE_RPCS` — arriving with no migration that mentions it,
   // so `0030` reaching the project says nothing about whether this is there.
   'calendar-busy',
+  // #210. Invoked by the capacity capture flow (src/lib/capture.js) AHEAD of
+  // the function existing — owner decision at pickup, 2026-09-04 — so this
+  // read NOT DEPLOYED with no directory behind it, and `scripts/deploy-function.mjs`
+  // listed it as PENDING so a bare deploy did not try to ship a directory that
+  // was not there. #208 wrote the function (supabase/functions/extract-description)
+  // and moved the name into that script's deployable list; #209 deployed it on
+  // 2026-09-07, so this probe is green and docs/access-model.md's excused-red
+  // set is empty again. What the probe still cannot see is whether the
+  // function's provider secret is set — a preflight carries no body and invokes
+  // nothing, so this row reads the same either way, and what settles it is a
+  // POST with a real session (docs/deploy-runbook.md section 3c). The secret is
+  // deliberately not named here: this file is under `src/`, and gate.test.js
+  // refuses that spelling anywhere the bundler reads.
+  'extract-description',
+  // #99. The way back out of #95's connection, and the third function arriving
+  // with no migration that mentions it — `0011` and `0030` created the tables it
+  // deletes from, so both reaching the project says nothing about whether this
+  // is there. RED on purpose until `npm run deploy:function` ships it, exactly
+  // as `calendar-busy` was for #96 and `extract-description` was for #210: the
+  // row exists because a deploy is a step recorded nowhere else, and one
+  // withheld until after the deploy would leave the window it covers uncovered.
+  'calendar-disconnect',
+  // #101. Lists a member's upcoming events for the week, transiently — the
+  // titles reach the phone and no table — so an event can be imported as a
+  // chore. Arrives with `0038` (the import ledger) AND with a deploy, `0011`'s
+  // pair shape: the paste clears the table row, the deploy clears this one,
+  // and neither clears the other. RED on purpose until `npm run
+  // deploy:function` ships it.
+  'calendar-events',
 ])
 
 /**

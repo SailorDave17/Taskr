@@ -146,7 +146,7 @@ vi.mock('./supabase.js', () => ({
 const {
   addMember,
   confirmationRedirectTo,
-  currentHousehold,
+  resolveActiveHousehold,
   listHouseholds,
   createHousehold,
   currentSession,
@@ -635,13 +635,13 @@ describe('finding the household the signed-in person belongs to', () => {
   // is now the policy.
   it('is null when nobody is signed in as a member, rather than an error', async () => {
     results.households = { data: [], error: null }
-    await expect(currentHousehold()).resolves.toBeNull()
+    expect(resolveActiveHousehold(await listHouseholds())).toBeNull()
   })
 
   it('loads the household the policy returns, without naming an id itself', async () => {
     results.households = { data: [{ id: 'h1', name: 'Placeholder Household' }], error: null }
 
-    await expect(currentHousehold()).resolves.toMatchObject({ id: 'h1' })
+    expect(resolveActiveHousehold(await listHouseholds())).toMatchObject({ id: 'h1' })
     // The absence is the point: an `eq('id', …)` here would mean the client is
     // choosing which household to load, and it has nothing to choose from.
     expect(calls).not.toContainEqual(
@@ -679,9 +679,12 @@ describe('finding the household the signed-in person belongs to', () => {
     const all = await listHouseholds()
     expect(all).toHaveLength(2)
     expect(all.map((h) => h.id)).toEqual(['h1', 'h2'])
-    // And the active one is the FIRST of that order - today's placeholder for a
-    // switcher, asserted so the seam is visible rather than implied.
-    await expect(currentHousehold()).resolves.toMatchObject({ id: 'h1' })
+    // And with no choice made, the active one is the FIRST of that order —
+    // #164 AC 4's deterministic default, asserted against the read rather than
+    // assumed. This was `currentHousehold()` until #164; the seam it described
+    // as a placeholder is now `resolveActiveHousehold`, and the property it
+    // asserted is unchanged.
+    expect(resolveActiveHousehold(all)).toMatchObject({ id: 'h1' })
   })
 
   it('is an empty array, not null, when nobody is signed in', async () => {
@@ -691,7 +694,72 @@ describe('finding the household the signed-in person belongs to', () => {
 
   it('names what it was doing when the query fails, not just the driver message', async () => {
     results.households = { data: null, error: { message: 'connection reset' } }
-    await expect(currentHousehold()).rejects.toThrow(/loading your households: connection reset/)
+    await expect(listHouseholds()).rejects.toThrow(/loading your households: connection reset/)
+  })
+})
+
+// #164 AC 4 / #165 AC 2 and AC 3 — which of the caller's households is active.
+//
+// PURE, so these are ordinary function calls with no client behind them: the
+// read is `listHouseholds()` above and it is asserted there. What is asserted
+// here is the CHOICE, and every case that decides it.
+describe('resolving which household is active', () => {
+  const first = { id: 'h1', name: 'Placeholder Household', created_at: '2026-01-01T00:00:00Z' }
+  const second = {
+    id: 'h2',
+    name: 'Placeholder Other Household',
+    created_at: '2026-02-01T00:00:00Z',
+  }
+  const both = [first, second]
+
+  it('is null when the person belongs to no household', () => {
+    expect(resolveActiveHousehold([])).toBeNull()
+    expect(resolveActiveHousehold([], 'h1')).toBeNull()
+  })
+
+  // The owner's decision of 2026-08-26, taken against most-recently-joined.
+  // `listHouseholds()` orders by created_at then id, so "first of the read" IS
+  // "oldest". The dates are spelled out so a reader can see WHICH row is the
+  // oldest; they are not a guard, and an earlier version of this comment
+  // claimed they were. `resolveActiveHousehold` reads no date at all — it
+  // returns `households[0]` — so swapping the fixture's dates would leave this
+  // green while it asserted the newest. What actually pins the ordering is
+  // "issues no limit at all, and orders by created_at then id" above.
+  it('defaults to the OLDEST household when no choice has been made', () => {
+    expect(resolveActiveHousehold(both)).toMatchObject({ id: 'h1' })
+    expect(resolveActiveHousehold(both, null)).toMatchObject({ id: 'h1' })
+  })
+
+  it('honours a choice that is still in the membership set', () => {
+    expect(resolveActiveHousehold(both, 'h2')).toMatchObject({ id: 'h2' })
+    // Both directions, so a version that simply returned the LAST household
+    // would fail one of them. Choosing the household that is also the default
+    // must not be indistinguishable from making no choice at all.
+    expect(resolveActiveHousehold(both, 'h1')).toMatchObject({ id: 'h1' })
+  })
+
+  // #165 AC 2 — a membership that has been removed, and #165 AC 3's value that
+  // was never an id, reach here as the same case and take the same answer. The
+  // app must not be left on a household no policy will serve.
+  it('falls back to the default when the chosen household is not in the set', () => {
+    expect(resolveActiveHousehold(both, 'h-gone')).toMatchObject({ id: 'h1' })
+    expect(resolveActiveHousehold([second], 'h1')).toMatchObject({ id: 'h2' })
+  })
+
+  // Under one household the answer is that household whatever the choice says,
+  // which is what lets #163's screen render identically for everybody who has
+  // not got a second one.
+  it('is the one household for anybody who has only one, whatever was chosen', () => {
+    expect(resolveActiveHousehold([first])).toMatchObject({ id: 'h1' })
+    expect(resolveActiveHousehold([first], 'h2')).toMatchObject({ id: 'h1' })
+  })
+
+  // Defensive rather than reachable from App, and cheap: a caller that has not
+  // read yet passes undefined, and a null read is what `listHouseholds` refuses
+  // to return. Neither should throw on the boot path.
+  it('treats a missing list as no households rather than throwing', () => {
+    expect(resolveActiveHousehold(undefined)).toBeNull()
+    expect(resolveActiveHousehold(null, 'h1')).toBeNull()
   })
 })
 

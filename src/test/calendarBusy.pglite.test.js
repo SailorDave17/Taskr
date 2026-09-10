@@ -59,11 +59,12 @@
 //   A behavioural test would therefore fail for a reason that has nothing to do
 //   with the grant it claims to be about.
 //
-// #95's `calendar.pglite.test.js` carries the same superseded paragraph, in the
+// #95's `calendar.pglite.test.js` carried the same superseded paragraph, in the
 // same words, about `0011` — *measured the same day*: deleting ITS revokes
 // reddens 3 of 23 there too, against a header claiming every refusal in the file
 // depends on them. Corrected here and reported rather than edited there, because
-// that file is not this story's subject.
+// that file was not this story's subject; #334 corrected it against a
+// measurement of its own (2026-09-05, same count), so neither header is a copy.
 //
 // Names are synthetic — see #19.
 
@@ -336,7 +337,7 @@ describe('the derived busy figure, run against a real Postgres', () => {
       'refuses a client %s — the function owns the write',
       async (verb) => {
           // A client that could write here could claim any busy figure it liked
-        // for anybody in the household, and #97 will offer that figure as a
+        // for anybody in the household, and #97 offers that figure as a
         // capacity prefill. The credential it is derived from is one no client
         // can reach, so a client-written row would be a number nothing could be
         // checked against.

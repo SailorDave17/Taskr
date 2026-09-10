@@ -161,18 +161,33 @@ create policy calendar_connections_select_same_household
 -- freshly created table gives every Data API role `Dxtm` — truncate, references,
 -- trigger, maintain — and nothing else: no select, no insert, no update, no
 -- delete. An Edge Function holding the service_role key would be refused 42501
--- on its own table. The local pglite harness DISAGREES, because
--- `alter default privileges ... grant all` there is deliberately more permissive
--- than the platform (see src/test/support/pgliteSupabase.js). A grant that is
--- vacuous in the harness and load-bearing in production has to be written down
--- rather than inferred from a green suite.
+-- on its own table.
+--
+-- This comment used to add that the local pglite harness DISAGREED, being
+-- `alter default privileges ... grant all` and "deliberately more permissive
+-- than the platform", so that the grant below was vacuous there and load-bearing
+-- only in production. That expired with #91, which narrowed the harness to the
+-- platform's real default (src/test/support/pgliteSupabase.js) — an expired
+-- sentence, not a wrong one, corrected under #334. With no DML in the default,
+-- an explicit grant is the ONLY thing that can put DML on a table, so the grant
+-- is proven locally as well: *measured 2026-09-05 (#334)*, deleting the two
+-- service_role grants below reddens `and service_role reaches only what the
+-- Edge Functions need` in src/test/grants.pglite.test.js — predicted 1, actual
+-- 1. `0030`'s comment says the same of its own grant, on its own measurement;
+-- neither borrows the other's. Which direction a stub can prove is written out
+-- once, in that test file's header.
 --
 -- The revokes come first and name `anon` alongside `authenticated` for 0002's
 -- reason, restated by 0003, 0005 and 0010: no policy above targets `anon`, so it
 -- cannot reach a row today — but that is one `to anon` away from being false,
 -- and a privilege that has to STAY correct is worse than one that is absent.
 -- `public` is named as well on the token table, because a privilege held by
--- `public` is held by every role that will ever exist.
+-- `public` is held by every role that will ever exist. Since the same #91
+-- change they no longer hold the client's doors shut on their own — the default
+-- already grants no DML — so they are the house convention rather than the
+-- refusal: *measured 2026-09-05 (#334)*, deleting both reddens 3 of 23 in
+-- src/test/calendar.pglite.test.js (the two table-level ACL assertions and the
+-- ordering test), not every refusal in that file.
 -- ---------------------------------------------------------------------------
 
 revoke all on public.calendar_connections from authenticated, anon;

@@ -179,7 +179,7 @@ is re-derived from that module by a test, so it cannot fall behind the numbers t
 | due dates exact | — | >= 18 of 25 | >= 18 of 25 | narrows the bet |
 | p95, deployed path | — | — | <= 3000 ms | kills the bet |
 | cost per household per year | — | — | <= $5.00 | kills the bet |
-| correction rate | — | — | <= 30% | kills the bet |
+| correction rate | <= 30% | <= 30% | <= 30% | kills the bet |
 
 ### Two verdicts, not one
 
@@ -209,7 +209,7 @@ reason:
 |---|---|
 | p95, deployed path | needs transport and cold start (#205) and the provider call (#206) |
 | cost per household per year | needs token usage from a live run (#206) |
-| correction rate | needs the capture flow in production |
+| correction rate | needs a scored member-sentence run (#207) |
 
 This is the half of the story worth the most. An axis with no figure that prints **pass** is exactly
 what a report looks like when nothing ran, and this report's whole authority is that a fail is real.

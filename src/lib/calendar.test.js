@@ -52,6 +52,18 @@ vi.mock('./supabase.js', () => ({
           calls.push({ op: 'eq', table, column, value })
           return q
         },
+        // #101 — `recordCalendarImport` is the first WRITE this module makes
+        // through the client, and the recorded row is what the tests read:
+        // a fake that only recorded the call could not tell a ledger row
+        // naming the chore it became from one naming nothing.
+        insert: (row) => {
+          calls.push({ op: 'insert', table, row })
+          return q
+        },
+        single: () => {
+          calls.push({ op: 'single', table })
+          return q
+        },
         then: (onOk, onErr) => Promise.resolve(selectResult).then(onOk, onErr),
       }
       return q
@@ -60,16 +72,32 @@ vi.mock('./supabase.js', () => ({
 }))
 
 const {
+  ALREADY_IMPORTED_SENTENCE,
+  BUSY_STALE_AFTER_HOURS,
+  BUSY_STALE_AFTER_MS,
   CALENDAR_BUSY_COLUMNS,
   CALENDAR_CONNECTION_COLUMNS,
+  CALENDAR_IMPORT_COLUMNS,
   CONSENT_HOUSEHOLD_KEY,
   CONSENT_STATE_KEY,
+  EVENT_READ_SCOPES,
   GOOGLE_AUTH_ENDPOINT,
+  GOOGLE_CALENDAR_READONLY_SCOPE,
   GOOGLE_FREEBUSY_SCOPE,
   completeConnect,
   connectionFor,
   consentUrl,
+  disconnectCalendar,
+  eventChorePrefill,
+  eventWhenLabel,
+  fetchCalendarEvents,
+  hasEventReadScope,
+  importedEventIds,
+  listCalendarImports,
+  recordCalendarImport,
+  revokeNoteFor,
   hasCalendarConfig,
+  isBusyWeekStale,
   isRealEmailMember,
   busyComputedLabel,
   busyWeekFor,
@@ -677,6 +705,156 @@ describe('fetchBusyWeek', () => {
   })
 })
 
+// #99 — the way back out. The DELETIONS are the Edge Function's and are proven
+// in supabase/functions/calendar-disconnect/handler.test.js; this is the client
+// half, which decides what is asked for and what is said afterwards.
+describe('disconnectCalendar', () => {
+  it('names the household and never who it is about', async () => {
+    // The function acts on the CALLER'S own member row, so a member id in this
+    // body would be a value the server must ignore — and the cheapest way to be
+    // sure it is ignored is not to send one. The same argument `fetchBusyWeek`
+    // and `completeConnect` make.
+    invoke.mockResolvedValue({ data: { ok: true, memberId: 'm1', revoked: true }, error: null })
+    await disconnectCalendar({ householdId: 'h1' })
+    expect(invoke).toHaveBeenCalledWith('calendar-disconnect', { body: { householdId: 'h1' } })
+    const [, options] = invoke.mock.calls[0]
+    expect(Object.keys(options.body)).toEqual(['householdId'])
+  })
+
+  it('refuses to ask without a household', async () => {
+    await expect(disconnectCalendar({})).rejects.toThrow(/Which household/)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('hands back what the function said, revoke outcome included', async () => {
+    invoke.mockResolvedValue({ data: { ok: true, memberId: 'm1', revoked: false }, error: null })
+    await expect(disconnectCalendar({ householdId: 'h1' })).resolves.toEqual({
+      ok: true,
+      memberId: 'm1',
+      revoked: false,
+    })
+  })
+
+  it('shows the FUNCTION’S sentence, not the SDK’s', async () => {
+    // #112's lesson again. The handler distinguishes a partial deletion the
+    // member should retry from a household they are not in, and collapsing both
+    // into "Edge Function returned a non-2xx status code" would put a sentence
+    // that reads like a network outage on a state with a one-tap repair.
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: {
+          json: async () => ({
+            error: 'Could not finish disconnecting that calendar. Part of it was removed.',
+          }),
+        },
+      },
+    })
+    await expect(disconnectCalendar({ householdId: 'h1' })).rejects.toThrow(/Part of it was removed/)
+  })
+
+  it('falls back to the SDK’s message when the body cannot be read', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Failed to send a request to the Edge Function',
+        context: {
+          json: async () => {
+            throw new SyntaxError('not json')
+          },
+        },
+      },
+    })
+    await expect(disconnectCalendar({ householdId: 'h1' })).rejects.toThrow(
+      /Failed to send a request/,
+    )
+  })
+})
+
+// #99 AC 4 — which of the three revoke outcomes is worth a sentence. Owner
+// decision at pickup, 2026-09-08: say the one Taskr cannot vouch for, and say
+// nothing on the other two, because a note on every disconnect is noise that
+// hides the one that matters.
+describe('revokeNoteFor', () => {
+  it('says nothing when Google accepted the revocation', () => {
+    expect(revokeNoteFor({ ok: true, revoked: true })).toBeNull()
+  })
+
+  it('says nothing when there was no credential to revoke', () => {
+    // `null` is not `false`, and this is the assertion that keeps them apart. A
+    // member who never had a grant outstanding must not be told Google may
+    // still hold one — which is the opposite of what this story is for.
+    expect(revokeNoteFor({ ok: true, revoked: null })).toBeNull()
+  })
+
+  it('names Google, and where to remove Taskr, when the revocation could not be confirmed', () => {
+    const note = revokeNoteFor({ ok: true, revoked: false })
+    expect(note).toMatch(/forgotten/)
+    expect(note).toMatch(/Google/)
+    // Actionable, which is the whole reason the sentence exists rather than a
+    // bare "could not revoke": a member reading this needs somewhere to go.
+    expect(note).toMatch(/Third-party apps/)
+  })
+
+  it('says nothing about a response it did not get', () => {
+    // A disconnect that threw never reaches this, and a caller that passes
+    // nothing must not produce a sentence claiming Google was asked.
+    expect(revokeNoteFor(null)).toBeNull()
+    expect(revokeNoteFor(undefined)).toBeNull()
+    expect(revokeNoteFor({})).toBeNull()
+  })
+})
+
+// #98 AC 1 — the staleness bound, and the predicate that applies it. App.test.jsx
+// proves WHEN the app asks; this proves what "older than the bound" means, with
+// the clock injected so the boundary itself can be pinned rather than sampled.
+describe('isBusyWeekStale', () => {
+  const NOW = Date.parse('2026-09-08T18:00:00Z')
+  const rowReadAt = (msAgo) => ({ computed_at: new Date(NOW - msAgo).toISOString() })
+
+  it('names twelve hours, in hours and in the milliseconds the comparison uses', () => {
+    // The constant is the criterion's "default 12 hours". Both spellings are
+    // exported so a reader and the comparison cannot disagree about the unit.
+    expect(BUSY_STALE_AFTER_HOURS).toBe(12)
+    expect(BUSY_STALE_AFTER_MS).toBe(12 * 60 * 60 * 1000)
+  })
+
+  it('is stale strictly BEYOND the bound, and fresh at it', () => {
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS + 1), NOW)).toBe(true)
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS), NOW)).toBe(false)
+    expect(isBusyWeekStale(rowReadAt(BUSY_STALE_AFTER_MS - 1), NOW)).toBe(false)
+  })
+
+  it('is fresh for a figure read moments ago, and stale for one read yesterday', () => {
+    expect(isBusyWeekStale(rowReadAt(60 * 1000), NOW)).toBe(false)
+    expect(isBusyWeekStale(rowReadAt(24 * 60 * 60 * 1000), NOW)).toBe(true)
+  })
+
+  it('measures wall-clock age, so midnight does not make a figure stale', () => {
+    // 23:00 to 00:01 is one hour and one minute, whatever the date did.
+    const justBeforeMidnight = { computed_at: '2026-09-08T03:00:00Z' } // 23:00 New York
+    const justAfter = Date.parse('2026-09-08T04:01:00Z') // 00:01 New York
+    expect(isBusyWeekStale(justBeforeMidnight, justAfter)).toBe(false)
+  })
+
+  it('reads a figure of unknown age as stale, never as current', () => {
+    expect(isBusyWeekStale({ computed_at: 'whenever' }, NOW)).toBe(true)
+    expect(isBusyWeekStale({ computed_at: null }, NOW)).toBe(true)
+    expect(isBusyWeekStale({}, NOW)).toBe(true)
+  })
+
+  it('is not stale when there is no row — that is #96’s trigger, not this one', () => {
+    expect(isBusyWeekStale(null, NOW)).toBe(false)
+    expect(isBusyWeekStale(undefined, NOW)).toBe(false)
+  })
+
+  it('defaults the clock to now, so a caller need not pass one', () => {
+    expect(isBusyWeekStale({ computed_at: new Date().toISOString() })).toBe(false)
+    expect(isBusyWeekStale({ computed_at: '2020-01-01T00:00:00Z' })).toBe(true)
+  })
+})
+
 describe('busyComputedLabel', () => {
   it('says which day the figure was read, in the household’s zone', () => {
     // 21:00 in New York on the 4th is 01:00 UTC on the 5th. The zone is what
@@ -691,5 +869,292 @@ describe('busyComputedLabel', () => {
     expect(busyComputedLabel(null, 'America/New_York')).toBeNull()
     expect(busyComputedLabel('2026-09-05T01:00:00Z', null)).toBeNull()
     expect(busyComputedLabel('2026-09-05T01:00:00Z', 'Nowhere/Atlantis')).toBeNull()
+  })
+})
+
+// ===========================================================================
+// #101 — importing an event as a chore: the client half
+// ===========================================================================
+
+describe('#101 AC 1 — the widened scope is asked for through the SAME consent flow', () => {
+  it('names the readonly scope Google publishes, and it is one this app never asks for first', () => {
+    expect(GOOGLE_CALENDAR_READONLY_SCOPE).toBe('https://www.googleapis.com/auth/calendar.readonly')
+    // The initial ask is still one scope and still the narrow one — the AC 3
+    // tests above assert that on a URL built with no scope argument, and this
+    // is the same fact from the other side: the default IS free/busy.
+    expect(paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')).toBe(
+      GOOGLE_FREEBUSY_SCOPE,
+    )
+  })
+
+  it('startConnect with the wider scope builds the incremental consent URL', () => {
+    const storage = fakeStorage()
+    const url = startConnect({
+      householdId: 'h1',
+      scope: GOOGLE_CALENDAR_READONLY_SCOPE,
+      storage,
+      location: LOCATION,
+    })
+    const params = paramsOf(url)
+    expect(params.get('scope')).toBe(GOOGLE_CALENDAR_READONLY_SCOPE)
+    // INCREMENTAL: added to the free/busy grant, never replacing it.
+    expect(params.get('include_granted_scopes')).toBe('true')
+    // And a LASTING one, for the same two reasons the first consent is.
+    expect(params.get('access_type')).toBe('offline')
+    expect(params.get('prompt')).toBe('consent')
+    // The same state and household the ordinary flow remembers, so the return
+    // is handled by the same `completeConnect`.
+    expect(storage.store[CONSENT_STATE_KEY]).toBe(params.get('state'))
+    expect(storage.store[CONSENT_HOUSEHOLD_KEY]).toBe('h1')
+  })
+
+  it('refuses an empty scope rather than asking Google for nothing', () => {
+    expect(() => consentUrl({ redirectUri: 'https://x.test/', state: 's', scope: '' })).toThrow(/scope/)
+  })
+
+  it('hasEventReadScope reads what Google GRANTED off the connection row', () => {
+    const freebusyOnly = { scope: GOOGLE_FREEBUSY_SCOPE }
+    const widened = { scope: `${GOOGLE_FREEBUSY_SCOPE} ${GOOGLE_CALENDAR_READONLY_SCOPE}` }
+    expect(hasEventReadScope(freebusyOnly)).toBe(false)
+    expect(hasEventReadScope(widened)).toBe(true)
+    // Each of the wider grants Google could have issued reads as enough.
+    for (const scope of EVENT_READ_SCOPES) expect(hasEventReadScope({ scope })).toBe(true)
+    // A prefix is not a scope, and no row is no scope.
+    expect(hasEventReadScope({ scope: `${GOOGLE_CALENDAR_READONLY_SCOPE}.evil` })).toBe(false)
+    expect(hasEventReadScope(null)).toBe(false)
+    expect(hasEventReadScope({ scope: '' })).toBe(false)
+  })
+})
+
+describe('#101 AC 2 — the events are asked of the Edge Function, and nothing is written', () => {
+  it('invokes calendar-events with the household and the week, and hands back its answer', async () => {
+    const answer = { ok: true, events: [{ id: 'e1', title: 'Placeholder Event' }] }
+    invoke.mockResolvedValue({ data: answer, error: null })
+    const result = await fetchCalendarEvents({ householdId: 'h1', periodStart: '2026-09-07' })
+    expect(invoke).toHaveBeenCalledWith('calendar-events', {
+      body: { householdId: 'h1', periodStart: '2026-09-07' },
+    })
+    expect(result).toEqual(answer)
+    // No table was touched on the way: the answer is displayed, never persisted.
+    expect(calls).toEqual([])
+  })
+
+  it('refuses to ask without a household or a week', async () => {
+    await expect(fetchCalendarEvents({ periodStart: '2026-09-07' })).rejects.toThrow(/household/i)
+    await expect(fetchCalendarEvents({ householdId: 'h1' })).rejects.toThrow(/week/i)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('reads the function’s own sentence off the error body, and MARKS the scope refusal', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: {
+          json: async () => ({
+            error: 'This calendar is connected for free/busy only.',
+            needsScope: true,
+          }),
+        },
+      },
+    })
+    const failure = await fetchCalendarEvents({ householdId: 'h1', periodStart: '2026-09-07' }).catch(
+      (err) => err,
+    )
+    expect(failure.message).toBe('This calendar is connected for free/busy only.')
+    expect(failure.needsScope).toBe(true)
+  })
+
+  it('a refusal for any other reason is NOT marked, so the screen shows the sentence and not the consent step', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'non-2xx',
+        context: { json: async () => ({ error: 'Could not reach Google. Try again in a moment.' }) },
+      },
+    })
+    const failure = await fetchCalendarEvents({ householdId: 'h1', periodStart: '2026-09-07' }).catch(
+      (err) => err,
+    )
+    expect(failure.message).toMatch(/Could not reach Google/)
+    expect(failure.needsScope).toBe(false)
+  })
+
+  it('falls back to the SDK’s message when the body cannot be read', async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: { message: 'Failed to send a request to the Edge Function', context: undefined },
+    })
+    await expect(fetchCalendarEvents({ householdId: 'h1', periodStart: '2026-09-07' })).rejects.toThrow(
+      /Could not read that calendar: Failed to send/,
+    )
+  })
+})
+
+describe('#101 AC 3 — what the form is prefilled with', () => {
+  it('takes the title, the duration as minutes and the local date', () => {
+    expect(
+      eventChorePrefill({
+        id: 'e1',
+        title: 'Placeholder Event',
+        durationMinutes: 90,
+        dueOn: '2026-09-10',
+        allDay: false,
+      }),
+    ).toEqual({ title: 'Placeholder Event', expectedMinutes: '90', dueOn: '2026-09-10' })
+  })
+
+  it('leaves the minutes BLANK for an all-day event — a day is not how long a chore takes', () => {
+    expect(
+      eventChorePrefill({
+        id: 'e2',
+        title: 'Placeholder Other Event',
+        allDay: true,
+        durationMinutes: null,
+        dueOn: '2026-09-12',
+      }),
+    ).toEqual({ title: 'Placeholder Other Event', expectedMinutes: '', dueOn: '2026-09-12' })
+    // And blank EVEN WHEN a duration arrives with it. The function's reduction
+    // sends null for an all-day event, so with a null-only fixture the
+    // `allDay` clause had a spare — the null check refused first and deleting
+    // the clause reddened nothing (*measured*, mutation M3, 0 of a predicted
+    // 1). This fixture is the one where the two rules disagree: 1440 minutes
+    // is a legal chore length and the clause is what keeps it out of the field.
+    expect(
+      eventChorePrefill({ id: 'e3', title: 'Placeholder Other Event', allDay: true, durationMinutes: 1440, dueOn: '2026-09-12' })
+        .expectedMinutes,
+    ).toBe('')
+  })
+
+  it('holds the minutes to the chore column’s bounds, so the prefill is never a value the form refuses', () => {
+    // A two-day conference block, as minutes, is more than a day of work.
+    expect(eventChorePrefill({ durationMinutes: 2880, dueOn: '2026-09-10' }).expectedMinutes).toBe('1440')
+    // A zero-length reminder is not a chore that takes no time — it is blank,
+    // for the member to say.
+    expect(eventChorePrefill({ durationMinutes: 0, dueOn: '2026-09-10' }).expectedMinutes).toBe('')
+    // Seconds round to whole minutes.
+    expect(eventChorePrefill({ durationMinutes: 44.6, dueOn: '2026-09-10' }).expectedMinutes).toBe('45')
+  })
+
+  it('tolerates a nameless event with an empty title the form will refuse with its own sentence', () => {
+    expect(eventChorePrefill({ id: 'x', title: '', durationMinutes: 30, dueOn: '2026-09-10' }).title).toBe('')
+    expect(eventChorePrefill(null)).toEqual({ title: '', expectedMinutes: '', dueOn: '' })
+  })
+})
+
+describe('#101 AC 4 and AC 5 — the ledger read and write', () => {
+  it('reads the household’s imports with exactly the granted columns, by household', async () => {
+    selectResult = { data: [{ id: 'i1', calendar_event_id: 'e1', chore_id: 'c1' }], error: null }
+    const rows = await listCalendarImports('h1')
+    expect(rows).toEqual([{ id: 'i1', calendar_event_id: 'e1', chore_id: 'c1' }])
+    expect(calls).toEqual([
+      { op: 'select', table: 'calendar_imports', cols: CALENDAR_IMPORT_COLUMNS },
+      { op: 'eq', table: 'calendar_imports', column: 'household_id', value: 'h1' },
+    ])
+    expect(CALENDAR_IMPORT_COLUMNS).toBe(
+      'id, household_id, member_id, calendar_event_id, chore_id, imported_at',
+    )
+  })
+
+  it('refuses to read without a household, and reports a failed read by what it was doing', async () => {
+    await expect(listCalendarImports()).rejects.toThrow(/household/i)
+    selectResult = { data: null, error: { message: 'relation does not exist' } }
+    await expect(listCalendarImports('h1')).rejects.toThrow(/loading calendar imports: relation/)
+  })
+
+  it('records an import with the four columns the client knows, and reads the row back', async () => {
+    selectResult = { data: { id: 'i1', calendar_event_id: 'e1', chore_id: 'c1' }, error: null }
+    const row = await recordCalendarImport({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'e1',
+      choreId: 'c1',
+    })
+    expect(row.id).toBe('i1')
+    expect(calls).toEqual([
+      {
+        op: 'insert',
+        table: 'calendar_imports',
+        row: { household_id: 'h1', member_id: 'm1', calendar_event_id: 'e1', chore_id: 'c1' },
+      },
+      { op: 'select', table: 'calendar_imports', cols: CALENDAR_IMPORT_COLUMNS },
+      { op: 'single', table: 'calendar_imports' },
+    ])
+  })
+
+  it('turns the unique-constraint refusal into the already-imported sentence, MARKED', async () => {
+    selectResult = {
+      data: null,
+      error: {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "calendar_imports_one_per_event"',
+      },
+    }
+    const failure = await recordCalendarImport({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'e1',
+      choreId: 'c1',
+    }).catch((err) => err)
+    expect(failure.message).toBe(ALREADY_IMPORTED_SENTENCE)
+    expect(failure.alreadyImported).toBe(true)
+    expect(failure.cause.code).toBe('23505')
+  })
+
+  it('does NOT mark any other refusal, so a network failure never costs the chore', async () => {
+    selectResult = { data: null, error: { code: '42501', message: 'permission denied' } }
+    const failure = await recordCalendarImport({
+      householdId: 'h1',
+      memberId: 'm1',
+      calendarEventId: 'e1',
+      choreId: 'c1',
+    }).catch((err) => err)
+    expect(failure.message).toMatch(/recording the import: permission denied/)
+    expect(failure.alreadyImported).toBe(false)
+  })
+
+  it.each([
+    [{ memberId: 'm1', calendarEventId: 'e1', choreId: 'c1' }, /household/i],
+    [{ householdId: 'h1', calendarEventId: 'e1', choreId: 'c1' }, /member/i],
+    [{ householdId: 'h1', memberId: 'm1', choreId: 'c1' }, /event/i],
+    [{ householdId: 'h1', memberId: 'm1', calendarEventId: 'e1' }, /chore/i],
+  ])('refuses an incomplete record %j before any request', async (args, pattern) => {
+    await expect(recordCalendarImport(args)).rejects.toThrow(pattern)
+    expect(calls).toEqual([])
+  })
+
+  it('importedEventIds is the set the screen marks "already imported" from', () => {
+    const ids = importedEventIds([
+      { calendar_event_id: 'e1', chore_id: 'c1' },
+      { calendar_event_id: 'e2', chore_id: 'c2' },
+    ])
+    expect(ids.has('e1')).toBe(true)
+    expect(ids.has('e3')).toBe(false)
+    expect(importedEventIds([]).size).toBe(0)
+    expect(importedEventIds(undefined).size).toBe(0)
+  })
+})
+
+describe('#101 — when an event happens, as a person reads it', () => {
+  it('says the household-local day and time for a timed event', () => {
+    // 17:00Z is 1:00 PM in New York on the 10th.
+    const label = eventWhenLabel(
+      { start: '2026-09-10T17:00:00.000Z', allDay: false, dueOn: '2026-09-10' },
+      'America/New_York',
+    )
+    expect(label).toMatch(/Thu, Sep 10 · 1:00 PM/)
+  })
+
+  it('says the day and "all day" for an all-day event, without a zone shifting the date', () => {
+    expect(
+      eventWhenLabel({ start: '2026-09-12', allDay: true, dueOn: '2026-09-12' }, 'America/New_York'),
+    ).toBe('Sat, Sep 12 · all day')
+  })
+
+  it('costs the label and never the row when it cannot parse', () => {
+    expect(eventWhenLabel({ start: 'whenever', allDay: false }, 'America/New_York')).toBeNull()
+    expect(eventWhenLabel(null, 'America/New_York')).toBeNull()
+    expect(eventWhenLabel({ start: '2026-09-10T17:00:00Z', allDay: false }, null)).toBeNull()
+    expect(eventWhenLabel({ start: '2026-09-10T17:00:00Z', allDay: false }, 'Nowhere/Atlantis')).toBeNull()
   })
 })

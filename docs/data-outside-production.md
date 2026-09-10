@@ -468,12 +468,18 @@ So the operative change is not to any control. It is to **how much a Decision 2 
 a real name reaching the fixture corpus was exposed to whoever holds repository access; now it is
 published. The guard was already the load-bearing control and is now the only one.
 
-#### The surface control 5 was quietly covering, and no guard reaches
+#### The surface control 5 was quietly covering, and ~~no guard reaches~~ **only a detective one reaches (#328)**
+
+*The heading is struck rather than rewritten: it was true when it was written on 2026-09-04, and it is
+the sentence a reader would have believed. Decision 5 below is what changed it.*
 
 **The repository going public took the tracker with it, and the tracker is outside every check here.**
 Decision 2's corpus is `git ls-files` plus untracked-not-ignored files — issues, comments and pull
 request bodies are not files, so no scan in `gate.test.js` has ever been able to see them, and none
-was ever meant to.
+was ever meant to. *(Still true of `gate.test.js`, and no longer true of the repository: #328 added
+`scripts/scan-tracker.mjs` and a workflow that reads the tracker directly. It is detective rather
+than preventive, which is why the paragraph above is amended rather than deleted — the claim that
+nothing can **refuse** a live identifier before it is published survives intact.)*
 
 *Measured 2026-09-04*: **four issues name the real household**, and one of them additionally carries
 the owner's address, both live household ids and an organizer's auth and member ids — recorded there
@@ -484,17 +490,11 @@ because a different document made a different decision.
 The values are deliberately not repeated here — writing them into `docs/` would move them from a
 surface no guard watches into the one surface Decision 2 does, which is the wrong direction.
 
-**This is not settled by this re-read.** Whether to redact, and what a story is allowed to record
-about the live project now that the tracker is public, is **#328** — filed rather than decided in a
-paragraph at the end of a document re-read (owner decision, 2026-09-04). What this record settles is
-only that the gap is real, that it is structural rather than an oversight, and that the next person
-to write a live identifier into an issue should know the surface changed under them. #328's fourth
-criterion replaces this paragraph with whatever it decides, so this is a pointer with an expiry
-rather than a standing position.
-
-**Revisit when** the repository's visibility changes again in either direction, or when any check
-gains the ability to read the tracker — at which point the paragraph above stops being a description
-and becomes something enforceable.
+**Settled 2026-09-10 by #328 — see Decision 5 below.** The verdict in one line: the identifiers
+were **redacted in place across all four classes, with nothing deleted**, and the shape half of the
+search now runs as a workflow. What this paragraph described as an unwatched surface is watched
+after the fact and cannot be watched before it, for a reason that is GitHub’s rather than this
+repository’s.
 
 ---
 
@@ -563,6 +563,195 @@ clause 2 differ.
   worth re-pricing rather than kept out of habit.
 - **Anything is added to a pre-redemption surface**, at all. Clause 3 is a closed list, and the way a
   closed list fails is one useful-looking addition at a time.
+
+---
+
+## Decision 5 — what the public tracker carries, and what it may carry
+
+**Decided 2026-09-10, story #328.** The pointer under Decision 3’s control-5 re-read said the gap
+was real and routed the decision here; this section is that decision. The re-read's *"four issues name the real
+household"* was **exactly right and exactly incomplete** — the four are #102, #162, #241 and #242,
+and the household name is one of four classes.
+
+### What was there, measured rather than remembered
+
+The set is produced by a **repeatable search**, `npm run scan:tracker`
+([`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs)), not by reading. It has two halves: a
+shape half for UUID- and address-shaped strings that needs no secret, and a term half whose search
+terms are the live project's own household names and member addresses, read from the database at run
+time and never written down. *Measured 2026-09-10 over 211 issues and 197 pull requests*: **13 items,
+15 places, 16 distinct values.**
+
+| Class | Items |
+|---|---|
+| Live row ids — household, member and `auth.users` | #162, #241, #246, #247, #262, #279, #349 |
+| The real household's name | #102, #162, #241, #242 |
+| The owner's address and its plus-aliases | #52, #140, #142, #241, #293 |
+| Test-household names naming live rows | #162, #241, #293, #349 |
+
+One **false positive** is worth recording because the next screenshot will produce another: #80's
+comment carried two UUIDs that were GitHub attachment ids, not rows. The scanner excludes them by the
+URL they sit in rather than by issue number, so the rule stays true for the next one.
+
+#### When each was written, and why that turned out to matter
+
+*Measured 2026-09-10 from each place's own `created_at`* — the date an identifier was **written**,
+not the date its issue was opened, which are eleven days apart on #162 and are the difference between
+the two halves of this table.
+
+| Written | Place | |
+|---|---|---|
+| 2026-08-26 | #140 comment 2, #142 comment 3 | |
+| 2026-08-28 | #241 body, #242 comment 3, #246 comment 2, #247 body, #247 comment 1, #262 body | |
+| 2026-08-29 | #279 body | |
+| 2026-08-30 | #52 comment 2 | |
+| 2026-08-31 | #162 comment 4, #241 comment 2, #293 body | **after** |
+| 2026-09-05 | #349 comment 2 | **after** |
+| 2026-09-08 | #102 comment 1 | **after** |
+
+**Five of the fifteen places were written after the repository went public**, across five issues, and
+#102's was written **2026-09-08 — nine days after, and two days before this decision**.
+
+That is worth stating plainly because the comfortable version of this story is false. The first draft
+of the rule in [`docs/access-model.md`](access-model.md) said all thirteen *"were written when it was
+not [public] … not one of them was a mistake at the time"*, and framed the whole thing as a correct
+habit overtaken by a surface change. **Ten of the fifteen places fit that description. Five do not.**
+Nobody had decided anything different for those five; the habit simply continued after the ground
+moved, which is exactly what a habit does and exactly why the rule below is a rule rather than a
+reminder.
+
+The AC that asked for this was AC 1's *"and when it was written"* clause. It was **not** answered in
+the first draft of this section — the enumeration above was the class table alone — and the false
+sentence is what the missing clause was hiding. The instrument requests `createdAt` now and prints a
+date beside every place, so the next reader gets the dates without asking for them.
+
+### The decision, and the cost of what was not chosen
+
+**Redact in place, across all four classes, deleting nothing.** Applied 2026-09-10 to 15 places
+across 13 issues; each edit was verified by re-reading the item from the API rather than from the
+edit's own success response, and the search was then re-run and came back **empty with its positive
+control passing on the same run** — which is what tells an instrument that found nothing apart from
+one that can no longer find anything.
+
+Each value became a stable label — `[redacted #328 — household 1 id]` — and the labels are
+**entity-scoped**, so a household's name and its id share an index and a table that read
+`| first | <name> | <id> |` still reads as one household. A first attempt lettered each class
+alphabetically by value and paired household name A with household id B: it protected the values
+perfectly and destroyed the record's meaning, which is the wrong trade in a repository whose whole
+argument is that a measurement without its reasoning is worthless.
+
+Two options were weighed and rejected, and both were defensible:
+
+- **Accept and leave.** Cheaper, and it has a real argument behind it — see the next subsection, where
+  two of the four classes turn out to be published by the repository itself regardless. Rejected
+  because the *linkage* is not: a real family's name joined to a live household id, its member count
+  and its roster's shape is a fact the tracker was publishing and nothing else was.
+- **Redact and delete the comments.** The only route to true removal, and it reaches 10 of the 15
+  places. Rejected because those comments are the evidence their own acceptance criteria were ticked
+  against — #162's and #241's especially — and deleting a measurement to protect a value it no longer
+  contains trades the wrong thing away.
+
+**Redaction is a reduction in exposure and not a removal, and this is measured rather than assumed.**
+*Measured 2026-09-10 on #158*: the GraphQL `userContentEdits` field returns the **full prior body
+text** of every edit, three revisions deep. So every value redacted above is still stored and still
+served. Choosing redaction is choosing to lower the odds a passer-by sees it, not to make it unseen.
+
+**The limit on that measurement, stated rather than glossed:** the query was authenticated as the
+repository's owner, and nothing here establishes what GitHub returns to a stranger. The safe reading
+is that edit history is as public as the issue it belongs to — which is what the decision above was
+taken against — but *"anyone can read it"* is an assumption and *"it is still stored and served"* is
+the measurement. Anyone re-pricing this decision should re-measure that from an unprivileged account
+rather than inherit this sentence.
+
+There is an asymmetry inside that, and it decides what the third option could ever have bought: a
+**comment** can be deleted outright, and a **body** can only be edited. Five of the thirteen carry
+their identifiers in the body (#241, #247, #262, #279, #293), so for those, nothing short of deleting
+the whole issue removes anything at all.
+
+### Two things that make the exposure smaller than it looks, and one that does not
+
+*Both measured 2026-09-10, and both cut against redacting at all — recorded because a decision whose
+counter-argument is missing reads as unconsidered.*
+
+- **The surname is published by the repository, on purpose.** `LICENSE` line 3 and
+  `docs/license-scope.md` carry it as tracked files. Redacting the household name from four issues
+  does not conceal it and was never going to.
+- **The owner's address is in every commit.** `git log --format='%an <%ae>'` prints it on the whole
+  history of a public repository, and commit author metadata cannot be edited without rewriting
+  history. Redacting it from five issues changes almost nothing about who can find it. *(The command
+  is given rather than its output, and the reason is worth a sentence: the first draft of this bullet
+  quoted the name and address verbatim — into the one surface Decision 2 is about, in the same commit
+  that adds a rule forbidding exactly that. It was caught by grepping the diff, not by a check.
+  See the note below.)*
+
+What is **not** covered by either is the class that motivated the decision: household ids, member ids
+and `auth.users` ids exist nowhere outside the live project and the tracker, and the join between
+them and a real family existed only here. That class is the reason the answer is redact rather than
+accept, and it is worth being clear that it is carrying the decision alone.
+
+None of those ids is a credential — row-level security gates on membership, never on knowing an id
+— so this is a privacy decision and not a security one. Recorded plainly because "identifiers were
+exposed" invites a reader to assume otherwise.
+
+### Can anything enforce this? Partly, and only after the fact
+
+**Yes for detection, never for prevention, and the second half is structural.** GitHub offers no
+write-time hook on an issue or a comment — there is no pre-receive equivalent a repository can
+install — so the earliest anything can fire is after the value is published. The honest claim is *a
+value that lands here is found*, never *a value cannot land here*.
+
+[`.github/workflows/tracker-scan.yml`](../.github/workflows/tracker-scan.yml) runs the shape half on
+every event that writes tracker text — the trigger list lives in the workflow and is deliberately
+not copied here, since copying it is how one wrong word landed in three files. **There is no
+schedule**: `gate.test.js`’s `#98 AC 5` refuses `schedule:`/`cron:` under `.github/workflows` with no
+exemption, and the daily run was weighed at the owner’s gate and dropped rather than putting the
+first door into that guard. `main()` is event-blind and re-paginates the whole tracker on any
+trigger, so what the schedule would have bought is a bounded-latency guarantee, not coverage. It
+needs no secret and
+fails the run on a finding. **It prints item numbers and match classes only**: this repository is
+public, so its Actions logs are public, and a check that printed the identifier it caught would
+publish it a second time on a surface with no edit history to redact. `assertReportCarriesNoValues`
+holds that mechanically rather than by care.
+
+The **term half does not run in CI**, and that is a decision rather than a limitation. Its search
+terms are the live household names and member addresses; putting them into an Actions secret to
+detect their publication would create a third home for values Decision 2 spends an entire guard
+keeping out of version control. It runs locally with `--names-file`, and the script states which
+halves ran on every invocation — a run that quietly skipped the term half and reported clean would be
+the failure this whole section is about.
+
+So: the shape half is enforced, the term half is a convention with a local instrument, and neither is
+preventive. What a story may record in the first place is in
+[`docs/access-model.md`](access-model.md) under *What a story may record about the live project* —
+linked rather than copied, so there is one copy to correct.
+
+#### And a gap found by walking into it: `docs/` is outside Decision 2's own guard
+
+*Measured 2026-09-10, while writing this section.* `gate.test.js`'s name corpus is
+`src/**/*.test.jsx?`, `src/test/**`, `src/lib/*.corpus.js` and `supabase/{migrations,seed}/*.sql`.
+**`README.md` and `docs/*.md` are not in it** — so the document you are reading, which is where
+Decision 2 is written down, is covered by that decision as a *convention* and by no check at all.
+
+This was found the expensive way. A first draft of the bullet above quoted the owner's real name and
+address verbatim, three paragraphs after this record says *"the values are deliberately not repeated
+here"*, and in the same commit as a new rule forbidding it. Nothing went red. It was caught by
+grepping the diff for the pattern the new script scans for, which is a thing a person has to remember
+to do.
+
+**Widening the corpus to `README.md` and `docs/` was considered here and deliberately not done.** The
+docs legitimately quote fixture names, `PLACEHOLDER_NAMES` entries and issue prose by the hundred, so
+the immediate effect would be a flood of findings that are not defects — the shape this repository
+already records from #170, where widening a source-text guard's corpus from 2 files to 47 produced
+118 findings and not one was a defect. Doing it properly needs the docs' own vocabulary declared
+first, which is a story rather than a paragraph. **Filed as #409**, which replaces this subsection
+when it closes.
+
+**Revisit when** the repository's visibility changes again in either direction; when GitHub gains a
+write-time hook on issue content, which would move the term half from convention to gate; or when a
+household organised by somebody who is not the owner appears on the live project, at which point
+*accept and leave* stops being available as an option for anything.
+
+---
 
 ## What this record does not decide
 

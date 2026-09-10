@@ -4,6 +4,10 @@ import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { signInAddressFor } from '../lib/household.js'
 import { PROBE_MARKER, isProbeFile } from './support/probeFiles.js'
+// #409 — the prose corpus reuses #328's matcher rather than growing a second
+// copy of it. `scan-tracker.mjs` guards its own entry point behind `isMain`, so
+// importing it runs nothing.
+import { classify, UUID_PATTERN } from '../../scripts/scan-tracker.mjs'
 
 // AC 4 of #4: "a test suite containing zero tests must FAIL rather than pass
 // vacuously — an explicit fail-on-empty setting".
@@ -1164,6 +1168,39 @@ describe('#19 — no real household name reaches version control', () => {
   // name-shaped, so it sees `'Alex'` as an object key and is blind to a name
   // inside a sentence. A corpus whose content IS sentences needs the prose
   // assertions in src/lib/extraction.test.js as well as this one.
+  // #409 — `README.md` and `docs/*.md` joined the corpus, and the honest
+  // reading of what that bought is BELOW the widening rather than implied by
+  // it, because the number is much smaller than it looks.
+  //
+  // The gap was found by walking into it (#328): a first draft of
+  // `docs/data-outside-production.md` quoted a real name and address verbatim
+  // into the one document that records the rule forbidding it, and nothing went
+  // red, because the document was in no corpus. That is what this clause fixes.
+  //
+  // *Measured 2026-09-10, before anything was changed*, by widening this filter
+  // and running the two assertions below: 15 files, **4 SHAPE findings and 0
+  // POSITION findings**. Not the flood #170 predicts for a widened source-text
+  // corpus, and not the "hundreds" this story and the docs both estimated. All
+  // four are declared at the end of NOT_NAMES below, and not one was a person
+  // or a household — `Roomy`, `Took`, `Dairy` and `Supermarket API`.
+  //
+  // WHAT THIS CANNOT SEE, and it is most of what prose does. Both scanners
+  // below match STRAIGHT-QUOTED literals, so against Markdown they are nearly
+  // inert. *Measured on a five-case probe planted in `docs/`*: a name in bare
+  // prose — the shape the #328 incident actually took — a name in typographic
+  // quotes, and a name in backticks, which is the ordinary Markdown way of
+  // quoting a value, were ALL missed. Only the two straight-quoted cases were
+  // caught.
+  //
+  // So this clause is worth having and is not sufficient, and the second half
+  // is the `#409` describe below: `classify` from `scripts/scan-tracker.mjs`
+  // reads the same files for UUID- and address-shaped strings, which is a rule
+  // built for prose and is what would have caught the address half of the
+  // incident. The NAME half in bare prose is catchable by no shape rule at all
+  // — no check can recognise a name it has not been shown — and it stays with
+  // `scan:tracker`'s local `--names-file` term half. Saying that plainly is the
+  // point: a check over `docs/` that reads as coverage while missing the defect
+  // it was written for is worse than no check.
   function corpusOf(paths) {
     return paths.filter(
       (path) =>
@@ -1176,7 +1213,9 @@ describe('#19 — no real household name reaches version control', () => {
         (/^src\/.*\.test\.jsx?$/.test(path) ||
           /^src\/test\/.*\.jsx?$/.test(path) ||
           /^src\/lib\/[^/]*\.corpus\.js$/.test(path) ||
-          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
+          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path) ||
+          path === 'README.md' ||
+          /^docs\/[^/]*\.md$/.test(path)),
     )
   }
 
@@ -1200,8 +1239,31 @@ describe('#19 — no real household name reaches version control', () => {
       : withoutBlocks.replace(/(^|[^:])\/\/[^\n]*/g, '$1')
   }
 
+  // Split out from `codeOf` so the positive control below can exercise the
+  // PROSE branch on TEXT — the same reason `stripComments` itself is split out,
+  // and the same reason it needed to be: an unexercised defence is one nobody
+  // has asked. Doing it by planting a `.md` file instead would redden the
+  // README docs-list check, which is a different subject entirely.
+  function strippedFor(path, text) {
+    // #409 — Markdown is stripped of NOTHING, and that is a decision rather
+    // than an omission.
+    //
+    // Stripping exists because a comment quoting a name is prose ABOUT a
+    // fixture and not a fixture. In a document there is no such distinction:
+    // every line is prose, and a real name is exposed by being committed
+    // whatever surrounds it — an HTML comment in `docs/` is in git exactly as
+    // much as a paragraph is.
+    //
+    // Applying the JavaScript rule here — which is what "naively add the
+    // paths" does, since a `.md` path is not `.sql` — would strip everything
+    // after a bare `//` in a sentence, and that is a blind spot pointing the
+    // wrong way: it can only ever HIDE a name, never reveal one.
+    if (path.endsWith('.md')) return text
+    return stripComments(text, path.endsWith('.sql'))
+  }
+
   function codeOf(path) {
-    return stripComments(readFileSync(resolve(process.cwd(), path), 'utf8'), path.endsWith('.sql'))
+    return strippedFor(path, readFileSync(resolve(process.cwd(), path), 'utf8'))
   }
 
   // One to three words, first word capitalised and NOT all-caps — which is what
@@ -1472,6 +1534,23 @@ describe('#19 — no real household name reaches version control', () => {
     // because the whole point is that they are the strings on the buttons.
     Rename: 'the rename control’s visible label in the #360 gesture assertion',
     Archive: 'the archive control’s visible label in the #360 gesture assertion',
+    // #409 — the whole of what widening the corpus to `README.md` and
+    // `docs/*.md` turned up: FOUR literals, none of them a person and none of
+    // them a household. They are recorded here with that count stated, because
+    // the estimate this story was filed on was "hundreds" and the estimate is
+    // what decided the work was a story rather than a paragraph.
+    //
+    // Each is also a fair example of the third triage class — a shape rule
+    // matching prose it was never aimed at. They are DECLARED rather than
+    // narrowed around for the reason the #37 chores above record: the
+    // vocabulary exists to put every name-shaped literal in a diff a person can
+    // look at, and a rule tightened until the noise disappears is a rule that
+    // has stopped asking.
+    Roomy: 'a rebalance SCENARIO name, quoted in prose in docs/rebalance-churn.md',
+    Took: 'a button LABEL, quoted in prose in docs/refresh-charter.md',
+    Dairy: 'a value inside a third-party API response quoted verbatim in docs/shopping-aisle-spike.md',
+    'Supermarket API':
+      'a PRODUCT name from 2011 press coverage, quoted in docs/shopping-aisle-spike.md',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])
@@ -1517,6 +1596,13 @@ describe('#19 — no real household name reaches version control', () => {
     // replaced would read exactly like a working generalisation.
     expect(corpus).toContain('src/lib/allocation.corpus.js')
     expect(corpus).toContain('src/lib/extraction.corpus.js')
+    // #409's two clauses, named individually for the same reason the two
+    // `*.corpus.js` files are. `README.md` in particular is exercised by
+    // NOTHING else: all four findings the widening produced are under `docs/`,
+    // so without this line the README clause could be deleted and every
+    // assertion in this file would still pass.
+    expect(corpus).toContain('README.md')
+    expect(corpus).toContain('docs/data-outside-production.md')
   })
 
   it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {
@@ -1591,6 +1677,17 @@ describe('#19 — no real household name reaches version control', () => {
     expect(shapeOffenders(stripComments(`const x = 'Marguerite'`, false))).toContain('Marguerite')
   })
 
+  it('POSITIVE CONTROL: Markdown is stripped of nothing, so prose after a // is still scanned', () => {
+    // #409. The two branches are given the SAME text, and they must disagree —
+    // which is what makes this a control on the decision rather than on the
+    // matcher. Under the JavaScript rule a document sentence containing a bare
+    // `//` would have everything after it discarded, and that blind spot points
+    // the wrong way: it can only ever hide a name.
+    const text = `a URL-ish path a//b and the organizer was 'Marguerite'`
+    expect(shapeOffenders(strippedFor('docs/anything.md', text))).toContain('Marguerite')
+    expect(shapeOffenders(strippedFor('src/test/anything.test.js', text))).toEqual([])
+  })
+
   it('every NOT_NAMES exemption is still needed', () => {
     // An exemption for a string that has left the corpus is a hole: the next
     // person to use it inherits a pass nobody granted them.
@@ -1623,6 +1720,154 @@ describe('#19 — no real household name reaches version control', () => {
     const images = tracked.filter((path) => IMAGE.test(path))
     expect(images).toEqual(expect.arrayContaining(Object.keys(ALLOWED_ASSETS)))
     expect(images.length).toBe(Object.keys(ALLOWED_ASSETS).length)
+  })
+})
+
+// #409 — the OTHER half of covering `README.md` and `docs/*.md`, and the half
+// that answers the incident.
+//
+// The corpus widening above puts the documents inside Decision 2's literal
+// scans, and *measured*, those scans are nearly inert against prose: they match
+// straight-quoted literals, and a document quotes with backticks, with
+// typographic quotes, or with nothing at all. A five-case probe planted in
+// `docs/` was caught in two cases and missed in three, and the missed three
+// include the shape the #328 incident actually took — a real name and address
+// written into a sentence.
+//
+// So the documents get a rule built for prose as well, and it is deliberately
+// NOT a second name matcher. There is no shape that distinguishes a real name
+// in a sentence from any other capitalised phrase; a matcher for that would
+// flag every proper noun in every document, which is #170's flood arriving for
+// a reason nobody could triage away.
+//
+// What DOES have a shape is the rest of the payload: `classify` from
+// `scripts/scan-tracker.mjs` — #328's tracker scanner — reads UUID- and
+// address-shaped strings. Reused rather than reimplemented, because a second
+// copy of a matcher is a second thing to correct, and this one already carries
+// its own placeholder-domain list, its nil-UUID skip and its attachment-URL
+// exclusion, each with a measured reason.
+//
+// WHAT THIS PAIR STILL CANNOT CATCH, stated because a check over `docs/` that
+// reads as coverage is worse than none: a real household or member NAME written
+// in bare prose. No shape reaches it and no check can recognise a name it has
+// not been shown — which is Decision 2's own founding argument, unchanged. That
+// case belongs to `npm run scan:tracker -- --names-file <path>`, whose term
+// half searches for the live project's actual names and is deliberately local,
+// and to a human reading the diff. This block narrows the gap; it does not
+// close it.
+describe('#409 — no live identifier reaches README.md or docs/*.md', () => {
+  function prosePaths() {
+    return execSync('git ls-files -z --cached --others --exclude-standard', {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+      .split('\0')
+      .filter(Boolean)
+      .filter((path) => path === 'README.md' || /^docs\/[^/]*\.md$/.test(path))
+  }
+
+  const prose = prosePaths()
+
+  // Exemptions, in the shape `NOT_NAMES` uses: a reason in band, and an
+  // assertion below that each is still needed.
+  //
+  // Keyed on the URL PREFIX rather than on the identifier, for the reason
+  // `scan-tracker.mjs`'s own `ATTACHMENT_PREFIX` records: excluding by context
+  // keeps the rule true for the next id somebody pastes, where excluding by
+  // value would exempt exactly one string and silently cover nothing else.
+  // Writing the id here would also put a bare UUID into the file whose subject
+  // is keeping identifiers out of documents.
+  const NOT_LIVE_IDENTIFIERS = {
+    'claude.ai/code/artifact/':
+      'the trailing segment of a Claude artifact URL — it names an artifact on claude.ai, ' +
+      'not a row on the live project. One in docs/refresh-charter.md, and the only finding ' +
+      'the whole prose corpus produced when this block was written (#409).',
+  }
+
+  function escapeForRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  // Blank the id and KEEP the prefix, so the exemption is visibly scoped to an
+  // id that trails one — a bare UUID elsewhere in the same file is untouched,
+  // which the control below is what proves.
+  function withoutDeclaredIdentifiers(text) {
+    let out = text
+    for (const prefix of Object.keys(NOT_LIVE_IDENTIFIERS)) {
+      out = out.replace(new RegExp(escapeForRegExp(prefix) + UUID_PATTERN.source, 'gi'), prefix)
+    }
+    return out
+  }
+
+  function classesIn(path) {
+    const text = withoutDeclaredIdentifiers(readFileSync(resolve(process.cwd(), path), 'utf8'))
+    return [...classify(text)].sort()
+  }
+
+  it('POSITIVE CONTROL: there is a prose corpus, and it holds the documents this is about', () => {
+    // The same guard the #19 corpus carries, for the same reason: an
+    // always-empty scan and a clean tree print identically. Named individually
+    // because a glob that matched only `README.md` would read exactly like a
+    // working one.
+    expect(prose.length).toBeGreaterThan(5)
+    expect(prose).toContain('README.md')
+    expect(prose).toContain('docs/data-outside-production.md')
+    expect(prose).toContain('docs/access-model.md')
+  })
+
+  it('carries no UUID-shaped or address-shaped string', () => {
+    // Reports the PATH and the match CLASS, never the value — `scan-tracker`'s
+    // rule, and it applies here for a sharper reason than it does there. That
+    // script protects a public Actions log; this assertion's message would be
+    // printed by CI *and* pasted into a pull request by whoever fixes it.
+    const offenders = prose
+      .map((path) => ({ path, classes: classesIn(path) }))
+      .filter((row) => row.classes.length)
+      .map((row) => `${row.path} [${row.classes.join(', ')}]`)
+    expect(
+      offenders,
+      'live-identifier shapes in the prose corpus — remove the value from the document; ' +
+        'if it names nothing on the live project, declare its URL prefix in NOT_LIVE_IDENTIFIERS',
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the scan catches an address and an id planted in prose', () => {
+    // Run against TEXT rather than a file, and through the same `classify` the
+    // assertion above uses — a control that builds its own matcher proves the
+    // control rather than the guard.
+    //
+    // The address is the half that matters: it is what the #328 incident put
+    // into `docs/data-outside-production.md`, and it is the case the literal
+    // scans above are measurably blind to, since a sentence does not quote it.
+    const planted = 'written up by somebody at real.person@somewhere.invalid, household 3f2a9c41-77b0-4e19-9d2c-5a1e0b8c4d63'
+    expect([...classify(planted)].sort()).toEqual(['email', 'uuid'])
+    // ...and ordinary documentation prose is not flagged, so the assertion
+    // above is discriminating rather than matching everything.
+    expect([...classify('The organizer opens the Roster tab and taps Add.')]).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the exemption is scoped to an id that TRAILS its prefix', () => {
+    // The failure this rules out is an exemption written wide enough to blank
+    // every id in a file that happens to contain one declared URL — which would
+    // read exactly like a clean file.
+    const id = '3f2a9c41-77b0-4e19-9d2c-5a1e0b8c4d63'
+    const [prefix] = Object.keys(NOT_LIVE_IDENTIFIERS)
+    expect([...classify(withoutDeclaredIdentifiers(`see ${prefix}${id}`))]).toEqual([])
+    expect([...classify(withoutDeclaredIdentifiers(`see ${prefix}${id} and also ${id}`))]).toEqual([
+      'uuid',
+    ])
+  })
+
+  it('every NOT_LIVE_IDENTIFIERS exemption is still needed', () => {
+    // An exemption whose subject has left the corpus is a hole waiting for
+    // somebody to reuse the prefix — `NOT_NAMES`' reasoning, and the same test.
+    const text = prose.map((path) => readFileSync(resolve(process.cwd(), path), 'utf8')).join('\n')
+    const unnecessary = Object.keys(NOT_LIVE_IDENTIFIERS).filter((prefix) => !text.includes(prefix))
+    expect(
+      unnecessary,
+      `these exemptions are no longer needed: ${unnecessary.join(', ')}`,
+    ).toEqual([])
   })
 })
 

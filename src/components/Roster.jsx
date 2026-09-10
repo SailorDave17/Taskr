@@ -678,25 +678,43 @@ CalendarControl.propTypes = {
 }
 
 /**
- * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6.
+ * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6,
+ * rebuilt by #341.
  *
  * Organizer-only, because the Edge Function refuses anybody else and a control
  * that renders for a person who will always be refused is a promise the app
  * cannot keep. The refusal is still the real boundary; this is manners.
  *
- * The organizer types the credential and tells the person out loud (owner
- * decision, #87): a household already understands "your PIN is 1234", and the
- * alternative — generating one and showing it once — needs a surface that
- * displays a secret exactly once and a recovery path for the organizer who
- * looks away. Reset uses this identical control, which is why the copy is the
- * only thing that changes between the two states.
+ * TWO SHAPES NOW, DECIDED BY WHETHER THE ROW HAS AN INBOX.
+ *
+ * A member with a real address gets a single button and no form at all: an
+ * invitation if they have no sign-in, a reset link if they do. The organizer
+ * never chooses, types or reads a credential for another adult — which is what
+ * #341 is, stated three times by the owner before it was filed.
+ *
+ * A member with NO address keeps the form below, and it is unchanged. This is
+ * the reason the old path survives rather than being deleted: `<id>@taskr.invalid`
+ * has no mailbox by construction, so there is nowhere to send anything and a
+ * typed credential is the only thing that can work. #191 retires the ability to
+ * CREATE such a row, and this branch goes with it.
+ *
+ * What the old docblock argued is worth keeping, because it is the decision that
+ * was reversed rather than a detail: "the organizer types the credential and
+ * tells the person out loud (owner decision, #87) — a household already
+ * understands 'your PIN is 1234', and the alternative needs a surface that
+ * displays a secret exactly once and a recovery path for the organizer who looks
+ * away." That was true of a household of children. It stopped being the right
+ * default the moment the people being added were other adults, and the
+ * alternative it rejected is not the one #341 took: nothing displays a secret,
+ * because nobody but the person ever knows one.
  */
-function SignInControl({ member, busy, onProvision }) {
+function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
   const [editing, setEditing] = useState(false)
   const [secret, setSecret] = useState('')
   const [complaint, setComplaint] = useState(null)
 
   const hasSignIn = Boolean(member.claimed_by)
+  const byEmail = isRealEmailMember(member)
 
   function open() {
     setSecret('')
@@ -707,6 +725,56 @@ function SignInControl({ member, busy, onProvision }) {
   function close() {
     setComplaint(null)
     setEditing(false)
+  }
+
+  // #341 AC 1 — one button, no form, nothing that takes a credential.
+  //
+  // Returned before `editing` is consulted at all, rather than as a branch
+  // inside the form: there is no editing state on this path, and leaving the
+  // form reachable behind a flag is how a password field survives a story whose
+  // whole subject is removing it.
+  if (byEmail) {
+    return (
+      <div className="stack">
+        <button
+          className="button button--quiet"
+          type="button"
+          disabled={busy}
+          data-testid={`invite-${member.id}`}
+          aria-label={
+            hasSignIn
+              ? `Email ${member.display_name} a link to set a new password`
+              : `Email ${member.display_name} an invitation`
+          }
+          onClick={() => {
+            setComplaint(null)
+            const run = hasSignIn ? onSendReset(member) : onInvite(member.id)
+            run.then(
+              () =>
+                setComplaint(
+                  hasSignIn
+                    ? `Sent. ${member.display_name} can set a new password from that email.`
+                    : `Invitation sent to ${member.email}.`,
+                ),
+              // The refusal is already on the shell's error strip — the Edge
+              // Function's sentences are surfaced verbatim — so this only has to
+              // avoid an unhandled rejection and NOT clear the note, or a
+              // failure would read as nothing having happened.
+              () => {},
+            )
+          }}
+        >
+          {hasSignIn ? 'Email a reset link' : 'Email an invitation'}
+        </button>
+        {complaint ? (
+          // role="status", not role="alert": this is a confirmation, and the
+          // .error palette stays reserved for faults.
+          <p className="card__note" role="status" data-testid={`invite-note-${member.id}`}>
+            {complaint}
+          </p>
+        ) : null}
+      </div>
+    )
   }
 
   if (!editing) {
@@ -768,18 +836,31 @@ function SignInControl({ member, busy, onProvision }) {
           name-based lookup has ever existed. An organizer following it handed
           over a name and a PIN, and the person could not get in: the address
           the account was minted at is a UUID that appeared on no screen. */}
+      {/* #341 rewrote this and the rewrite is smaller than it looks. Every word
+          about telling somebody their PIN is still here, because on this branch
+          it is still TRUE: this form is now only reached by a member with no
+          address, for whom nothing can be emailed and a spoken credential is the
+          only thing that works. What changed is who reaches it.
+
+          The sentence AC 5 sweeps for is gone from every row that HAS an
+          address, which is what the criterion asks — not gone from the app,
+          which would have left the one member it is true of with no instructions
+          at all. */}
       <p className="card__note" data-testid={`provision-address-${member.id}`}>
         Tell {member.display_name} both of these — they sign in with{' '}
         <strong>{signInAddressFor(member)}</strong> and this PIN. No email is
         sent, and nobody can look the PIN up later.
       </p>
-      {isRealEmailMember(member) ? null : (
-        <p className="card__note">
-          That address is one Taskr made up, because {member.display_name} has no
-          email on their row. It works, and it is long — give them an address
-          above and this becomes something they can type.
-        </p>
-      )}
+      {/* Unconditional now, where it used to be behind `isRealEmailMember`. The
+          branch is not deleted for tidiness: it became UNREACHABLE, because a
+          member with a real address never renders this form at all. Left as a
+          condition it would read as a live choice and quietly always take the
+          same arm — the shape a later reader has no way to tell from a bug. */}
+      <p className="card__note">
+        That address is one Taskr made up, because {member.display_name} has no
+        email on their row. It works, and it is long — give them an address above
+        and Taskr can email them an invitation instead.
+      </p>
       {complaint ? (
         <p className="error" role="alert">
           {complaint}
@@ -808,6 +889,8 @@ SignInControl.propTypes = {
   member: PropTypes.object.isRequired,
   busy: PropTypes.bool,
   onProvision: PropTypes.func.isRequired,
+  onInvite: PropTypes.func.isRequired,
+  onSendReset: PropTypes.func.isRequired,
 }
 
 function MemberRow({
@@ -819,6 +902,8 @@ function MemberRow({
   onSave,
   onRemove,
   onProvision,
+  onInvite,
+  onSendReset,
   onSetCapacity,
   onClearCapacity,
   onProposeCapacity,
@@ -955,7 +1040,13 @@ function MemberRow({
             else, and offering a control that is always refused is worse than
             not offering one. */}
         {isOrganizer && onProvision ? (
-          <SignInControl member={member} busy={busy} onProvision={onProvision} />
+          <SignInControl
+            member={member}
+            busy={busy}
+            onProvision={onProvision}
+            onInvite={onInvite}
+            onSendReset={onSendReset}
+          />
         ) : null}
         {/* The baseline above stays visible beside this week's number on
             purpose: an override that hid what it was overriding would make the
@@ -1074,6 +1165,8 @@ function MemberRow({
 MemberRow.propTypes = {
   isOrganizer: PropTypes.bool,
   onProvision: PropTypes.func,
+  onInvite: PropTypes.func,
+  onSendReset: PropTypes.func,
   member: PropTypes.object.isRequired,
   override: PropTypes.object,
   isMe: PropTypes.bool,
@@ -1115,6 +1208,8 @@ export default function Roster({
   onSave,
   onRemove,
   onProvision,
+  onInvite,
+  onSendReset,
   onRefresh,
   onSignOut,
   overrides = [],
@@ -1266,11 +1361,21 @@ export default function Roster({
             documentation, and this one would have sent an organizer looking for
             a tool that is now sitting on the row in front of them. The
             replacement is not prose — it is the control itself. */}
+        {/* #341 AC 5, and the third reversal this sentence has been through —
+            `docs/access-model.md`'s admission section carries the other two.
+            What it said until now was accurate and is the thing the story
+            removes: "They sign in with that address and a PIN you set — tell
+            them the PIN yourself, because no email is sent."
+
+            Left as a note rather than deleted, because the organizer still needs
+            to know that the address is the thing that matters and that what
+            happens next happens in somebody else's inbox — which is a fact about
+            timing they cannot see from this screen. */}
         {isOrganizer ? (
           <p className="card__note" data-testid="provisioning-note">
-            Add people here with their email address, then give each of them a
-            sign-in from their row. They sign in with that address and a PIN you
-            set — tell them the PIN yourself, because no email is sent.
+            Add people here with their email address, then email each of them an
+            invitation from their row. They choose their own password from that
+            email — you never set one, and never see it.
           </p>
         ) : null}
         {/* #152 — a household whose organizer row is gone. 0016 stops this being
@@ -1326,6 +1431,8 @@ export default function Roster({
                 onSave={onSave}
                 onRemove={onRemove}
                 onProvision={onProvision}
+                onInvite={onInvite}
+                onSendReset={onSendReset}
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
@@ -1549,6 +1656,8 @@ Roster.propTypes = {
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
   onProvision: PropTypes.func,
+  onInvite: PropTypes.func,
+  onSendReset: PropTypes.func,
   onRefresh: PropTypes.func.isRequired,
   onSignOut: PropTypes.func,
   overrides: PropTypes.array,

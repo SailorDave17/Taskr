@@ -996,8 +996,18 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     // Without this the test above passes just as happily against a typo in the
     // pattern, or if the function were deleted — an absence proving nothing.
     // The function lives outside src/, which is the whole point.
+    //
+    // #341 MOVED THE PATH, and this is the THIRD guard in that story keyed on
+    // `provision-member/index.ts` whose subject walked out from under it: the
+    // key is read in `handler.ts` now, and `index.ts` is the platform binding.
+    // The other two behaved differently and the contrast is the lesson —
+    // `edge-function-cors.test.js` reads both files and joins them, so it needed
+    // nothing; `gate.test.js`'s #242 block and this one name one file, and both
+    // had to follow. This one at least failed LOUDLY, because it is a positive
+    // control: it asserts presence, so a subject that moved reads as absent
+    // rather than as clean.
     const fn = readFileSync(
-      resolve(process.cwd(), 'supabase/functions/provision-member/index.ts'),
+      resolve(process.cwd(), 'supabase/functions/provision-member/handler.ts'),
       'utf8',
     )
     expect(fn).toMatch(/SUPABASE_SERVICE_ROLE_KEY/)
@@ -1011,7 +1021,11 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     // environment, and its own test plants a `GOCSPX-` fixture. A typo in any of
     // the four reddens here rather than going quiet in the scan above.
     const outsideSrc = [
-      'supabase/functions/provision-member/index.ts',
+      // #341 — `handler.ts`, not `index.ts`. The name moved with the code, and
+      // pointing this at the binding would leave an entry carrying none of the
+      // patterns, which is exactly the dead-exemption shape the test two above
+      // exists to refuse.
+      'supabase/functions/provision-member/handler.ts',
       'supabase/functions/calendar-connect/handler.ts',
       'supabase/functions/calendar-connect/handler.test.js',
       // #203 — the extraction runner reads ANTHROPIC_API_KEY from its
@@ -1973,8 +1987,16 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
 // This reads the deployed source rather than the client's, deliberately: the
 // client's copy is the one under test everywhere else in the suite, and a guard
 // that reads it would be asserting a thing against itself.
+// #341 MOVED THIS GUARD, and the move is the point rather than a detail. The
+// minting code left `index.ts` for `handler.ts` when the function was split so
+// its mailer-refusal branch could be tested in `npm test`. A guard that names a
+// FILE follows its subject or it stops asking anything — and this one would not
+// have failed quietly: its own positive control asserts the source is over 1000
+// characters and contains `createUser`, and the new `index.ts` is neither. That
+// is the difference between this and `edge-function-cors.test.js`, which reads
+// `index.ts` and `handler.ts` and joins them, and so needed no change at all.
 describe('#242 — the client and the Edge Function agree on the synthetic address', () => {
-  const FUNCTION_SOURCE = 'supabase/functions/provision-member/index.ts'
+  const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
 
   // Built rather than written out, so this file does not itself contain the
   // literal it is hunting — the same reason the token block above builds its

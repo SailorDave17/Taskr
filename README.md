@@ -20,9 +20,12 @@ This is a **rebuild in progress**, tracked by epic
 from this file.
 
 **What is live today**: an installable page where a household is created, people are added with
-their weekly available minutes **and their email address**, each person signs in on their own phone
-with that address and an organizer-set PIN, typed into the password box,
-and the household's chores are recorded as titled units of expected minutes with a due date. Chores can be marked done and
+their weekly available minutes **and their email address**, each person is emailed an invitation and
+**sets their own password** from it — the organizer never chooses or sees one — and each then signs
+in on their own phone with that address. A member added without an email address is the one exception
+and keeps the organizer-set PIN, because a synthetic `@taskr.invalid` address has no inbox to send
+anything to.
+The household's chores are recorded as titled units of expected minutes with a due date. Chores can be marked done and
 un-done, with the completion moment stamped by the database's clock rather than the phone's, so a
 phone with the wrong date cannot move work between weeks. Each chore can be **given to a person**.
 

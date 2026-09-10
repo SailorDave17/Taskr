@@ -1581,9 +1581,10 @@
   written against names alone would have called this project healthy while every household creation
   in the app failed.
 
-## Read this first — the decision below changed, twice
+## Read this first — the decision below changed, three times
 
-Two supersessions, and the second undoes an assumption the first was built on.
+Three supersessions. The second undoes an assumption the first was built on; the third takes away the
+organizer's part in it.
 
 1. **2026-08-05 → 2026-08-06.** The original decision was *a household join code plus anonymous auth,
    pick yourself from the roster*. It was overridden in favour of **per-member credentials**: an
@@ -1592,6 +1593,36 @@ Two supersessions, and the second undoes an assumption the first was built on.
    auth users**, which is what the section below calls the upgrade path and explicitly does not
    reject on principle. Its stated blocker — *"the Supabase CLI is not installed, Docker is not
    running"* — is what changed, not the reasoning.
+3. **2026-08-11 → 2026-09-09 (#341). The organizer no longer chooses anybody's credential.** A member
+   with a real address is sent an **invitation** and sets their own password from it; a member with a
+   sign-in already is sent a **reset link** and does the same. The organizer never types, sees or
+   passes on a password for another adult.
+
+   **What this reverses is a decision rather than a mechanism**, and #87 stated it plainly enough to
+   quote: *"the organizer types the credential and tells the person out loud — a household already
+   understands 'your PIN is 1234', and the alternative needs a surface that displays a secret exactly
+   once and a recovery path for the organizer who looks away."* That reasoning was sound for a
+   household of children. It stopped being the right default once the people being added were other
+   adults, and the alternative it rejected is **not** the one taken here: nothing displays a secret,
+   because nobody except the person ever knows one.
+
+   **What did NOT change**, and this is the part a reader will assume wrongly:
+
+   - **The email-less member keeps the PIN path exactly as described below.** `<id>@taskr.invalid` has
+     no mailbox by construction, so there is nothing to send and a spoken credential is the only
+     thing that can work. `provision-member`'s `provision` action survives for that row alone and is
+     **refused for any member with a real address**. #191 retires the ability to create such a row,
+     and the action goes with it.
+   - **`members.email` is still the discriminator**, and it now decides which of two *surfaces* an
+     organizer sees as well as which address the account is reached at.
+   - **The authorization shape is untouched.** `provision-member` was split into `handler.ts` and a
+     platform binding so its refusal branches could be tested without Docker; the caller-scoped read
+     and the `is_household_organizer` check on the member's own household row moved unchanged.
+   - **The reset link needs no Edge Function and no `service_role`.** A reset mail is a request about
+     an ADDRESS, so GoTrue takes it from the anon key — and answers identically whether or not the
+     address is known, which is deliberate on its side and stops the call being an oracle for which
+     addresses have accounts. The organizer is therefore told the mail was *sent*, never that it
+     reached somebody real.
 
 **What #62 actually changes**, in the order it matters:
 

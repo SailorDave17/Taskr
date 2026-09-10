@@ -2190,6 +2190,83 @@ test body rather than by `beforeAll`, so a count derived by reading setup cannot
 > the dashboard's user search — that search has been observed returning *"No users found"* for an
 > address present in the unfiltered list seconds earlier, so it cannot prove an absence.
 
+## What a story may record about the live project
+
+**Decided 2026-09-10, story #328.** This is the one copy;
+[`docs/data-outside-production.md`](data-outside-production.md) Decision 5 carries the reasoning and
+links here rather than restating it.
+
+**The tracker is public.** It went public with the repository on or before 2026-08-30, and every
+issue, comment and pull request body on it is world-readable. Thirteen issues had to be redacted
+under #328, at fifteen places.
+
+**Ten of those fifteen were written before the repository went public, and five were written after** —
+*measured 2026-09-10 from each place's own `created_at`*, the dates are in
+[`docs/data-outside-production.md`](data-outside-production.md) Decision 5. The last of them was
+written **2026-09-08, nine days after the surface changed and two days before this rule**.
+
+That distinction is the reason this section exists in the form it does, and an earlier draft of it got
+the fact wrong in the flattering direction — it said all thirteen predated the change and that *"not
+one of them was a mistake at the time"*. For ten places that is true and worth saying: each was
+recorded under a criterion that asked for exactly what it recorded, and the surface moved underneath a
+correct habit. For the other five, nobody decided anything; **the habit simply carried on after the
+ground moved**, which is what habits do. A rule that assumes the first story would be a reminder. This
+is a rule.
+
+### The rule
+
+A story, a comment, a pull request body and a commit message may **describe** anything about the live
+project. What they may not do is **name** the four things below.
+
+1. **A row id** — `households.id`, `members.id`, an `auth.users` id, or anything else a UUID from the
+   live project. Write what it is, not what it is: *"the second household's organizer's member row"*
+   carries every bit of meaning *"`9b61d912-…`"* does, to every reader who matters.
+2. **A household's name.** The real one is a family surname. The synthetic ones name live rows too,
+   and are included because a reader cannot tell them apart from the outside.
+3. **A member's address**, including a plus-alias on the owner's own inbox. An alias is not an
+   anonymisation; it is the same inbox with a label.
+4. **A synthetic address that encodes a row id.** A provisioned member's `…@taskr.invalid` is a
+   `members.id` with a domain stuck on it, so it is rule 1 wearing a disguise. This is the clause
+   most likely to be missed, because such an address *looks* like the safe kind.
+
+**What to write instead.** A stable label naming the role — *household 1*, *the organizer's member
+id*, *the orphaned auth user* — and the measurement itself in full. #328's redaction used
+`[redacted #328 — household 1 id]`, and the labels are entity-scoped, so a household's name and its
+id share an index and a table still reads as one household. Nothing about a measurement's value is
+carried by the identifier it was taken from.
+
+**A count, a timestamp, a timezone, an error code, a display name and a household's member count are
+all fine**, and this is worth stating because the instinct after reading the list above is to write
+nothing at all. The rule is about identifiers, not about detail; a story that records less than it
+measured is the failure this whole repository is arranged against.
+
+### Where the exception is, and it is narrow
+
+`.env.local`, the live database and this machine. Nowhere else — and specifically **not** a GitHub
+Actions secret, which is why the tracker scan's term half does not run in CI. Creating a third home
+for these values in order to detect their publication is the trade Decision 2 exists to refuse.
+
+### What enforces it
+
+**A detective check, and nothing preventive.** `npm run scan:tracker`
+([`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs)) reads the whole tracker and reports which
+items carry identifier-shaped strings, printing item numbers and match classes only — a public
+repository has public Actions logs, so a check that printed what it caught would publish it a second
+time. [`.github/workflows/tracker-scan.yml`](../.github/workflows/tracker-scan.yml) runs its shape
+half on every event that writes tracker text — the trigger list is in the workflow, which is the
+one copy of it.
+
+**Rules 1, 3 and 4 are covered by shape and rule 2 is not** — a household name is an ordinary English
+phrase and only a term search finds it, which needs the names. So rule 2 is a convention with a local
+instrument (`--names-file`), and the script prints which halves ran on every invocation so a
+term-less run cannot be read as a clean one.
+
+**Nothing can refuse an issue before it is stored.** GitHub has no write-time hook on issue content,
+so the earliest anything here fires is seconds after publication. The honest claim is *a value that
+lands here is found*, never *a value cannot land here* — and the difference matters, because
+`gate.test.js`'s Decision 2 guard genuinely is preventive for version control and the two read alike
+from a distance.
+
 ## What is not done
 
 ### Correction, 2026-08-09 — this section was wrong in both directions at once

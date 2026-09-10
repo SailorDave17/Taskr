@@ -342,7 +342,7 @@ export default function App() {
   // hidden costs the charter's ambition 4.
   const [fairnessNoteDismissed, setFairnessNoteDismissed] = useState(false)
   // #47 criterion 11 — which surface is on screen. `useState`, not a router and
-  // not a state library: this app has neither, adding one to move between three
+  // not a state library: this app has neither, adding one to move between the
   // views would be the largest dependency in the repo, and the URL is already
   // spoken for — Google returns a calendar consent to the app ROOT with a
   // `?code=`, and the PWA's scope is `/`.

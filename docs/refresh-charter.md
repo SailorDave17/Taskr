@@ -510,18 +510,36 @@ Owner decision at the pickup of #47, whose criterion 11 required "the navigation
 recorded in the decision log". This is that record.
 
 - **Three surfaces — Split, Chores, Who — as a tab strip in `App.jsx`, with the current view held in
-  `useState`.** *(Four since 2026-09-01: #302 added Done — see that decision below.)* The split opens
+  `useState`.** *(Five as of 2026-09-09: #302 added Done and #353 added Shop — see those decisions
+  below. `SURFACES` in `App.jsx` is the count that is true; this parenthetical has been behind it
+  once already, which is what misled #175's criteria.)* The split opens
   by default, which is not a new decision: the grooming section above
   settled it on 2026-08-06 ("the load surface opens by default, with the roster reachable from it").
   What #47 settled is the *mechanism*.
-- ~~**Why not a router.** `react-router` would be the largest dependency in the repo, added to move
-  between three views of one household. It also wants the URL, and the URL is already spoken for:
+- **Why not a router.** `react-router` would be the largest dependency in the repo, added to move
+  between the views of one household. It also wants the URL, and the URL is already spoken for:
   Google returns a calendar consent to the app **root** with a `?code=` (#95), the PWA's scope is
   `/`, and a path-based route would need a rewrite rule at Vercel to behave the way the root already
   does. Rejected on cost, not on principle — the moment a surface needs to be linkable from outside
-  the app, this decision is the one to reopen.~~ **Superseded 2026-08-26 — see the decision section
-  below.** The stated condition fired exactly as written: an invitation has to be openable from an
-  email, which is a surface linkable from outside the app. The rest of this section stands.
+  the app, this decision is the one to reopen.
+
+  **This bullet was struck through as superseded on 2026-08-26 and is reinstated 2026-09-09.** It is
+  left in place rather than tidied away, because what was believed in between is worth having. The
+  supersession's reason was that "an invitation has to be openable from an email, which is a surface
+  linkable from outside the app", and it asserted the reopen condition above had "fired exactly as
+  written". #175 (`react-router`, 3 engineer-days) and #176 (confirm the deploy rewrite, 0.25) were
+  filed under it and epic #253 framed around it.
+
+  **The condition had not fired, and #341 is why.** *Measured at #175's pickup*: the emailed
+  invitation lands on the bare root — `provision-member/handler.ts` calls `inviteUserByEmail` with
+  `redirectTo` set to the origin the app is running on, and `App.jsx` reads the link's `type=invite`
+  off the same fragment as the `#access_token`, returning the Choose-your-password surface before the
+  shell renders. An invitation is openable from an email today, on `/`, with no router, no
+  `vercel.json` and no route table. A surface linkable from outside the app is a *sufficient* reason
+  to want a router; it was not a *necessary* consequence of wanting the invitation, and the
+  supersession collapsed the two. #175 and #176 are closed as not planned, retiring 3.25
+  engineer-days. The condition itself is unchanged and still stands as written — it is the thing to
+  re-evaluate against the code, rather than a claim that it fired.
 - **Why not a state library.** There is no state to share: `App.jsx` holds every read and hands the
   results down. A library here would be ceremony around one string.
 - **Why not keep the surfaces stacked on one page**, which is what the app did until this story and

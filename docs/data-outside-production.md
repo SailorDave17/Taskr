@@ -212,6 +212,16 @@ taps that control, which is one tap after a deploy. Annotated in place rather th
 file's own idiom: what was believed when the re-read was taken stays visible. The re-read this owes
 is **#401**.)*
 
+*(**Two more corrections to the same sentence, 2026-09-09, annotated in place for the same reason.**
+First, **#341 shipped a mechanism that reaches the membership side for one case**: re-inviting an
+address whose auth user is still PENDING returns that same user and claims it onto a member row in a
+second household — measured in `src/test/provisioning.functions.test.js`, *re-inviting a PENDING
+address returns the same account rather than a second one*. So the list of open issues above is no
+longer the whole answer to *what could create this state*; an ESTABLISHED account is still refused,
+which is the half that remains. Second, **#169 was not superseded — only #168 was.** #169's own
+routing comment of the same date says #341 cannot replace it, because #341 refuses precisely its
+subject. #168 is closed as not planned; #169 stands, behind `#171 → #172 → #173`.)*
+
 ### Revisit when
 
 - **Vercel changes what *Standard Protection* exempts.** This arrangement rests on a measured

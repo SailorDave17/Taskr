@@ -380,11 +380,20 @@ describe('#87 — provisioning a member, against a real stack', () => {
     const theirs = await makeHousehold()
 
     // Putting the caller on the other roster needs `service_role`, and that is
-    // not a shortcut: there is NO public path that attaches an EXISTING auth
-    // user to a second member row. `provision-member` mints a new one, which is
-    // the gap #191 and #168 both record. So this state is unreachable through
-    // the app today — which is exactly why #161 lands before the affordance
-    // that makes it reachable, rather than after.
+    // not a shortcut — but the reason it is not changed under #341 and the old
+    // one is worth not re-deriving. This used to read "there is NO public path
+    // that attaches an EXISTING auth user to a second member row". Since #341
+    // there is one, and it is measured in this file: *re-inviting a PENDING
+    // address returns the same account rather than a second one* claims an
+    // existing auth user onto a member row in another household, 200.
+    //
+    // It stays out of reach HERE because the caller's account is ESTABLISHED —
+    // `makeHousehold` signs up with a password — and `inviteUserByEmail` refuses
+    // an address in that state, measured in the test above this one. So the
+    // fixture still needs `service_role` to reach the state, which is why #161
+    // lands before the affordance that makes it reachable rather than after.
+    // #168 recorded the gap and was retired superseded; #191 records the half
+    // that is left.
     const { data: identity } = await mine.organizer.auth.getUser()
     const housemate = await theirs.addMember('Housemate', 60)
     const svc = serviceClient()

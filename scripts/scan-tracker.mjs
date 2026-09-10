@@ -120,6 +120,14 @@ export function isPlaceholderDomain(domain) {
  * The classes of live identifier `text` carries. Returns class NAMES, never the
  * matched values — see the header. `terms` are literal strings (household names,
  * member addresses) read from the live project at run time.
+ *
+ * SECOND CONSUMER, since #409: `src/test/gate.test.js` imports this to read
+ * `README.md` and `docs/*.md` for the same two shapes. Decision 2's literal
+ * scans match straight-quoted strings and are therefore nearly inert against
+ * prose, so the documents needed a rule built for prose and this is it, reused
+ * rather than copied. A change here changes what the CI gate refuses in a
+ * document — which is the intended coupling, and is worth knowing before
+ * narrowing either pattern.
  */
 export function classify(text, terms = []) {
   const hits = new Set()

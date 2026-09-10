@@ -277,17 +277,22 @@ the precise thing being prevented.
 
 ### What enforces it, and what it cannot see
 
-Three assertions in `src/test/gate.test.js`, deliberately with **different blind spots** — none is
+Four assertions in `src/test/gate.test.js`, deliberately with **different blind spots** — none is
 sufficient alone:
 
 | assertion | catches | blind to |
 |---|---|---|
-| **Shape scan** — every capitalised-word-shaped literal in the fixture corpus must be declared | a name in *any* position, including syntax the check was never taught | a name written in lower case |
+| **Shape scan** — every capitalised-word-shaped literal in the corpus must be declared | a name in *any* position, including syntax the check was never taught | a name written in lower case; anything not in straight quotes |
 | **Position scan** — every person-name-shaped literal in a name *position* (`create_household` arg 2, `organizerName`, `displayName`, `name:`, `h.name =`) must be declared, case-insensitively | `name: 'alex'` | a position not on the list |
+| **Prose scan** — no UUID- or address-shaped string in `README.md` or `docs/*.md` (#409, reusing #328's `classify`) | a live row id or a member address written into a document, quoted or not | a real *name* in a sentence, which has no shape |
 | **Asset scan** — no tracked image outside the manifest's icon set | a committed screenshot | an image outside the extension list |
 
-The corpus is discovered from `git ls-files`, not hard-coded, so a new test file is scanned the day
-it lands.
+The corpus is discovered from `git ls-files` plus untracked-not-ignored files, not hard-coded, so a
+new file is scanned the day it lands. It is **two corpora**: the fixture corpus
+(`src/**/*.test.jsx?`, `src/test/**`, `src/lib/*.corpus.js`, `supabase/{migrations,seed}/*.sql`),
+and — since #409 — the prose corpus (`README.md`, `docs/*.md`), which the first two assertions also
+read. Why the prose corpus needs a rule of its own, and what the pair still cannot reach, is in *The
+gap found by walking into it* below.
 
 **None of the three can tell a real name from a plausible one.** They enforce that the vocabulary is
 *declared*, which converts the failure from "somebody committed a real name" into "somebody added a
@@ -725,26 +730,60 @@ preventive. What a story may record in the first place is in
 [`docs/access-model.md`](access-model.md) under *What a story may record about the live project* —
 linked rather than copied, so there is one copy to correct.
 
-#### And a gap found by walking into it: `docs/` is outside Decision 2's own guard
+#### The gap found by walking into it, and what closed it: `docs/` is inside the guard now
 
-*Measured 2026-09-10, while writing this section.* `gate.test.js`'s name corpus is
-`src/**/*.test.jsx?`, `src/test/**`, `src/lib/*.corpus.js` and `supabase/{migrations,seed}/*.sql`.
-**`README.md` and `docs/*.md` are not in it** — so the document you are reading, which is where
-Decision 2 is written down, is covered by that decision as a *convention* and by no check at all.
+This subsection recorded an open gap until #409 closed it on 2026-09-10. What follows is what was
+decided, and the estimate that turned out to be wrong is kept rather than quietly dropped, because it
+is the reason the work was deferred at all.
 
-This was found the expensive way. A first draft of the bullet above quoted the owner's real name and
-address verbatim, three paragraphs after this record says *"the values are deliberately not repeated
-here"*, and in the same commit as a new rule forbidding it. Nothing went red. It was caught by
-grepping the diff for the pattern the new script scans for, which is a thing a person has to remember
-to do.
+**How it was found.** A first draft of the bullet above quoted the owner's real name and address
+verbatim, three paragraphs after this record says *"the values are deliberately not repeated here"*,
+and in the same commit as a new rule forbidding it. Nothing went red — `README.md` and `docs/*.md`
+were in no corpus, so the document that *records* Decision 2 was covered by it as a convention and by
+no check. It was caught by grepping the diff, which is a thing a person has to remember to do.
 
-**Widening the corpus to `README.md` and `docs/` was considered here and deliberately not done.** The
-docs legitimately quote fixture names, `PLACEHOLDER_NAMES` entries and issue prose by the hundred, so
-the immediate effect would be a flood of findings that are not defects — the shape this repository
-already records from #170, where widening a source-text guard's corpus from 2 files to 47 produced
-118 findings and not one was a defect. Doing it properly needs the docs' own vocabulary declared
-first, which is a story rather than a paragraph. **Filed as #409**, which replaces this subsection
-when it closes.
+**The estimate that deferred it was wrong by two orders of magnitude, and that is the finding worth
+carrying.** #328 predicted a flood — the docs quote fixture names and `PLACEHOLDER_NAMES` entries by
+the hundred, and this repository already records #170, where a source-text corpus widened from 2
+files to 47 produced 118 findings and not one was a defect. *Measured 2026-09-10 with the real guard,
+before anything was changed*: **15 files, 4 shape findings, 0 position findings.** All four were
+declared, and **not one was a person or a household** — a rebalance scenario name, a button label, a
+value inside a quoted third-party API response, and a product name from press coverage. The estimate
+was expensive and the measurement cost one run.
+
+**Why it was so small, which is the same reason it was not sufficient.** Both of Decision 2's literal
+scans match *straight-quoted* strings, and prose does not quote that way. *Measured on a five-case
+probe planted in `docs/`*: a name in bare prose, a name in typographic quotes, and a name in
+backticks were **all missed**; only the two straight-quoted cases were caught. The bare-prose case is
+the shape the incident above actually took. So widening the corpus alone would have given `docs/` a
+check that could not catch the defect it was written for, while reading as coverage.
+
+**So the documents are covered by two rules, not one:**
+
+| rule | catches | blind to |
+|---|---|---|
+| The **literal scans** above, corpus widened to `README.md` and `docs/*.md` | a fixture-style quoted literal pasted into a document | anything not in straight quotes, which is most of prose |
+| A **prose scan** — `classify` from [`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs), the #328 tracker matcher, reading the same files for UUID- and address-shaped strings | the *address* half of the incident above, and any live row id | a real name in a sentence |
+
+The prose scan is reused rather than reimplemented: a second copy of a matcher is a second thing to
+correct, and that one already carries its placeholder-domain list, its nil-UUID skip and its
+attachment-URL exclusion, each with a measured reason. Markdown is stripped of **nothing** before
+either scan — comment-stripping exists because a comment quoting a name is prose *about* a fixture,
+and in a document every line is prose, so stripping could only ever hide a name.
+
+**What no check here reaches, stated plainly.** A real household or member **name written in bare
+prose**. No shape distinguishes it from any other capitalised phrase, and a matcher for that would
+flag every proper noun in every document — #170's flood, arriving for a reason nobody could triage
+away. This is Decision 2's founding argument unchanged: no check can recognise a name it has not been
+shown. That case belongs to `npm run scan:tracker -- --names-file <path>`, whose term half searches
+for the live project's actual names and is deliberately local, and to a human reading the diff. The
+pair narrows the gap; it does not close it, and a reader should not take a green suite as saying
+otherwise.
+
+One exemption exists, declared in band with its reason and asserted still needed the way `NOT_NAMES`
+entries are: a UUID that trails a Claude artifact URL names an artifact rather than a row here. It is
+keyed on the URL **prefix** rather than on the id, so it stays true for the next such link — and so
+that the file whose subject is keeping identifiers out of documents does not itself carry one.
 
 **Revisit when** the repository's visibility changes again in either direction; when GitHub gains a
 write-time hook on issue content, which would move the term half from convention to gate; or when a

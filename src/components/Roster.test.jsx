@@ -2371,3 +2371,84 @@ describe('#172 — the invitation card follows the organizer role', () => {
     expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
   })
 })
+
+// #173 — the "Join another household" card, the other half of #166's pair.
+describe('#173 — joining another household with a code', () => {
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'me' }
+  const card = () => within(screen.getByRole('region', { name: /join another household/i }))
+  const fillAndSubmit = async (code = 'k7m3qp4rwn') => {
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: code } })
+    await clickAndSettle(card().getByRole('button', { name: /join household/i }))
+  }
+
+  it('is not offered at all when no handler is wired — the state before this story', () => {
+    setup({ me })
+    expect(
+      screen.queryByRole('region', { name: /join another household/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('sits after the start-another card, so the pair reads in order of likelihood', () => {
+    setup({
+      me,
+      onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }),
+      onJoinHousehold: vi.fn().mockResolvedValue({ id: 'm9' }),
+    })
+    const start = screen.getByRole('region', { name: /start another household/i })
+    const join = screen.getByRole('region', { name: /join another household/i })
+    expect(start.compareDocumentPosition(join) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('prefills this person’s name from their own member row, editable', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    expect(card().getByLabelText(/join as/i)).toHaveValue('Placeholder One')
+  })
+
+  it('is disabled until a code is typed', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: '   ' } })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+  })
+
+  it('is disabled when the name is cleared, even with a code', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: 'k7m3qp4rwn' } })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: '  ' } })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+  })
+
+  it('hands the code over as typed with the prefilled name — normalisation is the data layer’s', async () => {
+    const onJoinHousehold = vi.fn().mockResolvedValue({ id: 'm9' })
+    setup({ me, onJoinHousehold })
+    await fillAndSubmit('  K7M3QP4RWN ')
+    expect(onJoinHousehold).toHaveBeenCalledWith('  K7M3QP4RWN ', { name: 'Placeholder One' })
+  })
+
+  it('hands over a name the person typed instead', async () => {
+    const onJoinHousehold = vi.fn().mockResolvedValue({ id: 'm9' })
+    setup({ me, onJoinHousehold })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: 'Housemate' } })
+    await fillAndSubmit()
+    expect(onJoinHousehold).toHaveBeenCalledWith('k7m3qp4rwn', { name: 'Housemate' })
+  })
+
+  it('clears the code once the join succeeds, and the name goes back to the prefill', async () => {
+    setup({ me, onJoinHousehold: vi.fn().mockResolvedValue({ id: 'm9' }) })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: 'Housemate' } })
+    await fillAndSubmit()
+    expect(card().getByLabelText(/invitation code/i)).toHaveValue('')
+    expect(card().getByLabelText(/join as/i)).toHaveValue('Placeholder One')
+  })
+
+  it('keeps the code in the field when the join is refused', async () => {
+    setup({ me, onJoinHousehold: vi.fn().mockRejectedValue(new Error('refused')) })
+    await fillAndSubmit()
+    expect(card().getByLabelText(/invitation code/i)).toHaveValue('k7m3qp4rwn')
+  })
+
+  it('is offered to a member who is NOT the organizer — joining is everybody’s act', () => {
+    setup({ me, isOrganizer: false, onJoinHousehold: vi.fn() })
+    expect(screen.getByRole('region', { name: /join another household/i })).toBeInTheDocument()
+  })
+})

@@ -1230,6 +1230,8 @@ export default function Roster({
   busyComplaint = null,
   // #166 — optional, and its absence renders exactly what #163 shipped.
   onCreateHousehold = null,
+  // #173 — optional, the #166 shape: join another household with a code.
+  onJoinHousehold = null,
   // #172 — the organizer's invitation card. Optional in the #166 shape: a roster
   // with no minter wired renders exactly what shipped before, so a test about
   // something else is not suddenly carrying a card it never asked for.
@@ -1262,6 +1264,13 @@ export default function Roster({
   const [anotherName, setAnotherName] = useState('')
   const [organizerOverride, setOrganizerOverride] = useState(null)
   const anotherOrganizer = organizerOverride ?? myName
+  // #173 — the code typed into the join-another-household card, and the name
+  // to join under: the `organizerOverride ?? myName` shape above, for its
+  // reason — prefilled from this person's row here, editable, and following
+  // a rename until they type their own answer.
+  const [joinCode, setJoinCode] = useState('')
+  const [joinNameOverride, setJoinNameOverride] = useState(null)
+  const joinName = joinNameOverride ?? myName
   // #291 — the second sign-out is two taps, matching the Remove idiom below.
   // Not because it is destructive to data (it is not) but because it is
   // destructive to a session you are not holding: the point of pressing it is
@@ -1676,6 +1685,78 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #173 — join ANOTHER household with a code, from inside one. The
+          other half of #166's pair: starting a second household is the
+          organizer's act, and being invited into one is everybody else's, so
+          the two cards sit together at the foot of this surface and read in
+          the order of likelihood. AC 7's whole subject — a person in two
+          households, with the switcher listing both — is reachable by a
+          person only through this card; the other two entry points serve
+          somebody who is in no household yet. Optional in the wiring for the
+          same reason as the card above. */}
+      {onJoinHousehold ? (
+        <section className="card" aria-labelledby="join-household-heading">
+          <h2 id="join-household-heading" className="card__heading">
+            Join another household
+          </h2>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              onJoinHousehold(joinCode, { name: joinName }).then(
+                () => {
+                  setJoinCode('')
+                  // Back to the live prefill, never to blank — the create
+                  // card's reason exactly.
+                  setJoinNameOverride(null)
+                },
+                // A refused code stays in the field, beside the sentence that
+                // refused it, so the person can see what they typed.
+                () => {},
+              )
+            }}
+          >
+            <p className="card__note">
+              Been given a code for a different household? Type it here and
+              you are in both &mdash; move between them from the name at the
+              top of the screen. A household is allowed to know you by a
+              different name.
+            </p>
+            <label className="field">
+              <span className="field__label">Invitation code</span>
+              <input
+                className="field__input"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+                maxLength={64}
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Join as</span>
+              <input
+                className="field__input"
+                value={joinName}
+                onChange={(e) => setJoinNameOverride(e.target.value)}
+                maxLength={40}
+                autoComplete="off"
+              />
+            </label>
+            <button
+              className="button"
+              type="submit"
+              disabled={busy || !joinCode.trim() || !joinName.trim()}
+            >
+              Join household
+            </button>
+          </form>
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -1712,6 +1793,7 @@ Roster.propTypes = {
   busyWeeks: PropTypes.array,
   busyComplaint: PropTypes.string,
   onCreateHousehold: PropTypes.func,
+  onJoinHousehold: PropTypes.func,
   invitations: PropTypes.array,
   mintedCode: PropTypes.string,
   onMintInvitation: PropTypes.func,

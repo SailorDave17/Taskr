@@ -293,11 +293,17 @@ const invitationsApi = {
   listInvitations: vi.fn(),
   mintInvitation: vi.fn(),
   withdrawInvitation: vi.fn(),
+  // #173 — the redeemer's half. Its fake carries the CODE for the argument
+  // reason above: what proves the held code was applied is this being called
+  // with the code that was held, and a fake that only recorded the call could
+  // not tell that from a redemption of whatever was in the field.
+  redeemInvitation: vi.fn(),
 }
-// The redeemable flag ships FALSE (no code can be spent until #173), which
-// would hide the card from every test below. A getter, the idiom the
-// `supabase.js` mock uses for `hasSupabaseConfig`: on by default in the shared
-// beforeEach, and the one test about the flag turns it off.
+// The redeemable flag ships TRUE since #173 (it was FALSE from #172 until then,
+// so that a promotion between the two stories could not put an unspendable
+// code in front of organizers). A getter, the idiom the `supabase.js` mock uses
+// for `hasSupabaseConfig`: on by default in the shared beforeEach, and the one
+// test about the flag turns it OFF to prove the gate still holds.
 const invitationFlags = { redeemable: true }
 vi.mock('./lib/invitations.js', async () => {
   const actual = await vi.importActual('./lib/invitations.js')
@@ -1286,9 +1292,11 @@ describe('#172 — the invitation card, through App', () => {
   })
 
   it('the flag — no card and no read while an invitation cannot yet be redeemed', async () => {
-    // Owner decision at the review escalation, 2026-09-10: until #173 ships
-    // redemption the card is not wired, so a promotion of develop cannot put an
-    // unspendable code in front of real organizers.
+    // Owner decision at the review escalation, 2026-09-10: the card is wired
+    // only while this is true. It WAS false from #172 until #173 shipped
+    // redemption, so a promotion of develop between them could not put an
+    // unspendable code in front of real organizers; the gate stays as the
+    // record of that coupling, and this test forces it off to prove it holds.
     invitationFlags.redeemable = false
     api.listHouseholds.mockResolvedValue([HOME])
     await renderApp('Who')
@@ -7249,5 +7257,556 @@ describe('#341 — following an invitation, from App', () => {
 
     expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('#173 — redeeming an invitation code, from App', () => {
+  const PENDING_KEY = 'taskr.pendingInvitation'
+  const CHOICE_KEY = 'taskr.activeHousehold'
+  const alone = [
+    { id: 'm1', display_name: 'Placeholder Everywhere', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const joinedRow = { id: 'm9', household_id: HOUSEHOLD_TWO.id, display_name: 'New member' }
+  const inTwo = [
+    { id: 'm9', display_name: 'Placeholder Three', weekly_minutes: 0, claimed_by: 'person-a' },
+    { id: 'm10', display_name: 'Placeholder Other Organizer', weekly_minutes: 30, claimed_by: 'person-b' },
+  ]
+  const UNUSABLE =
+    'That code cannot be used — it may have expired, been withdrawn, or already been used. Ask whoever gave it to you for a fresh one.'
+
+  const click = async (element) => act(async () => void fireEvent.click(element))
+  const codeField = (scope = screen) => scope.getByLabelText(/invitation code/i)
+  const nameField = (scope = screen) => scope.getByLabelText(/join as/i)
+  const joinButton = (scope = screen) => scope.getByRole('button', { name: /join household/i })
+  const fillJoin = (scope = screen, code = 'k7m3qp4rwn', name = 'Placeholder Three') => {
+    fireEvent.change(codeField(scope), { target: { value: code } })
+    fireEvent.change(nameField(scope), { target: { value: name } })
+  }
+  /** What `pendingInvitation.js` writes — the shape the boot reads. */
+  const hold = (code = 'k7m3qp4rwn', name = 'Placeholder Three') =>
+    window.localStorage.setItem(PENDING_KEY, JSON.stringify({ code, name }))
+
+  /** The write succeeds and the read that follows sees the new household — `mutate()`'s shape. */
+  const redemptionJoins = (from = []) =>
+    invitationsApi.redeemInvitation.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([...from, HOUSEHOLD_TWO])
+      return joinedRow
+    })
+
+  let scrollTo
+
+  beforeEach(() => {
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : alone))
+    api.updateMember.mockResolvedValue({})
+    scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    scrollTo.mockRestore()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 1 — signed in, no household: the join card
+  // -------------------------------------------------------------------------
+
+  it('AC 1: a signed-in person with no household is offered the join card beside the household form', async () => {
+    await renderApp()
+    expect(await screen.findByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Start a household' })).toBeInTheDocument()
+  })
+
+  it('AC 1: entering a code creates the member row through the function and the app switches to that household', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    // The shell, on the household the code named — and no client insert.
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(api.addMember).not.toHaveBeenCalled()
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: the joined household is the one this device now remembers', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+    await screen.findByText('Placeholder Other Household')
+
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // The name — #191 AC 2's half that sits on this surface
+  // -------------------------------------------------------------------------
+
+  it('renames the row the function created to the name the person chose, after the join', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin(screen, 'k7m3qp4rwn', ' Placeholder Three ')
+    await click(joinButton())
+    await screen.findByText('Placeholder Other Household')
+
+    expect(api.updateMember).toHaveBeenCalledTimes(1)
+    expect(api.updateMember).toHaveBeenCalledWith('m9', { displayName: 'Placeholder Three' })
+    // ORDER: the join first, then the rename — the row has to exist to be renamed.
+    expect(invitationsApi.redeemInvitation.mock.invocationCallOrder[0]).toBeLessThan(
+      api.updateMember.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('a refused rename does not undo the join — the person lands in the household and is told', async () => {
+    redemptionJoins()
+    api.updateMember.mockRejectedValue(new Error('saving the change: permission denied'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your name could not be saved/i)
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 2 and AC 3 — refusals
+  // -------------------------------------------------------------------------
+
+  it('AC 2: an existing member is refused with a sentence saying the code was not spent, and stays where they were', async () => {
+    invitationsApi.redeemInvitation.mockRejectedValue(
+      new Error('You are already in that household, so the code was left unused.'),
+    )
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/left unused/)
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    // The code stays in the field beside the sentence that refused it, and
+    // nothing was renamed.
+    expect(codeField()).toHaveValue('k7m3qp4rwn')
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: an unusable code is refused with the one sentence, naming no household', async () => {
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/cannot be used/)
+    expect(alert).not.toHaveTextContent(/Placeholder/)
+    expect(alert).not.toHaveTextContent(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 4 — the code survives the leave-for-inbox round trip, on this device
+  // -------------------------------------------------------------------------
+
+  it('AC 4: signed out, the join link takes the code and the name FIRST and keeps them on this device', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    await click(screen.getByRole('button', { name: /join a household/i }))
+
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    fireEvent.change(codeField(), { target: { value: '  K7M3QP4RWN\t' } })
+    fireEvent.change(nameField(), { target: { value: ' Placeholder Three ' } })
+    await click(screen.getByRole('button', { name: /keep this code/i }))
+
+    // Normalised into storage, and nothing redeemed — there is no session.
+    expect(JSON.parse(window.localStorage.getItem(PENDING_KEY))).toEqual({
+      code: 'k7m3qp4rwn',
+      name: 'Placeholder Three',
+    })
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // Back on the sign-in card, which says the code is held.
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.getByTestId('held-invitation-note')).toHaveTextContent(/saved on this device/i)
+  })
+
+  it('AC 4: a held code is applied on sign-in without being re-typed, under the held name, then forgotten', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // ONE tap, naming the held name, and nothing typed again (AC 4's letter).
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    expect(api.updateMember).toHaveBeenCalledWith('m9', { displayName: 'Placeholder Three' })
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: the confirmation link opened in THIS browser offers the held code at boot, one tap applies it', async () => {
+    // Back from the inbox: the client picked the session up off the URL, the
+    // person has no household yet, and this device is still holding the code.
+    // The offer, not a silent apply — the account that signed in is not
+    // necessarily the one that held the code (review escalation, 2026-09-11).
+    hold()
+    redemptionJoins()
+    await renderApp()
+
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 5 — what the mechanism guarantees in a DIFFERENT browser
+  // -------------------------------------------------------------------------
+
+  it('AC 5: the confirmation link opened in a DIFFERENT browser finds no code — nothing is redeemed and the join form is shown', async () => {
+    // The mechanism is `localStorage` on the device that entered the code
+    // (pendingInvitation.js), so another browser holds nothing. The guarantee
+    // is that the person is shown the join form and types the code again —
+    // asserted here rather than left to the happy path above.
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    await renderApp()
+
+    expect(await screen.findByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // And typing it there works exactly as if it had been carried.
+    redemptionJoins()
+    fillJoin()
+    await click(joinButton())
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+  })
+
+  it('a held code that is refused is forgotten, so a boot cannot loop on it', async () => {
+    hold()
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot be used/)
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    // The join form is there for the next attempt, which is theirs to make.
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+  })
+
+  it('a held code does not outlive the session on a shared tablet — sign-out forgets it', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /join another household/i })
+    // Left behind by somebody else on this device, after this boot's read.
+    hold()
+
+    api.signOut.mockImplementation(async () => {
+      api.currentUserId.mockResolvedValue(null)
+      api.listHouseholds.mockResolvedValue([])
+    })
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 7 — a second household, from inside the first
+  // -------------------------------------------------------------------------
+
+  it('AC 7: a person already in a household is offered a way to join another', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    expect(
+      await screen.findByRole('region', { name: /join another household/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('AC 7: after joining, the switcher lists both and the newly joined one is active', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+
+    const switcher = await screen.findByRole('combobox', { name: /^household$/i })
+    expect(within(switcher).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Placeholder Household',
+      'Placeholder Other Household',
+    ])
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  it('AC 7: the join scrolls to the top, where the switcher names the new household', async () => {
+    // Owner decision at the design pass, 2026-09-11: from the roster card the
+    // person was ~2,300px down and, after the re-read, still there — looking
+    // at the NEW household's "Start another household" card with nothing in
+    // view saying they had moved. jsdom has no layout, so the scroll is
+    // asserted as a request.
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    expect(scrollTo).not.toHaveBeenCalled()
+    await click(joinButton(card))
+    await screen.findByRole('combobox', { name: /^household$/i })
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+  })
+
+  it('a refused join scrolls nowhere — the sentence is beside the control', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+    await screen.findByText(/cannot be used/)
+
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('AC 7: the first household’s notices do not come along — the switch path’s rule', async () => {
+    // A re-balance announcement about household ONE must not stand over TWO's
+    // surfaces after the join, for exactly `chooseHousehold`'s reason (#164's
+    // finding 6, whose fixture this is): a refresh never clears it, so only
+    // the join path can. The precondition below is what keeps this from
+    // passing on a page that never had one.
+    const rebalanced = {
+      ...HOUSEHOLD_ONE,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: false,
+        jobsMoved: 1,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: '2026-08-27T18:00:00+00:00',
+      },
+    }
+    const inOne = [
+      { id: 'm1', household_id: rebalanced.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+      { id: 'm2', household_id: rebalanced.id, display_name: 'Placeholder Two', weekly_minutes: 300, claimed_by: null },
+    ]
+    api.listHouseholds.mockResolvedValue([rebalanced])
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : inOne))
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOUSEHOLD_TWO.id
+        ? []
+        : [
+            { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+            { id: 'c2', title: 'Placeholder Other Chore', expected_minutes: 50, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+          ],
+    )
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: {
+        members: [
+          { id: 'm1', minutes: 90, capacityMinutes: 420 },
+          { id: 'm2', minutes: 50, capacityMinutes: 300 },
+        ],
+      },
+      seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+    })
+    redemptionJoins([rebalanced])
+    await renderApp('Who')
+    // The precondition: the announcement really is on screen before the join.
+    await screen.findByTestId('rebalance-announcement')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+    await screen.findByRole('combobox', { name: /^household$/i })
+
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // The review round's three behaviour findings
+  // -------------------------------------------------------------------------
+
+  it('a refusal on the strip is answered by the person’s next join attempt on the no-household screen', async () => {
+    // Review finding: App's error prop has no setter on the screen, so a
+    // refusal stayed under the form after the person moved on. What THIS test
+    // exercises: a signed-in join refused (the strip shows), then a second
+    // attempt submitted — the old sentence must be gone before the new call
+    // resolves. The signed-out move-between-views case, and a NEW App
+    // sentence showing after the old one was answered, are the Onboarding
+    // component tests' (`Onboarding.test.jsx`, the latch describe).
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+    // The held code is offered, taken, and refused; the person is on the
+    // no-household screen with the strip.
+    await click(await screen.findByRole('button', { name: /^join as placeholder three$/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot be used/)
+
+    // Their next act — typing and trying again — answers the old sentence
+    // before the new call resolves.
+    invitationsApi.redeemInvitation.mockImplementation(() => new Promise(() => {}))
+    fillJoin()
+    await click(joinButton())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a held code is offered only after the sign-in’s own refresh has settled', async () => {
+    // Review finding: keyed on `userId` alone, the effect fired mid-refresh
+    // and the redemption ran while the sign-in's read of household ONE was
+    // still writing ONE's seen marker. The split-seen read is held open here;
+    // nothing may be offered, let alone redeemed, until it resolves.
+    let release
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
+    hold()
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+      return { user: { id: 'person-a' } }
+    })
+    announceApi.readSplitSeen.mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve(null) }),
+    )
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // The sign-in's refresh is parked on the seen-marker read, with the id set.
+    expect(api.currentUserId).toHaveBeenCalled()
+    expect(release).toBeTypeOf('function')
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+
+    await act(async () => release())
+    // Settled: the member of ONE is now offered the code — above ONE's shell.
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(screen.getByText('Placeholder Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+    await waitFor(() => expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('combobox', { name: /^household$/i })).toHaveValue(HOUSEHOLD_TWO.id)
+  })
+
+  it('Not me forgets the held code without spending it, and leaves the join form', async () => {
+    // The shared-tablet ordering the sign-out clear does not cover (review
+    // escalation, owner decision 2026-09-11): B held a code and left for the
+    // inbox; A signs in first. A must be able to decline, and the code must
+    // not be redeemed on A's account.
+    hold()
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    await click(within(confirm).getByRole('button', { name: /^not me$/i }))
+
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('a boot that FAILED after setting the session offers nothing, and keeps its own reason', async () => {
+    // Review finding: the effect ran after a boot whose refresh threw past
+    // `setUserId` — an organizer whose invitations read alone refused — and a
+    // redemption's refusal replaced the boot's sentence. `listInvitations` is
+    // the one uncaught read after the id is set, and it runs only for the
+    // organizer of an existing household.
+    const organised = { ...HOUSEHOLD_ONE, organizer_member_id: 'm1' }
+    api.listHouseholds.mockResolvedValue([organised])
+    invitationsApi.listInvitations.mockRejectedValue(new Error('loading the invitations: the network went away'))
+    hold()
+    await renderApp()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/the network went away/)
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // The code is still held for a boot that succeeds.
+    expect(window.localStorage.getItem(PENDING_KEY)).not.toBeNull()
+  })
+
+  it('the held note follows the store when another tab changes it', async () => {
+    // Review finding: `heldInvitation` was a mount-time snapshot. Another tab
+    // redeeming, being refused on, or signing out clears the same key, and
+    // this tab kept promising a code that was gone.
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+
+    window.localStorage.removeItem(PENDING_KEY)
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: PENDING_KEY, newValue: null }))
+    })
+    expect(screen.queryByTestId('held-invitation-note')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /join a household/i })).toBeInTheDocument()
+
+    // And the other direction: a code held in another tab shows here.
+    hold()
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: PENDING_KEY, newValue: 'x' }))
+    })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 10 — the organizer's card is back
+  // -------------------------------------------------------------------------
+
+  it('AC 10: with redemption shipped the organizer’s invitation card renders again', async () => {
+    // The flag is read through the module, not through the test's getter, so
+    // this is the real constant: TRUE since this story.
+    const real = await vi.importActual('./lib/invitations.js')
+    expect(real.INVITATIONS_REDEEMABLE).toBe(true)
   })
 })

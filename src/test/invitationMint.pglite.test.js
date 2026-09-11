@@ -109,14 +109,21 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
   })
 
   describe('AC 2 — the digest the browser computes is the digest redemption recomputes', () => {
-    it('byte-equals digest(lower(btrim(code))) for fifty generated codes', async () => {
+    // The server's expression, as `0041` (#173) spells it. `0040` wrote
+    // `btrim($2)` — spaces only — and the first draft of this file measured
+    // the client disagreeing with it on a tab; `0041` widened the server to
+    // the four characters below and the client to match, so the cross-check
+    // now runs against the expression that is actually on the server.
+    const SERVER_NORMALISED = `extensions.digest(lower(btrim($2, E' \\t\\r\\n')), 'sha256')`
+
+    it('byte-equals digest(lower(btrim(code, …))) for fifty generated codes', async () => {
       // The direct cross-check. Fifty rather than one because a normalisation
       // mismatch only shows on a code that the mismatch touches, and the
       // generator is what decides which characters appear.
       for (let i = 0; i < 50; i += 1) {
         const code = generateInvitationCode()
         const { rows } = await db.query(
-          `select $1::text::bytea = extensions.digest(lower(btrim($2)), 'sha256') as same`,
+          `select $1::text::bytea = ${SERVER_NORMALISED} as same`,
           [await hashInvitationCode(code), code],
         )
         expect(rows[0].same, code).toBe(true)
@@ -128,7 +135,7 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
       // normalised form, so both ends land on one digest.
       const code = '  K7M3QP4RWN '
       const { rows } = await db.query(
-        `select $1::text::bytea = extensions.digest(lower(btrim($2)), 'sha256') as same`,
+        `select $1::text::bytea = ${SERVER_NORMALISED} as same`,
         [await hashInvitationCode(code), code],
       )
       expect(rows[0].same).toBe(true)
@@ -137,22 +144,26 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
     it('and for one carrying a TAB — the input on which the first draft disagreed', async () => {
       // The finding this file produced on its first run. The first
       // `normalizeInvitationCode` used JavaScript's `trim()`, which strips tabs
-      // and newlines; `btrim` does not. This exact input hashed to two
+      // and newlines; `btrim(code)` did not. This exact input hashed to two
       // different digests, which is the "code that cannot be redeemed" `0040`'s
-      // header warns about. Kept as a case of its own rather than folded into
-      // the one above, so the input that found it stays named.
+      // header warns about — and #172 narrowed the client to spaces to match.
+      // Since `0041` BOTH ends trim the tab, so the two agree here for the
+      // opposite reason from before; the input stays named because it is the
+      // one that found the class. `invitationWhitespace.pglite.test.js` carries
+      // the positive control that `0040`'s expression still disagrees on it.
       const code = '  K7M3QP4RWN\t'
       const { rows } = await db.query(
-        `select $1::text::bytea = extensions.digest(lower(btrim($2)), 'sha256') as same`,
+        `select $1::text::bytea = ${SERVER_NORMALISED} as same`,
         [await hashInvitationCode(code), code],
       )
       expect(rows[0].same).toBe(true)
     })
 
     it('PLATFORM FACT: btrim with one argument trims spaces and nothing else', async () => {
-      // Pinned because the whole agreement above rests on it, and because it is
-      // the fact the first draft got wrong. If a Postgres upgrade ever widened
-      // the default set, this reddens before the cross-check does and says why.
+      // Pinned because `0041` exists because of it, and because it is the fact
+      // the first draft got wrong. If a Postgres upgrade ever widened the
+      // default set, this reddens and says why — the two-argument form `0041`
+      // uses would then be redundant rather than wrong.
       const { rows } = await db.query(
         `select btrim(E'  x\\t') = E'x\\t' as keeps_tab,
                 btrim(E'\\nx ') = E'\\nx' as keeps_newline,
@@ -169,7 +180,7 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
       // which showed normalisation matters to SHA-256 and never that the
       // comparison actually asserted above could come back false.
       const { rows } = await db.query(
-        `select $1::text::bytea = extensions.digest(lower(btrim($2)), 'sha256') as same`,
+        `select $1::text::bytea = ${SERVER_NORMALISED} as same`,
         [await hashInvitationCode('k7m3qp4rwn'), 'k7m3qp4rwm'],
       )
       expect(rows[0].same).toBe(false)

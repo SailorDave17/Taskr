@@ -419,6 +419,9 @@ describe('#85 — the RPC list cannot fall behind the code either', () => {
       'unpurchase_shopping_item',
       // #354 — the run's closer and the next run's opener, arriving with `0033`.
       'finish_shopping_run',
+      // #173 — the redeemer's half of admission, the one route into a household
+      // the caller is not yet in. Arrived with its call site, not its migration.
+      'redeem_invitation',
     ]) {
       expect(LIVE_RPC_NAMES).toContain(fn)
     }

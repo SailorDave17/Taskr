@@ -1240,6 +1240,10 @@ export default function Roster({
   onMintInvitation = null,
   onWithdrawInvitation = null,
   onDismissMintedCode = null,
+  // #430 — the organizer's "Delete this household". Optional in the #166
+  // shape: a roster with no handler wired renders exactly what it did.
+  onDeleteHousehold = null,
+  deletionGraceDays = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -1277,6 +1281,9 @@ export default function Roster({
   // to end a session on a device that is not in front of you, and a mis-tap
   // ends one that is.
   const [confirmingSignOutAll, setConfirmingSignOutAll] = useState(false)
+  // #430 — deleting the household is two taps, the Remove idiom: the mistake
+  // it guards is one tap on the wrong control.
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -1757,6 +1764,56 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #430 — deleting the household, in its own card at the BOTTOM of the
+          Who tab, after everything done here week to week. It first sat in the
+          household card under Sign out, looking like one of them; the owner
+          moved it at design-bar (2026-09-11). Confirm-in-place, and the
+          confirm says what goes and that it can be undone for a while. */}
+      {isOrganizer && onDeleteHousehold ? (
+        <section className="card" aria-labelledby="delete-household-heading">
+          <h2 id="delete-household-heading" className="card__heading">
+            Delete this household
+          </h2>
+          {confirmingDelete ? (
+            <div className="row">
+              <p className="card__note" data-testid="delete-household-warning">
+                Everyone in {household.name} loses it at once: its people, chores,
+                shopping lists and calendar connections. You can restore it for{' '}
+                {deletionGraceDays} days; after that it is deleted for good.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingDelete(false)
+                  onDeleteHousehold(household.id)
+                }}
+                disabled={busy}
+              >
+                Delete {household.name}?
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={busy}
+              >
+                Keep it
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={busy}
+            >
+              Delete this household
+            </button>
+          )}
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -1799,4 +1856,6 @@ Roster.propTypes = {
   onMintInvitation: PropTypes.func,
   onWithdrawInvitation: PropTypes.func,
   onDismissMintedCode: PropTypes.func,
+  onDeleteHousehold: PropTypes.func,
+  deletionGraceDays: PropTypes.number,
 }

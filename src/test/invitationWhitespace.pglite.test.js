@@ -223,8 +223,14 @@ describe('0041 — what the replace changed, and what it preserved', () => {
     return rows[0]
   }
 
+  // Through 0041, not the whole list: this block's subject is what 0041 does,
+  // and since 0042 (#430) replaces `redeem_invitation` again, "re-applying 0041
+  // changes nothing" is only true of a database that stops at 0041. On the full
+  // list, re-applying it takes 0042's pending-deletion refusal away, which is
+  // 0042's re-paste hazard and is asserted in householdDeletion.pglite.test.js.
+  // `databaseThrough`'s own docblock names this as the honest setting.
   beforeEach(async () => {
-    db = await freshDatabase()
+    db = await databaseThrough(MIGRATION)
   })
 
   it('widens the normalisation and nothing else about the function’s shape', async () => {

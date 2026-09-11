@@ -26,6 +26,11 @@ import {
   signOut,
   signUpOrganizer,
   updateMember,
+  // #430 — deleting and restoring a household.
+  GRACE_PERIOD_DAYS,
+  householdDeletionStatus,
+  requestHouseholdDeletion,
+  restoreHousehold,
 } from './lib/household.js'
 import {
   clearActiveHouseholdChoice,
@@ -128,6 +133,7 @@ import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
 import ChoosePassword from './components/ChoosePassword.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
+import PendingDeletion from './components/PendingDeletion.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
 import Split from './components/Split.jsx'
@@ -394,6 +400,10 @@ export default function App() {
   // from it"), and it is the whole reason the tabs exist rather than a stack:
   // the thing judged at arm's length has to be the thing on screen.
   const [view, setView] = useState('split')
+  // #430 — households this person organizes that are pending deletion: what
+  // the restore banner shows. Read once at boot and after each delete or
+  // restore, not on every refresh (#351 priced a round trip at 562 ms).
+  const [pendingDeletions, setPendingDeletions] = useState([])
   // #358 — which shopping list the Shop tab is showing, held HERE and beside
   // `view` for the reason the tab strip is here: `Shopping` unmounts the moment
   // another tab is chosen, so a choice held inside it would last exactly as
@@ -845,7 +855,14 @@ export default function App() {
         }
 
         const found = await requestRefresh()
+        // #430 — the restore banner's boot-time read. A failure here must not
+        // keep anybody out of their household, so it reads as "none pending".
+        const pending = await Promise.resolve()
+          .then(() => householdDeletionStatus())
+          .then((rows) => (Array.isArray(rows) ? rows : []))
+          .catch(() => [])
         if (!cancelled) {
+          setPendingDeletions(pending)
           // #154 — the entry decision has ONE implementation, beside the screen
           // it picks, and its three branches are proven in Onboarding.test.jsx.
           setStatus(
@@ -1256,6 +1273,26 @@ export default function App() {
         return result
       }),
     [mutate],
+  )
+  // #430 — delete and restore a household. Both through mutate, so the list
+  // is re-read and the shell lands on onboarding when the last household
+  // goes; then the banner's status is re-read, because the household it
+  // names is no longer in the list mutate reads.
+  const refreshPendingDeletions = useCallback(
+    () =>
+      Promise.resolve()
+        .then(() => householdDeletionStatus())
+        .then((rows) => setPendingDeletions(Array.isArray(rows) ? rows : []))
+        .catch(() => {}),
+    [],
+  )
+  const handleDeleteHousehold = useCallback(
+    (id) => mutate(() => requestHouseholdDeletion(id)).then(refreshPendingDeletions),
+    [mutate, refreshPendingDeletions],
+  )
+  const handleRestoreHousehold = useCallback(
+    (id) => mutate(() => restoreHousehold(id)).then(refreshPendingDeletions),
+    [mutate, refreshPendingDeletions],
   )
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
@@ -2442,6 +2479,17 @@ export default function App() {
         </section>
       ) : null}
 
+      {/* #430 — the way back from deleting a household, ABOVE onboarding and
+          the tabs alike: deleting your only household lands you on
+          onboarding, and undoing it is the one thing you might want next. */}
+      {(status === 'joined' || status === 'onboarding') && pendingDeletions.length ? (
+        <PendingDeletion
+          pending={pendingDeletions}
+          onRestore={handleRestoreHousehold}
+          busy={busy}
+        />
+      ) : null}
+
       {status === 'onboarding' ? (
         <Onboarding
           onCreate={handleCreate}
@@ -2570,6 +2618,9 @@ export default function App() {
           onSendReset={handleSendReset}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
+          // #430 — the organizer's "Delete this household".
+          onDeleteHousehold={handleDeleteHousehold}
+          deletionGraceDays={GRACE_PERIOD_DAYS}
           // #166 — the affordance that did not exist. Owner decision at pickup:
           // its own card on this surface rather than an entry inside the
           // switcher or a second control on the shell row, because the shell

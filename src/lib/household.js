@@ -42,6 +42,47 @@ function unwrap({ data, error }, whatWeWereDoing) {
 }
 
 /**
+ * #430 — how many days a household pending deletion can still be restored.
+ *
+ * The database's `household_grace_period()` (migration 0042) is the authority;
+ * this is the number the confirm and the banner say out loud, and
+ * `householdDeletion.test.js` reads the migration and fails if they differ.
+ */
+export const GRACE_PERIOD_DAYS = 7
+
+/**
+ * Schedule the household for deletion — organizer only, refused otherwise by
+ * the RPC. It disappears for every member at once and is purged for good when
+ * the grace period ends, unless restored first.
+ */
+export async function requestHouseholdDeletion(householdId) {
+  return unwrap(
+    await getSupabase().rpc('request_household_deletion', { household_id: householdId }),
+    'scheduling the household for deletion',
+  )
+}
+
+/** Bring back a household pending deletion, while its grace period lasts. */
+export async function restoreHousehold(householdId) {
+  return unwrap(
+    await getSupabase().rpc('restore_household', { household_id: householdId }),
+    'restoring the household',
+  )
+}
+
+/**
+ * The households this person organizes that are pending deletion, soonest
+ * purge first: `{ household_id, household_name, deletion_requested_at, purge_after }`.
+ * Read through an RPC because such a household is no longer selectable.
+ */
+export async function householdDeletionStatus() {
+  return (
+    unwrap(await getSupabase().rpc('household_deletion_status'), 'reading households pending deletion') ??
+    []
+  )
+}
+
+/**
  * The same, plus the two member-write failures that are worth naming — #242.
  *
  * Both come from constraints `0007` added with `members.email`, and both reach

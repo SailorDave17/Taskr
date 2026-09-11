@@ -165,6 +165,24 @@ body {
   color: var(--ink-dim);
 }
 
+/* #425 — "Report a problem", on its own line ABOVE the build stamp. Above, so
+   the footer still ends with `build <sha>`, which README tells a reader to look
+   for. Its own line, because it is the footer's one control, and a control here
+   is at least 44px tall however small its text.
+
+   Colour: the footer's own dim ink, underlined the way .button--link is. Not
+   --accent, which is 3:1 against --bg — short of 4.5:1 for text this small —
+   and not the browser's default link blue, which is off-palette. */
+.shell__report {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 /* ---------------------------------------------------------------------------
    Household roster — story #5.
 

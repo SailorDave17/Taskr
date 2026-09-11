@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildInfo } from './buildInfo.js'
+import { reportHref, reportScreen } from './lib/reportProblem.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
 import { attachVisibilityRefresh, createReadQueue, subscribeToHousehold } from './lib/realtime.js'
 import {
@@ -2719,6 +2720,19 @@ export default function App() {
       ) : null}
 
       <footer className="shell__footer">
+        {/* #425 — a mailto the person reads and sends themselves; see
+            lib/reportProblem.js for why its fields are an allowlist. */}
+        <a
+          className="shell__report"
+          href={reportHref({
+            build: buildInfo.commit,
+            environment: buildInfo.env,
+            screen: reportScreen({ status, view, surfaces: SURFACES }),
+            browser: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
+          })}
+        >
+          Report a problem
+        </a>
         <span>{buildInfo.name}</span>
         <span aria-hidden="true"> · </span>
         <span>{buildInfo.env}</span>

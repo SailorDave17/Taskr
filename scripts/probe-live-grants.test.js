@@ -556,5 +556,13 @@ describe('reconcileTableAcls is the control on the role a revoke could hit by mi
     // #208 — the second table the client cannot name, and the same reasoning.
     expect(covered).toContain('extraction_calls')
     expect(LIVE_TABLES).not.toContain('extraction_calls')
+    // #171 — the third, and it is here for a DIFFERENT reason worth keeping
+    // distinct: the two above are readable by nobody, while `invitations` is
+    // readable by the household's organizer. It is absent from LIVE_SCHEMA
+    // because #171 ships no client code — the reads arrive with #172, and the
+    // story that adds them adds the entry. Asserted as a pair so the entry
+    // cannot be added here and quietly forgotten there, or the reverse.
+    expect(covered).toContain('invitations')
+    expect(LIVE_TABLES).not.toContain('invitations')
   })
 })

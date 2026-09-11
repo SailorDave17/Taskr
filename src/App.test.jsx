@@ -281,6 +281,35 @@ vi.mock('./lib/realtime.js', async () => {
   return { ...actual, ...realtimeApi }
 })
 
+// #172 — the three IMPURE invitation functions. `outstandingInvitations`,
+// `normalizeInvitationCode` and the code generator stay REAL for the standing
+// reason: pure, own tests, and the list a person reads should be filtered by the
+// rule the data layer uses. The fakes RECORD THEIR ARGUMENTS (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`): a mint must name
+// the household on screen AND the organizer's own member row in it, and a fake
+// that recorded only the call could not tell that from a mint naming the first
+// household by name or somebody else's row.
+const invitationsApi = {
+  listInvitations: vi.fn(),
+  mintInvitation: vi.fn(),
+  withdrawInvitation: vi.fn(),
+}
+// The redeemable flag ships FALSE (no code can be spent until #173), which
+// would hide the card from every test below. A getter, the idiom the
+// `supabase.js` mock uses for `hasSupabaseConfig`: on by default in the shared
+// beforeEach, and the one test about the flag turns it off.
+const invitationFlags = { redeemable: true }
+vi.mock('./lib/invitations.js', async () => {
+  const actual = await vi.importActual('./lib/invitations.js')
+  return {
+    ...actual,
+    ...invitationsApi,
+    get INVITATIONS_REDEEMABLE() {
+      return invitationFlags.redeemable
+    },
+  }
+})
+
 const { default: App } = await import('./App.jsx')
 
 // The REAL pure halves, for building #50's expected snapshot the same way
@@ -399,6 +428,17 @@ beforeEach(() => {
   // unless a test pushes something through the handlers it recorded.
   realtimeApi.subscribeToHousehold.mockReset()
   realtimeApi.subscribeToHousehold.mockImplementation(() => ({ close: vi.fn() }))
+  // #172 — no invitation outstanding, which is the ordinary state. The mint
+  // hands back a code from the real alphabet so a test reading it off the screen
+  // reads a string the app could actually have produced.
+  Object.values(invitationsApi).forEach((fn) => fn.mockReset())
+  invitationsApi.listInvitations.mockResolvedValue([])
+  invitationsApi.mintInvitation.mockResolvedValue({
+    code: 'k7m3qp4rwn',
+    invitation: { id: 'inv-1', household_id: 'h1' },
+  })
+  invitationsApi.withdrawInvitation.mockResolvedValue(undefined)
+  invitationFlags.redeemable = true
 })
 
 afterEach(() => {
@@ -1013,6 +1053,350 @@ describe('#160 — identity and organizer within the active household', () => {
     const expectedRow = lastScoped === householdA.id ? 'Placeholder One' : 'Placeholder Three'
     const badge = await screen.findByText(/· you/)
     expect(badge.closest('li')).toHaveTextContent(expectedRow)
+  })
+})
+
+describe('#172 — the invitation card, through App', () => {
+  // `person-a` ORGANISES one household and merely BELONGS to the other — #160's
+  // shape, and AC 6's whole subject: the control must follow the organizer
+  // role in the ACTIVE household, not the person. Reusing #160's names so the
+  // #19 vocabulary needs nothing new.
+  const HOME = {
+    id: 'household-a',
+    name: 'Placeholder Household',
+    organizer_member_id: 'm-a1',
+    timezone: 'America/New_York',
+  }
+  const AWAY = {
+    id: 'household-b',
+    name: 'Placeholder Other Household',
+    organizer_member_id: 'm-b1',
+    timezone: 'America/New_York',
+  }
+  const rosterHome = [
+    { id: 'm-a1', household_id: HOME.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm-a2', household_id: HOME.id, display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' },
+  ]
+  const rosterAway = [
+    { id: 'm-b2', household_id: AWAY.id, display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm-b1', household_id: AWAY.id, display_name: 'Placeholder Other Organizer', weekly_minutes: 200, claimed_by: 'person-b' },
+  ]
+  const invitationRow = (id) => ({
+    id,
+    household_id: HOME.id,
+    created_by_member_id: 'm-a1',
+    created_at: '2026-09-10T19:04:00.000Z',
+    expires_at: '2099-09-17T19:04:00.000Z',
+    withdrawn_at: null,
+    redeemed_at: null,
+    redeemed_by_member_id: null,
+  })
+
+  const switcher = () => screen.getByRole('combobox', { name: /^household$/i })
+  const switchTo = async (id) =>
+    act(async () => void fireEvent.change(switcher(), { target: { value: id } }))
+  const click = async (element) => act(async () => void fireEvent.click(element))
+
+  beforeEach(() => {
+    api.listMembers.mockImplementation(async (id) =>
+      id === HOME.id ? rosterHome : id === AWAY.id ? rosterAway : [],
+    )
+    invitationsApi.mintInvitation.mockResolvedValue({
+      code: 'k7m3qp4rwn',
+      invitation: { id: 'inv-1', household_id: HOME.id },
+    })
+  })
+
+  it('AC 1 / AC 3 — reads the organizer’s invitations for the household on screen, and offers the card', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-9')])
+    await renderApp('Who')
+
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(invitationsApi.listInvitations).toHaveBeenCalledWith(HOME.id)
+    expect(screen.getByTestId('invitation-inv-9')).toBeInTheDocument()
+  })
+
+  it('AC 5 — a plain member of the active household gets no card, and App never asks for the rows', async () => {
+    api.listHouseholds.mockResolvedValue([AWAY])
+    await renderApp('Who')
+    // The identity RESOLVED — they are somebody here — so the absence below is
+    // "not the organizer" and not "nobody", which is a different state.
+    const badge = await screen.findByText(/· you/)
+    expect(badge.closest('li')).toHaveTextContent('Placeholder Three')
+
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+    // The read is not made at all. The policy would answer it with nothing, so
+    // this is the round trip #351 priced, not the guard — the guard is proven
+    // in invitationMint.pglite.test.js through the exact statement.
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalled()
+  })
+
+  it('AC 6 — the card follows the organizer role in the ACTIVE household, not the person', async () => {
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+
+    await switchTo(AWAY.id)
+    // Same person, same session — and in the household they merely belong to,
+    // no card and no read on its behalf.
+    await waitFor(() => expect(api.listMembers).toHaveBeenCalledWith(AWAY.id))
+    await waitFor(() => expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument())
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalledWith(AWAY.id)
+
+    await switchTo(HOME.id)
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+  })
+
+  it('AC 2 — minting names the household on screen and the organizer’s own row in it, then shows the code', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    // The ARGUMENTS, not the call: a mint naming the first household by name, or
+    // somebody else's member row, is the fault #159 measured on `addMember`.
+    expect(invitationsApi.mintInvitation).toHaveBeenCalledWith({
+      householdId: HOME.id,
+      createdByMemberId: 'm-a1',
+    })
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+    // The code lands together with its row, because it is set after the re-read.
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('AC 2 — a refused mint shows the refusal and no code', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    invitationsApi.mintInvitation.mockRejectedValue(new Error('creating the invitation: permission denied'))
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission denied/i)
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — withdrawing the invitation whose code is on screen takes the code away with it', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    invitationsApi.listInvitations.mockResolvedValue([])
+    const item = screen.getByTestId('invitation-inv-1')
+    await click(within(item).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(item).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-1')
+    // A withdrawn code is dead; leaving it on screen would invite somebody to
+    // read out a code the server now refuses.
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('invitation-inv-1')).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — withdrawing a DIFFERENT invitation leaves the shown code where it is', async () => {
+    // The other direction of the same condition. Without it, a version that
+    // cleared the code on ANY withdrawal would pass the test above.
+    api.listHouseholds.mockResolvedValue([HOME])
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-2')])
+    await renderApp('Who')
+    await screen.findByTestId('invitation-inv-2')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1'), invitationRow('inv-2')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    const older = screen.getByTestId('invitation-inv-2')
+    await click(within(older).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(older).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-2')
+    await waitFor(() => expect(screen.queryByTestId('invitation-inv-2')).not.toBeInTheDocument())
+    expect(screen.getByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+  })
+
+  it('AC 2 — a code minted for one household does not survive a switch, even back to it', async () => {
+    // "Even back to it" is the discriminating half. Leaving the other household
+    // hides the card by the ROLE gate whatever the state holds, so only coming
+    // back shows whether the code was CLEARED or merely out of sight.
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument())
+    await switchTo(HOME.id)
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('AC 2 — the code can be hidden once it has been passed on', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    // Create is hidden while the code is up (design-bar re-measure), so the
+    // only route to a second code runs through this button.
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+    await click(screen.getByRole('button', { name: /hide the code/i }))
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create an invitation code/i })).toBeInTheDocument()
+  })
+
+  it('AC 2 — the shown code does not survive signing out and back in on the same device', async () => {
+    // #165 AC 7's reason: on a shared tablet the next person to sign in must
+    // not find somebody else's invitation code on their screen. The harder case
+    // is the one tested — the SAME organizer back into the SAME household — so
+    // the role gate would show the card again either way, and only a CLEARED
+    // code is absent rather than merely out of sight while signed out.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    api.signOut.mockImplementation(async () => {
+      api.currentUserId.mockResolvedValue(null)
+      api.listHouseholds.mockResolvedValue([])
+    })
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    api.signIn.mockImplementation(async () => {
+      api.currentUserId.mockResolvedValue('person-a')
+      api.listHouseholds.mockResolvedValue([HOME])
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('the flag — no card and no read while an invitation cannot yet be redeemed', async () => {
+    // Owner decision at the review escalation, 2026-09-10: until #173 ships
+    // redemption the card is not wired, so a promotion of develop cannot put an
+    // unspendable code in front of real organizers.
+    invitationFlags.redeemable = false
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    // Positive control: this person IS the organizer here (the note is
+    // organizer-only), so the absence below is the flag's and not the role's.
+    expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalled()
+  })
+
+  it('review — a mint that commits but whose re-read fails still shows the code', async () => {
+    // review-fanout's headline, three lenses: the code used to be read off
+    // `mutate`'s return, which a failed re-read never produces, so the only
+    // copy was thrown away while its row stayed live.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    let committed = false
+    invitationsApi.mintInvitation.mockImplementation(async () => {
+      committed = true
+      return { code: 'k7m3qp4rwn', invitation: { id: 'inv-1', household_id: HOME.id } }
+    })
+    api.listMembers.mockImplementation(async (id) => {
+      if (committed) throw new Error('loading the roster: the network went away')
+      return id === HOME.id ? rosterHome : []
+    })
+
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+    // Beside the read's error, which is the honest pair: the code worked, the
+    // re-read did not.
+    expect(screen.getByRole('alert')).toHaveTextContent(/network went away/i)
+  })
+
+  it('review — a withdrawal that commits but whose re-read fails still takes the code away', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    let withdrawn = false
+    invitationsApi.withdrawInvitation.mockImplementation(async () => {
+      withdrawn = true
+    })
+    api.listMembers.mockImplementation(async (id) => {
+      if (withdrawn) throw new Error('loading the roster: the network went away')
+      return id === HOME.id ? rosterHome : []
+    })
+    const item = screen.getByTestId('invitation-inv-1')
+    await click(within(item).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(item).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-1')
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent(/network went away/i)
+  })
+
+  it('review — a code withdrawn from another device leaves this screen on the next refresh', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    // The organizer's tablet withdrew it; this phone learns on its next read.
+    invitationsApi.listInvitations.mockResolvedValue([])
+    const roster = screen.getByRole('region', { name: /who is in the household/i })
+    await click(within(roster).getByRole('button', { name: /^refresh$/i }))
+
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    // Nothing on THIS device withdrew anything.
+    expect(invitationsApi.withdrawInvitation).not.toHaveBeenCalled()
+  })
+
+  it('review — switching between two households you organise never shows the first one’s codes under the second', async () => {
+    const OTHER = {
+      id: 'household-c',
+      name: 'Placeholder Other Household',
+      organizer_member_id: 'm-c1',
+      timezone: 'America/New_York',
+    }
+    const rosterOther = [
+      { id: 'm-c1', household_id: OTHER.id, display_name: 'Placeholder One', weekly_minutes: 90, claimed_by: 'person-a' },
+      { id: 'm-c2', household_id: OTHER.id, display_name: 'Placeholder Two', weekly_minutes: 30, claimed_by: null },
+    ]
+    api.listHouseholds.mockResolvedValue([HOME, OTHER])
+    api.listMembers.mockImplementation(async (id) =>
+      id === HOME.id ? rosterHome : id === OTHER.id ? rosterOther : [],
+    )
+    // OTHER's invitation read never settles — the window the finding is about,
+    // held open so the test can look inside it.
+    invitationsApi.listInvitations.mockImplementation((id) =>
+      id === HOME.id ? Promise.resolve([invitationRow('inv-9')]) : new Promise(() => {}),
+    )
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitation-inv-9')).toBeInTheDocument()
+
+    await switchTo(OTHER.id)
+    await waitFor(() => expect(invitationsApi.listInvitations).toHaveBeenCalledWith(OTHER.id))
+
+    // OTHER's card, because this person organises OTHER too — and none of
+    // HOME's codes under it.
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('invitation-inv-9')).not.toBeInTheDocument()
   })
 })
 

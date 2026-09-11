@@ -576,8 +576,11 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // client cannot name freely: `calendar_tokens`' and `extraction_calls`'
   // reasoning, reached from the other direction. Those two are unreadable
   // because no policy admits anybody; this one is readable by the household's
-  // ORGANIZER alone, so it is absent from `LIVE_SCHEMA` for a different reason —
-  // #171 ships no client code at all, and the reads arrive with #172.
+  // ORGANIZER alone. It was absent from `LIVE_SCHEMA` for a different reason
+  // when #171 added this row — #171 shipped no client code — and it is IN
+  // `LIVE_SCHEMA` since #172 added the organizer's read, so the loop in
+  // `probe-live-grants.test.js` now requires this row the way it requires every
+  // client-read table's.
   //
   // Every grant `0040` makes is BY COLUMN (nine select, four insert, one
   // update), so the expected table-level reading is an absence, and a letter

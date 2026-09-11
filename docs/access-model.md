@@ -10,7 +10,10 @@
 - Status: **`0001`–`0040` are ALL applied to the live project** (`0040` on 2026-09-10 in #171's own
   session, at md5 `bd84210bf0e64eb21ce749411d84a83a` (`32878 characters, 19 statements`), read back
   identical — see its entry below; **`npm run check:live` is blind to that file in BOTH directions**,
-  so its 65 of 65 is the same on either side and is NOT evidence the paste happened —
+  so its 65 of 65 is the same on either side and is NOT evidence the paste happened (**#172 listed
+  the table the same day and read 66 of 66**, the new row green on arrival, then **68 of 68** once
+  its review round looped the live Realtime control over every excused table; the function half
+  stays unseen until #173 calls it) —
   `npm run probe:live-grants` moved 19 of 20 → 20 of 20 on the file's own control row, and the
   read-only catalog query read the three policies, the function's ACL and its lock;
   `0039` on 2026-09-08 in #106's own
@@ -645,7 +648,9 @@
       `0035`'s correction asserted on production (assert the row being locked, never the clause).
       Fourteen column grants for `authenticated` and **no table-level grant for either client
       role**: `SELECT` on all nine columns, `INSERT` on four, `UPDATE` on `withdrawn_at` alone. Not
-      in the publication, as `LIVE_SCHEMA`'s absence requires.
+      in the publication — as `LIVE_SCHEMA`'s absence then required, and as `UNWATCHED_TABLES`
+      requires since #172 (owner decision at #172's pickup: organizer-only, and publishing would put
+      `token_hash` on a channel for no other reader).
     - **`npm run probe:live-grants`: 19 of 20 before, 20 of 20 after**, the one moved row being this
       file's own new control (`invitations` reading *the table is not there*) — the entry doing its
       job, `extraction_calls`' behaviour for `0036` exactly, draining on the apply and on nothing
@@ -655,6 +660,47 @@
       story's AC-8 departure showing up as a number: the check is blind to this file in both
       directions, so a green run is not evidence the paste happened, and the two instruments above
       are what say it did.
+    - **#172 (2026-09-10) — the organizer's half, and the table becomes visible.** `LIVE_SCHEMA`
+      gained `invitations` with the client's own column list (`INVITATION_COLUMNS`, which omits
+      `token_hash` — granted, and never wanted: a digest cannot be shown, read aloud or spent), and
+      `npm run check:live` read **66 of 66** on the story's branch, the new row green on its first
+      run — and **68 of 68** after the review round, which found the live Realtime control pinned to
+      the first excused table only, so `invitations`' exclusion had no live assertion. It now runs
+      once per excused table plus an empty-set floor, and the live server refused `invitations` as
+      NOT PUBLISHED. The first `LIVE_SCHEMA` entry here to arrive green rather than red-until-pasted, because
+      the file it probes was applied before any client read it. The function half stays unseen until
+      #173 lists `redeem_invitation` (#416). What the client does with the table:
+      - **The code is generated and hashed in the browser**, and only the digest crosses the wire —
+        ten characters from a 31-symbol alphabet with no `0`/`o`/`1`/`l`/`i`, drawn by rejection
+        sampling from `crypto.getRandomValues` (a plain `% 31` would bias the first eight symbols by
+        about 12%). `src/test/invitationMint.pglite.test.js` mints through that JavaScript digest and
+        redeems through the real `redeem_invitation`, because the two are one function in two
+        languages and only a real Postgres can say whether they agree.
+      - **That cross-check found a disagreement on its first run.** `btrim(code)` with one argument
+        trims SPACES only — its set defaults to a single space — while JavaScript's `trim()` also
+        takes tabs and newlines, so the first client normalisation hashed `'  K7M3QP4RWN\t'` to a
+        digest the server would never reproduce. The client now trims spaces only, matching `btrim`
+        exactly, and a pglite test pins `btrim`'s behaviour as a platform fact. The mint is unaffected
+        (the generator emits no whitespace); the redemption is not, since a code pasted with a
+        trailing newline is refused today — recorded on #173, whose AC 8 it lands on.
+      - **Withdrawal stamps `withdrawn_at` from the database clock**, by sending the text `'now'`,
+        which Postgres resolves when it casts the value — the same text-to-`timestamptz` leg
+        `expires_at` rides on every mint. Filtered on both stamps being null, so a withdrawal that
+        arrives after a redemption matches no row and cannot overwrite the stamp that won.
+      - **The read is made only for the organizer.** `invitations_select_organizer` would answer a
+        member with nothing, so reading unconditionally would be harmless and would cost every
+        member one round trip per refresh; the policy stays the guard, proven through the exact
+        statement the app issues.
+      - **Not watched** (`UNWATCHED_TABLES`, owner decision at pickup): a redemption on another phone
+        reaches the organizer's list on their next refresh rather than the instant it happens.
+      - **The card is OFF until #173 ships redemption.** `INVITATIONS_REDEEMABLE` in
+        `src/lib/invitations.js` is `false`, and App wires the card and reads the list only when it
+        is true — owner decision 2026-09-10, at an escalation two review lenses raised
+        independently. #172 and #173 "must reach a release together", `release` is promoted from
+        `develop` as a whole branch, and a sentence was all that held the coupling; now code does,
+        whatever gets promoted. #173 carries the criterion that flips it. Everything above is built,
+        tested and measured with the flag on; `check:live` probes the table either way, since the
+        read's column list is in `LIVE_SCHEMA` regardless.
     - **The code is stored as a DIGEST and nowhere as a code** (AC 4, owner decision 2026-09-10,
       taken at a clickable question against storing the plaintext and withholding it by column
       grant). `token_hash bytea` is `extensions.digest(code, 'sha256')`, unique, and the plaintext
@@ -705,22 +751,27 @@
       redemption as a failed refusal. *Measured on this branch*: the first fixture did exactly that.
     - **What each instrument can see, and this file is a departure from AC 8's letter.** AC 8 asks
       that `liveSchema.js` gain the table and the function so `check:live` is red until the paste.
-      Both halves are refused by that file's own both-directions guards, for one reason — **#171
-      ships no client code at all**: the reads arrive with #172 and the call with #173, and an entry
-      today reddens `liveSchema.test.js` (*measured, 1 of 54*, on the RPC half). A probe for
+      Both halves were refused by that file's own both-directions guards, for one reason — **#171
+      shipped no client code at all**: the reads arrived with #172 and the call arrives with #173, and
+      an entry then reddened `liveSchema.test.js` (*measured, 1 of 54*, on the RPC half). A probe for
       something nothing calls reports a missing grant on a correct project, which is the
       `household_devices` mistake with the sign flipped. So the table joins `MEASURED_TABLE_ACLS`
       instead — `calendar_tokens`' and `extraction_calls`' shape, which
       `scripts/probe-live-grants.test.js` asserts as a pair — and it is there for a DIFFERENT reason
       worth keeping distinct: those two are readable by nobody, while this one is readable by the
-      organizer and is out of `LIVE_SCHEMA` only because its reader has not shipped. Owner decision,
+      organizer and was out of `LIVE_SCHEMA` only because its reader had not shipped (it is in since
+      #172). Owner decision,
       2026-09-10. Consequence: **`check:live` reads the same on both sides of this paste and says
       nothing about whether it happened** — `probe:live-grants` and the read-only catalog query are
       what confirm it, and #172/#173 add the `LIVE_SCHEMA` and `LIVE_RPCS` entries with their
-      client code.
+      client code — #172 did its half on 2026-09-10 (**66 of 66**, the new row green on arrival).
     - **Not in the Realtime publication**, and asserted absent rather than left out: `0037` fills it
       from `LIVE_SCHEMA`, `realtime.pglite.test.js` holds the two equal in both directions, and the
-      story that adds the client read adds both.
+      story that adds the client read adds both. *(Corrected 2026-09-10: it did not. #172 added the
+      read and, at the owner's decision on pickup, named the table in `UNWATCHED_TABLES` instead —
+      organizer-only, and publishing would put `token_hash` on a channel for no other reader. The
+      table is still out of the publication; the absence is a decision now rather than a
+      consequence, and `invitations.pglite.test.js` asserts both halves of it.)*
   - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
     `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
     client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with
@@ -2166,7 +2217,8 @@ on 2026-09-08, not assumed.
   green with nothing published**, its own negative control the one red; the control is what caught
   it, and the probe now reads the `system` frame and reports a join followed by silence as *no
   evidence*, never as a pass. One row per table, red on purpose until `0037` is applied, plus the
-  live negative control on `member_split_seen`, the one table the client reads and does not watch,
+  live negative control on `member_split_seen` — then the one table the client read and did not watch;
+  #172 added `invitations` as a second, and the control has run once per excused table since —
   which passes only while the server *refuses* it — so it is also the assertion that the
   self-scoped table stays unpublished. Joining reads no row; the server records the subscription
   in its own `realtime` schema and drops it when the channel is removed.

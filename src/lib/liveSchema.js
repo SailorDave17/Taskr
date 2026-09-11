@@ -9,6 +9,7 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import { INVITATION_COLUMNS } from './invitations.js'
 import {
   SHOPPING_ITEM_COLUMNS,
   SHOPPING_LIST_COLUMNS,
@@ -116,6 +117,20 @@ export const LIVE_SCHEMA = Object.freeze([
   // member row — which `grants.pglite.test.js` exercises and this list, being
   // what the client reads, does not.
   Object.freeze({ table: 'calendar_imports', columns: CALENDAR_IMPORT_COLUMNS }),
+  // #172, and the first entry here for a migration that was ALREADY applied when
+  // it arrived. `0040` reached the live project in #171's own session, while
+  // this list deliberately did not name its table — #171 shipped no client code,
+  // and an entry ahead of its reader reddens `liveSchema.test.js` in the "no
+  // entry for a table the app does not read" direction (measured 1 of 54 on
+  // #171's branch). So this entry is expected GREEN on its first run rather than
+  // red-until-pasted, which inverts the reading every entry above records.
+  //
+  // Read by the organizer alone, and the column list is not the table's:
+  // `token_hash` is granted and deliberately not asked for (see
+  // `INVITATION_COLUMNS`). The probe asks exactly what the app asks, so a
+  // project that had revoked that one column would still read green here —
+  // correctly, since nothing the client does would notice.
+  Object.freeze({ table: 'invitations', columns: INVITATION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */

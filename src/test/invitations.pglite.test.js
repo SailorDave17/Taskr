@@ -9,10 +9,13 @@
 //
 // What a pass means: "consistent with Postgres, given the Supabase-shaped
 // environment stubbed in support/pgliteSupabase.js". Not "Supabase will accept
-// this" — this harness BUILDS the schema it certifies. `npm run check:live` is
-// blind to this whole file (see `0040`'s section 8: no client reads the table
-// and nothing calls the function until #172/#173), so the live instruments are
-// `npm run probe:live-grants` and the catalog query in docs/access-model.md.
+// this" — this harness BUILDS the schema it certifies. `npm run check:live` was
+// blind to this whole file when it was written (see `0040`'s section 8: no
+// client read the table and nothing called the function), so the live
+// instruments were `npm run probe:live-grants` and the catalog query in
+// docs/access-model.md. Since #172 it probes the TABLE, with the organizer's
+// read (66 of 66 on that story's branch, green on arrival); the function stays
+// unseen until #173 lists it, and those two instruments still own that half.
 //
 // ===========================================================================
 // WHAT THIS SUITE IS FOR, AND WHAT IT STRUCTURALLY CANNOT SEE
@@ -47,6 +50,7 @@ import {
   blankSqlComments,
   retiredNamesIn,
 } from './support/retiredVocabulary.js'
+import { UNWATCHED_TABLES } from '../lib/realtime.js'
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -404,17 +408,24 @@ describe('the invitation record, run against a real Postgres', () => {
       ])
     })
 
-    it('is NOT in the Realtime publication, because no client reads it yet', async () => {
+    it('is NOT in the Realtime publication, and the client names why', async () => {
       // The pair `0037` and `realtime.pglite.test.js` hold in both directions:
-      // the publication is `LIVE_SCHEMA` minus the self-scoped marker, and this
-      // table is absent from `LIVE_SCHEMA` until #172 ships its reader. Asserted
-      // rather than left as an omission, because an absent entry and a forgotten
-      // one look identical.
+      // the publication is `LIVE_SCHEMA` minus `UNWATCHED_TABLES`.
+      //
+      // Until #172 the reason this table was absent was that no client read it,
+      // so it was in neither list. #172 added the reader and the `LIVE_SCHEMA`
+      // entry, and the owner decided at pickup (2026-09-10) that it is NOT
+      // watched: only the organizer's device may read it, and publishing would
+      // put `token_hash` on a channel for no other reader. So the reason moved
+      // from "nothing reads it" to a named excuse, and this assertion moved with
+      // it rather than being deleted (#416 AC 3) — the table is still absent
+      // from the publication, and now that absence is a decision on record.
       const { rows } = await db.query(
         `select tablename from pg_publication_tables
           where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'invitations'`,
       )
       expect(rows).toEqual([])
+      expect(UNWATCHED_TABLES).toHaveProperty('invitations')
     })
   })
 

@@ -10,6 +10,7 @@ import {
 } from '../lib/capacity.js'
 import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
 import CaptureShell from './CaptureShell.jsx'
+import Invitations from './Invitations.jsx'
 import { CAPTURE_OUTCOMES, isFirstPerson } from '../lib/capture.js'
 
 // The roster — ACs 2 and 4 (a person with a budget, edited or removed, and the
@@ -1229,6 +1230,14 @@ export default function Roster({
   busyComplaint = null,
   // #166 — optional, and its absence renders exactly what #163 shipped.
   onCreateHousehold = null,
+  // #172 — the organizer's invitation card. Optional in the #166 shape: a roster
+  // with no minter wired renders exactly what shipped before, so a test about
+  // something else is not suddenly carrying a card it never asked for.
+  invitations = [],
+  mintedCode = null,
+  onMintInvitation = null,
+  onWithdrawInvitation = null,
+  onDismissMintedCode = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -1478,6 +1487,37 @@ export default function Roster({
         ) : null}
       </section>
 
+      {/* #172 — invite somebody by code. BEFORE "Add someone", owner decision
+          at the design-bar pass, 2026-09-10: at 360 wide the card started 2.4
+          screens down (y 1919 of 2636), under the add-by-email form that #191
+          retires in favour of this one — so the forward path was the one a
+          person had to scroll furthest to reach. The two are the same act by
+          two routes and still read as a pair. Until #173 ships the redemption
+          a code minted here cannot be spent, which is why this story and #173
+          must reach a release together.
+
+          THE GATE IS `isOrganizer`, and it is the only one that decides who
+          sees this (AC 5). `isOrganizer` is App's answer for the ACTIVE
+          household — `me.id === household.organizer_member_id`, both resolved
+          within the household on screen — so a person who organises one
+          household and merely belongs to another sees this card in the first
+          and not the second, by construction (AC 6). `onMintInvitation` is the
+          wiring-optional half, not a second opinion about the role.
+
+          This is not the guard: `0040`'s three organizer-only policies are,
+          and they refuse the read and both writes to anybody else. */}
+      {isOrganizer && onMintInvitation ? (
+        <Invitations
+          invitations={invitations}
+          mintedCode={mintedCode}
+          timeZone={household.timezone}
+          busy={busy}
+          onMint={onMintInvitation}
+          onWithdraw={onWithdrawInvitation}
+          onDismissCode={onDismissMintedCode}
+        />
+      ) : null}
+
       <section className="card" aria-labelledby="add-heading">
         <h2 id="add-heading" className="card__heading">
           Add someone
@@ -1672,4 +1712,9 @@ Roster.propTypes = {
   busyWeeks: PropTypes.array,
   busyComplaint: PropTypes.string,
   onCreateHousehold: PropTypes.func,
+  invitations: PropTypes.array,
+  mintedCode: PropTypes.string,
+  onMintInvitation: PropTypes.func,
+  onWithdrawInvitation: PropTypes.func,
+  onDismissMintedCode: PropTypes.func,
 }

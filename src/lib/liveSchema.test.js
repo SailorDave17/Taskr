@@ -12,6 +12,7 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import { INVITATION_COLUMNS } from './invitations.js'
 import {
   SHOPPING_ITEM_COLUMNS,
   SHOPPING_LIST_COLUMNS,
@@ -133,12 +134,14 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the eleven tables the app still reads', () => {
+  it('covers the twelve tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
     // fifth — to six with #95's `calendar_connections`, to seven with #96's
-    // `calendar_busy`, to ten with #352's three shopping tables, and to eleven
-    // with #101's `calendar_imports`. Every edit is stated, because a
+    // `calendar_busy`, to ten with #352's three shopping tables, to eleven
+    // with #101's `calendar_imports`, and to twelve with #172's `invitations`
+    // (#416 AC 1 — the entry #171 deliberately withheld until a reader existed).
+    // Every edit is stated, because a
     // required-set that changes size silently is exactly how somebody quietly
     // weakens a check. (`member_split_seen` and `chore_repeat_exceptions` are
     // read too and are asserted by the two directional tests above; this list
@@ -156,6 +159,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'shopping_runs',
       'shopping_items',
       'calendar_imports',
+      'invitations',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }
@@ -184,6 +188,11 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     // The point of AC 3: these are the SAME strings the queries use, so adding a
     // column to a select cannot leave the check behind. Asserting identity here
     // is what makes that claim checkable rather than a comment.
+    //
+    // Corrected 2026-09-10 (#172): it is not identity. The values are strings,
+    // and `toBe` on primitives compares values, so an EQUAL restatement passes
+    // here — measured, 0 red. This still catches a list that differs; the
+    // restatement itself is caught by the source scan added below it.
     const byTable = Object.fromEntries(LIVE_SCHEMA.map((e) => [e.table, e.columns]))
     expect(byTable.chores).toBe(CHORE_COLUMNS)
     expect(byTable.member_capacity).toBe(CAPACITY_COLUMNS)
@@ -197,6 +206,55 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(byTable.shopping_lists).toBe(SHOPPING_LIST_COLUMNS)
     expect(byTable.shopping_runs).toBe(SHOPPING_RUN_COLUMNS)
     expect(byTable.shopping_items).toBe(SHOPPING_ITEM_COLUMNS)
+    // #172 (#416 AC 1) — the organizer's read. This catches a restated list
+    // that DIFFERS from the data layer's; it cannot catch one that matches —
+    // see the source scan below, which is the test that can.
+    expect(byTable.invitations).toBe(INVITATION_COLUMNS)
+  })
+
+  it('#172 — every column list in liveSchema.js is an IMPORTED name, never a restated literal', () => {
+    // Why this exists, measured on #172's mutation pass: the test above reads as
+    // an identity check and is not one. The column lists are STRINGS, and
+    // `toBe` on two primitives compares their values — so restating
+    // `INVITATION_COLUMNS` in liveSchema.js as an equal literal reddened 0 of a
+    // predicted 1 (mutation L1). The restatement AC 3 of #78 forbids is exactly
+    // the equal one, because it is the one that drifts later without anybody
+    // noticing now. Only the source can tell a name from a copy of its value.
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/liveSchema.js'), 'utf8')
+    const block = source.slice(source.indexOf('export const LIVE_SCHEMA'), source.indexOf('export const LIVE_TABLES'))
+    const entries = [...block.matchAll(/table:\s*'([a-z_]+)',\s*columns:\s*([^}]+?)\s*\}/g)].map(
+      ([, table, value]) => ({ table, value: value.trim() }),
+    )
+    // Positive control: the scan found every entry, so an empty pass is impossible.
+    expect(entries.map((e) => e.table)).toEqual([...LIVE_TABLES])
+    const literals = entries.filter((e) => !/^[A-Z][A-Z_]*$/.test(e.value))
+    // `households` is the one entry with no constant, for the reason the
+    // liveSchema.js docblock gives: the data layer really does `select('*')`.
+    expect(literals).toEqual([{ table: 'households', value: "'*'" }])
+
+    // A NAME is not an IMPORT — review finding on this very test. Its first
+    // version checked only that each value was an UPPER_CASE identifier, so a
+    // local `const INVITATION_COLS = '…'` restatement passed it: it proved a bare
+    // name, not the data layer's name. Each identifier must arrive through an
+    // `import { … } from './<module>.js'` clause, and none may be declared here.
+    const imported = new Set(
+      [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'\.\/[A-Za-z]+\.js'/g)].flatMap(([, names]) =>
+        names
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean),
+      ),
+    )
+    const named = entries.filter((e) => /^[A-Z][A-Z_]*$/.test(e.value))
+    // Positive control: the import scan found the constants, so the next two
+    // assertions cannot pass on an empty set.
+    expect(imported.has('INVITATION_COLUMNS')).toBe(true)
+    expect(named.filter((e) => !imported.has(e.value)).map((e) => e.table)).toEqual([])
+    expect(
+      named
+        .filter((e) => new RegExp(`\\b(?:const|let|var)\\s+${e.value}\\b`).test(source))
+        .map((e) => e.table),
+    ).toEqual([])
   })
 
   it('asks for the columns the data layer actually selects', () => {
@@ -217,6 +275,10 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(shopping).toContain('.select(SHOPPING_LIST_COLUMNS)')
     expect(shopping).toContain('.select(SHOPPING_RUN_COLUMNS)')
     expect(shopping).toContain('.select(SHOPPING_ITEM_COLUMNS)')
+    // #172 — the list read AND the mint's `returning`, both through the one
+    // constant, so the row the mint hands back is the shape the list reads.
+    const invitations = readFileSync(resolve(process.cwd(), 'src/lib/invitations.js'), 'utf8')
+    expect(invitations.split('.select(INVITATION_COLUMNS)').length - 1).toBe(2)
   })
 
   it('#352 — the three shopping tables are here, and the client reads all three', () => {

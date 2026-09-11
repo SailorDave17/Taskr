@@ -159,6 +159,11 @@ describe('what it asks for — AC 3', () => {
       // (select and insert, both by column) and asserted in
       // `MEASURED_TABLE_ACLS` as an absence at table level.
       'calendar_imports',
+      // #172 — the invitation record, in the same change that adds it to
+      // LIVE_SCHEMA. Its `MEASURED_TABLE_ACLS` row predates this line: #171
+      // added it while the table was still unread, which is the one entry here
+      // whose ACL was decided before any client asked for the table.
+      'invitations',
     ])
   })
 
@@ -556,13 +561,20 @@ describe('reconcileTableAcls is the control on the role a revoke could hit by mi
     // #208 — the second table the client cannot name, and the same reasoning.
     expect(covered).toContain('extraction_calls')
     expect(LIVE_TABLES).not.toContain('extraction_calls')
-    // #171 — the third, and it is here for a DIFFERENT reason worth keeping
-    // distinct: the two above are readable by nobody, while `invitations` is
-    // readable by the household's organizer. It is absent from LIVE_SCHEMA
-    // because #171 ships no client code — the reads arrive with #172, and the
-    // story that adds them adds the entry. Asserted as a pair so the entry
-    // cannot be added here and quietly forgotten there, or the reverse.
+    // #171 put `invitations` here as the third table the client could not
+    // name, asserted as a pair with its absence from LIVE_SCHEMA so the entry
+    // could not be added in one place and forgotten in the other. #172 is the
+    // story that pair was waiting for: it ships the organizer's read, so the
+    // table is in LIVE_SCHEMA now and the loop above already requires it here.
+    // The control row itself is unchanged — `authenticated: null` stays true,
+    // because every `0040` grant is by COLUMN and the table-level ACL is empty.
+    // Asserted in its new form rather than deleted, because an absent entry and
+    // a forgotten one look identical.
     expect(covered).toContain('invitations')
-    expect(LIVE_TABLES).not.toContain('invitations')
+    expect(LIVE_TABLES).toContain('invitations')
+    expect(MEASURED_TABLE_ACLS.find((entry) => entry.table === 'invitations')).toEqual({
+      table: 'invitations',
+      authenticated: null,
+    })
   })
 })

@@ -10,12 +10,16 @@ import {
   describeSignInReturn,
   findClaimedMember,
   listHouseholds,
+  inviteMember,
   listMembers,
   provisionMember,
+  readAuthCallback,
   readSignInReturn,
   removeMember,
   resetMemberCredential,
   resolveActiveHousehold,
+  sendPasswordReset,
+  setOwnPassword,
   signIn,
   signInWithGoogle,
   signOut,
@@ -104,10 +108,24 @@ import {
   unarchiveList,
   unpurchaseItem,
 } from './lib/shopping.js'
+import {
+  INVITATIONS_REDEEMABLE,
+  listInvitations,
+  mintInvitation,
+  outstandingInvitations,
+  redeemInvitation,
+  withdrawInvitation,
+} from './lib/invitations.js'
+import {
+  clearPendingInvitation,
+  readPendingInvitation,
+  writePendingInvitation,
+} from './lib/pendingInvitation.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
+import ChoosePassword from './components/ChoosePassword.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
@@ -253,6 +271,18 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #172 — the organizer's outstanding invitations, read on every refresh like
+  // every other row here, and EMPTY for anybody who does not organise the
+  // household on screen (the read is not even made for them — see refresh()).
+  const [invitations, setInvitations] = useState([])
+  // #172 AC 2 — the one copy of a freshly minted code that exists anywhere.
+  // `0040` stores a digest, so this is not a cache of something the server
+  // could re-send: lose it and the code is gone. Held WITH the invitation's id,
+  // so withdrawing that same invitation takes a dead code off the screen rather
+  // than leaving it standing beside the list that no longer carries it.
+  // Cleared on a household switch and on sign-out, and never written anywhere
+  // that outlives this render tree.
+  const [minted, setMinted] = useState(null)
   // #101 — which calendar events this household has already imported, as the
   // ledger rows `0038` keeps: an event id and the chore it became, per row, and
   // nothing out of anybody's calendar. Server state through the same refresh,
@@ -310,6 +340,29 @@ export default function App() {
   // rendered while a person is signed out, and this is a sentence for exactly
   // that person.
   const [signInNotice, setSignInNotice] = useState(null)
+  // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
+  // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
+  // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
+  // construction and by the URL strip below, so the boot's reading is the only
+  // one there will ever be. A render that went back to `location.hash` would
+  // find nothing and drop the person straight into the app with no password.
+  const [authCallback, setAuthCallback] = useState(null)
+  // #173 — is this device holding an invitation code for somebody not yet
+  // signed in? A BOOLEAN, never the code: the code lives in storage
+  // (`pendingInvitation.js`) until the boot that applies it, and the screen
+  // only needs to know whether to say so. Read once, lazily, so a person who
+  // came back from their inbox to the sign-in screen is told the code is
+  // still here before they type anything.
+  const [heldInvitation, setHeldInvitation] = useState(() =>
+    Boolean(readPendingInvitation()),
+  )
+  // #173 — the held invitation this signed-in boot found, waiting for ONE tap.
+  // `{ code, name }` or null. Owner decision at the review round's escalation
+  // (2026-09-11): a code held while signed OUT was applied to whichever account
+  // signed in next on the device — on a shared tablet, somebody else's — so the
+  // boot asks "Join as <name>?" and redeems only on the tap. "Not me" forgets
+  // the code. AC 4's "without being re-typed" holds: nothing is typed again.
+  const [pendingJoin, setPendingJoin] = useState(null)
   // #53 AC 4 — the catch-up pass skipped occurrences older than the bound and
   // the household is told rather than left to wonder. Transient and on the
   // device whose open performed the skip (owner decision, 2026-08-24): the
@@ -330,7 +383,7 @@ export default function App() {
   // hidden costs the charter's ambition 4.
   const [fairnessNoteDismissed, setFairnessNoteDismissed] = useState(false)
   // #47 criterion 11 — which surface is on screen. `useState`, not a router and
-  // not a state library: this app has neither, adding one to move between three
+  // not a state library: this app has neither, adding one to move between the
   // views would be the largest dependency in the repo, and the URL is already
   // spoken for — Google returns a calendar consent to the app ROOT with a
   // `?code=`, and the PWA's scope is `/`.
@@ -527,6 +580,34 @@ export default function App() {
     }
     const uid = await currentUserId()
     setUserId(uid)
+    // #172 — the organizer's invitations, and ONLY the organizer's. Resolved
+    // against the roster and uid just read rather than the render's
+    // `isOrganizer`, which is the previous refresh's answer — the same reason
+    // the busy-fetch block below resolves `mine` here.
+    //
+    // NOT READ AT ALL for anybody else, and that is a choice about cost rather
+    // than about safety. `invitations_select_organizer` would answer a member's
+    // read with nothing, so reading unconditionally would be harmless — and
+    // would cost every member who can never see the list one round trip per
+    // refresh, which #351 priced at 562 ms on Slow 4G. The policy is still the
+    // guard (`invitationMint.pglite.test.js` proves it through this exact
+    // statement); this only stops asking a question whose answer is known.
+    const mineHere = found ? findClaimedMember(roster, uid, found.id) : null
+    const organizesHere = Boolean(mineHere && found && mineHere.id === found.organizer_member_id)
+    // Not read at all while no code can be redeemed (`INVITATIONS_REDEEMABLE`,
+    // false from #172 until #173 shipped redemption) — there is no card to
+    // show it on. The gate stays, and the reason is in the constant's docstring.
+    const invitationRows =
+      organizesHere && INVITATIONS_REDEEMABLE ? await listInvitations(found.id) : []
+    setInvitations(invitationRows)
+    // RECONCILE THE SHOWN CODE WITH WHAT THE SERVER JUST SAID — review finding.
+    // A code withdrawn from the organizer's other device, or redeemed, used to
+    // stay on this screen after the next background refresh, Share still
+    // sending it, because nothing compared `minted` with the list. A fresh mint
+    // is safe from this: `handleMintInvitation` sets the code AFTER its own
+    // re-read, which already carries the new row.
+    const stillOutstanding = new Set(outstandingInvitations(invitationRows).map((row) => row.id))
+    setMinted((shown) => (shown && !stillOutstanding.has(shown.id) ? null : shown))
     // #96 — the FETCH's complaint clears only once a figure for THIS member and
     // THIS week has actually arrived, from another device or a reload: "the
     // calendar could not be read" stops being true the moment a read of it is
@@ -669,8 +750,18 @@ export default function App() {
         // the URL has to be intact when it looks. Stripped AFTER, for the same
         // reason, and so that a reload does not announce a spent failure twice.
         const signInReturn = readSignInReturn(globalThis.location)
+        // #341 — read in the SAME breath and for the same reason, which the
+        // paragraph above spells out: the client reads the URL once, at
+        // construction, and `currentSession()` is what constructs it. An invite
+        // link's `type=invite` rides in the same fragment as the `#access_token`
+        // the client is about to swallow, so a read placed after this line finds
+        // an empty hash — and the person lands in the app signed in, with no
+        // password of their own and nothing on screen to say so. That failure is
+        // silent and looks exactly like success, which is why the ordering is
+        // asserted by a test rather than left to this comment.
+        const callback = readAuthCallback(globalThis.location)
         const session = await currentSession()
-        if (signInReturn) {
+        if (signInReturn || callback) {
           const { pathname } = globalThis.location
           globalThis.history?.replaceState?.(null, '', pathname)
         }
@@ -682,6 +773,18 @@ export default function App() {
           }
           return
         }
+
+        // #341 AC 2 — an invitation was followed and the session is real, so ask
+        // for a password before anything else. Set AFTER the signed-out branch
+        // above, deliberately: a link whose token was rejected leaves no session,
+        // and showing a password screen for a session that does not exist would
+        // fail on the write with a sentence about the write. The sign-in screen
+        // plus the link's own expiry sentence is the honest state there.
+        //
+        // The read continues underneath rather than stopping here — the household
+        // load runs as normal, so dismissing this screen lands them in their
+        // household rather than on a second loading pass.
+        if (callback && !cancelled) setAuthCallback(callback)
 
         // #95 — Google sends the member back to the app ROOT with `?code=`, so
         // the return is an ordinary boot that happens to carry two query
@@ -851,6 +954,179 @@ export default function App() {
       }),
     [mutate],
   )
+
+  /**
+   * Redeem an invitation code and land in the household it names — #173.
+   *
+   * ONE HANDLER FOR ALL THREE ENTRY POINTS: the no-household card, the
+   * roster's join-another card, and the held code applied at boot below. The
+   * function is the only route that can create a member row in a household
+   * the caller is not yet in (`0040`; AC 6), and `redeemInvitation` issues
+   * that one statement and nothing else.
+   *
+   * THE JOINED HOUSEHOLD BECOMES ACTIVE (AC 1's "the app switches to it", and
+   * AC 7's "the newly joined one is active") — `handleCreateAnotherHousehold`'s
+   * shape exactly, and for its reason: the function returns the member row,
+   * whose `household_id` is in hand BEFORE `mutate`'s re-read runs, and the
+   * re-read then resolves against a set that has just grown by one household
+   * sorting LAST by `created_at`. Without the ref the person would join and be
+   * left looking at the household they were already in. Both households are
+   * in the switcher because `listHouseholds()` returns everything the person
+   * belongs to and the switcher renders that list unfiltered.
+   *
+   * THE NAME IS WRITTEN AFTER THE JOIN, AND A FAILED RENAME DOES NOT UNDO IT.
+   * `redeem_invitation` creates the row as `New member` (`0040` has no name to
+   * write; #191's rule is that the recipient names themselves), so the join
+   * forms ask for the name and this renames the row through the ordinary
+   * `updateMember` grant — the same statement the person's own Edit control
+   * issues. Owner decision at the design pass, 2026-09-11: the prototype
+   * showed the person arriving under a placeholder they then had to find and
+   * edit. If the rename is refused the join has still happened, and throwing
+   * here would make `mutate` skip the re-read and leave the person on the
+   * screen they came from while a member of a household it does not show —
+   * so the complaint is held and reported AFTER the re-read, over the
+   * household they did join.
+   *
+   * The held copy is cleared on EVERY outcome, including a refusal: a refused
+   * code re-tried on every boot is a loop the person cannot leave, and the
+   * refusal is on screen, so the next attempt is theirs to make. Cleared
+   * BEFORE the call rather than after, so a refresh mid-call cannot find it
+   * and try again. `setHeldInvitation` follows, so the sign-in note stops
+   * promising a code that is gone.
+   *
+   * SCROLLED TO THE TOP once the join has landed (owner decision at the same
+   * design pass): from the roster's join-another card the person is ~2,300px
+   * down the page, and after the re-read they were left there, looking at the
+   * NEW household's "Start another household" card with nothing in view saying
+   * they had moved — the switcher naming the new household is at the top.
+   * Guarded, because jsdom has no layout; asserted as a scroll request.
+   */
+  const handleJoinHousehold = useCallback(
+    async (code, { name } = {}) => {
+      let renameComplaint = null
+      const joined = await mutate(async () => {
+        clearPendingInvitation()
+        setHeldInvitation(false)
+        const member = await redeemInvitation(code)
+        if (member?.household_id) {
+          const chosen = String(name ?? '').trim()
+          if (chosen) {
+            try {
+              await updateMember(member.id, { displayName: chosen })
+            } catch (err) {
+              renameComplaint = `You are in, but your name could not be saved (${err.message}). Edit it from your row on the Who tab.`
+            }
+          }
+          activeIdRef.current = member.household_id
+          choiceEpochRef.current += 1
+          writeActiveHouseholdChoice(member.household_id)
+          // The old household's notices do not come with it — the switch
+          // path's rule (`chooseHousehold`), and the same four states.
+          setAnnouncement(null)
+          setCalendarRevokeNote(null)
+          setMinted(null)
+          setInvitations([])
+        }
+        return member
+      })
+      if (joined?.household_id) globalThis.scrollTo?.({ top: 0 })
+      if (renameComplaint) setError(renameComplaint)
+      return joined
+    },
+    [mutate],
+  )
+
+  /**
+   * Keep an invitation for a person who is signed out — #173 AC 4, the first
+   * half: the code, and the name they will join under.
+   *
+   * NOT through `mutate`: there is no session, so the re-read would run as
+   * `anon` — refused since `0017` — and paint a refusal over a code that was
+   * kept perfectly well (the `handleSignUp` reason). A blank code or name is
+   * refused with a sentence about the field.
+   */
+  const handleHoldInvitation = useCallback(async (code, { name } = {}) => {
+    if (!String(code ?? '').trim()) throw new Error('Type the invitation code first.')
+    if (!String(name ?? '').trim()) throw new Error('Type the name you want to be called.')
+    if (!writePendingInvitation({ code, name })) {
+      throw new Error(
+        'This browser cannot keep the code — sign in first, then type it on the next screen.',
+      )
+    }
+    setHeldInvitation(true)
+  }, [])
+
+  // #173 AC 4 — apply the code this device was holding, on the first boot
+  // that has a session. THE CARRYING MECHANISM IS `localStorage`, read by
+  // `readPendingInvitation` — so a reader can tell this from an accident:
+  // the code got here because `handleHoldInvitation` wrote it before the
+  // person left for their inbox, and NOT through the confirmation link, the
+  // URL, or the auth user's metadata (the two rejected routes, and why, are
+  // in `pendingInvitation.js`). What it guarantees is per browser: the same
+  // browser applies the code without it being re-typed; a confirmation link
+  // opened in a different browser finds nothing here and shows the join form
+  // instead — AC 5, asserted in both directions in `App.test.jsx`.
+  //
+  // Keyed on `userId`, which `refresh()` sets from the session on every boot
+  // and after every sign-in, so one effect covers the returning-from-inbox
+  // boot, a plain sign-in with a code held, and a signup on a project with
+  // confirmation off — AND on the read having SETTLED, which is the review's
+  // finding: `refresh()` sets `userId` mid-way and goes on to read the split
+  // marker and write the seen snapshot, so an effect fired on `userId` alone
+  // started the redemption while the sign-in's own refresh was still running.
+  // For a member of one household holding a code for another, that first
+  // refresh could write the old household's announcement AFTER the join had
+  // cleared it, and the old household's screen was actionable for one round
+  // trip. `busy` is true for the whole of a `mutate` (sign-in, sign-up with a
+  // session) and `status` is `loading` for the whole of the boot, so waiting
+  // on both is waiting for whichever read set the id to finish. A boot that
+  // FAILED after setting the id (an organizer whose invitations read alone
+  // refused — review finding) offers nothing: the strip is carrying the boot's
+  // own reason and a redemption's refusal would replace it.
+  //
+  // It does NOT redeem. It puts the held invitation in front of the person as
+  // a one-tap confirmation (`pendingJoin`), because the account that signed in
+  // is not necessarily the one that held the code — see the state's comment.
+  useEffect(() => {
+    if (!userId || busy || status === 'loading' || status === 'failed') return
+    const carried = readPendingInvitation()
+    if (!carried) return
+    setPendingJoin(carried)
+  }, [userId, busy, status])
+
+  // The tap. Redeems what the boot found, under the held name; the redemption
+  // clears the store and the sign-in note, and this clears the card.
+  const handleConfirmPendingJoin = useCallback(() => {
+    const held = pendingJoin
+    setPendingJoin(null)
+    if (!held) return Promise.resolve(null)
+    return handleJoinHousehold(held.code, { name: held.name }).catch(() => {
+      // Reported by `mutate` onto the error strip; the join form is there for
+      // the next attempt.
+    })
+  }, [pendingJoin, handleJoinHousehold])
+
+  // "Not me." Forgets the code without spending it, so whoever held it can
+  // type it again on their own device; nothing is redeemed and nothing moves.
+  const handleDeclinePendingJoin = useCallback(() => {
+    clearPendingInvitation()
+    setHeldInvitation(false)
+    setPendingJoin(null)
+  }, [])
+
+  // #173 — the held note follows the store. `heldInvitation` is read once at
+  // mount; another tab on the same device can redeem, be refused on, or sign
+  // out and clear the same key (review finding), and this tab would go on
+  // promising a code that is gone. A `storage` event fires in every OTHER tab
+  // when the key changes, so re-read on it. `key === null` is a cleared store.
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== null && event.key !== 'taskr.pendingInvitation') return
+      setHeldInvitation(Boolean(readPendingInvitation()))
+    }
+    globalThis.addEventListener?.('storage', onStorage)
+    return () => globalThis.removeEventListener?.('storage', onStorage)
+  }, [])
   // #154 — the organizer's own account, on its own. NOT through `mutate`, and
   // the reason is the grant layer: `mutate` re-reads the household after every
   // action, and after a signup that needs email confirmation there is no
@@ -926,6 +1202,15 @@ export default function App() {
         activeIdRef.current = null
         choiceEpochRef.current += 1
         clearActiveHouseholdChoice()
+        // #172 — the shown code does not outlive the session that minted it,
+        // for #165 AC 7's reason: on a shared tablet the next person to sign in
+        // must not find somebody else's invitation code on their screen.
+        setMinted(null)
+        // #173 — and a code HELD for redemption does not outlive it either, for
+        // the same tablet: the next person to sign in on this device must not
+        // be joined to a household by a code somebody else typed.
+        clearPendingInvitation()
+        setHeldInvitation(false)
         return result
       }),
     [mutate],
@@ -984,6 +1269,64 @@ export default function App() {
       ),
     [mutate],
   )
+  /**
+   * Email somebody an invitation instead of choosing their password — #341 AC 1.
+   *
+   * Beside `handleProvision` rather than folded into it, because the two are no
+   * longer variants of one act. Provision takes a credential the organizer typed
+   * and reaches the roster's own screen; this takes nothing, and what it changes
+   * is in somebody else's inbox.
+   */
+  const handleInvite = useCallback(
+    (memberId) => mutate(() => inviteMember({ memberId })),
+    [mutate],
+  )
+
+  /**
+   * Email a member a link to set a new password — #341, owner decision at pickup.
+   *
+   * Takes the MEMBER rather than an id, because the address is what GoTrue is
+   * given and it is on the row. Nothing is re-read afterwards and `mutate` still
+   * wraps it for the busy flag and the error strip: what changed is in an inbox,
+   * so a re-read would show the same roster and imply something on screen had
+   * moved.
+   */
+  const handleSendReset = useCallback(
+    (member) => mutate(() => sendPasswordReset(member.email)),
+    [mutate],
+  )
+
+  /**
+   * Finish an invitation or a recovery by setting a password — #341 AC 2.
+   *
+   * `mutate()` is not used, and the difference is the point: every other write in
+   * this file re-reads the household afterwards, and there is no household on
+   * screen here — the shell is not rendered at all. What has to happen after the
+   * write is that this screen goes away, which is what clearing `authCallback`
+   * does; boot has already loaded the household underneath, so what they land on
+   * is their household rather than a second loading pass.
+   *
+   * The error is deliberately left set when the write fails: the screen stays,
+   * because a password that was not set is a person who cannot sign in again if
+   * they leave.
+   */
+  const handleChoosePassword = useCallback(
+    async (password) => {
+      setBusy(true)
+      setError(null)
+      try {
+        await setOwnPassword(password)
+        setAuthCallback(null)
+      } catch (err) {
+        setError(err.message)
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [setBusy, setError],
+  )
+
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
 
   /**
@@ -1031,6 +1374,14 @@ export default function App() {
       // the connection is per member-and-household and still live.
       setAnnouncement(null)
       setCalendarRevokeNote(null)
+      // #172 — a code minted for household A is A's. Left standing it would be
+      // read out as an invitation to B, whose roster is now on screen under it.
+      setMinted(null)
+      // And A's LIST, for the same reason — review finding. B's roster and its
+      // organizer answer land a moment before B's invitations are read, so for
+      // that window (and for good, if a read in between fails) A's outstanding
+      // codes sat under B's "Waiting to be used", withdrawable there.
+      setInvitations([])
       return handleRefresh().catch(() => {})
     },
     [handleRefresh],
@@ -1548,6 +1899,56 @@ export default function App() {
   // nothing it cares about leaves it alone.
   const householdId = household?.id
   const myMemberId = me?.id
+
+  // #172 — mint an invitation for the household ON SCREEN, recorded against
+  // this person's own member row IN IT. Both ids come from state `refresh()`
+  // set, never re-resolved in the data layer: #159 measured a write landing in
+  // the other household when it re-resolved. `invitations_insert_organizer`
+  // refuses any other pairing regardless.
+  //
+  // The code arrives AFTER `mutate`'s re-read, so it lands on screen together
+  // with the new row in the list rather than a round trip ahead of it.
+  //
+  // HELD OUTSIDE THE ACTION, and that is review-fanout's headline, found by
+  // three lenses. The first version read the code off `mutate`'s return, and
+  // `mutate` rethrows when any unguarded read in the re-read fails — so an
+  // insert that COMMITTED followed by a flaky read threw the only copy of the
+  // code away while its row stayed live: AC 2's "shown once" became "shown
+  // zero times", under an error strip naming the read. Now a committed mint is
+  // shown whether or not the re-read worked, beside that read's error if it
+  // did not. A REFUSED mint leaves `made` null and shows nothing, correctly.
+  const handleMintInvitation = useCallback(async () => {
+    let made = null
+    try {
+      await mutate(async () => {
+        made = await mintInvitation({ householdId: household?.id, createdByMemberId: myMemberId })
+        return made
+      })
+    } catch {
+      // `mutate` has set the error strip — for a refused mint, or for a
+      // re-read that failed after the insert committed.
+    }
+    if (made) setMinted({ code: made.code, id: made.invitation?.id ?? null })
+  }, [mutate, household, myMemberId])
+
+  // #172 AC 4 — withdraw, then re-read. If the invitation withdrawn is the one
+  // whose code is still on screen, that code is dead the moment the stamp
+  // lands, so it leaves with the row rather than standing there looking usable.
+  //
+  // Cleared INSIDE the action, the moment the withdrawal resolves — review
+  // finding. It used to be cleared in a `.then` after `mutate`, which a failed
+  // re-read skips: the stamp committed, the code died, and it stayed on screen
+  // with Share still sending it.
+  const handleWithdrawInvitation = useCallback(
+    (id) =>
+      mutate(async () => {
+        await withdrawInvitation(id)
+        setMinted((shown) => (shown?.id === id ? null : shown))
+      }).catch(() => {}),
+    [mutate],
+  )
+
+  const handleDismissMintedCode = useCallback(() => setMinted(null), [])
   // #213 — ask the extraction endpoint what a chore description means. NOT
   // through `mutate()`, for #210's reason: a proposal is a list on screen the
   // member has not agreed to, so nothing is written, nothing re-reads, and
@@ -1921,6 +2322,36 @@ export default function App() {
     [mutate, myMemberId],
   )
 
+  // #341 AC 2 — the invitation and recovery landing, returned BEFORE the shell
+  // rather than rendered inside it.
+  //
+  // Early-returned deliberately, and the alternative is worth naming because it
+  // is the obvious one: adding `&& !authCallback` to the render conditions
+  // below. There are more than a dozen of them, every future surface adds
+  // another, and a single one forgotten renders a household's chores to somebody
+  // who has not finished setting up their account. The screen has one job, and a
+  // return is the only way to say "and nothing else" once.
+  //
+  // The shell's title and tagline go with it. Somebody who has just clicked a
+  // link in their email does not need the product pitch; they need the one field
+  // that finishes what they started.
+  if (authCallback) {
+    return (
+      <main className="shell">
+        <ChoosePassword
+          type={authCallback.type}
+          busy={busy}
+          onChoose={handleChoosePassword}
+        />
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </main>
+    )
+  }
+
   return (
     <main className="shell">
       <h1 className="shell__title">Taskr</h1>
@@ -1969,6 +2400,47 @@ export default function App() {
         </section>
       ) : null}
 
+      {/* #173 — the held invitation, as one tap. Rendered for a person with no
+          household AND for a member of another household alike, above whatever
+          else the screen shows, because in both cases the question is the same
+          and the code was typed before anybody signed in. `role="status"` on the
+          note rather than `alert`: nothing is wrong. Only existing classes.
+          Gated on `pendingJoin` ALONE: the effect that sets it is the one place
+          that decides when an offer is made (a settled, non-failed boot with a
+          session), and a second condition here made that guard dead — measured,
+          removing it reddened nothing until this line stopped repeating it. */}
+      {pendingJoin ? (
+        <section className="card" aria-labelledby="held-invitation-heading" data-testid="held-invitation-confirm">
+          <h2 id="held-invitation-heading" className="card__heading">
+            Join with the code on this device?
+          </h2>
+          <p className="card__body" role="status">
+            This device is holding an invitation code, entered as{' '}
+            <strong>{pendingJoin.name}</strong> before anybody signed in. Join
+            that household under that name, or say it is not you and the code
+            is forgotten so whoever typed it can use it on their own phone.
+          </p>
+          <div className="row">
+            <button
+              className="button"
+              type="button"
+              onClick={handleConfirmPendingJoin}
+              disabled={busy}
+            >
+              Join as {pendingJoin.name}
+            </button>
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={handleDeclinePendingJoin}
+              disabled={busy}
+            >
+              Not me
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {status === 'onboarding' ? (
         <Onboarding
           onCreate={handleCreate}
@@ -1976,6 +2448,15 @@ export default function App() {
           onSignIn={handleSignIn}
           onSignInWithGoogle={handleSignInWithGoogle}
           onSignOut={handleSignOut}
+          // #173 — the invited person's two halves: hold a code while signed
+          // out, redeem one while signed in with no household.
+          onJoin={handleJoinHousehold}
+          onHoldInvitation={handleHoldInvitation}
+          heldInvitation={heldInvitation}
+          // #173 — a held code refused at boot is reported by `mutate` onto
+          // this, and no form on that screen submitted it, so the screen has
+          // to be handed it.
+          error={error}
           signInNotice={signInNotice}
           // Non-null only when boot found a session, because the signed-out path
           // returns before refresh() runs. Signed in AND on this screen is
@@ -2084,6 +2565,8 @@ export default function App() {
           onSave={handleSave}
           onRemove={handleRemove}
           onProvision={handleProvision}
+          onInvite={handleInvite}
+          onSendReset={handleSendReset}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
           // #166 — the affordance that did not exist. Owner decision at pickup:
@@ -2092,6 +2575,21 @@ export default function App() {
           // row already fits five tabs into 263.2px at exactly 8px of padding
           // and this is household administration, which is what the Who tab is.
           onCreateHousehold={handleCreateAnotherHousehold}
+          // #173 — the other half of that pair: join a second household with a
+          // code, from inside the first. Same surface, same reason.
+          onJoinHousehold={handleJoinHousehold}
+          // #172 — the invitation card. Roster shows it only to the organizer of
+          // the household on screen; `invitations` is already empty for anybody
+          // else because refresh() never asks on their behalf.
+          invitations={invitations}
+          mintedCode={minted?.code ?? null}
+          // Unwired while no code can be redeemed (`INVITATIONS_REDEEMABLE`, false
+          // from #172 until #173 shipped redemption) — Roster's optional-wiring
+          // gate then renders no card at all, whoever is looking and whatever
+          // gets promoted to `release`. The gate stays for the constant's reason.
+          onMintInvitation={INVITATIONS_REDEEMABLE ? handleMintInvitation : null}
+          onWithdrawInvitation={handleWithdrawInvitation}
+          onDismissMintedCode={handleDismissMintedCode}
           overrides={overrides}
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}

@@ -3,6 +3,11 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { signInAddressFor } from '../lib/household.js'
+import { PROBE_MARKER, isProbeFile } from './support/probeFiles.js'
+// #409 — the prose corpus reuses #328's matcher rather than growing a second
+// copy of it. `scan-tracker.mjs` guards its own entry point behind `isMain`, so
+// importing it runs nothing.
+import { classify, UUID_PATTERN } from '../../scripts/scan-tracker.mjs'
 
 // AC 4 of #4: "a test suite containing zero tests must FAIL rather than pass
 // vacuously — an explicit fail-on-empty setting".
@@ -329,7 +334,10 @@ describe('every class name a component emits has a rule in the stylesheet', () =
   const components = [
     'src/App.jsx',
     ...readdirSync(resolve(process.cwd(), 'src/components'))
-      .filter((f) => f.endsWith('.jsx') && !f.endsWith('.test.jsx'))
+      // #192 — `isProbeFile` first: a probe planted by
+      // `retiredVocabulary.test.js` in a parallel worker matches the extension
+      // filter and is removed before the read below.
+      .filter((f) => !isProbeFile(f) && f.endsWith('.jsx') && !f.endsWith('.test.jsx'))
       .map((f) => `src/components/${f}`),
   ]
 
@@ -864,6 +872,9 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
 
   function filesUnder(dir) {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      // #192 — a probe planted by `retiredVocabulary.test.js` in a parallel
+      // worker is gone by the time the collected paths are read.
+      if (isProbeFile(entry.name)) return []
       const full = resolve(dir, entry.name)
       return entry.isDirectory() ? filesUnder(full) : [full]
     })
@@ -989,8 +1000,18 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     // Without this the test above passes just as happily against a typo in the
     // pattern, or if the function were deleted — an absence proving nothing.
     // The function lives outside src/, which is the whole point.
+    //
+    // #341 MOVED THE PATH, and this is the THIRD guard in that story keyed on
+    // `provision-member/index.ts` whose subject walked out from under it: the
+    // key is read in `handler.ts` now, and `index.ts` is the platform binding.
+    // The other two behaved differently and the contrast is the lesson —
+    // `edge-function-cors.test.js` reads both files and joins them, so it needed
+    // nothing; `gate.test.js`'s #242 block and this one name one file, and both
+    // had to follow. This one at least failed LOUDLY, because it is a positive
+    // control: it asserts presence, so a subject that moved reads as absent
+    // rather than as clean.
     const fn = readFileSync(
-      resolve(process.cwd(), 'supabase/functions/provision-member/index.ts'),
+      resolve(process.cwd(), 'supabase/functions/provision-member/handler.ts'),
       'utf8',
     )
     expect(fn).toMatch(/SUPABASE_SERVICE_ROLE_KEY/)
@@ -1004,7 +1025,11 @@ describe('#87 — the service_role key cannot reach the client bundle', () => {
     // environment, and its own test plants a `GOCSPX-` fixture. A typo in any of
     // the four reddens here rather than going quiet in the scan above.
     const outsideSrc = [
-      'supabase/functions/provision-member/index.ts',
+      // #341 — `handler.ts`, not `index.ts`. The name moved with the code, and
+      // pointing this at the binding would leave an entry carrying none of the
+      // patterns, which is exactly the dead-exemption shape the test two above
+      // exists to refuse.
+      'supabase/functions/provision-member/handler.ts',
       'supabase/functions/calendar-connect/handler.ts',
       'supabase/functions/calendar-connect/handler.test.js',
       // #203 — the extraction runner reads ANTHROPIC_API_KEY from its
@@ -1143,14 +1168,54 @@ describe('#19 — no real household name reaches version control', () => {
   // name-shaped, so it sees `'Alex'` as an object key and is blind to a name
   // inside a sentence. A corpus whose content IS sentences needs the prose
   // assertions in src/lib/extraction.test.js as well as this one.
+  // #409 — `README.md` and `docs/*.md` joined the corpus, and the honest
+  // reading of what that bought is BELOW the widening rather than implied by
+  // it, because the number is much smaller than it looks.
+  //
+  // The gap was found by walking into it (#328): a first draft of
+  // `docs/data-outside-production.md` quoted a real name and address verbatim
+  // into the one document that records the rule forbidding it, and nothing went
+  // red, because the document was in no corpus. That is what this clause fixes.
+  //
+  // *Measured 2026-09-10, before anything was changed*, by widening this filter
+  // and running the two assertions below: 15 files, **4 SHAPE findings and 0
+  // POSITION findings**. Not the flood #170 predicts for a widened source-text
+  // corpus, and not the "hundreds" this story and the docs both estimated. All
+  // four are declared at the end of NOT_NAMES below, and not one was a person
+  // or a household — `Roomy`, `Took`, `Dairy` and `Supermarket API`.
+  //
+  // WHAT THIS CANNOT SEE, and it is most of what prose does. Both scanners
+  // below match STRAIGHT-QUOTED literals, so against Markdown they are nearly
+  // inert. *Measured on a five-case probe planted in `docs/`*: a name in bare
+  // prose — the shape the #328 incident actually took — a name in typographic
+  // quotes, and a name in backticks, which is the ordinary Markdown way of
+  // quoting a value, were ALL missed. Only the two straight-quoted cases were
+  // caught.
+  //
+  // So this clause is worth having and is not sufficient, and the second half
+  // is the `#409` describe below: `classify` from `scripts/scan-tracker.mjs`
+  // reads the same files for UUID- and address-shaped strings, which is a rule
+  // built for prose and is what would have caught the address half of the
+  // incident. The NAME half in bare prose is catchable by no shape rule at all
+  // — no check can recognise a name it has not been shown — and it stays with
+  // `scan:tracker`'s local `--names-file` term half. Saying that plainly is the
+  // point: a check over `docs/` that reads as coverage while missing the defect
+  // it was written for is worse than no check.
   function corpusOf(paths) {
     return paths.filter(
       (path) =>
         path !== 'src/test/gate.test.js' &&
+        // #192 — this corpus lists UNTRACKED files and then reads every one of
+        // them. A probe planted by `retiredVocabulary.test.js` in a parallel
+        // worker is listed under `supabase/migrations/` by the clause below and
+        // is removed before `codeOf` opens it.
+        !isProbeFile(path) &&
         (/^src\/.*\.test\.jsx?$/.test(path) ||
           /^src\/test\/.*\.jsx?$/.test(path) ||
           /^src\/lib\/[^/]*\.corpus\.js$/.test(path) ||
-          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path)),
+          /^supabase\/(migrations|seed)[^\n]*\.sql$/.test(path) ||
+          path === 'README.md' ||
+          /^docs\/[^/]*\.md$/.test(path)),
     )
   }
 
@@ -1174,8 +1239,31 @@ describe('#19 — no real household name reaches version control', () => {
       : withoutBlocks.replace(/(^|[^:])\/\/[^\n]*/g, '$1')
   }
 
+  // Split out from `codeOf` so the positive control below can exercise the
+  // PROSE branch on TEXT — the same reason `stripComments` itself is split out,
+  // and the same reason it needed to be: an unexercised defence is one nobody
+  // has asked. Doing it by planting a `.md` file instead would redden the
+  // README docs-list check, which is a different subject entirely.
+  function strippedFor(path, text) {
+    // #409 — Markdown is stripped of NOTHING, and that is a decision rather
+    // than an omission.
+    //
+    // Stripping exists because a comment quoting a name is prose ABOUT a
+    // fixture and not a fixture. In a document there is no such distinction:
+    // every line is prose, and a real name is exposed by being committed
+    // whatever surrounds it — an HTML comment in `docs/` is in git exactly as
+    // much as a paragraph is.
+    //
+    // Applying the JavaScript rule here — which is what "naively add the
+    // paths" does, since a `.md` path is not `.sql` — would strip everything
+    // after a bare `//` in a sentence, and that is a blind spot pointing the
+    // wrong way: it can only ever HIDE a name, never reveal one.
+    if (path.endsWith('.md')) return text
+    return stripComments(text, path.endsWith('.sql'))
+  }
+
   function codeOf(path) {
-    return stripComments(readFileSync(resolve(process.cwd(), path), 'utf8'), path.endsWith('.sql'))
+    return strippedFor(path, readFileSync(resolve(process.cwd(), path), 'utf8'))
   }
 
   // One to three words, first word capitalised and NOT all-caps — which is what
@@ -1237,6 +1325,16 @@ describe('#19 — no real household name reaches version control', () => {
   // left is a hole waiting for somebody to reuse the string.
   const NOT_NAMES = {
     Dishes: 'a chore title in App.test.jsx',
+    // #173 — the display name `redeem_invitation` writes on the member row it
+    // creates (`0040`), which the recipient replaces with their own (#191). It
+    // sits in a `display_name:` position in the redemption fixtures and is
+    // nobody's name — it is the row's state before it has one.
+    'New member': 'the placeholder display_name redeem_invitation writes — 0040, replaced by the person (#191)',
+    // #172 — the two DOMException names the Web Share API rejects with, in
+    // Invitations.test.jsx: a cancelled share (which must say nothing) and a
+    // refused one (which must say how to copy instead).
+    AbortError: 'a DOMException name — a cancelled navigator.share() rejects with it',
+    NotAllowedError: 'a DOMException name — a refused navigator.share() rejects with it',
     'Placeholder Chore': 'a chore title',
     'Placeholder Other Chore': 'a chore title',
     // #37 AC 4's fixture needs four chores in one household. Declared rather
@@ -1446,6 +1544,23 @@ describe('#19 — no real household name reaches version control', () => {
     // because the whole point is that they are the strings on the buttons.
     Rename: 'the rename control’s visible label in the #360 gesture assertion',
     Archive: 'the archive control’s visible label in the #360 gesture assertion',
+    // #409 — the whole of what widening the corpus to `README.md` and
+    // `docs/*.md` turned up: FOUR literals, none of them a person and none of
+    // them a household. They are recorded here with that count stated, because
+    // the estimate this story was filed on was "hundreds" and the estimate is
+    // what decided the work was a story rather than a paragraph.
+    //
+    // Each is also a fair example of the third triage class — a shape rule
+    // matching prose it was never aimed at. They are DECLARED rather than
+    // narrowed around for the reason the #37 chores above record: the
+    // vocabulary exists to put every name-shaped literal in a diff a person can
+    // look at, and a rule tightened until the noise disappears is a rule that
+    // has stopped asking.
+    Roomy: 'a rebalance SCENARIO name, quoted in prose in docs/rebalance-churn.md',
+    Took: 'a button LABEL, quoted in prose in docs/refresh-charter.md',
+    Dairy: 'a value inside a third-party API response quoted verbatim in docs/shopping-aisle-spike.md',
+    'Supermarket API':
+      'a PRODUCT name from 2011 press coverage, quoted in docs/shopping-aisle-spike.md',
   }
 
   const declared = new Set([...PLACEHOLDER_NAMES, ...Object.keys(NOT_NAMES)])
@@ -1491,6 +1606,13 @@ describe('#19 — no real household name reaches version control', () => {
     // replaced would read exactly like a working generalisation.
     expect(corpus).toContain('src/lib/allocation.corpus.js')
     expect(corpus).toContain('src/lib/extraction.corpus.js')
+    // #409's two clauses, named individually for the same reason the two
+    // `*.corpus.js` files are. `README.md` in particular is exercised by
+    // NOTHING else: all four findings the widening produced are under `docs/`,
+    // so without this line the README clause could be deleted and every
+    // assertion in this file would still pass.
+    expect(corpus).toContain('README.md')
+    expect(corpus).toContain('docs/data-outside-production.md')
   })
 
   it('POSITIVE CONTROL: an UNTRACKED file is scanned, the day it lands and not the day it is staged', () => {
@@ -1565,6 +1687,17 @@ describe('#19 — no real household name reaches version control', () => {
     expect(shapeOffenders(stripComments(`const x = 'Marguerite'`, false))).toContain('Marguerite')
   })
 
+  it('POSITIVE CONTROL: Markdown is stripped of nothing, so prose after a // is still scanned', () => {
+    // #409. The two branches are given the SAME text, and they must disagree —
+    // which is what makes this a control on the decision rather than on the
+    // matcher. Under the JavaScript rule a document sentence containing a bare
+    // `//` would have everything after it discarded, and that blind spot points
+    // the wrong way: it can only ever hide a name.
+    const text = `a URL-ish path a//b and the organizer was 'Marguerite'`
+    expect(shapeOffenders(strippedFor('docs/anything.md', text))).toContain('Marguerite')
+    expect(shapeOffenders(strippedFor('src/test/anything.test.js', text))).toEqual([])
+  })
+
   it('every NOT_NAMES exemption is still needed', () => {
     // An exemption for a string that has left the corpus is a hole: the next
     // person to use it inherits a pass nobody granted them.
@@ -1597,6 +1730,154 @@ describe('#19 — no real household name reaches version control', () => {
     const images = tracked.filter((path) => IMAGE.test(path))
     expect(images).toEqual(expect.arrayContaining(Object.keys(ALLOWED_ASSETS)))
     expect(images.length).toBe(Object.keys(ALLOWED_ASSETS).length)
+  })
+})
+
+// #409 — the OTHER half of covering `README.md` and `docs/*.md`, and the half
+// that answers the incident.
+//
+// The corpus widening above puts the documents inside Decision 2's literal
+// scans, and *measured*, those scans are nearly inert against prose: they match
+// straight-quoted literals, and a document quotes with backticks, with
+// typographic quotes, or with nothing at all. A five-case probe planted in
+// `docs/` was caught in two cases and missed in three, and the missed three
+// include the shape the #328 incident actually took — a real name and address
+// written into a sentence.
+//
+// So the documents get a rule built for prose as well, and it is deliberately
+// NOT a second name matcher. There is no shape that distinguishes a real name
+// in a sentence from any other capitalised phrase; a matcher for that would
+// flag every proper noun in every document, which is #170's flood arriving for
+// a reason nobody could triage away.
+//
+// What DOES have a shape is the rest of the payload: `classify` from
+// `scripts/scan-tracker.mjs` — #328's tracker scanner — reads UUID- and
+// address-shaped strings. Reused rather than reimplemented, because a second
+// copy of a matcher is a second thing to correct, and this one already carries
+// its own placeholder-domain list, its nil-UUID skip and its attachment-URL
+// exclusion, each with a measured reason.
+//
+// WHAT THIS PAIR STILL CANNOT CATCH, stated because a check over `docs/` that
+// reads as coverage is worse than none: a real household or member NAME written
+// in bare prose. No shape reaches it and no check can recognise a name it has
+// not been shown — which is Decision 2's own founding argument, unchanged. That
+// case belongs to `npm run scan:tracker -- --names-file <path>`, whose term
+// half searches for the live project's actual names and is deliberately local,
+// and to a human reading the diff. This block narrows the gap; it does not
+// close it.
+describe('#409 — no live identifier reaches README.md or docs/*.md', () => {
+  function prosePaths() {
+    return execSync('git ls-files -z --cached --others --exclude-standard', {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+      .split('\0')
+      .filter(Boolean)
+      .filter((path) => path === 'README.md' || /^docs\/[^/]*\.md$/.test(path))
+  }
+
+  const prose = prosePaths()
+
+  // Exemptions, in the shape `NOT_NAMES` uses: a reason in band, and an
+  // assertion below that each is still needed.
+  //
+  // Keyed on the URL PREFIX rather than on the identifier, for the reason
+  // `scan-tracker.mjs`'s own `ATTACHMENT_PREFIX` records: excluding by context
+  // keeps the rule true for the next id somebody pastes, where excluding by
+  // value would exempt exactly one string and silently cover nothing else.
+  // Writing the id here would also put a bare UUID into the file whose subject
+  // is keeping identifiers out of documents.
+  const NOT_LIVE_IDENTIFIERS = {
+    'claude.ai/code/artifact/':
+      'the trailing segment of a Claude artifact URL — it names an artifact on claude.ai, ' +
+      'not a row on the live project. One in docs/refresh-charter.md, and the only finding ' +
+      'the whole prose corpus produced when this block was written (#409).',
+  }
+
+  function escapeForRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  // Blank the id and KEEP the prefix, so the exemption is visibly scoped to an
+  // id that trails one — a bare UUID elsewhere in the same file is untouched,
+  // which the control below is what proves.
+  function withoutDeclaredIdentifiers(text) {
+    let out = text
+    for (const prefix of Object.keys(NOT_LIVE_IDENTIFIERS)) {
+      out = out.replace(new RegExp(escapeForRegExp(prefix) + UUID_PATTERN.source, 'gi'), prefix)
+    }
+    return out
+  }
+
+  function classesIn(path) {
+    const text = withoutDeclaredIdentifiers(readFileSync(resolve(process.cwd(), path), 'utf8'))
+    return [...classify(text)].sort()
+  }
+
+  it('POSITIVE CONTROL: there is a prose corpus, and it holds the documents this is about', () => {
+    // The same guard the #19 corpus carries, for the same reason: an
+    // always-empty scan and a clean tree print identically. Named individually
+    // because a glob that matched only `README.md` would read exactly like a
+    // working one.
+    expect(prose.length).toBeGreaterThan(5)
+    expect(prose).toContain('README.md')
+    expect(prose).toContain('docs/data-outside-production.md')
+    expect(prose).toContain('docs/access-model.md')
+  })
+
+  it('carries no UUID-shaped or address-shaped string', () => {
+    // Reports the PATH and the match CLASS, never the value — `scan-tracker`'s
+    // rule, and it applies here for a sharper reason than it does there. That
+    // script protects a public Actions log; this assertion's message would be
+    // printed by CI *and* pasted into a pull request by whoever fixes it.
+    const offenders = prose
+      .map((path) => ({ path, classes: classesIn(path) }))
+      .filter((row) => row.classes.length)
+      .map((row) => `${row.path} [${row.classes.join(', ')}]`)
+    expect(
+      offenders,
+      'live-identifier shapes in the prose corpus — remove the value from the document; ' +
+        'if it names nothing on the live project, declare its URL prefix in NOT_LIVE_IDENTIFIERS',
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the scan catches an address and an id planted in prose', () => {
+    // Run against TEXT rather than a file, and through the same `classify` the
+    // assertion above uses — a control that builds its own matcher proves the
+    // control rather than the guard.
+    //
+    // The address is the half that matters: it is what the #328 incident put
+    // into `docs/data-outside-production.md`, and it is the case the literal
+    // scans above are measurably blind to, since a sentence does not quote it.
+    const planted = 'written up by somebody at real.person@somewhere.invalid, household 3f2a9c41-77b0-4e19-9d2c-5a1e0b8c4d63'
+    expect([...classify(planted)].sort()).toEqual(['email', 'uuid'])
+    // ...and ordinary documentation prose is not flagged, so the assertion
+    // above is discriminating rather than matching everything.
+    expect([...classify('The organizer opens the Roster tab and taps Add.')]).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the exemption is scoped to an id that TRAILS its prefix', () => {
+    // The failure this rules out is an exemption written wide enough to blank
+    // every id in a file that happens to contain one declared URL — which would
+    // read exactly like a clean file.
+    const id = '3f2a9c41-77b0-4e19-9d2c-5a1e0b8c4d63'
+    const [prefix] = Object.keys(NOT_LIVE_IDENTIFIERS)
+    expect([...classify(withoutDeclaredIdentifiers(`see ${prefix}${id}`))]).toEqual([])
+    expect([...classify(withoutDeclaredIdentifiers(`see ${prefix}${id} and also ${id}`))]).toEqual([
+      'uuid',
+    ])
+  })
+
+  it('every NOT_LIVE_IDENTIFIERS exemption is still needed', () => {
+    // An exemption whose subject has left the corpus is a hole waiting for
+    // somebody to reuse the prefix — `NOT_NAMES`' reasoning, and the same test.
+    const text = prose.map((path) => readFileSync(resolve(process.cwd(), path), 'utf8')).join('\n')
+    const unnecessary = Object.keys(NOT_LIVE_IDENTIFIERS).filter((prefix) => !text.includes(prefix))
+    expect(
+      unnecessary,
+      `these exemptions are no longer needed: ${unnecessary.join(', ')}`,
+    ).toEqual([])
   })
 })
 
@@ -1672,20 +1953,23 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
   })
 
   it('the onboarding step count is unchanged from before this story', () => {
-    // THREE cards and THREE forms since #154 — sign in, create your own
-    // account, name the household — of which a person is shown exactly one at
-    // a time. It was TWO and TWO from #37 to #154 (create a household, or sign
-    // in), and the rework that moved it is what this literal exists to make
-    // visible in a diff: #154 split the organizer's signup out of the household
-    // form, because the two could only ever succeed together on a project with
-    // email confirmation off. A capability step would be a FOURTH of each, and
-    // this is the number that says so.
+    // FIVE cards and FIVE forms since #173 — sign in, create your own account,
+    // name the household, and the two join-with-a-code cards (one signed out,
+    // one signed in with no household) — of which a person is shown at most
+    // two at a time. It was THREE and THREE from #154 to #173 — #154 split the
+    // organizer's signup out of the household form, because the two could
+    // only ever succeed together on a project with email confirmation off —
+    // and TWO and TWO from #37 to #154 (create a household, or sign in). Each
+    // rework is what this literal exists to make visible in a diff. A
+    // capability step would be a SIXTH of each, and this is the number that
+    // says so: the two #173 cards are admission, not capability, and neither
+    // asks anything about what a person can do.
     //
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(3)
-    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(3)
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(5)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(5)
   })
 
   it('no component offers a capability screen, by any of the words one would be called', () => {
@@ -1885,15 +2169,23 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
     // End to end: listed, read, and REFUSED. Removed in a `finally`, and the
     // removal is then proven rather than assumed.
     //
-    // AT THE REPO ROOT, not under `src/test/`, and that is not cosmetic. Four
-    // suites — allocation, calendar, capacity and liveSchema — walk `src/`
-    // recursively at RUN TIME, and vitest's default file parallelism runs them
-    // alongside this one, so a probe written there can be read between the write
-    // and the `rm` and redden an unrelated suite with ENOENT. Nothing enumerates
+    // AT THE REPO ROOT, not under `src/test/`, and that is not cosmetic. Six
+    // suites — allocation, calendar, capacity, capture, liveSchema and the #87
+    // scan in this very file — walk `src/` recursively at RUN TIME, and vitest's
+    // default file parallelism runs them alongside this one, so a probe written
+    // there can be read between the write and the `rm` and redden an unrelated
+    // suite with ENOENT. (It said FOUR until #192 counted them; the two it
+    // missed were added after it was written, which is the whole argument for
+    // the convention below rather than a remembered list.) Nothing enumerates
     // the repo root. The extension is `.tmp` rather than `.js` for the same class
     // of reason: `npm run lint` is `eslint .`, which would lint a stray root
     // `.js`. The rule is cairn's — before writing a probe into a repo directory,
     // grep for who enumerates that directory at run time.
+    //
+    // #192 gave that rule a second half: a probe that MUST live in an enumerated
+    // directory carries `PROBE_MARKER`, which every walker above skips by name.
+    // This probe deliberately does not, and stays at the root — the marker buys
+    // nothing here, and the root case is the one this control exists to prove.
     const probe = '.token-probe.tmp'
     const absolute = resolve(process.cwd(), probe)
     writeFileSync(absolute, `const fixture = '${PREFIX}${'0123456789abcdef'.repeat(3)}'\n`)
@@ -1953,8 +2245,16 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
 // This reads the deployed source rather than the client's, deliberately: the
 // client's copy is the one under test everywhere else in the suite, and a guard
 // that reads it would be asserting a thing against itself.
+// #341 MOVED THIS GUARD, and the move is the point rather than a detail. The
+// minting code left `index.ts` for `handler.ts` when the function was split so
+// its mailer-refusal branch could be tested in `npm test`. A guard that names a
+// FILE follows its subject or it stops asking anything — and this one would not
+// have failed quietly: its own positive control asserts the source is over 1000
+// characters and contains `createUser`, and the new `index.ts` is neither. That
+// is the difference between this and `edge-function-cors.test.js`, which reads
+// `index.ts` and `handler.ts` and joins them, and so needed no change at all.
 describe('#242 — the client and the Edge Function agree on the synthetic address', () => {
-  const FUNCTION_SOURCE = 'supabase/functions/provision-member/index.ts'
+  const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
 
   // Built rather than written out, so this file does not itself contain the
   // literal it is hunting — the same reason the token block above builds its
@@ -2189,6 +2489,9 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     }
     return entries.flatMap((entry) => {
       if (entry.name === 'node_modules' || entry.name === '.temp') return []
+      // #192 — the read below is already in a `try`, so this is not the race;
+      // it keeps a probe out of a corpus whose POSITIVE CONTROL counts it.
+      if (isProbeFile(entry.name)) return []
       const full = resolve(dir, entry.name)
       return entry.isDirectory() ? filesUnder(full) : [full]
     })
@@ -2371,5 +2674,120 @@ describe('#345 — an overdue chore is warm, and it is not an error', () => {
     // ink still reads the fact.
     const chores = readFileSync(resolve(process.cwd(), 'src/components/Chores.jsx'), 'utf8')
     expect(chores).toMatch(/className="chore__overdue">overdue</)
+  })
+})
+
+// #192 — the reserved probe name is a HOLE, and these are the two things that
+// close it.
+//
+// `retiredVocabulary.test.js` plants a real file into each covered directory and
+// removes it in a `finally`. Other files in this repo enumerate those
+// directories at run time in parallel workers, so every one of them now skips a
+// filename — `src/test/support/probeFiles.js` carries the census and the
+// argument, and the counts are derived below rather than written down twice.
+// That skip is a hole in every one of those guards at once, and a skip nobody
+// re-derives is exactly the shape this file exists to refuse.
+//
+// So: no COMMITTED file may occupy the name, and no walker may be added that
+// does not honour it. The second is the one that decays on its own — a new
+// suite walking `src/` is the ordinary thing to write, and writing it the
+// obvious way silently reintroduces the race the eleven skips removed.
+describe('#192 — the reserved probe name is honoured, and cannot be occupied', () => {
+  const tracked = execSync('git ls-files -z', {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean)
+
+  // Comments stripped, for the reason every scan here gives: the paragraphs
+  // above each skip NAME the helper, and a guard that a correct file fails is a
+  // guard that gets deleted.
+  const codeOf = (text) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+  // Every source file the test run can execute. `scripts/` is in because two of
+  // its `*.test.js` files walk `supabase/migrations/`, and a `.mjs` they import
+  // would run under vitest just as readily.
+  const SOURCES = tracked.filter((path) => /^(src|scripts)\/.*\.(js|jsx|mjs|cjs)$/.test(path))
+
+  // A file that enumerates a directory and is structurally unable to see a
+  // probe. One entry, and it has to state WHY — the same bar the exemptions in
+  // `retiredVocabulary.test.js` are held to.
+  const EXEMPT = {
+    'src/test/edge-function-cors.test.js':
+      'filters the directory to `isDirectory()` entries, so a loose file is invisible to it ' +
+      'whatever it is called. That is why #170 could put a real untracked probe in ' +
+      'supabase/functions/ and nowhere else, and importing the helper here would be dead code.',
+  }
+
+  const ENUMERATES = /readdirSync\s*\(/
+  const HONOURS = /isProbeFile\s*\(/
+
+  it('POSITIVE CONTROL: there are enumerating files to check, so an empty pass is impossible', () => {
+    const walkers = SOURCES.filter((path) => ENUMERATES.test(codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))))
+    // Measured 2026-09-09: twelve files, eleven honouring the marker and one
+    // exempt. A FLOOR rather than an equality — the number moves whenever a
+    // walker is added, and pinning it would make this a change-detector — but a
+    // floor near the measured value, because the failure worth catching is the
+    // scan quietly finding nothing: a filter that stopped matching would leave
+    // the two assertions below as the only thing standing between a new
+    // unguarded walker and a green run.
+    expect(walkers.length).toBeGreaterThanOrEqual(12)
+    // Named files rather than only a count, one per hazard class: a `src/`
+    // walker, a `supabase/migrations/` reader that is not a test, and one under
+    // `scripts/`, which is in `SOURCES` for exactly this reason.
+    expect(walkers).toContain('src/lib/allocation.test.js')
+    expect(walkers).toContain('src/test/support/pgliteSupabase.js')
+    expect(walkers).toContain('scripts/probe-live-grants.test.js')
+    expect(walkers).toContain(Object.keys(EXEMPT)[0])
+  })
+
+  it('every file that enumerates a directory at run time skips the probe name', () => {
+    const offenders = []
+    for (const path of SOURCES) {
+      if (EXEMPT[path]) continue
+      const code = codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))
+      if (ENUMERATES.test(code) && !HONOURS.test(code)) offenders.push(path)
+    }
+    expect(
+      offenders,
+      `these walk a directory at run time and would read a probe mid-write: ${offenders.join(', ')}. ` +
+        'Import isProbeFile from src/test/support/probeFiles.js and skip it BEFORE any statSync or readFileSync.',
+    ).toEqual([])
+  })
+
+  it('the one exemption is still earned, and says why', () => {
+    for (const [path, reason] of Object.entries(EXEMPT)) {
+      expect(reason.length, `${path} needs a real reason, not a word`).toBeGreaterThan(40)
+      const code = codeOf(readFileSync(resolve(process.cwd(), path), 'utf8'))
+      // The claim, not the assertion of it: this file is exempt BECAUSE it
+      // filters to directories. The day it stops, the exemption is a hole.
+      expect(code, `${path} no longer filters its listing to directories`).toMatch(
+        /isDirectory\s*\(\s*\)/,
+      )
+    }
+  })
+
+  it('no COMMITTED file carries the reserved name, so the skip can hide nothing real', () => {
+    // The other half. Eleven walkers ignore this substring; if a real source
+    // file ever carried it, it would leave every one of their corpora at once
+    // and each would go on reporting a clean scan.
+    const occupied = tracked.filter((path) => isProbeFile(path))
+    expect(
+      occupied,
+      `these tracked files carry the reserved probe marker "${PROBE_MARKER}" and are invisible ` +
+        `to every run-time walker: ${occupied.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the predicate separates a probe name from an ordinary one', () => {
+    // Both directions, because a predicate matching nothing and one matching
+    // everything produce the same clean scan above.
+    expect(isProbeFile(`.${PROBE_MARKER}.plant.tmp.js`)).toBe(true)
+    expect(isProbeFile(`9999_${PROBE_MARKER}.plant.tmp.sql`)).toBe(true)
+    expect(isProbeFile('src/lib/household.js')).toBe(false)
+    expect(isProbeFile('0014_scope_reads_to_one_household.sql')).toBe(false)
   })
 })

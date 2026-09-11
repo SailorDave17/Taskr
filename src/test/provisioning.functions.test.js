@@ -380,11 +380,20 @@ describe('#87 — provisioning a member, against a real stack', () => {
     const theirs = await makeHousehold()
 
     // Putting the caller on the other roster needs `service_role`, and that is
-    // not a shortcut: there is NO public path that attaches an EXISTING auth
-    // user to a second member row. `provision-member` mints a new one, which is
-    // the gap #191 and #168 both record. So this state is unreachable through
-    // the app today — which is exactly why #161 lands before the affordance
-    // that makes it reachable, rather than after.
+    // not a shortcut — but the reason it is not changed under #341 and the old
+    // one is worth not re-deriving. This used to read "there is NO public path
+    // that attaches an EXISTING auth user to a second member row". Since #341
+    // there is one, and it is measured in this file: *re-inviting a PENDING
+    // address returns the same account rather than a second one* claims an
+    // existing auth user onto a member row in another household, 200.
+    //
+    // It stays out of reach HERE because the caller's account is ESTABLISHED —
+    // `makeHousehold` signs up with a password — and `inviteUserByEmail` refuses
+    // an address in that state, measured in the test above this one. So the
+    // fixture still needs `service_role` to reach the state, which is why #161
+    // lands before the affordance that makes it reachable rather than after.
+    // #168 recorded the gap and was retired superseded; #191 records the half
+    // that is left.
     const { data: identity } = await mine.organizer.auth.getUser()
     const housemate = await theirs.addMember('Housemate', 60)
     const svc = serviceClient()
@@ -634,5 +643,261 @@ describe('#247 — revoking a sign-in when a member is removed', () => {
       password: 'kid-secret-1',
     })
     expect(still.error, "a stranger revoked another household's sign-in").toBeNull()
+  })
+})
+
+// #341 — the invitation path, against the REAL stack.
+//
+// `handler.test.js` covers every branch of this action with no network, and is
+// where the mailer-refusal and address-taken branches are proven, because no
+// local GoTrue will produce either on demand. This file exists for the two
+// things that fake cannot answer:
+//
+//   1. **Whether GoTrue really refuses an address that already holds an account.**
+//      AC 3's entire refusal branch rests on that, and until this suite ran it
+//      was a claim read out of Supabase's documentation. `handler.test.js` says
+//      so in its own header. Here it is exercised against a real GoTrue.
+//   2. **Whether the function still works at all after #341 split it.** The
+//      authorization shape moved from `index.ts` to `handler.ts` — 346 lines,
+//      on the one function in this repo holding a key that bypasses row-level
+//      security. A move is supposed to change nothing, and nothing is exactly
+//      what a unit test with a fake client cannot check: the fake answers
+//      whatever this file tells it to, and RLS is what the move must not have
+//      lost. Every test in this suite passing IS that evidence.
+describe('#341 — inviting a member, against a real stack', () => {
+  /**
+   * A member row carrying a REAL address, which is what the invite path needs.
+   *
+   * `makeHousehold`'s own `addMember` deliberately inserts none — every #87
+   * fixture is the email-less member the PIN path is for — so this adds the
+   * column here rather than widening a helper six other tests depend on.
+   */
+  async function addMemberWithEmail(h, displayName, email) {
+    const { data, error } = await h.organizer
+      .from('members')
+      .insert({
+        household_id: h.household.id,
+        display_name: displayName,
+        weekly_minutes: 60,
+        email,
+      })
+      .select('id, display_name, claimed_by, email')
+      .single()
+    expect(error, `adding ${displayName} failed: ${error?.message}`).toBeNull()
+    expect(data.email, 'the address did not land on the row').toBe(email)
+    return data
+  }
+
+  it('AC 1 — invites a member with an address, and claims their row', async () => {
+    const h = await makeHousehold()
+    const address = uniqueEmail('invited')
+    const member = await addMemberWithEmail(h, 'Placeholder One', address)
+
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status, `invite failed: ${JSON.stringify(body)}`).toBe(200)
+    expect(body).toMatchObject({ ok: true, action: 'invite', memberId: member.id, email: address })
+    expect(body.claimedBy, 'no auth user was attached').toBeTruthy()
+
+    // Read the row back through the ORGANIZER, so this is the state the app
+    // would see rather than the payload the function chose to report.
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by).toBe(body.claimedBy)
+  })
+
+  it('AC 3 MEASURED — a real GoTrue refuses an address that already has an ESTABLISHED account', async () => {
+    // THE POINT OF THIS FILE, and the word ESTABLISHED is load-bearing.
+    // Everything downstream of AC 3 assumes `inviteUserByEmail` refuses rather
+    // than returning the existing user, and until this ran it was a claim read
+    // out of Supabase's documentation.
+    //
+    // *Measured 2026-09-09 against a local GoTrue*, and it turns on the state of
+    // the existing account, which the criterion does not distinguish and which
+    // the first draft of this test got wrong:
+    //
+    //   - an account somebody has REGISTERED (signed up with a password) is
+    //     REFUSED — 409, this branch, what AC 3 describes;
+    //   - an account still INVITED-BUT-NEVER-ACCEPTED is re-invited: 200, and
+    //     the SAME auth user comes back. The case below covers that.
+    //
+    // The first draft invited a never-accepted address twice and expected a
+    // refusal, so it failed on the app being right. AC 3's own examples — "a
+    // member removed and re-added, or a Google sign-in from #304 that matched
+    // nobody" — are both established accounts, so the criterion is about this
+    // case and the fixture has to build it: a real signup, with a password.
+    const h = await makeHousehold()
+    const address = uniqueEmail('established')
+
+    // A person who already uses Taskr, in a household of their own.
+    const theirs = freshClient()
+    const { error: signUpError } = await theirs.auth.signUp({
+      email: address,
+      password: 'their-own-password-1',
+    })
+    expect(signUpError, `the established signup failed: ${signUpError?.message}`).toBeNull()
+
+    const member = await addMemberWithEmail(h, 'Placeholder One', address)
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status).toBe(409)
+    expect(body.error).toMatch(/already has a Taskr sign-in/i)
+    expect(body.error).toMatch(/Reset sign-in/i)
+
+    // The half a status code does not prove, and the one that matters most:
+    // nothing was attached. An organizer who merely knows an address cannot put
+    // that person's existing account into their household.
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by, 'a refused invite claimed the row anyway').toBeNull()
+  })
+
+  it('MEASURED — re-inviting a PENDING address returns the same account rather than a second one', async () => {
+    // The other half of the measurement above, recorded because it falsifies a
+    // sentence this repo used to carry. `revoke`'s blast-radius argument said
+    // invite "always attaches a FRESHLY created auth user, never an existing
+    // one". That is true of an established account (refused, above) and FALSE
+    // here: a second invitation to an address whose user has never accepted
+    // returns the SAME user, and it can be claimed onto a member row in another
+    // household.
+    //
+    // Which is why `revoke`'s `otherClaims` check is load-bearing rather than
+    // belt-and-braces: two member rows really can share one auth user by this
+    // route, and deleting the account on the first revoke would end the other
+    // household's access. The check already handles it; what was wrong was the
+    // comment saying it could not arise.
+    const a = await makeHousehold()
+    const address = uniqueEmail('pending')
+    const first = await addMemberWithEmail(a, 'Placeholder One', address)
+    const firstCall = await callFunction(a.organizerToken, {
+      action: 'invite',
+      memberId: first.id,
+      redirectTo: 'http://localhost:5173',
+    })
+    expect(firstCall.status, `the first invite must succeed: ${JSON.stringify(firstCall.body)}`).toBe(200)
+
+    // A second household, because `members_household_email_key` forbids two
+    // rows at one address inside one household — itself worth knowing, and
+    // measured: `23505` on the insert, before the function is reached.
+    const b = await makeHousehold()
+    const second = await addMemberWithEmail(b, 'Placeholder Two', address)
+    const secondCall = await callFunction(b.organizerToken, {
+      action: 'invite',
+      memberId: second.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(secondCall.status).toBe(200)
+    expect(
+      secondCall.body.claimedBy,
+      'a pending re-invite minted a SECOND account at one address',
+    ).toBe(firstCall.body.claimedBy)
+  })
+
+  it('AC 1 — provision is refused for a member who has an address', async () => {
+    const h = await makeHousehold()
+    const member = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('has-address'))
+
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'provision',
+      memberId: member.id,
+      password: 'a-good-password',
+    })
+
+    expect(status).toBe(409)
+    expect(body.error).toMatch(/send them an invitation instead/i)
+
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by, 'a refused provision minted an account anyway').toBeNull()
+  })
+
+  it('the email-less member still provisions, which is why that branch survives', async () => {
+    // The control for the test above. Without it, a function that refused
+    // `provision` outright would pass every assertion up there and would have
+    // left the one member who cannot be emailed with no way in at all.
+    const h = await makeHousehold()
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'provision',
+      memberId: h.member.id,
+      password: 'a-good-password',
+    })
+
+    expect(status, `provision failed: ${JSON.stringify(body)}`).toBe(200)
+    expect(body.email).toBe(`${h.member.id}@taskr.invalid`)
+  })
+
+  it('refuses an invite to a member with no address', async () => {
+    const h = await makeHousehold()
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: h.member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status).toBe(409)
+    expect(body.error).toMatch(/no email address on their row/i)
+  })
+
+  it('refuses an invite with no redirectTo', async () => {
+    const h = await makeHousehold()
+    const member = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('no-redirect'))
+    const { status } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+    })
+    expect(status).toBe(400)
+  })
+
+  it('the authorization shape survived the split — a non-organizer cannot invite', async () => {
+    // #161's escalation, re-asked of the NEW action against real row-level
+    // security. The caller here organises nothing in this household, so the
+    // caller-scoped member read is what must fail closed — and a fake client
+    // could not have shown that, because a fake enforces nothing.
+    const h = await makeHousehold()
+    const member = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('protected'))
+
+    const outsider = freshClient()
+    const { data: signUp, error } = await outsider.auth.signUp({
+      email: uniqueEmail('outsider'),
+      password: 'outsider-secret-1',
+    })
+    expect(error, `outsider signup failed: ${error?.message}`).toBeNull()
+
+    const { status, body } = await callFunction(signUp.session.access_token, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    // 404, not 403: the caller-scoped read cannot SEE the member, so the
+    // function never reaches the organizer check. That is the shape failing
+    // closed, and it is deliberately indistinguishable from "no such member".
+    expect([403, 404]).toContain(status)
+    expect(body.ok).toBeFalsy()
+
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by, 'an outsider got a sign-in attached').toBeNull()
   })
 })

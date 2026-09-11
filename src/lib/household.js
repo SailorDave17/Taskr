@@ -246,10 +246,18 @@ export async function signIn({ email, password }) {
  * Who this reaches is decided by Supabase, not here. A Google address equal to
  * a member's confirmed sign-in address resolves to the SAME auth user
  * (same-verified-email linking), so the roster does not change; a Google
- * address matching nobody gets a fresh auth user with no household, which is
- * the state invitation redemption (#173/#191) later attaches. A member on a
- * synthetic `<id>@taskr.invalid` address can never match a Google account and
- * keeps their PIN.
+ * address matching nobody gets a fresh auth user with no household, and that
+ * state is still unattached. A member on a synthetic `<id>@taskr.invalid`
+ * address can never match a Google account and keeps their PIN.
+ *
+ * That last state named #173/#191 as what would attach it "later", and #341
+ * does NOT — which is worth saying here rather than leaving the reader to
+ * assume the invitation path closed it. #341 invites somebody who is already a
+ * member row, so it never meets an auth user with no household; the person
+ * arriving by Google and matching nobody is still waiting on redemption
+ * (#171 → #172 → #173). A sentence promising a future story is the kind that
+ * quietly goes stale when a NEIGHBOURING story ships, which is why this one now
+ * names what did and did not happen instead of pointing forward.
  *
  * WHAT THE PERSON SEES AT GOOGLE is not this app's name: the consent screen
  * names the redirect URI's domain, `<project ref>.supabase.co`, and the only
@@ -323,6 +331,63 @@ export function readSignInReturn(location = globalThis.location) {
     }
   }
   return null
+}
+
+/**
+ * The kind of auth link this boot arrived on, or null — #341, and #155 later.
+ *
+ * `readSignInReturn` above reads the fragment's ERROR channel. This reads its
+ * SUCCESS channel, and the two are deliberately separate functions over the same
+ * few characters: one says a sign-in did not happen, the other says one did and
+ * names why the person is here.
+ *
+ * TWO THINGS ABOUT THE FRAGMENT, AND THE ORDERING IS THE DANGEROUS ONE.
+ *
+ * First, this app is on the IMPLICIT flow on purpose — `flowType: 'pkce'` would
+ * make `signUp` send a code challenge that only exchanges in the browser that
+ * started it, which breaks confirmation from a second device (see
+ * `signInWithGoogle` above, and cairn's `supabase-js-flow-type-is-client-wide`).
+ * So a completed invite or recovery link lands as `#access_token=…&type=…`,
+ * never as a `?code=`.
+ *
+ * Second, and this is the trap: `createClient` has `detectSessionInUrl` at its
+ * default of true, so **the client consumes that fragment at construction** and
+ * clears it. Anything reading `type` after the first call that builds a client
+ * reads an empty hash and finds nothing — and the person ends up signed in with
+ * no password screen, which is silent, plausible and wrong. App's boot already
+ * carries that rule for `readSignInReturn`: read the URL BEFORE
+ * `currentSession()`, strip it after. This function inherits it, and the test
+ * that would catch a violation is the one asserting the read happens first.
+ *
+ * `access_token` is required rather than assumed. An EXPIRED invite link carries
+ * `type` too, alongside `error=access_denied&error_code=otp_expired` and no
+ * token — that return is `readSignInReturn`'s and must not be mistaken for an
+ * arrival, or the person is shown a password screen for a session they do not
+ * have.
+ */
+export function readAuthCallback(location = globalThis.location) {
+  const fragment = new URLSearchParams(String(location?.hash ?? '').replace(/^#/, ''))
+  const type = fragment.get('type')
+  if (type !== 'invite' && type !== 'recovery') return null
+  if (!fragment.get('access_token')) return null
+  return { type }
+}
+
+/**
+ * Set the password of the account this session already belongs to — #341 AC 2.
+ *
+ * The one credential write a client is allowed to make, and the reason it is
+ * allowed is that it is about the caller themselves: `updateUser` acts on
+ * `auth.uid()` and can reach nobody else. Every other credential path in this
+ * app goes through the Edge Function precisely because it acts on somebody else.
+ */
+export async function setOwnPassword(password) {
+  const { error } = await getSupabase().auth.updateUser({ password })
+  if (error) {
+    const err = new Error(`Could not set that password: ${error.message}`)
+    err.cause = error
+    throw err
+  }
 }
 
 // GoTrue's codes for a flow that is gone rather than refused — the 5-minute
@@ -896,17 +961,37 @@ function describeProvisioningFailure(action, error) {
   return `Could not ${action} that sign-in: ${error?.message ?? 'unknown error'}`
 }
 
-async function callProvisioning(action, { memberId, password }) {
+async function callProvisioning(action, { memberId, password, redirectTo }) {
   const trimmed = String(password ?? '')
   if (!memberId) throw new Error('Pick a person first.')
   // Revoke takes no password — deleting a sign-in has no credential to set —
-  // so the floor applies only to the actions that mint one.
-  if (action !== 'revoke' && trimmed.length < 6) {
+  // and neither does invite, whose entire subject is that the organizer never
+  // chooses one (#341). So the floor applies only to the two actions that still
+  // mint a credential, and the list is spelled out rather than written as a
+  // negation: `action !== 'revoke'` silently included `invite` the moment it
+  // existed, and would have asked the organizer for a password of at least six
+  // characters on the path built to stop asking them at all.
+  const mintsACredential = action === 'provision' || action === 'reset'
+  if (mintsACredential && trimmed.length < 6) {
     throw new Error('That credential is too short — use at least 6 characters.')
   }
 
-  const body =
-    action === 'revoke' ? { action, memberId } : { action, memberId, password: trimmed }
+  let body
+  if (action === 'invite') {
+    // Refused here rather than sent, because the function's own refusal for a
+    // missing `redirectTo` is 'redirectTo is required.' — accurate, and a
+    // sentence about our request shape rather than about anything the organizer
+    // did. There is always an origin in a browser, so this is the non-browser
+    // caller, and saying so is more use than relaying a 400.
+    if (!redirectTo) {
+      throw new Error('Could not work out where the invitation should send them back to.')
+    }
+    body = { action, memberId, redirectTo }
+  } else if (action === 'revoke') {
+    body = { action, memberId }
+  } else {
+    body = { action, memberId, password: trimmed }
+  }
   const { data, error } = await getSupabase().functions.invoke(PROVISION_FUNCTION, {
     body,
   })
@@ -941,14 +1026,74 @@ export async function provisionMember({ memberId, password }) {
 }
 
 /**
+ * Email somebody an invitation they set their own password from — #341.
+ *
+ * The organizer never chooses, types or reads a credential for another adult.
+ * `inviteUserByEmail` on the server sends the project's *Invite user* template,
+ * creates the auth user unconfirmed, and confirms them when they follow the
+ * link; the link lands back here with a session in the fragment and
+ * `type=invite`, and `readAuthCallback` routes them to the password screen.
+ *
+ * `redirectTo` is derived from the origin, never a constant, for exactly the
+ * reason `confirmationRedirectTo` gives — and it is the SAME rule rather than a
+ * parallel one, so a dev server's invitation comes back to the dev server. That
+ * also means a preview deployment's invitation lands on production, which is
+ * #121's decision seen a third time and is recorded there rather than repaired
+ * here.
+ *
+ * This replaces `provisionMember` for anybody with a real address; the function
+ * refuses that call now (#341 AC 1). What is left of the old path is the
+ * email-less row, and #191 retires the ability to create one.
+ */
+export async function inviteMember({ memberId }) {
+  return callProvisioning('invite', { memberId, redirectTo: confirmationRedirectTo() })
+}
+
+/**
  * Replace a member's credential when they forget it — #87 AC 3.
  *
  * No inbox is involved and none can be: a provisioned member's address is
  * `<id>@taskr.invalid`, and `.invalid` can never resolve, so an emailed reset
  * link would go nowhere. It is an admin password update instead.
+ *
+ * #341 narrowed who this is for rather than changing what it does. A member with
+ * a REAL address is reset by `sendPasswordReset` below, so the organizer never
+ * chooses their credential — this is now the email-less row's path only, and
+ * goes when #191 retires the ability to create one.
  */
 export async function resetMemberCredential({ memberId, password }) {
   return callProvisioning('reset', { memberId, password })
+}
+
+/**
+ * Email a member a link they set a new password from — #341, owner decision.
+ *
+ * The other half of "the organizer never sets or sees a credential". #341 as
+ * filed covered only a member's FIRST sign-in, and left reset as the organizer
+ * typing a PIN — which would have kept every sentence AC 5 sweeps for on screen
+ * for anybody who already had an account, and made the story's headline true
+ * only for new members. The owner's call at pickup was to close that half too.
+ *
+ * NO EDGE FUNCTION, which is the thing worth noticing. Provisioning needs
+ * `service_role` because it acts on somebody who does not exist yet; a reset
+ * mail is a request about an ADDRESS, so GoTrue takes it from the anon key and
+ * answers the same way whether or not the address is known. That is a deliberate
+ * property on GoTrue's side — it stops this call being an oracle for which
+ * addresses have accounts — and it means the organizer is told the mail was
+ * SENT, never that it arrived at somebody real.
+ *
+ * The link lands with `type=recovery` on the same screen the invitation lands
+ * on, which is why AC 2 asked for that screen to be built once for both.
+ */
+export async function sendPasswordReset(email) {
+  const { error } = await getSupabase().auth.resetPasswordForEmail(String(email), {
+    redirectTo: confirmationRedirectTo(),
+  })
+  if (error) {
+    const err = new Error(`Could not send that reset email: ${error.message}`)
+    err.cause = error
+    throw err
+  }
 }
 
 /**

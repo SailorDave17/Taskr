@@ -1,0 +1,97 @@
+name: Tracker scan
+
+# #328. The repository is public and so is its tracker; `src/test/gate.test.js`'s
+# corpus is `git ls-files` plus untracked-not-ignored files, so issues, comments
+# and pull request bodies are outside every other check in this repo by
+# construction.
+#
+# THIS IS DETECTIVE, NOT PREVENTIVE, and that is structural. GitHub has no
+# write-time hook on an issue or a comment — nothing a repository can install
+# refuses a comment before it is stored — so the earliest this can fire is after
+# the value is published. The event triggers below fire it within seconds of a
+# write, which is as close to prevention as the platform allows.
+#
+# THE TRIGGERS AND THE CORPUS HAVE TO AGREE, and in the first draft they did not.
+# A pull request carries THREE writable text surfaces — its body, its
+# conversation comments, and its reviews (a review body plus inline
+# review-thread comments) — and that draft fetched only the first two and
+# triggered on only the first two, while this comment claimed it covered every
+# surface. The review pair below and the `reviews` connection in
+# `scripts/scan-tracker.mjs` were added together for that reason; changing either
+# alone re-opens the gap.
+#
+# `issues` and `issue_comment` workflows run from the DEFAULT branch's copy of
+# this file, never from a feature branch — so editing it here has no effect on
+# those triggers until this merges to `develop`. Stated because a workflow that
+# silently does not run is the failure this whole story is about.
+#
+# It runs the SHAPE half only. The term half needs the live project's household
+# names and member addresses, and putting those into an Actions secret would
+# create a third home for values this repo spends a guard keeping out of version
+# control. Run it locally with `npm run scan:tracker -- --names-file <path>`;
+# scripts/scan-tracker.mjs prints which halves ran on every invocation.
+
+# A DAILY RUN WAS WANTED HERE AND IS DELIBERATELY ABSENT. `src/test/gate.test.js`'s
+# "#98 AC 5 — nothing in the tree schedules work" scans every YAML under this
+# directory and refuses the two spellings a scheduled Actions trigger needs, with
+# no exemption mechanism at all. That guard is about the app never reading
+# household data on a timer, and this workflow reads GitHub rather than the
+# database — so an exemption would have been defensible. It was weighed at the
+# owner's gate on 2026-09-10 and rejected: the event triggers below cover every
+# surface a value can be written to, which left the schedule a backstop for an
+# edit made while Actions was down. That is not worth putting the first door into
+# a deliberate guard — and the cost is narrower than it looks, because
+# `scripts/scan-tracker.mjs` is event-blind: it reads no `GITHUB_EVENT_*`, takes
+# no issue number, and re-paginates the WHOLE tracker on every run. So an item
+# written during an outage is re-scanned by the next trigger of any kind
+# anywhere in the repository. What the schedule would have bought is a
+# bounded-latency guarantee, not coverage. Run it by hand with
+# `workflow_dispatch`, or locally with `npm run scan:tracker`.
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_target:
+    types: [opened, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# A burst of comments should not start a scan per comment; the last one wins and
+# scans everything anyway.
+concurrency:
+  group: tracker-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Live identifiers on the tracker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # The script exits 1 on a finding and 2 when it could not run at all — a
+      # scan that did not happen must not read the same as a clean one.
+      # It prints item numbers and match classes only: this repository is public,
+      # so its Actions logs are public, and a check that printed the identifier
+      # it caught would publish it a second time.
+      - name: Scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run scan:tracker

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isProbeFile } from '../src/test/support/probeFiles.js'
 
 import {
   MANAGEMENT_API_ROOT,
@@ -153,8 +154,10 @@ describe('splitStatements — counting what a paste actually sends', () => {
     // day it lands. A scanner that returned [] for everything — a dollar-quote
     // branch that swallows the file, say — is caught here even if every count
     // above were loosened.
-    const names = readdirSync(resolve(process.cwd(), 'supabase/migrations')).filter((name) =>
-      name.endsWith('.sql'),
+    // #192 — `isProbeFile` first, or a probe planted by
+    // `retiredVocabulary.test.js` in a parallel worker is read by the line below.
+    const names = readdirSync(resolve(process.cwd(), 'supabase/migrations')).filter(
+      (name) => !isProbeFile(name) && name.endsWith('.sql'),
     )
     expect(names.length).toBeGreaterThan(10)
     const empty = names.filter((name) => splitStatements(migration(name)).length === 0)

@@ -572,6 +572,24 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // and present here.
   Object.freeze({ table: 'extraction_calls', authenticated: null }),
   Object.freeze({ table: 'households', authenticated: null }),
+  // #171, arriving with `0040` — the invitation record, and the THIRD table the
+  // client cannot name freely: `calendar_tokens`' and `extraction_calls`'
+  // reasoning, reached from the other direction. Those two are unreadable
+  // because no policy admits anybody; this one is readable by the household's
+  // ORGANIZER alone. It was absent from `LIVE_SCHEMA` for a different reason
+  // when #171 added this row — #171 shipped no client code — and it is IN
+  // `LIVE_SCHEMA` since #172 added the organizer's read, so the loop in
+  // `probe-live-grants.test.js` now requires this row the way it requires every
+  // client-read table's.
+  //
+  // Every grant `0040` makes is BY COLUMN (nine select, four insert, one
+  // update), so the expected table-level reading is an absence, and a letter
+  // appearing here for `authenticated` would mean a later migration granted a
+  // whole-row privilege nobody decided on — DELETE most of all, which this
+  // feature deliberately never grants: an invitation is withdrawn, never
+  // removed. RED as *not there* until the apply, the same way
+  // `extraction_calls` was for `0036`.
+  Object.freeze({ table: 'invitations', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
   // #50, arriving with `0020`, which revokes wholesale and grants by column —
   // so the expected table-level reading is an absence, like `households` above.

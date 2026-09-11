@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { LIVE_TABLES } from '../src/lib/liveSchema.js'
+import { isProbeFile } from '../src/test/support/probeFiles.js'
 import {
   MEASURED_GRANTS,
   MEASURED_TABLE_ACLS,
@@ -158,6 +159,11 @@ describe('what it asks for — AC 3', () => {
       // (select and insert, both by column) and asserted in
       // `MEASURED_TABLE_ACLS` as an absence at table level.
       'calendar_imports',
+      // #172 — the invitation record, in the same change that adds it to
+      // LIVE_SCHEMA. Its `MEASURED_TABLE_ACLS` row predates this line: #171
+      // added it while the table was still unread, which is the one entry here
+      // whose ACL was decided before any client asked for the table.
+      'invitations',
     ])
   })
 
@@ -185,7 +191,9 @@ describe('what it asks for — AC 3', () => {
 function migrationsGranting(column) {
   const dir = resolve(process.cwd(), 'supabase/migrations')
   return readdirSync(dir)
-    .filter((name) => name.endsWith('.sql'))
+    // #192 — `isProbeFile` first, or the `readFileSync` below reads a probe that
+    // `retiredVocabulary.test.js` is about to remove in a parallel worker.
+    .filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
     .filter((file) =>
       new RegExp(`grant[^;]*\\b${column}\\b`, 'is').test(readFileSync(resolve(dir, file), 'utf8')),
     )
@@ -211,7 +219,8 @@ describe('the negative control — AC 3 requires one by name', () => {
     // enumerated by hand covers exactly the files somebody remembered, and the file
     // that breaks it is by definition the one written after the list.
     const dir = resolve(process.cwd(), 'supabase/migrations')
-    const files = readdirSync(dir).filter((name) => name.endsWith('.sql'))
+    // #192 — `isProbeFile` first, for the reason `migrationsGranting` gives.
+    const files = readdirSync(dir).filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
 
     // Without this the whole test passes the moment the filter stops matching.
     expect(files.length).toBeGreaterThan(10)
@@ -552,5 +561,20 @@ describe('reconcileTableAcls is the control on the role a revoke could hit by mi
     // #208 — the second table the client cannot name, and the same reasoning.
     expect(covered).toContain('extraction_calls')
     expect(LIVE_TABLES).not.toContain('extraction_calls')
+    // #171 put `invitations` here as the third table the client could not
+    // name, asserted as a pair with its absence from LIVE_SCHEMA so the entry
+    // could not be added in one place and forgotten in the other. #172 is the
+    // story that pair was waiting for: it ships the organizer's read, so the
+    // table is in LIVE_SCHEMA now and the loop above already requires it here.
+    // The control row itself is unchanged — `authenticated: null` stays true,
+    // because every `0040` grant is by COLUMN and the table-level ACL is empty.
+    // Asserted in its new form rather than deleted, because an absent entry and
+    // a forgotten one look identical.
+    expect(covered).toContain('invitations')
+    expect(LIVE_TABLES).toContain('invitations')
+    expect(MEASURED_TABLE_ACLS.find((entry) => entry.table === 'invitations')).toEqual({
+      table: 'invitations',
+      authenticated: null,
+    })
   })
 })

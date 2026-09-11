@@ -21,6 +21,7 @@ import { execSync } from 'node:child_process'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { PROBE_MARKER } from './probeFiles.js'
 import {
   RETIRED_BY_0007,
   blankComments,
@@ -290,16 +291,40 @@ describe('#88 AC 2 / #170 — the code no longer names the model 0007 retired', 
   const scanCorpus = () => corpusOf(ls())
   const corpus = scanCorpus()
 
-  // The four directories #170 AC 1 names, each with the predicate that admits it
-  // and a real tracked file that must be in the corpus today. The pairing is
-  // what makes the plant test below able to distinguish a corpus covering four
-  // directories from one covering three.
+  // The four directories #170 AC 1 names, each with the file this suite plants
+  // there. One plant per directory, because a pass on `src/lib` cannot
+  // distinguish a corpus covering four directories from one covering three.
+  //
+  // #192 — these are written to DISK now, and the extensions are not decoration:
+  // each is the extension its directory's clause in `corpusOf` admits, so a
+  // probe that stopped being listed would be saying something about the real
+  // predicate. The migration cannot be dot-prefixed like the other three —
+  // `MIGRATION` requires four leading digits — which is why the reserved name is
+  // a SUBSTRING rather than one filename, and `9999` keeps it above
+  // `HISTORY_THROUGH` and out of the way of a real migration number.
+  //
+  // Every one of them carries `PROBE_MARKER`, which every file in this repo that
+  // enumerates a directory at run time skips BY NAME before touching the
+  // filesystem — bar one, which filters its listing to directories and cannot
+  // see a file at all. That is what makes an on-disk plant safe here where #170
+  // measured it was not; the census, the cost and the two guards that close the
+  // hole it opens are in `probeFiles.js` and in `gate.test.js`'s `#192` block.
   const COVERED = [
-    { dir: 'src/lib', matches: (p) => /^src\/lib\/.*\.jsx?$/.test(p) },
-    { dir: 'src/components', matches: (p) => /^src\/components\/.*\.jsx?$/.test(p) },
-    { dir: 'supabase/functions', matches: (p) => /^supabase\/functions\/.*\.(ts|js)$/.test(p) },
-    { dir: 'supabase/migrations', matches: (p) => MIGRATION.test(p) },
+    { dir: 'src/lib', probe: `src/lib/.${PROBE_MARKER}.plant.tmp.js` },
+    { dir: 'src/components', probe: `src/components/.${PROBE_MARKER}.plant.tmp.jsx` },
+    { dir: 'supabase/functions', probe: `supabase/functions/.${PROBE_MARKER}.plant.tmp.ts` },
+    { dir: 'supabase/migrations', probe: `supabase/migrations/9999_${PROBE_MARKER}.plant.tmp.sql` },
   ]
+
+  // Two lines, and the first one is prose naming two OTHER retired names. So the
+  // single expected finding below carries four claims at once: the plant is
+  // found, the report names the most specific match rather than the
+  // `claim_member` prefix of it, the comment is blanked in the dialect the
+  // path's extension picks, and the line arithmetic survives a real file read.
+  const probeSourceFor = (path) =>
+    isSqlPath(path)
+      ? "-- prose naming claim_member and pin_hash, which must NOT be reported\nselect public.claim_member_with_pin('x');\n"
+      : "// prose naming claim_member and pin_hash, which must NOT be reported\nawait client.rpc('claim_member_with_pin')\n"
 
   // Vocabulary with a LEGITIMATE non-violating use, per file, with its reason.
   //
@@ -382,12 +407,14 @@ describe('#88 AC 2 / #170 — the code no longer names the model 0007 retired', 
     // That is what makes this blind spot invisible to every assertion over the
     // corpus as it stands.
     //
-    // `supabase/functions/` is the one covered directory where a probe FILE is
-    // safe. Three suites walk `src/` recursively at run time and two read
-    // `supabase/migrations/` from disk, so a probe in either races the other
-    // vitest workers; `edge-function-cors.test.js` filters that directory to
-    // `isDirectory()` entries, so a loose file there is invisible to it.
-    const probe = 'supabase/functions/.retired-probe.tmp.ts'
+    // `supabase/functions/` was the ONE covered directory where a probe file was
+    // safe when this was written: `edge-function-cors.test.js` filters it to
+    // `isDirectory()` entries, while `src/` and `supabase/migrations/` were
+    // enumerated at run time by ten suites that would have read a probe
+    // mid-write. #192 removed that hazard by name, so the four plants below now
+    // make this same claim in all four directories — this stays as #170 AC 2's
+    // own named artefact rather than being folded into them.
+    const probe = `supabase/functions/.${PROBE_MARKER}.tmp.ts`
     const absolute = resolve(process.cwd(), probe)
     writeFileSync(absolute, "const spent = call('join_household')\n")
     try {
@@ -416,43 +443,43 @@ describe('#88 AC 2 / #170 — the code no longer names the model 0007 retired', 
   })
 
   it.each(COVERED)(
-    'POSITIVE CONTROL: a planted name is refused in $dir, naming the file and the most specific match',
-    ({ dir, matches }) => {
-      // #170 AC 3. One plant per covered directory, because proving a single
-      // plant cannot distinguish a corpus covering four directories from one
-      // covering three — a pass on `src/lib` says nothing about migrations.
+    'POSITIVE CONTROL: a file planted in $dir is listed, READ FROM DISK, refused, and removed',
+    ({ dir, probe }) => {
+      // #170 AC 3, met literally by #192.
       //
-      // Planted into a real corpus file's CONTENT rather than onto disk. The
-      // AC's `finally` assumes an on-disk plant, and on-disk is unsafe here for
-      // the reason the untracked probe above records: `src/` is walked by three
-      // suites and `supabase/migrations/` is read by the pglite harness, both at
-      // run time and both in parallel workers, so a plant in either could be
-      // read mid-write or applied to Postgres as a call to a dropped function.
-      // Nothing is left behind because nothing is written — the risk the
-      // `finally` manages is removed by construction rather than cleaned up.
-      const host = corpus.find((path) => matches(path) && violationsIn(path).length === 0)
-      expect(host, `no clean corpus file under ${dir} to plant into`).toBeTruthy()
+      // Until #192 this planted into a real corpus file's CONTENT in memory,
+      // because an on-disk plant races the other vitest workers: `src/` is
+      // walked by six suites and `supabase/migrations/` is read by four more, at
+      // run time and in parallel, so a probe in either could be `statSync`ed
+      // between the write and the `rm`. That measurement was right, and the
+      // repair is not to avoid the disk but to remove the hazard — every one of
+      // those walkers now skips `PROBE_MARKER` by name before it touches the
+      // filesystem.
+      //
+      // What the in-memory version could NOT ask is what this asks now: whether
+      // a file appearing under this directory is picked up at all. That is a
+      // property of `ls()` and `corpusOf` together, and it is answered here by
+      // creating the condition rather than by reasoning about the filter.
+      const absolute = resolve(process.cwd(), probe)
+      writeFileSync(absolute, probeSourceFor(probe))
+      try {
+        // Re-derived, never the `corpus` constant: a list computed at collection
+        // time cannot be asked whether it WOULD have seen a file created since.
+        expect(scanCorpus(), `${dir}: the corpus does not list the planted file`).toContain(probe)
 
-      // `claim_member_with_pin` carries two claims at once: that the plant is
-      // found, and that the report names the MOST SPECIFIC match — the shorter
-      // `claim_member` is a prefix of it, and naming that one sends a reader
-      // hunting a call that is not there.
-      const statement = isSqlPath(host)
-        ? "select public.claim_member_with_pin('x');"
-        : "await client.rpc('claim_member_with_pin')"
-      const found = namesIn(`${sourceOf(host)}\n${statement}\n`, host)
-      const names = found.map((f) => f.name)
-
-      expect(names, `${dir}: the plant was not detected in ${host}`).toContain(
-        'claim_member_with_pin',
-      )
-      expect(names, `${dir}: reported the prefix instead of the specific name`).not.toContain(
-        'claim_member',
-      )
-      // The line, so the failure message can name a place. The plant is the last
-      // line, derived rather than spelled out.
-      const plantLine = sourceOf(host).split('\n').length + 1
-      expect(found.find((f) => f.name === 'claim_member_with_pin').line).toBe(plantLine)
+        // End to end — listed, READ FROM DISK through the same reader the scan
+        // itself uses, and refused. Listing alone would pass with a corpus
+        // nothing ever opens.
+        expect(namesIn(sourceOf(probe), probe), `${dir}: the plant in ${probe} was not refused`)
+          .toEqual([{ name: 'claim_member_with_pin', line: 2 }])
+      } finally {
+        rmSync(absolute, { force: true })
+      }
+      // Prove the cleanup rather than assuming it, and prove it the expensive
+      // way — by re-deriving the corpus, not by asking the filesystem. A
+      // leftover probe is a failure this file would otherwise report against the
+      // NEXT person's change.
+      expect(scanCorpus(), `${dir}: the plant survived its own finally`).not.toContain(probe)
     },
   )
 

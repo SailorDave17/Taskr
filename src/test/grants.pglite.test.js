@@ -287,6 +287,32 @@ const CLIENT_OPERATIONS = [
     site: 'calendar.js recordCalendarImport()',
     sql: "insert into public.calendar_imports (household_id, member_id, calendar_event_id, chore_id) select gen_random_uuid(), gen_random_uuid(), 'placeholder-event', gen_random_uuid() where false",
   },
+  // #172 — the organizer's three statements on `0040`'s table. Every grant is BY
+  // COLUMN, so each row names exactly the columns `invitations.js` sends: the
+  // read omits `token_hash` (granted, and never wanted), the insert names the
+  // four `0040` grants, and the update names the one. `decode('00', 'hex')`
+  // rather than `extensions.digest(...)` for the placeholder digest, because a
+  // statement that matches no row must still PLAN, and planning a call checks
+  // execute on the function — which would make this a test of pgcrypto's grant
+  // rather than of the table's.
+  {
+    table: 'invitations',
+    op: 'select',
+    site: 'invitations.js listInvitations()',
+    sql: 'select id, household_id, created_by_member_id, created_at, expires_at, withdrawn_at, redeemed_at, redeemed_by_member_id from public.invitations limit 0',
+  },
+  {
+    table: 'invitations',
+    op: 'insert',
+    site: 'invitations.js mintInvitation()',
+    sql: "insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at) select gen_random_uuid(), decode('00', 'hex'), gen_random_uuid(), now() + interval '1 day' where false",
+  },
+  {
+    table: 'invitations',
+    op: 'update',
+    site: 'invitations.js withdrawInvitation()',
+    sql: "update public.invitations set withdrawn_at = 'now' where false",
+  },
   // #368 — `shopping_items` 'delete' / 'shopping.js removeItem()' stood here
   // until `0034`. The privilege is gone (the remove is an RPC now), so the row
   // cannot stay: every entry in this list is a statement the client must be

@@ -7,7 +7,22 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0039` are ALL applied to the live project (`0039` on 2026-09-08 in #106's own
+- Status: **`0001`–`0041` are ALL applied to the live project** (`0041` on 2026-09-11 in #173's own
+  session, at md5 `ecabaf99ff72dcf9d92ce7a57085151a` (`8824 characters, 4 statements`), read back
+  identical — see its entry below; a BODY replace of `redeem_invitation` that **`npm run check:live`
+  cannot see** — *measured* **69 of 69** on both sides — and that
+  the read-only catalog query confirmed on both sides, the widened `btrim` absent before and present
+  after; `0040` on 2026-09-10 in #171's own
+  session, at md5 `bd84210bf0e64eb21ce749411d84a83a` (`32878 characters, 19 statements`), read back
+  identical — see its entry below; **`npm run check:live` is blind to that file in BOTH directions**,
+  so its 65 of 65 is the same on either side and is NOT evidence the paste happened (**#172 listed
+  the table the same day and read 66 of 66**, the new row green on arrival, then **68 of 68** once
+  its review round looped the live Realtime control over every excused table; **#173 listed the
+  function on 2026-09-11 with its call site and read 69 of 69**,
+  the new row green on arrival too) —
+  `npm run probe:live-grants` moved 19 of 20 → 20 of 20 on the file's own control row, and the
+  read-only catalog query read the three policies, the function's ACL and its lock;
+  `0039` on 2026-09-08 in #106's own
   session, at md5 `798a49fea4559ee5f1caa3c261907d7e` (`11592 characters, 17 statements`), read back
   identical — see its entry below; *measured* `check:live` **64 of 65**
   immediately before the apply and **65 of 65** immediately after, the
@@ -618,6 +633,210 @@
     - **The publication gains the table**, with `0037`'s guarded shape, so a second phone's import
       moves this phone's *already imported* marks without a reload. `WATCHED_TABLES` derives it from
       `LIVE_SCHEMA` and `realtime.pglite.test.js` holds the publication equal — twelve tables now.
+  - **`0040`** (#171) — `invitations`: the record an organizer mints to admit somebody, and
+    `redeem_invitation`, the only route that can create a member row in a household the caller is
+    not yet in. The first half of admission; #172 mints and withdraws, #173 redeems, and #191 makes
+    this the only add path. Applied 2026-09-10 in #171's own session with `npm run migrate:live`,
+    before the merge (`0020`'s safe order), at md5 `bd84210bf0e64eb21ce749411d84a83a`
+    (`32878 characters, 19 statements`), read back identical. Every reading below was taken on both
+    sides in that session.
+    - **What the catalog read, before and after.** *Before*: no table, no function, no policy, no
+      grant, not published — a clean slate, with `members`' `DELETE` grant read in the same query as
+      the control that the probe reached a real schema rather than returning empty. *After*: the
+      table present with `relrowsecurity = true`; **exactly three policies**
+      (`invitations_insert_organizer:INSERT`, `invitations_select_organizer:SELECT`,
+      `invitations_update_organizer:UPDATE`) and no DELETE policy; `redeem_invitation` at
+      `prosecdef = true` with `search_path=""` (the catalog's quoted form), **executable by
+      `authenticated` and NOT by `anon`** — the `0034` idiom landing on the live project, which is
+      the half no local test can check; its body md5 `ede6cb2e8a280e9e56a21e48c1cc1ddc`; and the
+      lock read back as a PREDICATE rather than inferred from the hash moving —
+      `position('where i.id = target.id' in pg_get_functiondef(...)) > 0` is **true**, which is
+      `0035`'s correction asserted on production (assert the row being locked, never the clause).
+      Fourteen column grants for `authenticated` and **no table-level grant for either client
+      role**: `SELECT` on all nine columns, `INSERT` on four, `UPDATE` on `withdrawn_at` alone. Not
+      in the publication — as `LIVE_SCHEMA`'s absence then required, and as `UNWATCHED_TABLES`
+      requires since #172 (owner decision at #172's pickup: organizer-only, and publishing would put
+      `token_hash` on a channel for no other reader).
+    - **`npm run probe:live-grants`: 19 of 20 before, 20 of 20 after**, the one moved row being this
+      file's own new control (`invitations` reading *the table is not there*) — the entry doing its
+      job, `extraction_calls`' behaviour for `0036` exactly, draining on the apply and on nothing
+      else. *(An earlier reading in this session said 20 of 20; that was taken before the control row
+      existed, and the denominator moved from 19 to 20 when it was added.)*
+    - **`npm run check:live`: 65 of 65 on BOTH sides**, measured rather than predicted. That is this
+      story's AC-8 departure showing up as a number: the check is blind to this file in both
+      directions, so a green run is not evidence the paste happened, and the two instruments above
+      are what say it did.
+    - **#172 (2026-09-10) — the organizer's half, and the table becomes visible.** `LIVE_SCHEMA`
+      gained `invitations` with the client's own column list (`INVITATION_COLUMNS`, which omits
+      `token_hash` — granted, and never wanted: a digest cannot be shown, read aloud or spent), and
+      `npm run check:live` read **66 of 66** on the story's branch, the new row green on its first
+      run — and **68 of 68** after the review round, which found the live Realtime control pinned to
+      the first excused table only, so `invitations`' exclusion had no live assertion. It now runs
+      once per excused table plus an empty-set floor, and the live server refused `invitations` as
+      NOT PUBLISHED. The first `LIVE_SCHEMA` entry here to arrive green rather than red-until-pasted, because
+      the file it probes was applied before any client read it. The function half followed on
+      2026-09-11: #173 listed `redeem_invitation` in `LIVE_RPCS` with its call site
+      (`invitations.js redeemInvitation`), and that row was green on arrival for the same reason —
+      *measured* **69 of 69** (#416's second criterion). What the
+      client does with the table:
+      - **The code is generated and hashed in the browser**, and only the digest crosses the wire —
+        ten characters from a 31-symbol alphabet with no `0`/`o`/`1`/`l`/`i`, drawn by rejection
+        sampling from `crypto.getRandomValues` (a plain `% 31` would bias the first eight symbols by
+        about 12%). `src/test/invitationMint.pglite.test.js` mints through that JavaScript digest and
+        redeems through the real `redeem_invitation`, because the two are one function in two
+        languages and only a real Postgres can say whether they agree.
+      - **That cross-check found a disagreement on its first run.** `btrim(code)` with one argument
+        trims SPACES only — its set defaults to a single space — while JavaScript's `trim()` also
+        takes tabs and newlines, so the first client normalisation hashed `'  K7M3QP4RWN\t'` to a
+        digest the server would never reproduce. The client now trims spaces only, matching `btrim`
+        exactly, and a pglite test pins `btrim`'s behaviour as a platform fact. The mint is unaffected
+        (the generator emits no whitespace); the redemption was, since a code pasted with a
+        trailing newline was refused — recorded on #173, whose AC 8 it landed on, and settled by
+        `0041` (below), which widens the server's set to space, tab, carriage return and newline
+        and the client's twin with it.
+      - **Withdrawal stamps `withdrawn_at` from the database clock**, by sending the text `'now'`,
+        which Postgres resolves when it casts the value — the same text-to-`timestamptz` leg
+        `expires_at` rides on every mint. Filtered on both stamps being null, so a withdrawal that
+        arrives after a redemption matches no row and cannot overwrite the stamp that won.
+      - **The read is made only for the organizer.** `invitations_select_organizer` would answer a
+        member with nothing, so reading unconditionally would be harmless and would cost every
+        member one round trip per refresh; the policy stays the guard, proven through the exact
+        statement the app issues.
+      - **Not watched** (`UNWATCHED_TABLES`, owner decision at pickup): a redemption on another phone
+        reaches the organizer's list on their next refresh rather than the instant it happens.
+      - **The card was OFF until #173 shipped redemption, and is ON since 2026-09-11.**
+        `INVITATIONS_REDEEMABLE` in `src/lib/invitations.js` shipped `false` with #172, and App
+        wires the card and reads the list only when it is true — owner decision 2026-09-10, at an
+        escalation two review lenses raised independently. #172 and #173 "must reach a release
+        together", `release` is promoted from `develop` as a whole branch, and a sentence was all
+        that held the coupling; code did instead, whatever got promoted. #173's AC 10 flipped it to
+        `true` in the same diff that added the call site, and `invitations.test.js` pins the value
+        in that direction now, so nothing switches redemption off without a diff that says so. The
+        gate stays in App rather than being folded away: it is the record of why the two were
+        coupled, and one line to change if redemption ever has to be withdrawn.
+    - **The code is stored as a DIGEST and nowhere as a code** (AC 4, owner decision 2026-09-10,
+      taken at a clickable question against storing the plaintext and withholding it by column
+      grant). `token_hash bytea` is `extensions.digest(code, 'sha256')`, unique, and the plaintext
+      exists in no column — asserted against the stored row, not only against the schema. This is
+      `docs/data-outside-production.md`'s **Decision 3, control 6** applied to a bearer secret this
+      schema mints itself: the alternative makes one column grant the only thing between a client
+      and every outstanding code, where a digest has nothing to withhold. **What it costs, and #172
+      inherits it:** the code can be displayed exactly ONCE, at mint, because nothing can recover
+      it afterwards — the organizer's list shows created and expires and never the code, and a lost
+      one is withdrawn and re-minted. `token_hash` IS in the select grant, which is safe by
+      construction rather than by trust: a test redeems with the digest itself and is refused.
+    - **Four organizer-only rules, and the fixture that makes them mean something.** Select, insert
+      and update policies each carry BOTH `current_household_ids()` and `0002`'s
+      `is_household_organizer(...)` — `0016`'s pair shape, so a change to one leaves the other
+      standing — and there is NO delete policy and no delete grant, because an invitation is
+      withdrawn rather than removed. AC 2 asks for three properties over a client-role connection
+      in both directions, and the load-bearing one is the middle: a CLAIMED member who is not the
+      organizer, whom the household clause would admit and only the organizer clause refuses. A
+      fixture of organizer-plus-outsider cannot tell the two predicates apart, so the suite seeds a
+      second claimed member and asserts they read nothing while their own roster read still works.
+      Fails CLOSED on a household whose `organizer_member_id` is null, inherited from `0016`.
+    - **Redemption has to be a function, and the positive control says why.** `members_insert_same_household`
+      requires a membership the redeemer does not have, so no client insert can ever substitute —
+      *measured*, the redeemer's own insert is refused `permission denied for table members`, at the
+      PRIVILEGE layer before any policy is consulted, because `claimed_by` is in no client insert
+      grant (`0007`'s withholding). Stopped twice over, and the control asserts the refusal rather
+      than the layer that won. `security definer`, `search_path` pinned to `''`, `execute` revoked
+      from `public` AND `anon` explicitly — `0034`'s idiom, whose second word is load-bearing on
+      this project and which no test here can check (cairn:
+      *the-harness-cannot-catch-what-the-platform-granted*).
+    - **One sentence for four refusals — Decision 4 clause 4.** No such code, expired, withdrawn and
+      already-redeemed all raise `that invitation cannot be used`, asserted EQUAL to each other and
+      asserted not to name the household or its id. Four distinguishable answers would tell somebody
+      guessing codes that they had found a real one. #173's surface draws its four messages from what
+      the person did, which is where that criterion lives — and, owner decision at #173's pickup
+      (2026-09-11), that surface shows ONE sentence naming the three possibilities without saying
+      which applied, since a client cannot distinguish what the server refuses to distinguish
+      without the oracle this clause forbids. The one refusal that names anything —
+      `you are already in that household` — is reachable only by somebody already inside, and it
+      fires BEFORE the invitation is spent (#173 AC 2), asserted by redeeming the same code
+      afterwards.
+    - **Spent exactly once** (AC 6), under a `for update` lock taken by PRIMARY KEY rather than
+      through `redeemed_at is null` — `0035`'s correction and cairn's
+      *a-lock-through-a-mutable-predicate-loses-its-row*: a lock through a mutable predicate does not
+      survive the row it matched being retired, and the guarded branch is then skipped whole. The
+      row is found by digest, then locked by its own id, then re-read under the lock.
+    - **An invitation cannot be BORN expired.** `invitations_expires_after_creation` compares against
+      `created_at`, which defaults to `now()`, so a row minted already-dead is refused outright. The
+      expired-redemption test therefore has to AGE a valid row — moving both stamps, since moving
+      only `expires_at` leaves the expiry microseconds in the future and the test reads a successful
+      redemption as a failed refusal. *Measured on this branch*: the first fixture did exactly that.
+    - **What each instrument can see, and this file is a departure from AC 8's letter.** AC 8 asks
+      that `liveSchema.js` gain the table and the function so `check:live` is red until the paste.
+      Both halves were refused by that file's own both-directions guards, for one reason — **#171
+      shipped no client code at all**: the reads arrived with #172 and the call arrives with #173, and
+      an entry then reddened `liveSchema.test.js` (*measured, 1 of 54*, on the RPC half). A probe for
+      something nothing calls reports a missing grant on a correct project, which is the
+      `household_devices` mistake with the sign flipped. So the table joins `MEASURED_TABLE_ACLS`
+      instead — `calendar_tokens`' and `extraction_calls`' shape, which
+      `scripts/probe-live-grants.test.js` asserts as a pair — and it is there for a DIFFERENT reason
+      worth keeping distinct: those two are readable by nobody, while this one is readable by the
+      organizer and was out of `LIVE_SCHEMA` only because its reader had not shipped (it is in since
+      #172). Owner decision,
+      2026-09-10. Consequence: **`check:live` reads the same on both sides of this paste and says
+      nothing about whether it happened** — `probe:live-grants` and the read-only catalog query are
+      what confirm it, and #172/#173 add the `LIVE_SCHEMA` and `LIVE_RPCS` entries with their
+      client code — #172 did its half on 2026-09-10 (**66 of 66**, the new row green on arrival),
+      and #173 did the function half on 2026-09-11 (**69 of 69**,
+      that row green on arrival too, so the whole of `0040` is probed now and #416's obligation is
+      discharged by the two stories it named).
+    - **Not in the Realtime publication**, and asserted absent rather than left out: `0037` fills it
+      from `LIVE_SCHEMA`, `realtime.pglite.test.js` holds the two equal in both directions, and the
+      story that adds the client read adds both. *(Corrected 2026-09-10: it did not. #172 added the
+      read and, at the owner's decision on pickup, named the table in `UNWATCHED_TABLES` instead —
+      organizer-only, and publishing would put `token_hash` on a channel for no other reader. The
+      table is still out of the publication; the absence is a decision now rather than a
+      consequence, and `invitations.pglite.test.js` asserts both halves of it.)*
+  - **`0041`** (#173) — `redeem_invitation` normalises with `lower(btrim(code, E' \t\r\n'))`
+    rather than `0040`'s `lower(btrim(code))`, so a code pasted with its line ending is accepted
+    (#173 AC 8). One expression widened; everything else about the function is `0040`'s and is
+    asserted preserved. Applied 2026-09-11 in #173's own session with `npm run migrate:live`,
+    before the merge (`0020`'s safe order), at md5 `ecabaf99ff72dcf9d92ce7a57085151a`
+    (`8824 characters, 4 statements`), read back identical. Every reading below was
+    taken on both sides in that session.
+    - **Why a migration and not a client trim — owner decision at pickup, 2026-09-11.** `btrim`
+      with one argument trims SPACES only (its set defaults to a single space; *measured
+      2026-09-10* under #172, pinned as a platform fact in `invitationMint.pglite.test.js`), so a
+      code copied out of #172's share message with its newline hashed to a digest no row holds and
+      was refused as unusable, with nothing on either side saying why. The client could have
+      stripped the wider set before the call — no migration, this client only. The server route
+      covers every caller and keeps the rule where `0040` put it: the normalisation lives in the
+      function and the client's `normalizeInvitationCode` is written to BE it, so the client widened
+      to the same four characters in the same change and the mint-to-redeem cross-check asserts the
+      pair agree on exactly the inputs that used to differ. Not `\s` and not `.trim()`: the set is
+      four characters, because a client wider than the server is #172's defect with the sign
+      flipped. Worth knowing, measured in the component test that found it: a single-line `<input>`
+      strips CR and LF from its value by the platform's own sanitisation, so the newline reaches the
+      server from a textarea or another client rather than from this app's field — which is a second
+      reason the server is the place to widen.
+    - **What the catalog read, before and after.** *Before*: `pg_get_functiondef` carrying
+      `btrim(redeem_invitation.code)` and NOT the widened form; *after*: the widened form present,
+      `prosecdef = true`, `search_path=""` (the catalog's quoted form), **executable by
+      `authenticated` and NOT by `anon`**, the primary-key lock still read back as a predicate
+      (`where i.id = target.id`), the comment naming `0041`, and the body md5 moved
+      `72c95ebf95127e61304a997f4a6b26f2` → `1e9f6d75e784b6d0b13843febdba2dc8` — `0028`'s reading, that a
+      `create or replace` preserves the ACL and the flags, taken on production rather than assumed.
+      The table's grants and policies were read in the same select as the control that nothing
+      else moved: exactly the three `0040` policies, fourteen column grants and no table-level grant for `authenticated`, identical on both sides.
+    - **`npm run check:live`: 69 of 69 on BOTH sides**, measured
+      rather than predicted. A body replace with the same name and argument set is invisible to a
+      probe that resolves by name and argument set (`0028`'s and `0029`'s blindness), so a green
+      run is not evidence this paste happened; the catalog query above is. The `redeem_invitation`
+      ROW itself is #173's, listed with the call site in the same change, and read green on arrival
+      because `0040` was already applied — the first RPC entry in `LIVE_RPCS` to arrive that way.
+    - **`npm run probe:live-grants`: 20 of 20 on both
+      sides.** No grant moves: the file restates `0034`'s revoke-then-grant so it carries the
+      complete privilege statement on its own, and the restatement is idempotent.
+    - **Re-runnable, and the re-paste hazard runs the other way.** Applying `0041` twice changes
+      nothing (asserted by md5). Re-pasting `0040` alone on top of it succeeds silently and REVERTS
+      the normalisation to spaces only — `0028`'s hazard exactly — and re-pasting `0041` restores
+      it; both directions are asserted in `invitationWhitespace.pglite.test.js`, with a positive
+      control that every pasted input it accepts was refused under `0040` alone. The safe re-paste
+      order is the whole sequence and now ends on `0041`.
   - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
     `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
     client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with
@@ -1581,9 +1800,10 @@
   written against names alone would have called this project healthy while every household creation
   in the app failed.
 
-## Read this first — the decision below changed, twice
+## Read this first — the decision below changed, three times
 
-Two supersessions, and the second undoes an assumption the first was built on.
+Three supersessions. The second undoes an assumption the first was built on; the third takes away the
+organizer's part in it.
 
 1. **2026-08-05 → 2026-08-06.** The original decision was *a household join code plus anonymous auth,
    pick yourself from the roster*. It was overridden in favour of **per-member credentials**: an
@@ -1592,6 +1812,36 @@ Two supersessions, and the second undoes an assumption the first was built on.
    auth users**, which is what the section below calls the upgrade path and explicitly does not
    reject on principle. Its stated blocker — *"the Supabase CLI is not installed, Docker is not
    running"* — is what changed, not the reasoning.
+3. **2026-08-11 → 2026-09-09 (#341). The organizer no longer chooses anybody's credential.** A member
+   with a real address is sent an **invitation** and sets their own password from it; a member with a
+   sign-in already is sent a **reset link** and does the same. The organizer never types, sees or
+   passes on a password for another adult.
+
+   **What this reverses is a decision rather than a mechanism**, and #87 stated it plainly enough to
+   quote: *"the organizer types the credential and tells the person out loud — a household already
+   understands 'your PIN is 1234', and the alternative needs a surface that displays a secret exactly
+   once and a recovery path for the organizer who looks away."* That reasoning was sound for a
+   household of children. It stopped being the right default once the people being added were other
+   adults, and the alternative it rejected is **not** the one taken here: nothing displays a secret,
+   because nobody except the person ever knows one.
+
+   **What did NOT change**, and this is the part a reader will assume wrongly:
+
+   - **The email-less member keeps the PIN path exactly as described below.** `<id>@taskr.invalid` has
+     no mailbox by construction, so there is nothing to send and a spoken credential is the only
+     thing that can work. `provision-member`'s `provision` action survives for that row alone and is
+     **refused for any member with a real address**. #191 retires the ability to create such a row,
+     and the action goes with it.
+   - **`members.email` is still the discriminator**, and it now decides which of two *surfaces* an
+     organizer sees as well as which address the account is reached at.
+   - **The authorization shape is untouched.** `provision-member` was split into `handler.ts` and a
+     platform binding so its refusal branches could be tested without Docker; the caller-scoped read
+     and the `is_household_organizer` check on the member's own household row moved unchanged.
+   - **The reset link needs no Edge Function and no `service_role`.** A reset mail is a request about
+     an ADDRESS, so GoTrue takes it from the anon key — and answers identically whether or not the
+     address is known, which is deliberate on its side and stops the call being an oracle for which
+     addresses have accounts. The organizer is therefore told the mail was *sent*, never that it
+     reached somebody real.
 
 **What #62 actually changes**, in the order it matters:
 
@@ -1871,8 +2121,11 @@ the stated reason. What it did not name:
   Re-pasting `0027` alone takes the completion-assigns-the-completer rule away; re-pasting `0007`
   takes it away too, because that file carries **both** functions — a prediction that only the undo
   half would go was written into the test and **falsified by running it**, which is why the arm
-  exists. `check:live` cannot see a function body, so the reversion is silent to it too; the repair
-  is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
+  exists. And, since `0041`, **`0040`**, which carries the `redeem_invitation` body `0041` superseded:
+  re-pasted alone it takes the widened whitespace normalisation away and a code pasted with its
+  line ending is refused again (*measured under #173, both directions in one run in
+  `invitationWhitespace.pglite.test.js`*). `check:live` cannot see a function body, so the reversion
+  is silent to it too; the repair is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
   until 2026-09-02.)* Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
@@ -2032,7 +2285,8 @@ on 2026-09-08, not assumed.
   green with nothing published**, its own negative control the one red; the control is what caught
   it, and the probe now reads the `system` frame and reports a join followed by silence as *no
   evidence*, never as a pass. One row per table, red on purpose until `0037` is applied, plus the
-  live negative control on `member_split_seen`, the one table the client reads and does not watch,
+  live negative control on `member_split_seen` — then the one table the client read and did not watch;
+  #172 added `invitations` as a second, and the control has run once per excused table since —
   which passes only while the server *refuses* it — so it is also the assertion that the
   self-scoped table stays unpublished. Joining reads no row; the server records the subscription
   in its own `realtime` schema and drops it when the channel is removed.
@@ -2158,6 +2412,83 @@ test body rather than by `beforeAll`, so a count derived by reading setup cannot
 > User**, using the exact values already in `.env.local`. Confirm it from the catalog rather than from
 > the dashboard's user search — that search has been observed returning *"No users found"* for an
 > address present in the unfiltered list seconds earlier, so it cannot prove an absence.
+
+## What a story may record about the live project
+
+**Decided 2026-09-10, story #328.** This is the one copy;
+[`docs/data-outside-production.md`](data-outside-production.md) Decision 5 carries the reasoning and
+links here rather than restating it.
+
+**The tracker is public.** It went public with the repository on or before 2026-08-30, and every
+issue, comment and pull request body on it is world-readable. Thirteen issues had to be redacted
+under #328, at fifteen places.
+
+**Ten of those fifteen were written before the repository went public, and five were written after** —
+*measured 2026-09-10 from each place's own `created_at`*, the dates are in
+[`docs/data-outside-production.md`](data-outside-production.md) Decision 5. The last of them was
+written **2026-09-08, nine days after the surface changed and two days before this rule**.
+
+That distinction is the reason this section exists in the form it does, and an earlier draft of it got
+the fact wrong in the flattering direction — it said all thirteen predated the change and that *"not
+one of them was a mistake at the time"*. For ten places that is true and worth saying: each was
+recorded under a criterion that asked for exactly what it recorded, and the surface moved underneath a
+correct habit. For the other five, nobody decided anything; **the habit simply carried on after the
+ground moved**, which is what habits do. A rule that assumes the first story would be a reminder. This
+is a rule.
+
+### The rule
+
+A story, a comment, a pull request body and a commit message may **describe** anything about the live
+project. What they may not do is **name** the four things below.
+
+1. **A row id** — `households.id`, `members.id`, an `auth.users` id, or anything else a UUID from the
+   live project. Write what it is, not what it is: *"the second household's organizer's member row"*
+   carries every bit of meaning *"`9b61d912-…`"* does, to every reader who matters.
+2. **A household's name.** The real one is a family surname. The synthetic ones name live rows too,
+   and are included because a reader cannot tell them apart from the outside.
+3. **A member's address**, including a plus-alias on the owner's own inbox. An alias is not an
+   anonymisation; it is the same inbox with a label.
+4. **A synthetic address that encodes a row id.** A provisioned member's `…@taskr.invalid` is a
+   `members.id` with a domain stuck on it, so it is rule 1 wearing a disguise. This is the clause
+   most likely to be missed, because such an address *looks* like the safe kind.
+
+**What to write instead.** A stable label naming the role — *household 1*, *the organizer's member
+id*, *the orphaned auth user* — and the measurement itself in full. #328's redaction used
+`[redacted #328 — household 1 id]`, and the labels are entity-scoped, so a household's name and its
+id share an index and a table still reads as one household. Nothing about a measurement's value is
+carried by the identifier it was taken from.
+
+**A count, a timestamp, a timezone, an error code, a display name and a household's member count are
+all fine**, and this is worth stating because the instinct after reading the list above is to write
+nothing at all. The rule is about identifiers, not about detail; a story that records less than it
+measured is the failure this whole repository is arranged against.
+
+### Where the exception is, and it is narrow
+
+`.env.local`, the live database and this machine. Nowhere else — and specifically **not** a GitHub
+Actions secret, which is why the tracker scan's term half does not run in CI. Creating a third home
+for these values in order to detect their publication is the trade Decision 2 exists to refuse.
+
+### What enforces it
+
+**A detective check, and nothing preventive.** `npm run scan:tracker`
+([`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs)) reads the whole tracker and reports which
+items carry identifier-shaped strings, printing item numbers and match classes only — a public
+repository has public Actions logs, so a check that printed what it caught would publish it a second
+time. [`.github/workflows/tracker-scan.yml`](../.github/workflows/tracker-scan.yml) runs its shape
+half on every event that writes tracker text — the trigger list is in the workflow, which is the
+one copy of it.
+
+**Rules 1, 3 and 4 are covered by shape and rule 2 is not** — a household name is an ordinary English
+phrase and only a term search finds it, which needs the names. So rule 2 is a convention with a local
+instrument (`--names-file`), and the script prints which halves ran on every invocation so a
+term-less run cannot be read as a clean one.
+
+**Nothing can refuse an issue before it is stored.** GitHub has no write-time hook on issue content,
+so the earliest anything here fires is seconds after publication. The honest claim is *a value that
+lands here is found*, never *a value cannot land here* — and the difference matters, because
+`gate.test.js`'s Decision 2 guard genuinely is preventive for version control and the two read alike
+from a distance.
 
 ## What is not done
 

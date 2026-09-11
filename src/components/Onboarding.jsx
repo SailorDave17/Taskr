@@ -49,15 +49,33 @@ export function entryStateFor({ session, household }) {
 // submit, the confirmation email is the next step, and naming the household
 // is a form this screen shows only to somebody who is signed in.
 //
-// So there are three cards in this file and a person sees exactly one:
+// So there are five cards in this file and a person sees at most two:
 //
 //   signed out, view 'sign-in'   → Sign in, with the start-a-household link
+//                                  and the have-a-code link under it
 //   signed out, view 'sign-up'   → Create your account (email + password)
-//   signed in, no household      → Name the household, or sign out
+//   signed out, view 'join'      → Join with a code (#173): the code is held
+//                                  on this device, then sign in or sign up
+//   signed in, no household      → Name the household, or sign out — AND,
+//                                  beside it, join one with a code (#173)
 //
 // The half-finished state — account made, household not — is no longer an
 // edge case reached by a failure. It is the ordinary state every organizer
-// passes through between confirming their email and naming the household.
+// passes through between confirming their email and naming the household,
+// and since #173 it is ALSO where an invited person lands after confirming:
+// the join card is what they came for, and the household form is the
+// organizer's route beside it.
+//
+// WHY THE CODE IS TAKEN BEFORE THE ACCOUNT, NOT AFTER (#173 AC 4). With
+// confirmation on, "create your account" ends with the person leaving this
+// app for their inbox. If the code were asked for on their return, everybody
+// who arrived holding one would have to remember it across that round trip —
+// and the ordinary case is a code pasted out of a message on the same phone,
+// which is gone from the clipboard by then. So the join view asks for the code
+// FIRST, `onHoldInvitation` keeps it on this device, and the sign-in and
+// sign-up cards then say so; App applies it on the first signed-in boot in
+// this browser. The mechanism and what it guarantees are
+// `src/lib/pendingInvitation.js`'s.
 
 export default function Onboarding({
   onCreate,
@@ -65,12 +83,32 @@ export default function Onboarding({
   onSignInWithGoogle,
   onSignUp,
   onSignOut,
+  onJoin,
+  onHoldInvitation,
+  heldInvitation = false,
+  // #173 — App's own error, for the one write on this screen that no form
+  // here submits: a held code applied at boot and refused. Every other
+  // failure on this screen is caught by `run()` below and shown from local
+  // state; this is the one that arrives from outside. Rendered as ONE strip —
+  // the local sentence wins when both are set, since they are the same
+  // sentence for a submit made here.
+  error = null,
   signedIn = false,
   signInNotice = null,
   busy,
 }) {
-  // Which of the two signed-out cards is showing. Irrelevant once signed in.
+  // Which of the three signed-out cards is showing. Irrelevant once signed in.
   const [view, setView] = useState('sign-in')
+  // #173 — the code typed on the join card (signed out) or the join form
+  // (signed in). One field serves both, since only one of them is ever on
+  // screen.
+  const [code, setCode] = useState('')
+  // #173 — the name they will join under. Asked beside the code on both join
+  // forms (owner decision at the design pass, 2026-09-11): the function
+  // creates the row as a placeholder, and a person arriving under "New
+  // member" had to find their own row and edit it before anybody could tell
+  // who had joined.
+  const [joinName, setJoinName] = useState('')
   // Set by a signup that came back needing email confirmation, and read by the
   // sign-in card so it can say so. Holds the address rather than a boolean
   // because the sentence names the inbox to look in.
@@ -81,10 +119,18 @@ export default function Onboarding({
   const [password, setPassword] = useState('')
   const [signInEmail, setSignInEmail] = useState('')
   const [signInPassword, setSignInPassword] = useState('')
-  const [error, setError] = useState(null)
+  const [localError, setError] = useState(null)
+  // #173 — the App-side error this screen has already answered. The prop has
+  // no setter here, so a boot-time refusal would otherwise stand over the join
+  // view while the person types the next code (review finding): every act on
+  // this screen latches the value it was showing, and the strip shows the
+  // prop only until then. A NEW App error (a different sentence) shows again.
+  const [dismissedError, setDismissedError] = useState(null)
+  const shownError = localError ?? (error && error !== dismissedError ? error : null)
 
   async function run(action) {
     setError(null)
+    setDismissedError(error)
     try {
       await action()
     } catch (err) {
@@ -100,6 +146,69 @@ export default function Onboarding({
   const createReady = Boolean(name.trim()) && Boolean(organizerName.trim())
   const signUpReady = Boolean(email.trim()) && password.length >= PASSWORD_MIN_LENGTH
   const signInReady = Boolean(signInEmail.trim()) && Boolean(signInPassword)
+  const joinReady = Boolean(code.trim()) && Boolean(joinName.trim())
+
+  // #173 — the signed-out half: keep the code and the name on this device,
+  // then move to the sign-in card, which says the code is held. The person
+  // signs in with the account they have, or takes the create-an-account link
+  // to make one — and both paths end with App applying the code once a
+  // session exists.
+  async function submitHold() {
+    await onHoldInvitation(code, { name: joinName })
+    setCode('')
+    setJoinName('')
+    switchTo('sign-in')
+  }
+
+  // #173 — the signed-in half: redeem now. Clears the fields on success only;
+  // a refused code stays in the field so the person can see what they typed
+  // against the sentence that refused it.
+  async function submitJoin() {
+    await onJoin(code, { name: joinName })
+    setCode('')
+    setJoinName('')
+  }
+
+  // The name field both join forms render. "Join as" rather than "Your
+  // name", which is the household form's label on the same screen — and not
+  // "Your name in it" either, which the #154 tests reach with a regex that
+  // would then find two fields (measured: three App tests reddened on it).
+  const nameField = (
+    <label className="field">
+      <span className="field__label">Join as</span>
+      <input
+        className="field__input"
+        value={joinName}
+        onChange={(e) => setJoinName(e.target.value)}
+        placeholder="Sam"
+        maxLength={40}
+        autoComplete="off"
+      />
+    </label>
+  )
+
+  // The one field both join forms render. `autoCapitalize="none"` because the
+  // code is shown in lower case and a phone keyboard would otherwise open with
+  // shift on; `spellCheck={false}` because a ten-character code is exactly the
+  // thing a spell-checker underlines. Casing and surrounding whitespace are
+  // normalised by the data layer and the server alike (AC 8), so neither
+  // attribute is load-bearing — they stop the keyboard fighting the person.
+  const codeField = (
+    <label className="field">
+      <span className="field__label">Invitation code</span>
+      <input
+        className="field__input"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        maxLength={64}
+        autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        inputMode="text"
+      />
+    </label>
+  )
 
   // The account submit, on its own. What happens next depends on what the
   // signup came back with, and both answers are ordinary:
@@ -125,11 +234,47 @@ export default function Onboarding({
 
   const switchTo = (next) => {
     setError(null)
+    setDismissedError(error)
     setView(next)
   }
 
   return (
     <div className="onboarding">
+      {/* #173 — the invited person's route out of the half-finished state.
+          Optional in the wiring (`onJoin`), so the #154 tests render the
+          household card alone as they always did; App always passes it.
+          ABOVE the household form (owner decision at the design pass,
+          2026-09-11): built below it, the prototype at 360×800 put this
+          heading at y=731 and its button at y=926, so an invited person who
+          confirmed in another browser landed on the organizer's form and had
+          to scroll to find what they came for. Organizers start a household
+          once; invited people arrive here every time. The household card
+          keeps its #154 heading and form unchanged underneath. */}
+      {signedIn && onJoin ? (
+        <section className="card" aria-labelledby="join-heading">
+          <h2 id="join-heading" className="card__heading">
+            Join with a code
+          </h2>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              run(submitJoin)
+            }}
+          >
+            <p className="card__note">
+              Been given an invitation code? Type it here with the name you
+              want to be called, and you join that household as yourself.
+            </p>
+            {codeField}
+            {nameField}
+            <button className="button" type="submit" disabled={busy || !joinReady}>
+              Join household
+            </button>
+          </form>
+        </section>
+      ) : null}
+
       {signedIn ? (
         <section className="card" aria-labelledby="create-heading">
           <h2 id="create-heading" className="card__heading">
@@ -215,13 +360,33 @@ export default function Onboarding({
             // obfuscated user, no session, no error — so that the call cannot
             // be used to find out who has an account. This sentence must not
             // undo that by promising a message that may not have been sent.
+            //
+            // #173 — with a code held, the sentence after the link changes:
+            // the next thing is joining the household, not naming one. Still
+            // one paragraph and one `role="status"`, so the #154 tests that
+            // read this note read the same element.
             <p className="card__body" data-testid="confirmation-note" role="status">
               Your account exists, but it needs its email confirmed before you
               can sign in. Open the link in the message sent to{' '}
-              <strong>{pendingEmail}</strong>, then sign in here &mdash; you will
-              name your household after that. If you already had an account at
-              that address, nothing has changed: sign in with the password you
-              had.
+              <strong>{pendingEmail}</strong>, then sign in here &mdash;{' '}
+              {heldInvitation
+                ? 'your invitation code is saved on this device and you confirm the join with one tap once you are in'
+                : 'you will name your household after that'}
+              . If you already had an account at that address, nothing has
+              changed: sign in with the password you had.
+            </p>
+          ) : heldInvitation ? (
+            // #173 — the person came through the join card and is now being
+            // asked to sign in or sign up. Say the code is kept, and say WHERE,
+            // because the guarantee is per device: opening the confirmation
+            // link in another browser means typing the code again there
+            // (pendingInvitation.js). `role="status"` like the note above,
+            // and not the `.error` palette — nothing is wrong.
+            <p className="card__body" data-testid="held-invitation-note" role="status">
+              Your invitation code is saved on this device. Sign in with the
+              account you have, or start with{' '}
+              <strong>Create an account</strong> below, and you confirm the
+              join with one tap as soon as you are signed in here.
             </p>
           ) : signInNotice ? null : (
             // Stepped aside while a return notice is showing (#304). design-bar
@@ -290,14 +455,78 @@ export default function Onboarding({
               (AC 1): the person opening this app on a new phone almost always
               has a household already, and the organizer starts one once. */}
           <p className="card__note">
-            New household?{' '}
+            {heldInvitation ? 'No account yet?' : 'New household?'}{' '}
             <button
               className="button--link"
               type="button"
               onClick={() => switchTo('sign-up')}
               disabled={busy}
             >
-              Start a household
+              {heldInvitation ? 'Create an account' : 'Start a household'}
+            </button>
+          </p>
+          {/* #173 — the third route in, and a link like the one above rather
+              than a button: for the person it applies to it is a once-only
+              act, and it must not compete with the sign-in form that nearly
+              everyone came for. Hidden once a code is held, because the note
+              above has taken its place and offering the card again would read
+              as "the code you just typed was not kept". Optional in the
+              wiring (`onHoldInvitation`) so the #154 tests render unchanged. */}
+          {onHoldInvitation && !heldInvitation ? (
+            <p className="card__note">
+              Have an invitation code?{' '}
+              <button
+                className="button--link"
+                type="button"
+                onClick={() => switchTo('join')}
+                disabled={busy}
+              >
+                Join a household
+              </button>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* #173 — signed out, holding a code. The code is taken FIRST (see the
+          file comment) and the account second, and the two are separate
+          submits for #154's reason exactly: creating the account ends in the
+          inbox, and this card's whole job is to have the code safe before
+          that happens. */}
+      {!signedIn && view === 'join' ? (
+        <section className="card" aria-labelledby="join-heading">
+          <h2 id="join-heading" className="card__heading">
+            Join with a code
+          </h2>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              run(submitHold)
+            }}
+          >
+            <p className="card__note">
+              Type the code you were given and the name you want to be called.
+              Both are kept on this device; next you sign in, or create an
+              account if you do not have one, and you confirm the join with
+              one tap the moment you are in. It works once, and only for a
+              week, so do this on the phone you will use.
+            </p>
+            {codeField}
+            {nameField}
+            <button className="button" type="submit" disabled={busy || !joinReady}>
+              Keep this code
+            </button>
+          </form>
+          <p className="card__note">
+            Changed your mind?{' '}
+            <button
+              className="button--link"
+              type="button"
+              onClick={() => switchTo('sign-in')}
+              disabled={busy}
+            >
+              Sign in instead
             </button>
           </p>
         </section>
@@ -306,15 +535,28 @@ export default function Onboarding({
       {!signedIn && view === 'sign-up' ? (
         <section className="card" aria-labelledby="signup-heading">
           <h2 id="signup-heading" className="card__heading">
-            Start a household
+            {heldInvitation ? 'Create your account' : 'Start a household'}
           </h2>
-          <p className="card__body">
-            First, your own account. You sign in with your own email and
-            password, and you are the organizer &mdash; the person who adds
-            everyone else and gives them their way in. There is nobody above
-            you, so if you lose this password it cannot be reset from inside
-            the app. You will name the household once you are signed in.
-          </p>
+          {heldInvitation ? (
+            // #173 — the same form, a different reason. The person is not
+            // the organizer of anything: they are making the account the held
+            // code will be applied to. The organizer paragraph below would
+            // tell them there is nobody above them, which is exactly wrong.
+            <p className="card__body">
+              Your own email and password, for the account your invitation
+              code will join to the household. You will confirm the address
+              from your inbox, sign in here, and confirm the join with one
+              tap as soon as you are in.
+            </p>
+          ) : (
+            <p className="card__body">
+              First, your own account. You sign in with your own email and
+              password, and you are the organizer &mdash; the person who adds
+              everyone else and gives them their way in. There is nobody above
+              you, so if you lose this password it cannot be reset from inside
+              the app. You will name the household once you are signed in.
+            </p>
+          )}
           <form
             className="stack"
             onSubmit={(e) => {
@@ -363,9 +605,9 @@ export default function Onboarding({
         </section>
       ) : null}
 
-      {error ? (
+      {shownError ? (
         <p className="error" role="alert">
-          {error}
+          {shownError}
         </p>
       ) : null}
     </div>
@@ -380,6 +622,12 @@ Onboarding.propTypes = {
   onSignInWithGoogle: PropTypes.func,
   onSignUp: PropTypes.func.isRequired,
   onSignOut: PropTypes.func,
+  // #173. Optional so the #154 tests render without a fixture edit; App
+  // always passes all three, and gate.test.js says so.
+  onJoin: PropTypes.func,
+  onHoldInvitation: PropTypes.func,
+  heldInvitation: PropTypes.bool,
+  error: PropTypes.string,
   signedIn: PropTypes.bool,
   signInNotice: PropTypes.string,
   busy: PropTypes.bool,

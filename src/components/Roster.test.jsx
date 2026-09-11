@@ -34,6 +34,12 @@ function setup(overrides = {}) {
     // control chains `.then(close)` off it, so a non-promise would close the
     // form for the wrong reason and hide a broken call.
     onProvision: vi.fn().mockResolvedValue(undefined),
+    // #341 — the two email paths. Promise-returning for the same reason
+    // `onProvision` is: the control chains a `.then()` that puts the
+    // confirmation note on screen, so a non-promise would throw inside the
+    // click handler and the missing note would read as the note being broken.
+    onInvite: vi.fn().mockResolvedValue(undefined),
+    onSendReset: vi.fn().mockResolvedValue(undefined),
   }
   // The week the fixture override belongs to. Passed explicitly rather than
   // defaulted, because an override is only an override OF a period — matching on
@@ -72,14 +78,37 @@ describe('the household header — #62', () => {
     expect(screen.queryByText(/deterrence, not\s+a lock/i)).not.toBeInTheDocument()
   })
 
-  it('tells the organizer how to give somebody a sign-in — #87', () => {
+  it('tells the organizer how to give somebody a sign-in — #87, rewritten by #341', () => {
     // Was "tells the organizer that provisioning is not built yet", asserting
     // the note said `not built yet`. #87 built it, so that assertion is now the
     // wrong way round and is REPLACED rather than deleted: the note still has a
     // job, and an organizer who is told nothing here has to guess whether the
     // button on each row is the thing that fixes "No sign-in yet".
+    //
+    // #341 replaced it a second time, and the reason is worth separating from
+    // the reason above. This test did not break because it was wrong; it broke
+    // because the THING IT DESCRIBES changed under it — the organizer no longer
+    // gives anybody a sign-in from their row, they send an invitation and the
+    // person makes their own. That is the ordinary shape of a rule change
+    // reddening a test that was about something else, and the repair is to
+    // assert the new fact rather than to loosen the matcher until both pass.
     setup({ isOrganizer: true })
-    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/sign-in from their row/i)
+    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/invitation from their row/i)
+    // The half worth asserting positively, because it is the story: nothing on
+    // this screen asks the organizer for somebody else's credential.
+    expect(screen.getByTestId('provisioning-note')).toHaveTextContent(/never set one/i)
+  })
+
+  it('#341 AC 5 — the PIN sentence is gone from the roster note', () => {
+    // The criterion names the sentence by quotation, so it is asserted by its
+    // own words rather than by the note's new ones. Separate from the test above
+    // deliberately: that one would go on passing if the old sentence were
+    // appended BELOW the new one, which is exactly how a reversal half-lands.
+    setup({ isOrganizer: true })
+    const note = screen.getByTestId('provisioning-note')
+    expect(note).not.toHaveTextContent(/PIN/i)
+    expect(note).not.toHaveTextContent(/no email is sent/i)
+    expect(note).not.toHaveTextContent(/tell them/i)
   })
 
   it('no longer claims provisioning is unbuilt — the placeholder must not outlive the gap', () => {
@@ -851,16 +880,46 @@ describe('#87 — giving somebody a sign-in', () => {
     )
   })
 
-  it('#242: names the real address instead, once the row has one', () => {
+  it('#242 under #341: a row with a real address is invited, and shows no form at all', async () => {
+    // This case USED to open the provision form and assert the note named the
+    // real address rather than the synthetic one. #341 removed that form for
+    // exactly these rows, so the old assertion could only be made to pass by
+    // reaching for an element that no longer exists.
+    //
+    // What #242 protects is unchanged and is still asserted: the organizer is
+    // never shown an address that is not the one the account is reached at. The
+    // address just moved from a note about what to say out loud to the target of
+    // an email, so the assertion follows it there.
     setup({
       isOrganizer: true,
       members: [{ ...roster[0], email: 'placeholder.one@example.com' }],
     })
-    fireEvent.click(screen.getByTestId('provision-m1'))
 
-    const note = screen.getByTestId('provision-address-m1')
-    expect(note).toHaveTextContent('placeholder.one@example.com')
-    expect(note).not.toHaveTextContent('taskr.invalid')
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('provision-address-m1')).not.toBeInTheDocument()
+
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    expect(screen.getByTestId('invite-note-m1')).toHaveTextContent(
+      'placeholder.one@example.com',
+    )
+    expect(screen.getByTestId('invite-note-m1')).not.toHaveTextContent('taskr.invalid')
+  })
+
+  it('#341 AC 1 — no credential control anywhere on a row that has an address', () => {
+    // The criterion's own words: "nothing that takes a credential — no PIN box,
+    // no password field". Asserted as an ABSENCE over the whole row rather than
+    // by the testid above, because the testid only proves THAT form is gone and
+    // the criterion is about any of them.
+    setup({
+      isOrganizer: true,
+      members: [{ ...roster[0], email: 'placeholder.one@example.com' }],
+    })
+
+    const row = rowFor('Placeholder One')
+    expect(within(row).queryByText(/PIN/i)).not.toBeInTheDocument()
+    expect(row.querySelector('input[type="password"]')).toBeNull()
+    // The positive half, so this cannot pass on a row that renders nothing.
+    expect(within(row).getByRole('button', { name: /email .* an invitation/i })).toBeInTheDocument()
   })
 
   it('#242: no screen tells the organizer that a name is what gets typed', () => {
@@ -2066,5 +2125,330 @@ describe('#166 — starting another household', () => {
 
     fireEvent.change(within(form).getByLabelText(/your name in it/i), { target: { value: '  ' } })
     expect(screen.getByRole('button', { name: 'Create household' })).toBeDisabled()
+  })
+})
+
+// #341 — the roster's sign-in control, rebuilt.
+//
+// The story's shape in one sentence: whether a row has an inbox decides whether
+// the organizer is shown a button or a form. Both halves are asserted here,
+// because the interesting failure is not "the button is missing" — it is the
+// PIN form surviving for a row that should never see one, which no assertion
+// about the button can catch.
+describe('#341 — emailing a sign-in instead of setting one', () => {
+  const WITH_EMAIL = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: null,
+    email: 'placeholder.one@example.test',
+  }
+  const WITH_EMAIL_AND_SIGNIN = { ...WITH_EMAIL, claimed_by: 'person-a' }
+
+  it('offers an invitation to a row with an address and no sign-in', async () => {
+    const handlers = setup({ isOrganizer: true, members: [WITH_EMAIL] })
+
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    expect(handlers.onInvite).toHaveBeenCalledWith('m1')
+    expect(handlers.onSendReset).not.toHaveBeenCalled()
+    expect(screen.getByTestId('invite-note-m1')).toHaveTextContent(/invitation sent/i)
+  })
+
+  it('offers a RESET link to a row that already has a sign-in', async () => {
+    // Owner decision at pickup, and the reason it is in this story at all: AC 5
+    // requires the PIN copy gone from every row with an address, and a reset
+    // form that asks the organizer for a credential carries every word of it.
+    const handlers = setup({ isOrganizer: true, members: [WITH_EMAIL_AND_SIGNIN] })
+
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    expect(handlers.onSendReset).toHaveBeenCalledWith(WITH_EMAIL_AND_SIGNIN)
+    expect(handlers.onInvite).not.toHaveBeenCalled()
+    expect(handlers.onProvision).not.toHaveBeenCalled()
+  })
+
+  // One note tells somebody to expect a fresh account, the other to expect a
+  // reset. A single "Sent." for both would leave the organizer unable to say
+  // which, so the two are asserted as SEPARATE tests over separate renders —
+  // the first draft did both in one `it` and rendered twice into the same
+  // container, where `getAllByTestId(...)[0]` reads the earlier render and the
+  // assertion is about the wrong element.
+  // EACH ASSERTS THE NOTE AND THE CALL TOGETHER, and that pairing is a repair
+  // rather than a flourish. The first draft asserted the wording in one test and
+  // the handler in another, and a mutation swapping ONLY the handler
+  // (`hasSignIn ? onSendReset : onInvite` -> always `onInvite`) reddened 1 of a
+  // predicted 2: the note kept saying "new password" because its wording is
+  // driven by `hasSignIn` independently of which call was made. That is a real
+  // hole rather than a bad prediction — in the mutated app the organizer reads
+  // "they can set a new password from that email" while an INVITATION was sent,
+  // and nothing was watching the pair.
+  it('an invitation note names the address, and an invitation is what was sent', async () => {
+    const handlers = setup({ isOrganizer: true, members: [WITH_EMAIL] })
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    expect(screen.getByTestId('invite-note-m1')).toHaveTextContent(WITH_EMAIL.email)
+    expect(screen.getByTestId('invite-note-m1')).toHaveTextContent(/invitation sent/i)
+    expect(handlers.onInvite).toHaveBeenCalledWith('m1')
+    expect(handlers.onSendReset).not.toHaveBeenCalled()
+  })
+
+  it('a reset note promises a new password, and a reset is what was sent', async () => {
+    const handlers = setup({ isOrganizer: true, members: [WITH_EMAIL_AND_SIGNIN] })
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    const note = screen.getByTestId('invite-note-m1')
+    expect(note).toHaveTextContent(/new password/i)
+    // The denial, so the two notes cannot converge on one sentence: this one
+    // must not claim an invitation went to somebody who already has an account.
+    expect(note).not.toHaveTextContent(/invitation sent/i)
+    // The pair. Without this the sentence above is a claim about the SCREEN and
+    // says nothing about what the app did.
+    expect(handlers.onSendReset).toHaveBeenCalledWith(WITH_EMAIL_AND_SIGNIN)
+    expect(handlers.onInvite).not.toHaveBeenCalled()
+  })
+
+  it('keeps the note off screen when the send is refused', async () => {
+    // The refusal reaches the shell's error strip, which this component does not
+    // own. What must NOT happen is a confirmation appearing anyway — an
+    // organizer told "Invitation sent" for a send that failed will wait forever
+    // rather than retry.
+    const handlers = setup({
+      isOrganizer: true,
+      members: [WITH_EMAIL],
+      onInvite: vi.fn().mockRejectedValue(new Error('the mail service refused it')),
+    })
+
+    await clickAndSettle(screen.getByTestId('invite-m1'))
+    expect(handlers.onInvite ?? true).toBeTruthy()
+    expect(screen.queryByTestId('invite-note-m1')).not.toBeInTheDocument()
+  })
+
+  it('a row with NO address keeps the PIN form, because nothing can be emailed', async () => {
+    // The other half, and the reason `provision` survives at all. A synthetic
+    // `@taskr.invalid` address has no mailbox, so a spoken credential is the
+    // only thing that works — and deleting the form for tidiness would leave
+    // this member with no way in.
+    setup({ isOrganizer: true, members: [roster[0]] })
+
+    expect(screen.queryByTestId('invite-m1')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('provision-m1'))
+    expect(screen.getByTestId('provision-input-m1')).toBeInTheDocument()
+    expect(screen.getByTestId('provision-address-m1')).toHaveTextContent('m1@taskr.invalid')
+  })
+
+  it('tells that member their address is one Taskr made up, and what to do about it', async () => {
+    // The note used to be conditional on the row having no real address, which
+    // is now the only way this form renders at all. Asserted so the branch's
+    // removal is a fact rather than a tidy-up nobody checked.
+    setup({ isOrganizer: true, members: [roster[0]] })
+    fireEvent.click(screen.getByTestId('provision-m1'))
+
+    const row = rowFor('Placeholder One')
+    expect(within(row).getByText(/one Taskr made up/i)).toBeInTheDocument()
+    expect(within(row).getByText(/email them an invitation instead/i)).toBeInTheDocument()
+  })
+
+  it('shows no sign-in control at all to somebody who is not the organizer', async () => {
+    // Inherited from #87 and re-asserted on the NEW control, deliberately: the
+    // gate lives on the caller in `MemberRow`, so a control added inside
+    // `SignInControl` inherits it — and that is exactly the kind of thing that
+    // is true until somebody moves the render.
+    setup({ isOrganizer: false, members: [WITH_EMAIL] })
+    expect(screen.queryByTestId('invite-m1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+  })
+})
+
+// #172 — who sees the invitation card at all. The card's INNER gates (a code on
+// screen, a list, the two-tap withdrawal) are Invitations.test.jsx's; this is
+// the ROLE gate, which lives here because Roster holds the active household's
+// organizer answer. Presence and absence are separate tests (AC 7), so removing
+// `isOrganizer` from the render condition reddens the absence tests and
+// removing the card reddens the presence one.
+describe('#172 — the invitation card follows the organizer role', () => {
+  const OUTSTANDING = [
+    {
+      id: 'inv-1',
+      household_id: 'h1',
+      created_by_member_id: 'm1',
+      created_at: '2026-09-10T19:04:00.000Z',
+      expires_at: '2099-09-17T19:04:00.000Z',
+      withdrawn_at: null,
+      redeemed_at: null,
+      redeemed_by_member_id: null,
+    },
+  ]
+  const wired = () => ({
+    onMintInvitation: vi.fn(),
+    onWithdrawInvitation: vi.fn(),
+    onDismissMintedCode: vi.fn(),
+  })
+
+  it('AC 1 — offers the organizer a control to create an invitation', () => {
+    setup({ isOrganizer: true, ...wired() })
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create an invitation code/i })).toBeInTheDocument()
+  })
+
+  it('AC 1 — pressing it reaches the handler App wired', () => {
+    const handlers = wired()
+    setup({ isOrganizer: true, ...handlers })
+    fireEvent.click(screen.getByRole('button', { name: /create an invitation code/i }))
+    expect(handlers.onMintInvitation).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3 — shows the organizer the outstanding list', () => {
+    setup({ isOrganizer: true, invitations: OUTSTANDING, ...wired() })
+    expect(screen.getByTestId('invitation-list')).toBeInTheDocument()
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('AC 5 — shows a member who is NOT the organizer no invitation control', () => {
+    // Handlers wired and rows handed in, deliberately: the only thing standing
+    // between this member and the card is the role, so this is the test that
+    // reddens when `isOrganizer` is dropped from the render condition.
+    setup({ isOrganizer: false, invitations: OUTSTANDING, ...wired() })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 5 — and no invitation list, even when rows reach the component', () => {
+    // App never reads them for a member (refresh() does not ask), but the
+    // screen must not depend on that: a list handed to a non-organizer's roster
+    // by any route is still not drawn.
+    setup({ isOrganizer: false, invitations: OUTSTANDING, ...wired() })
+    expect(screen.queryByTestId('invitation-list')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('invitation-inv-1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /withdraw the code created/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 5 — and no code, even if one is somehow held', () => {
+    setup({ isOrganizer: false, mintedCode: 'k7m3qp4rwn', ...wired() })
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+    expect(screen.queryByText('k7m3qp4rwn')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing new when no minter is wired — the #166 optional shape', () => {
+    // The wiring half of the condition, and a different gate from the role: an
+    // organizer's roster rendered by a caller that has not wired invitations is
+    // exactly the roster that shipped before this story.
+    setup({ isOrganizer: true, invitations: OUTSTANDING })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+  })
+
+  it('design-bar — the invitation card comes BEFORE Add someone', () => {
+    // Owner decision at the design-bar pass, 2026-09-10. At 360 wide the card
+    // started 2.4 screens down (y 1919 of 2636), under the add-by-email form
+    // #191 retires in favour of this one — so the forward path was the one a
+    // person had to scroll furthest to reach.
+    setup({ isOrganizer: true, ...wired() })
+    const card = screen.getByTestId('invitations-card')
+    const add = screen.getByRole('heading', { name: /add someone/i })
+    expect(card.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('AC 6 — follows the ROLE it is handed, not the person: the same roster flips with it', () => {
+    // At this level the "active household" is whatever `isOrganizer` says, so
+    // the component half of AC 6 is that the card tracks the prop in both
+    // directions on one mounted roster. App.test.jsx proves the prop itself is
+    // computed within the active household.
+    const handlers = wired()
+    const props = {
+      household: { id: 'h1', name: 'Placeholder Household' },
+      members: roster,
+      me: { id: 'm1', display_name: 'Placeholder One' },
+      periodStart: PERIOD,
+      onAdd: vi.fn(),
+      onSave: vi.fn(),
+      onRemove: vi.fn(),
+      onRefresh: vi.fn(),
+      onSetCapacity: vi.fn(),
+      onClearCapacity: vi.fn(),
+      ...handlers,
+    }
+    const { rerender } = render(<Roster {...props} isOrganizer />)
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    rerender(<Roster {...props} isOrganizer={false} />)
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    rerender(<Roster {...props} isOrganizer />)
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+  })
+})
+
+// #173 — the "Join another household" card, the other half of #166's pair.
+describe('#173 — joining another household with a code', () => {
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'me' }
+  const card = () => within(screen.getByRole('region', { name: /join another household/i }))
+  const fillAndSubmit = async (code = 'k7m3qp4rwn') => {
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: code } })
+    await clickAndSettle(card().getByRole('button', { name: /join household/i }))
+  }
+
+  it('is not offered at all when no handler is wired — the state before this story', () => {
+    setup({ me })
+    expect(
+      screen.queryByRole('region', { name: /join another household/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('sits after the start-another card, so the pair reads in order of likelihood', () => {
+    setup({
+      me,
+      onCreateHousehold: vi.fn().mockResolvedValue({ id: 'h2' }),
+      onJoinHousehold: vi.fn().mockResolvedValue({ id: 'm9' }),
+    })
+    const start = screen.getByRole('region', { name: /start another household/i })
+    const join = screen.getByRole('region', { name: /join another household/i })
+    expect(start.compareDocumentPosition(join) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('prefills this person’s name from their own member row, editable', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    expect(card().getByLabelText(/join as/i)).toHaveValue('Placeholder One')
+  })
+
+  it('is disabled until a code is typed', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: '   ' } })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+  })
+
+  it('is disabled when the name is cleared, even with a code', () => {
+    setup({ me, onJoinHousehold: vi.fn() })
+    fireEvent.change(card().getByLabelText(/invitation code/i), { target: { value: 'k7m3qp4rwn' } })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: '  ' } })
+    expect(card().getByRole('button', { name: /join household/i })).toBeDisabled()
+  })
+
+  it('hands the code over as typed with the prefilled name — normalisation is the data layer’s', async () => {
+    const onJoinHousehold = vi.fn().mockResolvedValue({ id: 'm9' })
+    setup({ me, onJoinHousehold })
+    await fillAndSubmit('  K7M3QP4RWN ')
+    expect(onJoinHousehold).toHaveBeenCalledWith('  K7M3QP4RWN ', { name: 'Placeholder One' })
+  })
+
+  it('hands over a name the person typed instead', async () => {
+    const onJoinHousehold = vi.fn().mockResolvedValue({ id: 'm9' })
+    setup({ me, onJoinHousehold })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: 'Housemate' } })
+    await fillAndSubmit()
+    expect(onJoinHousehold).toHaveBeenCalledWith('k7m3qp4rwn', { name: 'Housemate' })
+  })
+
+  it('clears the code once the join succeeds, and the name goes back to the prefill', async () => {
+    setup({ me, onJoinHousehold: vi.fn().mockResolvedValue({ id: 'm9' }) })
+    fireEvent.change(card().getByLabelText(/join as/i), { target: { value: 'Housemate' } })
+    await fillAndSubmit()
+    expect(card().getByLabelText(/invitation code/i)).toHaveValue('')
+    expect(card().getByLabelText(/join as/i)).toHaveValue('Placeholder One')
+  })
+
+  it('keeps the code in the field when the join is refused', async () => {
+    setup({ me, onJoinHousehold: vi.fn().mockRejectedValue(new Error('refused')) })
+    await fillAndSubmit()
+    expect(card().getByLabelText(/invitation code/i)).toHaveValue('k7m3qp4rwn')
+  })
+
+  it('is offered to a member who is NOT the organizer — joining is everybody’s act', () => {
+    setup({ me, isOrganizer: false, onJoinHousehold: vi.fn() })
+    expect(screen.getByRole('region', { name: /join another household/i })).toBeInTheDocument()
   })
 })

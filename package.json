@@ -20,6 +20,7 @@
     "migrate:live": "node scripts/migrate-live.mjs",
     "probe:live-grants": "node scripts/probe-live-grants.mjs",
     "prove:finish-race": "node scripts/prove-finish-race.mjs",
+    "scan:tracker": "node scripts/scan-tracker.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "allocation:corpus": "node scripts/allocation-corpus-report.mjs",
     "rebalance:corpus": "node scripts/rebalance-churn-report.mjs",

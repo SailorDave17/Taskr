@@ -377,6 +377,42 @@ for a data-handling control. So it is stated as one:
 > Revisit when: any client-role grant is proposed on `calendar_tokens`; a second provider is added;
 > or a credential of this class is stored anywhere but through this shape.
 
+#### Re-read 2026-09-10 — the third condition fired, at #171
+
+**The trigger was "a credential of that class stored any other way", and #171 stores one.** An
+invitation code is a bearer secret that admits its holder to household data — the same class as the
+Google refresh token control 6 was written for, arriving from the opposite direction: this one is
+minted by Taskr rather than issued by a third party, and it must be *given away on purpose*.
+
+**Verdict: control 6 holds, and it is met by a route control 6 did not contemplate — storing no
+credential at all.** `0040` holds `token_hash` (`extensions.digest(code, 'sha256')`, unique) and the
+plaintext exists in no column; it is shown once at mint and is unrecoverable afterwards. Owner
+decision at #171's pickup, taken at a clickable question against the alternative of storing the
+spendable string and withholding it by column grant.
+
+The distinction worth keeping, because it is what makes the two rows differ:
+
+| | `calendar_tokens` (`0011`) | `invitations` (`0040`) |
+|---|---|---|
+| what is stored | the credential itself — Google will not re-issue it | a DIGEST; the credential is not in the database |
+| who may read the row | nobody: no grant, no policy | the household's organizer, by policy |
+| what a reader gains | the calendar | nothing spendable — a test redeems with the digest and is refused |
+| why that shape | the token must be replayable to Google | the code need only be *recognised*, never replayed |
+
+**So the control gains a second referent rather than an exception.** Control 6's sentence — held in a
+table with no client grant and no policy — remains the rule for a credential that must be *kept*.
+Where a secret only has to be recognised, the stronger answer is to keep no secret, and this row
+records that as the preferred route when the choice exists. The cost is real and belongs to #172: an
+invitation code can be displayed exactly once, and a lost one is withdrawn and re-minted rather than
+looked up.
+
+What did NOT fire: **Decision 4 owes nothing here.** Its three conditions are a second invitation
+channel, household names ceasing to be family names, and anything added to a pre-redemption surface —
+#171 adds no surface at all. Its clauses 3 and 4 did constrain the schema (no invitee name column, no
+household id readable by a non-member) and clause 4 decided that the four unusable states share ONE
+refusal sentence, so a refusal cannot confirm a code exists. Those are recorded in `0040`'s header and
+in `docs/access-model.md`'s `0040` entry.
+
 #### A correction this re-read found, in this record's own words
 
 Two sentences here — the struck control 3 row above, and the *Google Calendar content* bullet at the
@@ -855,5 +891,5 @@ happened:
 | Decision 2 | **none, deliberately.** Its enforcement is executable and reddens on its own in CI, so it needs no date-based trigger; the two things that would change it — a name being added to the vocabulary, or the corpus being narrowed — are both diffs a reader sees. Stated rather than left blank, so an empty cell is not read as an oversight |
 | Decision 3, control 3 | a third scope; anything proposing to STORE a field the `calendar-events` response carries (re-read at #101's pickup, 2026-09-08 — the widening itself is settled there) |
 | Decision 3, control 5 | visibility changing again, in either direction; or a check gaining the ability to read the tracker |
-| Decision 3, control 6 | a client-role grant proposed on `calendar_tokens`; a second provider; a credential of that class stored any other way |
+| Decision 3, control 6 | a client-role grant proposed on `calendar_tokens`; a second provider; a credential of that class stored any other way — **the third fired at #171 (2026-09-10) and was answered by storing a DIGEST, so the control now has a second referent; see control 6's own *Re-read 2026-09-10* under Decision 3** |
 | Decision 4 | a second invitation channel; household names ceasing to be family names; anything added to a pre-redemption surface |

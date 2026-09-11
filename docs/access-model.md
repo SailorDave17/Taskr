@@ -7,7 +7,13 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0039` are ALL applied to the live project (`0039` on 2026-09-08 in #106's own
+- Status: **`0001`–`0040` are ALL applied to the live project** (`0040` on 2026-09-10 in #171's own
+  session, at md5 `bd84210bf0e64eb21ce749411d84a83a` (`32878 characters, 19 statements`), read back
+  identical — see its entry below; **`npm run check:live` is blind to that file in BOTH directions**,
+  so its 65 of 65 is the same on either side and is NOT evidence the paste happened —
+  `npm run probe:live-grants` moved 19 of 20 → 20 of 20 on the file's own control row, and the
+  read-only catalog query read the three policies, the function's ACL and its lock;
+  `0039` on 2026-09-08 in #106's own
   session, at md5 `798a49fea4559ee5f1caa3c261907d7e` (`11592 characters, 17 statements`), read back
   identical — see its entry below; *measured* `check:live` **64 of 65**
   immediately before the apply and **65 of 65** immediately after, the
@@ -618,6 +624,103 @@
     - **The publication gains the table**, with `0037`'s guarded shape, so a second phone's import
       moves this phone's *already imported* marks without a reload. `WATCHED_TABLES` derives it from
       `LIVE_SCHEMA` and `realtime.pglite.test.js` holds the publication equal — twelve tables now.
+  - **`0040`** (#171) — `invitations`: the record an organizer mints to admit somebody, and
+    `redeem_invitation`, the only route that can create a member row in a household the caller is
+    not yet in. The first half of admission; #172 mints and withdraws, #173 redeems, and #191 makes
+    this the only add path. Applied 2026-09-10 in #171's own session with `npm run migrate:live`,
+    before the merge (`0020`'s safe order), at md5 `bd84210bf0e64eb21ce749411d84a83a`
+    (`32878 characters, 19 statements`), read back identical. Every reading below was taken on both
+    sides in that session.
+    - **What the catalog read, before and after.** *Before*: no table, no function, no policy, no
+      grant, not published — a clean slate, with `members`' `DELETE` grant read in the same query as
+      the control that the probe reached a real schema rather than returning empty. *After*: the
+      table present with `relrowsecurity = true`; **exactly three policies**
+      (`invitations_insert_organizer:INSERT`, `invitations_select_organizer:SELECT`,
+      `invitations_update_organizer:UPDATE`) and no DELETE policy; `redeem_invitation` at
+      `prosecdef = true` with `search_path=""` (the catalog's quoted form), **executable by
+      `authenticated` and NOT by `anon`** — the `0034` idiom landing on the live project, which is
+      the half no local test can check; its body md5 `ede6cb2e8a280e9e56a21e48c1cc1ddc`; and the
+      lock read back as a PREDICATE rather than inferred from the hash moving —
+      `position('where i.id = target.id' in pg_get_functiondef(...)) > 0` is **true**, which is
+      `0035`'s correction asserted on production (assert the row being locked, never the clause).
+      Fourteen column grants for `authenticated` and **no table-level grant for either client
+      role**: `SELECT` on all nine columns, `INSERT` on four, `UPDATE` on `withdrawn_at` alone. Not
+      in the publication, as `LIVE_SCHEMA`'s absence requires.
+    - **`npm run probe:live-grants`: 19 of 20 before, 20 of 20 after**, the one moved row being this
+      file's own new control (`invitations` reading *the table is not there*) — the entry doing its
+      job, `extraction_calls`' behaviour for `0036` exactly, draining on the apply and on nothing
+      else. *(An earlier reading in this session said 20 of 20; that was taken before the control row
+      existed, and the denominator moved from 19 to 20 when it was added.)*
+    - **`npm run check:live`: 65 of 65 on BOTH sides**, measured rather than predicted. That is this
+      story's AC-8 departure showing up as a number: the check is blind to this file in both
+      directions, so a green run is not evidence the paste happened, and the two instruments above
+      are what say it did.
+    - **The code is stored as a DIGEST and nowhere as a code** (AC 4, owner decision 2026-09-10,
+      taken at a clickable question against storing the plaintext and withholding it by column
+      grant). `token_hash bytea` is `extensions.digest(code, 'sha256')`, unique, and the plaintext
+      exists in no column — asserted against the stored row, not only against the schema. This is
+      `docs/data-outside-production.md`'s **Decision 3, control 6** applied to a bearer secret this
+      schema mints itself: the alternative makes one column grant the only thing between a client
+      and every outstanding code, where a digest has nothing to withhold. **What it costs, and #172
+      inherits it:** the code can be displayed exactly ONCE, at mint, because nothing can recover
+      it afterwards — the organizer's list shows created and expires and never the code, and a lost
+      one is withdrawn and re-minted. `token_hash` IS in the select grant, which is safe by
+      construction rather than by trust: a test redeems with the digest itself and is refused.
+    - **Four organizer-only rules, and the fixture that makes them mean something.** Select, insert
+      and update policies each carry BOTH `current_household_ids()` and `0002`'s
+      `is_household_organizer(...)` — `0016`'s pair shape, so a change to one leaves the other
+      standing — and there is NO delete policy and no delete grant, because an invitation is
+      withdrawn rather than removed. AC 2 asks for three properties over a client-role connection
+      in both directions, and the load-bearing one is the middle: a CLAIMED member who is not the
+      organizer, whom the household clause would admit and only the organizer clause refuses. A
+      fixture of organizer-plus-outsider cannot tell the two predicates apart, so the suite seeds a
+      second claimed member and asserts they read nothing while their own roster read still works.
+      Fails CLOSED on a household whose `organizer_member_id` is null, inherited from `0016`.
+    - **Redemption has to be a function, and the positive control says why.** `members_insert_same_household`
+      requires a membership the redeemer does not have, so no client insert can ever substitute —
+      *measured*, the redeemer's own insert is refused `permission denied for table members`, at the
+      PRIVILEGE layer before any policy is consulted, because `claimed_by` is in no client insert
+      grant (`0007`'s withholding). Stopped twice over, and the control asserts the refusal rather
+      than the layer that won. `security definer`, `search_path` pinned to `''`, `execute` revoked
+      from `public` AND `anon` explicitly — `0034`'s idiom, whose second word is load-bearing on
+      this project and which no test here can check (cairn:
+      *the-harness-cannot-catch-what-the-platform-granted*).
+    - **One sentence for four refusals — Decision 4 clause 4.** No such code, expired, withdrawn and
+      already-redeemed all raise `that invitation cannot be used`, asserted EQUAL to each other and
+      asserted not to name the household or its id. Four distinguishable answers would tell somebody
+      guessing codes that they had found a real one. #173's surface draws its four messages from what
+      the person did, which is where that criterion lives. The one refusal that names anything —
+      `you are already in that household` — is reachable only by somebody already inside, and it
+      fires BEFORE the invitation is spent (#173 AC 2), asserted by redeeming the same code
+      afterwards.
+    - **Spent exactly once** (AC 6), under a `for update` lock taken by PRIMARY KEY rather than
+      through `redeemed_at is null` — `0035`'s correction and cairn's
+      *a-lock-through-a-mutable-predicate-loses-its-row*: a lock through a mutable predicate does not
+      survive the row it matched being retired, and the guarded branch is then skipped whole. The
+      row is found by digest, then locked by its own id, then re-read under the lock.
+    - **An invitation cannot be BORN expired.** `invitations_expires_after_creation` compares against
+      `created_at`, which defaults to `now()`, so a row minted already-dead is refused outright. The
+      expired-redemption test therefore has to AGE a valid row — moving both stamps, since moving
+      only `expires_at` leaves the expiry microseconds in the future and the test reads a successful
+      redemption as a failed refusal. *Measured on this branch*: the first fixture did exactly that.
+    - **What each instrument can see, and this file is a departure from AC 8's letter.** AC 8 asks
+      that `liveSchema.js` gain the table and the function so `check:live` is red until the paste.
+      Both halves are refused by that file's own both-directions guards, for one reason — **#171
+      ships no client code at all**: the reads arrive with #172 and the call with #173, and an entry
+      today reddens `liveSchema.test.js` (*measured, 1 of 54*, on the RPC half). A probe for
+      something nothing calls reports a missing grant on a correct project, which is the
+      `household_devices` mistake with the sign flipped. So the table joins `MEASURED_TABLE_ACLS`
+      instead — `calendar_tokens`' and `extraction_calls`' shape, which
+      `scripts/probe-live-grants.test.js` asserts as a pair — and it is there for a DIFFERENT reason
+      worth keeping distinct: those two are readable by nobody, while this one is readable by the
+      organizer and is out of `LIVE_SCHEMA` only because its reader has not shipped. Owner decision,
+      2026-09-10. Consequence: **`check:live` reads the same on both sides of this paste and says
+      nothing about whether it happened** — `probe:live-grants` and the read-only catalog query are
+      what confirm it, and #172/#173 add the `LIVE_SCHEMA` and `LIVE_RPCS` entries with their
+      client code.
+    - **Not in the Realtime publication**, and asserted absent rather than left out: `0037` fills it
+      from `LIVE_SCHEMA`, `realtime.pglite.test.js` holds the two equal in both directions, and the
+      story that adds the client read adds both.
   - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
     `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
     client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with

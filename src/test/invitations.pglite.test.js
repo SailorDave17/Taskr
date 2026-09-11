@@ -677,6 +677,57 @@ describe('the invitation record, run against a real Postgres', () => {
   })
 
   // -------------------------------------------------------------------------
+  // #167 — the account that already belongs somewhere else
+  // -------------------------------------------------------------------------
+  //
+  // Every redemption above that SUCCEEDS is made by a `newDevice` joiner who
+  // belongs to no household; the one redeemer already housed is a member of
+  // the SAME household, refused by #173 AC 2. #167 asked how an EXISTING account is attached to a second
+  // household, and redemption is the answer #173 shipped: the person signs in
+  // as that account and the function takes `auth.uid()` — no auth-admin call,
+  // no lookup by address, so an address never has to stand in for a person.
+  // The case worth asserting is therefore the one no fixture above reaches: a
+  // caller already CLAIMED in household B spending a code for household A. The
+  // already-member check keys on `target.household_id`; a version keyed on the
+  // caller alone ("already in a household") would refuse exactly this person,
+  // and every test above would stay green.
+  describe('#167 — an account already in one household joins a second by redemption', () => {
+    const householdsVisibleTo = (device) =>
+      asDevice(db, device, async () => {
+        const { rows } = await db.query('select id from public.households')
+        return rows.map((r) => r.id).sort()
+      })
+
+    it('attaches the same account to a member row in the second household, and leaves the first row alone', async () => {
+      const person = b.memberTwoDevice
+      // PRECONDITION: the person sees only their own household before the
+      // redemption, so the second one below is the redemption's doing and not
+      // the fixture's.
+      expect(await householdsVisibleTo(person)).toEqual([b.household.id])
+
+      await mint(a, 'second-home')
+      const redeemed = await redeemAs(person, 'second-home')
+      expect(redeemed.ok, redeemed.error ?? '').toBe(true)
+      expect(redeemed.value.rows[0].household_id).toBe(a.household.id)
+      expect(redeemed.value.rows[0].claimed_by).toBe(person)
+
+      // One account, two member rows, one in each household — `0009`'s
+      // per-household uniqueness is what permits it — and the first is the row
+      // the person already had, not one moved across.
+      const { rows } = await db.query(
+        'select id, household_id from public.members where claimed_by = $1',
+        [person],
+      )
+      expect(rows.map((r) => r.household_id).sort()).toEqual([a.household.id, b.household.id].sort())
+      expect(rows.find((r) => r.household_id === b.household.id).id).toBe(b.memberTwo)
+
+      // And the attachment is what membership means here: the same session now
+      // reads both households, which is what the switcher lists.
+      expect(await householdsVisibleTo(person)).toEqual([a.household.id, b.household.id].sort())
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // The schema's own backstops, and the re-run
   // -------------------------------------------------------------------------
 

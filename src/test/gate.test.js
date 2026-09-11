@@ -2410,6 +2410,63 @@ describe('#243 — the CI triggers match the branch model', () => {
   })
 })
 
+// #412 — a pull request's own tracker-scan run is not cancelled by a run about
+// something else.
+//
+// Until 2026-09-11 `.github/workflows/tracker-scan.yml` put every run in one
+// concurrency group, so Vercel's bot comment on a new pull request cancelled that
+// pull request's own run, and the check read `fail` on 4 of 4 pull requests beside
+// a clean gate. What PROVES the split is a reproduced collision on GitHub,
+// recorded on #412 — this suite cannot evaluate a GitHub expression and does not
+// pretend to. What it stops is the next edit quietly restoring one repo-wide
+// name, which reads exactly like a working file and fails only on GitHub, one
+// pull request later.
+//
+// Comments are stripped for #243's reason: the workflow's header names the old
+// group in the very sentence explaining why it was wrong.
+describe('#412 — a pull request run of the tracker scan has a concurrency group of its own', () => {
+  const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/tracker-scan.yml'), 'utf8')
+  const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8')
+  const code = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+
+  const block = code.match(/^concurrency:[ \t]*\n((?:[ \t]+\S.*\n?)+)/m)?.[1] ?? null
+  const group = block?.match(/^\s+group:\s*(.+)$/m)?.[1].trim() ?? null
+  const cancel = block?.match(/^\s+cancel-in-progress:\s*(\S+)/m)?.[1] ?? null
+
+  it('POSITIVE CONTROL: the concurrency block was actually parsed', () => {
+    // Without this, every assertion below fails for the wrong reason when the
+    // block moves — and a later negated assertion would pass against nothing.
+    expect(block, 'no top-level concurrency block').not.toBeNull()
+    expect(group, 'no group in the concurrency block').not.toBeNull()
+    expect(cancel, 'no cancel-in-progress in the concurrency block').not.toBeNull()
+  })
+
+  it('gives a run whose payload carries a pull request a group of its own — AC 1', () => {
+    // Keyed on `github.event.pull_request`, never on the issue number alone: a
+    // comment on a pull request carries `issue` with the SAME number, and it was
+    // a comment on the pull request itself that did the cancelling.
+    expect(group).toMatch(/^\$\{\{\s*github\.event\.pull_request\s*&&/)
+    expect(group).toMatch(/github\.event\.pull_request\.number/)
+  })
+
+  it('names the event in that group, so a review cannot cancel the opening run — AC 1', () => {
+    expect(group).toMatch(/github\.event_name/)
+  })
+
+  it('still supersedes within a group — AC 3', () => {
+    expect(cancel).toBe('true')
+  })
+
+  it('the README scan:tracker cell names cancellation as a fourth state — AC 4', () => {
+    const cell = readme.split('\n').find((line) => line.startsWith('| `npm run scan:tracker`'))
+    expect(cell, 'the scan:tracker row did not parse').toBeDefined()
+    expect(cell).toMatch(/cancelled run is a fourth state/)
+  })
+})
+
 // #98 AC 5 — "no cron, pg_cron, or scheduled trigger exists anywhere: client-
 // triggered only". The criterion is written against a diff; this is written
 // against the TREE, so every later diff is held to the same decision. The

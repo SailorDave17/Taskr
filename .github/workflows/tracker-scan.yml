@@ -65,10 +65,44 @@ permissions:
   issues: read
   pull-requests: read
 
-# A burst of comments should not start a scan per comment; the last one wins and
-# scans everything anyway.
+# ONE REPO-WIDE GROUP CANCELLED EVERY PULL REQUEST'S OWN CHECK, which is why the
+# group is split (#412). The scan is event-blind, so folding a burst into its
+# last run costs no coverage — but until 2026-09-11 every run shared the one
+# name `tracker-scan`, and Vercel's bot comments on every pull request seconds
+# after it opens. That comment's `issue_comment` run cancelled the pull
+# request's own `pull_request_target` run every time — measured on 4 of 4
+# pull requests — and `gh pr checks` renders a cancelled check as `fail`, beside
+# a clean gate. A check that is red on every pull request teaches its reader to
+# ignore it, which is the one thing a detective control cannot afford.
+#
+# So the group separates runs by whether anybody can SEE them:
+#
+# - A run attached to a pull request — `pull_request_target`,
+#   `pull_request_review` and `pull_request_review_comment`, the three events
+#   whose payload carries `pull_request` — is grouped by that pull request's
+#   number AND its event, so only a newer run of the same event on the same pull
+#   request supersedes it. The event is in the name because a review and the
+#   pull request's opening are separate checks on the same number.
+# - Every other run — `issues`, `issue_comment` (a comment on a pull request
+#   included: its payload carries `issue`, not `pull_request`) and
+#   `workflow_dispatch` — keeps the one repo-wide group, because none of those
+#   runs appears in any commit's check rollup (measured 2026-09-11: 0 of 17 on
+#   three of `develop`'s commits). A cancellation there is invisible to every
+#   reader, so the coalescing stays free.
+#
+# Giving EVERY subject its own group was weighed at the owner's gate and
+# rejected on cost: one full scan is ~115 GraphQL points (5 issue pages at 1,
+# 11 pull request pages at 10, by dry run on 2026-09-11, growing with the
+# tracker) against GITHUB_TOKEN's 1,000 points per hour per repository, and a
+# story's close fires about six distinct subjects inside two minutes. Past the
+# budget the scan exits 2 — a real red, and worse than the cancelled one this
+# replaces.
+#
+# `issues`, `issue_comment` and `pull_request_target` all read this file from
+# `develop`, so a change to this block reaches them only once it merges; the two
+# review events read the pull request's own copy.
 concurrency:
-  group: tracker-scan
+  group: ${{ github.event.pull_request && format('tracker-scan-pr-{0}-{1}', github.event.pull_request.number, github.event_name) || 'tracker-scan' }}
   cancel-in-progress: true
 
 jobs:
@@ -88,6 +122,11 @@ jobs:
 
       # The script exits 1 on a finding and 2 when it could not run at all — a
       # scan that did not happen must not read the same as a clean one.
+      # A CANCELLED run is a fourth state that none of the three covers: the job
+      # never reaches its own exit code, so GitHub supplies the verdict, and its
+      # annotation names the group that superseded it (`Canceling since a higher
+      # priority waiting request for <group> exists`). Not a finding — read the
+      # newer run of the same check. See the concurrency block above (#412).
       # It prints item numbers and match classes only: this repository is public,
       # so its Actions logs are public, and a check that printed the identifier
       # it caught would publish it a second time.

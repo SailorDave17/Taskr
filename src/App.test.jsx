@@ -468,6 +468,55 @@ describe('the shell, unchanged from #4', () => {
     expect(stamp).toBeInTheDocument()
     expect(stamp.textContent.replace(/^build\s+/, '')).not.toBe('')
   })
+
+  it('offers "Report a problem" above the build stamp, as a message naming the build and the screen (#425)', async () => {
+    await renderApp()
+    const link = screen.getByRole('link', { name: /report a problem/i })
+    const url = new URL(link.getAttribute('href'))
+    expect(url.protocol).toBe('mailto:')
+    const body = url.searchParams.get('body')
+    const stamp = screen.getByTestId('build-commit')
+    expect(body).toContain(`Build: ${stamp.textContent.replace(/^build\s+/, '')}`)
+    // A session and no household: the onboarding screen, and the report says so.
+    expect(body).toContain('Screen: Onboarding screen')
+    // README tells a reader the footer ENDS with the build stamp, so the link
+    // sits above it rather than after it.
+    const footer = stamp.closest('footer')
+    expect(footer.firstElementChild).toBe(link)
+    expect(footer.lastElementChild).toBe(stamp)
+  })
+
+  it('names the tab the person is on, inside a household, and nothing about the household (#425)', async () => {
+    // The fixture of 'when the signed-in person belongs to a household' below.
+    api.listHouseholds.mockResolvedValue([
+      { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' },
+    ])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+    await renderApp('Chores')
+    const body = () =>
+      new URL(screen.getByRole('link', { name: /report a problem/i }).getAttribute('href'))
+        .searchParams.get('body')
+    expect(body()).toContain('Screen: Chores')
+    // The allowlist, proven through the real shell: the household and the
+    // person are on the screen and are not in the message.
+    expect(body()).not.toContain('Placeholder Household')
+    expect(body()).not.toContain('Placeholder One')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Split' })))
+    expect(body()).toContain('Screen: Split')
+  })
+
+  it('offers the same link to somebody signed out, on the sign-in screen (#425)', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    // The sign-in form is what is showing, not the start-or-join screen.
+    expect(screen.getByLabelText(/password or pin/i)).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /report a problem/i })
+    expect(new URL(link.getAttribute('href')).searchParams.get('body')).toContain(
+      'Screen: Onboarding screen',
+    )
+  })
 })
 
 describe('when the build has no backend', () => {

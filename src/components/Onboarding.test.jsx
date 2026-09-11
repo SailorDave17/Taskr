@@ -396,3 +396,243 @@ describe('while a request is in flight', () => {
     expect(createButton()).toBeDisabled()
   })
 })
+
+// ---------------------------------------------------------------------------
+// #173 — joining with an invitation code, from this screen
+// ---------------------------------------------------------------------------
+
+describe('#173 — signed out, holding a code', () => {
+  const joinLink = () => screen.getByRole('button', { name: /join a household/i })
+  const keepButton = () => screen.getByRole('button', { name: /keep this code/i })
+  const codeField = () => screen.getByLabelText(/invitation code/i)
+  const nameField = () => screen.getByLabelText(/join as/i)
+
+  it('is not offered at all when no handler is wired — the #154 screen exactly', () => {
+    setup()
+    expect(screen.queryByRole('button', { name: /join a household/i })).not.toBeInTheDocument()
+  })
+
+  it('offers the route as a link under the sign-in form, not a second button of equal weight', () => {
+    setup({ onHoldInvitation: vi.fn().mockResolvedValue(undefined) })
+    expect(joinLink()).toHaveClass('button--link')
+    expect(signInButton()).toBeInTheDocument()
+  })
+
+  it('takes the code and the name FIRST, on their own card', () => {
+    setup({ onHoldInvitation: vi.fn().mockResolvedValue(undefined) })
+    fireEvent.click(joinLink())
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(codeField()).toBeInTheDocument()
+    expect(nameField()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+    expect(keepButton()).toBeDisabled()
+  })
+
+  it('needs BOTH the code and the name before it will keep anything', () => {
+    setup({ onHoldInvitation: vi.fn().mockResolvedValue(undefined) })
+    fireEvent.click(joinLink())
+    fireEvent.change(codeField(), { target: { value: 'k7m3qp4rwn' } })
+    expect(keepButton()).toBeDisabled()
+    fireEvent.change(nameField(), { target: { value: 'Placeholder Three' } })
+    expect(keepButton()).toBeEnabled()
+    fireEvent.change(codeField(), { target: { value: '   ' } })
+    expect(keepButton()).toBeDisabled()
+  })
+
+  it('hands the code and the name to the holder as typed — normalisation is the data layer’s', async () => {
+    // A tab and spaces, not a newline: a single-line `<input>` strips CR and
+    // LF from its value by the platform's own sanitisation (jsdom and every
+    // browser alike), so a newline can never reach this handler from this
+    // field — it reaches the server from a textarea or another client, which
+    // is why `0041` widened the SERVER rather than trusting the field.
+    const onHoldInvitation = vi.fn().mockResolvedValue(undefined)
+    setup({ onHoldInvitation })
+    fireEvent.click(joinLink())
+    fireEvent.change(codeField(), { target: { value: '  K7M3QP4RWN\t' } })
+    fireEvent.change(nameField(), { target: { value: ' Placeholder Three ' } })
+    await clickAndSettle(keepButton())
+    expect(onHoldInvitation).toHaveBeenCalledWith('  K7M3QP4RWN\t', { name: ' Placeholder Three ' })
+  })
+
+  it('returns to the sign-in card once the code is held', async () => {
+    setup({ onHoldInvitation: vi.fn().mockResolvedValue(undefined) })
+    fireEvent.click(joinLink())
+    fireEvent.change(codeField(), { target: { value: 'k7m3qp4rwn' } })
+    fireEvent.change(nameField(), { target: { value: 'Placeholder Three' } })
+    await clickAndSettle(keepButton())
+    expect(signInButton()).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+  })
+
+  it('shows a refused hold beside the field, and stays on the card', async () => {
+    setup({ onHoldInvitation: vi.fn().mockRejectedValue(new Error('Type the invitation code first.')) })
+    fireEvent.click(joinLink())
+    fireEvent.change(codeField(), { target: { value: 'x' } })
+    fireEvent.change(nameField(), { target: { value: 'Placeholder Three' } })
+    await clickAndSettle(keepButton())
+    expect(screen.getByRole('alert')).toHaveTextContent(/type the invitation code first/i)
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+  })
+
+  it('has a way back to sign in without holding anything', () => {
+    const onHoldInvitation = vi.fn()
+    setup({ onHoldInvitation })
+    fireEvent.click(joinLink())
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(signInButton()).toBeInTheDocument()
+    expect(onHoldInvitation).not.toHaveBeenCalled()
+  })
+
+  describe('with a code held on this device', () => {
+    it('says so on the sign-in card, and where', () => {
+      setup({ onHoldInvitation: vi.fn(), heldInvitation: true })
+      expect(screen.getByTestId('held-invitation-note')).toHaveTextContent(/saved on this device/i)
+      expect(screen.getByTestId('held-invitation-note')).toHaveAttribute('role', 'status')
+    })
+
+    it('no longer offers the join link — the note has taken its place', () => {
+      setup({ onHoldInvitation: vi.fn(), heldInvitation: true })
+      expect(screen.queryByRole('button', { name: /join a household/i })).not.toBeInTheDocument()
+    })
+
+    it('words the account route as creating an account, not starting a household', () => {
+      setup({ onHoldInvitation: vi.fn(), heldInvitation: true })
+      fireEvent.click(screen.getByRole('button', { name: /create an account/i }))
+      expect(screen.getByRole('heading', { name: /create your account/i })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Start a household' })).not.toBeInTheDocument()
+      // The organizer paragraph would say there is nobody above them; wrong here.
+      expect(screen.queryByText(/nobody above you/i)).not.toBeInTheDocument()
+      expect(screen.getByText(/confirm the join with one tap as soon as you are in/i)).toBeInTheDocument()
+    })
+
+    it('the confirmation note promises the code, not a household to name', async () => {
+      setup({ onHoldInvitation: vi.fn(), heldInvitation: true })
+      fireEvent.click(screen.getByRole('button', { name: /create an account/i }))
+      fireEvent.change(screen.getByLabelText(/your email/i), { target: { value: 'kid@example.com' } })
+      fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'longenough' } })
+      await clickAndSettle(createAccountButton())
+      const note = screen.getByTestId('confirmation-note')
+      expect(note).toHaveTextContent(/invitation code is saved on this device/i)
+      expect(note).not.toHaveTextContent(/name your household/i)
+    })
+
+    it('POSITIVE CONTROL: without a held code the confirmation note still promises the household', async () => {
+      setup({ onHoldInvitation: vi.fn() })
+      fillAccountForm()
+      await clickAndSettle(createAccountButton())
+      expect(screen.getByTestId('confirmation-note')).toHaveTextContent(/name your household/i)
+    })
+  })
+})
+
+describe('#173 — signed in with no household, joining with a code', () => {
+  const joinButton = () => screen.getByRole('button', { name: /join household/i })
+  const codeField = () => screen.getByLabelText(/invitation code/i)
+  const nameField = () => screen.getByLabelText(/join as/i)
+  const fillJoin = (code = 'k7m3qp4rwn', name = 'Placeholder Three') => {
+    fireEvent.change(codeField(), { target: { value: code } })
+    fireEvent.change(nameField(), { target: { value: name } })
+  }
+
+  it('is not offered at all when no handler is wired — the #154 card alone', () => {
+    setup({ signedIn: true })
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Start a household' })).toBeInTheDocument()
+  })
+
+  it('sits ABOVE the household form, and the household form is unchanged', () => {
+    // Owner decision at the design pass, 2026-09-11: built below, the join
+    // card's button sat at y=926 on an 800px viewport.
+    setup({ signedIn: true, onJoin: vi.fn().mockResolvedValue(undefined) })
+    const join = screen.getByRole('heading', { name: /join with a code/i })
+    const start = screen.getByRole('heading', { name: 'Start a household' })
+    expect(join.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(createButton()).toBeInTheDocument()
+    expect(screen.getByLabelText(/household name/i)).toBeInTheDocument()
+    expect(joinButton()).toBeDisabled()
+  })
+
+  it('needs both the code and the name', () => {
+    setup({ signedIn: true, onJoin: vi.fn() })
+    fireEvent.change(codeField(), { target: { value: 'k7m3qp4rwn' } })
+    expect(joinButton()).toBeDisabled()
+    fireEvent.change(nameField(), { target: { value: 'Placeholder Three' } })
+    expect(joinButton()).toBeEnabled()
+  })
+
+  it('redeems the code with the name as typed, and clears both fields on success', async () => {
+    const onJoin = vi.fn().mockResolvedValue({ id: 'm9', household_id: 'h2' })
+    setup({ signedIn: true, onJoin })
+    fillJoin()
+    await clickAndSettle(joinButton())
+    expect(onJoin).toHaveBeenCalledWith('k7m3qp4rwn', { name: 'Placeholder Three' })
+    expect(codeField()).toHaveValue('')
+    expect(nameField()).toHaveValue('')
+  })
+
+  it('keeps a refused code in the field, beside the sentence that refused it', async () => {
+    setup({
+      signedIn: true,
+      onJoin: vi
+        .fn()
+        .mockRejectedValue(new Error('You are already in that household, so the code was left unused.')),
+    })
+    fillJoin()
+    await clickAndSettle(joinButton())
+    expect(screen.getByRole('alert')).toHaveTextContent(/left unused/)
+    expect(codeField()).toHaveValue('k7m3qp4rwn')
+    expect(nameField()).toHaveValue('Placeholder Three')
+  })
+
+  it('shows an error handed in from outside — the held code refused at boot — as ONE strip', () => {
+    setup({ signedIn: true, onJoin: vi.fn(), error: 'That code cannot be used — ask for a fresh one.' })
+    const alerts = screen.getAllByRole('alert')
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]).toHaveTextContent(/cannot be used/)
+  })
+
+  it('disables Join household while a request is in flight', () => {
+    setup({ signedIn: true, onJoin: vi.fn(), busy: true })
+    fillJoin()
+    expect(joinButton()).toBeDisabled()
+  })
+})
+
+describe('#173 — an error handed in from App is answered by the next act on this screen', () => {
+  // Review finding: the prop has no setter here, so without a latch a held
+  // code refused at boot stood over the join view while the next code was
+  // typed.
+  const sentence = 'That code cannot be used — ask for a fresh one.'
+
+  it('shows the App error until the person moves to another card', () => {
+    setup({ onHoldInvitation: vi.fn(), error: sentence })
+    expect(screen.getByRole('alert')).toHaveTextContent(/cannot be used/)
+    fireEvent.click(screen.getByRole('button', { name: /join a household/i }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a NEW App error after the old one was answered', () => {
+    const onHoldInvitation = vi.fn()
+    const onCreate = vi.fn()
+    const onSignIn = vi.fn()
+    const onSignUp = vi.fn()
+    const { rerender } = render(
+      <Onboarding onCreate={onCreate} onSignIn={onSignIn} onSignUp={onSignUp} onHoldInvitation={onHoldInvitation} error={sentence} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /join a household/i }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    rerender(
+      <Onboarding onCreate={onCreate} onSignIn={onSignIn} onSignUp={onSignUp} onHoldInvitation={onHoldInvitation} error="Sign in first, then enter the code." />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/sign in first/i)
+  })
+
+  it('a submit on this screen answers the App error too', async () => {
+    setup({ signedIn: true, onJoin: vi.fn().mockResolvedValue({ id: 'm9' }), error: sentence })
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/invitation code/i), { target: { value: 'k7m3qp4rwn' } })
+    fireEvent.change(screen.getByLabelText(/join as/i), { target: { value: 'Placeholder Three' } })
+    await clickAndSettle(screen.getByRole('button', { name: /join household/i }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})

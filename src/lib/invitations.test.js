@@ -18,7 +18,10 @@ import {
   INVITATION_CODE_LENGTH,
   INVITATION_COLUMNS,
   INVITATION_LIFETIME_DAYS,
+  INVITATION_REFUSALS,
+  INVITATION_TRIM_SET,
   SERVER_NOW,
+  describeRedemptionRefusal,
   generateInvitationCode,
   hashInvitationCode,
   invitationDateLabel,
@@ -28,6 +31,7 @@ import {
   mintInvitation,
   normalizeInvitationCode,
   outstandingInvitations,
+  redeemInvitation,
   withdrawInvitation,
 } from './invitations.js'
 import { getSupabase } from './supabase.js'
@@ -183,21 +187,39 @@ describe('#172 — the invitation code itself', () => {
 })
 
 describe('#172 — the normalisation shared with redeem_invitation', () => {
-  it('lowers and trims SPACES, which is what lower(btrim(code)) does', () => {
+  it('lowers and trims spaces, which is what lower(btrim(code, …)) does', () => {
     expect(normalizeInvitationCode('K7M3QP4RWN')).toBe('k7m3qp4rwn')
     expect(normalizeInvitationCode('  k7m3qp4rwn  ')).toBe('k7m3qp4rwn')
     expect(normalizeInvitationCode('  K7m3Qp4rWn ')).toBe('k7m3qp4rwn')
   })
 
-  it('does NOT trim a tab or a newline, because btrim does not', () => {
-    // The correction this function carries. `btrim(s)` defaults its character
-    // set to a single space, so Postgres keeps a tab or a newline at either end
-    // — and a normalisation that stripped them here would hash to a digest the
-    // server will never reproduce. `invitationMint.pglite.test.js` measures the
-    // server half; this pins the client half to it.
-    expect(normalizeInvitationCode('\tk7m3qp4rwn')).toBe('\tk7m3qp4rwn')
-    expect(normalizeInvitationCode('k7m3qp4rwn\n')).toBe('k7m3qp4rwn\n')
-    expect(normalizeInvitationCode(' \tK7M3QP4RWN\t ')).toBe('\tk7m3qp4rwn\t')
+  it('trims a tab, a newline and a carriage return too — the four characters 0041 names (#173 AC 8)', () => {
+    // Two corrections deep. #172 narrowed this to spaces because `btrim(s)`
+    // defaults its set to a single space; #173 widened the SERVER (`0041`) to
+    // these four characters because a code copied out of a message arrives
+    // with its line ending, and widened this to match. The set is spelled
+    // once, in `INVITATION_TRIM_SET`, and the SQL in `0041` spells the same
+    // four in the same order; `invitationMint.pglite.test.js` measures that
+    // the two agree on these exact inputs.
+    expect(INVITATION_TRIM_SET).toBe(' \t\r\n')
+    expect(normalizeInvitationCode('\tk7m3qp4rwn')).toBe('k7m3qp4rwn')
+    expect(normalizeInvitationCode('k7m3qp4rwn\n')).toBe('k7m3qp4rwn')
+    expect(normalizeInvitationCode('k7m3qp4rwn\r\n')).toBe('k7m3qp4rwn')
+    expect(normalizeInvitationCode(' \tK7M3QP4RWN\t ')).toBe('k7m3qp4rwn')
+    // Each of the four on its own at the LEADING end too — review finding: the
+    // leading carriage return had no fixture anywhere.
+    for (const ch of INVITATION_TRIM_SET) {
+      expect(normalizeInvitationCode(`${ch}k7m3qp4rwn`), JSON.stringify(ch)).toBe('k7m3qp4rwn')
+      expect(normalizeInvitationCode(`k7m3qp4rwn${ch}`), JSON.stringify(ch)).toBe('k7m3qp4rwn')
+    }
+  })
+
+  it('does NOT trim what the server does not — a non-breaking space is not in the set', () => {
+    // `String.prototype.trim()` would take this and every other Unicode space,
+    // which is the first defect back: a client wider than the server hashes a
+    // digest the server never reproduces. The set is four characters, not `\s`.
+    expect(normalizeInvitationCode(' k7m3qp4rwn')).toBe(' k7m3qp4rwn')
+    expect(normalizeInvitationCode('k7m3qp4rwn ')).toBe('k7m3qp4rwn ')
   })
 
   it('leaves the MIDDLE alone, because btrim does', () => {
@@ -293,12 +315,15 @@ describe('#172 — the message a shared code travels in (design-bar, 2026-09-10)
 })
 
 describe('#172 — whether a code can be spent yet', () => {
-  it('ships FALSE, because nothing can redeem a code until #173', () => {
-    // Owner decision at the review escalation, 2026-09-10: the card is wired
-    // only when this is true, so a promotion of develop cannot put an
-    // unredeemable code in front of real organizers. #173 flips it, and this
-    // test with it — the criterion that says so is on #173.
-    expect(INVITATIONS_REDEEMABLE).toBe(false)
+  it('ships TRUE since #173 shipped redemption (AC 10), and was FALSE from #172 until then', () => {
+    // Owner decision at #172's review escalation, 2026-09-10: the card is
+    // wired only when this is true, so a promotion of develop between the two
+    // stories could not put an unredeemable code in front of real organizers.
+    // #173 flipped it in the same diff that added `redeemInvitation`, and this
+    // test with it, so the flip is a visible edit and never a default. Pinned
+    // in THIS direction now, for the mirror reason: nothing may switch
+    // redemption off without a diff that says so.
+    expect(INVITATIONS_REDEEMABLE).toBe(true)
   })
 })
 
@@ -475,5 +500,152 @@ describe('#172 — what each write actually sends', () => {
     await expect(withdrawInvitation('i1')).rejects.toThrow(
       /withdrawing the invitation: permission denied/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #173 — redemption, the one call site of `redeem_invitation`
+// ---------------------------------------------------------------------------
+
+/**
+ * A client that records `rpc` and OFFERS `from`, so the assertion that no
+ * table is touched is against a client that could have been asked — a fake
+ * without `from` would prove only that the fake was narrow.
+ */
+function rpcClient({ data = null, error = null } = {}) {
+  const calls = []
+  const client = {
+    calls,
+    rpc: (fn, args) => {
+      calls.push(['rpc', fn, args])
+      return Promise.resolve({ data, error })
+    },
+    from: (table) => {
+      calls.push(['from', table])
+      return client
+    },
+    insert: (row) => {
+      calls.push(['insert', row])
+      return Promise.resolve({ data: null, error: null })
+    },
+  }
+  getSupabase.mockReturnValue(client)
+  return client
+}
+
+describe('#173 AC 6 — redemption goes through the function and touches no table', () => {
+  it('issues exactly one statement, the RPC, with the normalised code', async () => {
+    const client = rpcClient({ data: { id: 'm9', household_id: 'h2' } })
+    await redeemInvitation('K7M3QP4RWN')
+    expect(client.calls).toEqual([['rpc', 'redeem_invitation', { code: 'k7m3qp4rwn' }]])
+  })
+
+  it('never builds a client insert against members — the function is the only route', async () => {
+    const client = rpcClient({ data: { id: 'm9', household_id: 'h2' } })
+    await redeemInvitation('k7m3qp4rwn')
+    expect(client.calls.filter(([name]) => name === 'from')).toEqual([])
+    expect(client.calls.filter(([name]) => name === 'insert')).toEqual([])
+  })
+
+  it('resolves to the member row the function returned', async () => {
+    rpcClient({ data: { id: 'm9', household_id: 'h2', display_name: 'New member' } })
+    await expect(redeemInvitation('k7m3qp4rwn')).resolves.toEqual({
+      id: 'm9',
+      household_id: 'h2',
+      display_name: 'New member',
+    })
+  })
+})
+
+describe('#173 AC 8 — a code arrives however it was typed or pasted', () => {
+  it('sends the ten characters and not the line ending a paste carried', async () => {
+    const client = rpcClient({ data: { id: 'm9', household_id: 'h2' } })
+    await redeemInvitation('  K7M3QP4RWN\r\n')
+    expect(client.calls[0][2]).toEqual({ code: 'k7m3qp4rwn' })
+  })
+
+  it('sends a tab-wrapped code the same way — the input on which #172 first disagreed', async () => {
+    const client = rpcClient({ data: { id: 'm9', household_id: 'h2' } })
+    await redeemInvitation('\tk7m3qp4rwn\t')
+    expect(client.calls[0][2]).toEqual({ code: 'k7m3qp4rwn' })
+  })
+
+  it('refuses a blank code before any round trip, with a sentence about the field', async () => {
+    const client = rpcClient()
+    await expect(redeemInvitation('  \n')).rejects.toThrow(/type the invitation code first/i)
+    expect(client.calls).toEqual([])
+  })
+})
+
+describe('#173 AC 2 and AC 3 — what a refused redemption says', () => {
+  // The three sentences `0040` raises, verbatim — `invitations.pglite.test.js`
+  // pins them at the source; this file pins what each becomes on screen.
+  const raised = (message) => ({ message, code: 'P0001' })
+
+  it('AC 3: an unusable code gets ONE sentence naming the three possibilities, and no household', async () => {
+    rpcClient({ error: raised('that invitation cannot be used') })
+    await expect(redeemInvitation('k7m3qp4rwn')).rejects.toThrow(INVITATION_REFUSALS.unusable)
+    expect(INVITATION_REFUSALS.unusable).toMatch(/expired/)
+    expect(INVITATION_REFUSALS.unusable).toMatch(/withdrawn/)
+    expect(INVITATION_REFUSALS.unusable).toMatch(/already been used/)
+  })
+
+  it('AC 2: an existing member is told the code was NOT spent', async () => {
+    rpcClient({ error: raised('you are already in that household') })
+    await expect(redeemInvitation('k7m3qp4rwn')).rejects.toThrow(INVITATION_REFUSALS.alreadyMember)
+    expect(INVITATION_REFUSALS.alreadyMember).toMatch(/left unused/)
+  })
+
+  it('a session that is gone is told to sign in, not shown a JSON error', async () => {
+    rpcClient({ error: raised('not authenticated') })
+    await expect(redeemInvitation('k7m3qp4rwn')).rejects.toThrow(INVITATION_REFUSALS.signedOut)
+  })
+
+  it('anything else is reported as a FAULT carrying the server’s words, never as a refusal', async () => {
+    // A network failure or an unapplied migration dressed as "cannot be used"
+    // would send somebody with a perfectly good code off to ask for another.
+    rpcClient({ error: { message: 'function public.redeem_invitation(code) does not exist', code: 'PGRST202' } })
+    await expect(redeemInvitation('k7m3qp4rwn')).rejects.toThrow(
+      /could not use that code: function public.redeem_invitation\(code\) does not exist/i,
+    )
+  })
+
+  it('keeps the cause on the thrown error, so a fault can be traced past the sentence', async () => {
+    const error = raised('that invitation cannot be used')
+    rpcClient({ error })
+    const thrown = await redeemInvitation('k7m3qp4rwn').catch((e) => e)
+    expect(thrown.cause).toBe(error)
+  })
+
+  it('AC 3: no refusal names a household, an id, or the word invitation’s state as a fact', () => {
+    // Decision 4 clause 4 — the sentences are constants, so this is asserted
+    // against the constants rather than against one rendered instance.
+    for (const sentence of Object.values(INVITATION_REFUSALS)) {
+      expect(sentence).not.toMatch(/Placeholder/)
+      expect(sentence).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/)
+    }
+    // And the unusable sentence commits to NONE of the three: it says "may".
+    expect(INVITATION_REFUSALS.unusable).toMatch(/may have/)
+  })
+
+  it('AC 9: each branch of the mapping is its own case', () => {
+    // Four inputs, four distinct outputs — so removing any one branch of
+    // `describeRedemptionRefusal` reddens the case for it and no other.
+    const sentences = [
+      describeRedemptionRefusal(raised('that invitation cannot be used')),
+      describeRedemptionRefusal(raised('you are already in that household')),
+      describeRedemptionRefusal(raised('not authenticated')),
+      describeRedemptionRefusal(raised('connection refused')),
+    ]
+    expect(new Set(sentences).size).toBe(4)
+    expect(sentences[0]).toBe(INVITATION_REFUSALS.unusable)
+    expect(sentences[1]).toBe(INVITATION_REFUSALS.alreadyMember)
+    expect(sentences[2]).toBe(INVITATION_REFUSALS.signedOut)
+    expect(sentences[3]).toMatch(/connection refused/)
+  })
+
+  it('says so when the server gave no reason at all', () => {
+    expect(describeRedemptionRefusal({})).toMatch(/no reason was given/)
+    expect(describeRedemptionRefusal(null)).toMatch(/no reason was given/)
   })
 })

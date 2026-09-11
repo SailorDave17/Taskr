@@ -308,27 +308,33 @@ export const LIVE_RPCS = Object.freeze([
   // both. Predicted from the bodies, not measured, until the apply.
   Object.freeze({ fn: 'archive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
   Object.freeze({ fn: 'unarchive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
-  // #171's `redeem_invitation` is deliberately NOT here, and the absence is the
-  // same decision as `calendar_tokens`' absence from LIVE_SCHEMA above: this
-  // list is what the CLIENT calls, and #171 ships the schema with no caller —
-  // #173 builds the redemption surface. An entry now would redden the
-  // both-directions test below ("no entry for an RPC the app does not call"),
-  // *measured 1 of 54* on #171's own branch, which is that guard doing its job
-  // rather than an obstacle: a probe for a function nothing calls reports a
-  // missing grant on a project that is entirely correct.
+  // #173, arriving with its CALL SITE (`invitations.js redeemInvitation`) and
+  // not with its migration: `0040` (#171) created the function and deliberately
+  // left it out of this list, because this list is what the CLIENT calls and
+  // #171 shipped no caller — an entry then reddened the both-directions test
+  // below (*measured 1 of 54* on #171's branch), and a probe for a function
+  // nothing calls reports a missing grant on a project that is entirely
+  // correct. Owner decision at #171's pickup, 2026-09-10; #416 tracked the
+  // obligation. So this is the first RPC entry here to arrive GREEN rather
+  // than red-until-pasted — `0040` was applied on 2026-09-10 — and the reading
+  // on the story's branch is in `docs/access-model.md`'s `0040` entry.
   //
-  // So `0040` is confirmed by `npm run probe:live-grants` (its table control
-  // row) and by the read-only catalog query in `docs/access-model.md`'s `0040`
-  // entry, and `check:live` reads the same on both sides of that paste. #173
-  // adds this entry in the same change that adds its call site — owner decision
-  // at #171's pickup, 2026-09-10.
+  // The read-only GET sends the nil UUID as the `text` placeholder; the body's
+  // first act after the auth check is an unlocked digest lookup that matches
+  // no row, so `authenticated` is answered by the function's own raise
+  // (`P0001`, before any lock or write) and `anon` by `42501` — the two roles
+  // differ, so the row is evidence about the grant (#268's reason). What this
+  // probe CANNOT see is `0041`'s widened normalisation, a body replace with the
+  // same name and argument set: the read-only catalog query in that file's
+  // access-model entry is the instrument for that half (`0028`'s shape).
   //
   // The call form is deliberately NOT spelled out in this comment. The test
   // below scrapes `src/` for RPC call sites with a regex, and a comment quoting
-  // one is indistinguishable from the real thing — *measured on this branch*,
+  // one is indistinguishable from the real thing — *measured on #171's branch*,
   // an earlier draft of these lines made the scraper report the function as
   // "called but absent from LIVE_RPCS", which is the exact inverse of the truth
   // (cairn: a-guard-that-reads-source-must-survive-its-own-docs).
+  Object.freeze({ fn: 'redeem_invitation', args: Object.freeze({ code: 'text' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */

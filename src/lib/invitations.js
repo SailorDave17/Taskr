@@ -1,9 +1,9 @@
 // The invitation data layer — story #172.
 //
 // `0040` (#171) created `invitations` and `redeem_invitation` and shipped no
-// client code at all. This file is the organizer's half: mint a code, list what
-// is outstanding, withdraw one. #173 is the redeemer's half and calls the
-// function; nothing here does.
+// client code at all. This file is BOTH halves: the organizer's (#172) — mint a
+// code, list what is outstanding, withdraw one — and the redeemer's (#173),
+// `redeemInvitation` below, which is the one call site of the function.
 //
 // ===========================================================================
 // THE CODE EXISTS IN THIS PROCESS AND NOWHERE ELSE
@@ -84,20 +84,25 @@ export const INVITATION_LIFETIME_DAYS = 7
 /**
  * Whether a code can be SPENT yet — and so whether the organizer's card exists.
  *
- * FALSE UNTIL #173 SHIPS REDEMPTION. Owner decision 2026-09-10, at an escalation
- * two review lenses raised independently: #172's own issue says it and #173
- * "must reach a release together", and a sentence is all that said so. `release`
- * is promoted from `develop` as a whole branch, so the next promotion for ANY
- * story would have put a "Create an invitation code" button in front of real
+ * TRUE SINCE #173 SHIPPED REDEMPTION, and it was false from #172 until then.
+ * Owner decision 2026-09-10, at an escalation two review lenses raised
+ * independently: #172's own issue said it and #173 "must reach a release
+ * together", and a sentence was all that said so. `release` is promoted from
+ * `develop` as a whole branch, so a promotion for ANY story between the two
+ * would have put a "Create an invitation code" button in front of real
  * organizers with no screen anywhere that could redeem one — the shape cairn's
  * `a-ratified-dependency-is-not-an-owned-deliverable` records.
  *
- * So the coupling is code: App wires the card, and reads the list, only when
- * this is true. #173 carries the criterion that flips it, and
- * `invitations.test.js` pins it false until then — so the flip is a visible
- * edit in #173's diff, never a default somebody forgot.
+ * So the coupling was code: App wires the card, and reads the list, only when
+ * this is true, and #173's AC 10 is the criterion that flipped it — a visible
+ * edit in that diff, never a default somebody forgot. `invitations.test.js`
+ * pins the value either way, so the flip cannot happen by accident in either
+ * direction. The constant stays rather than being folded away: the gate it
+ * feeds is the record of WHY the two stories were coupled, and a future story
+ * that has to switch redemption off (a compromised alphabet, say) has one line
+ * to change.
  */
-export const INVITATIONS_REDEEMABLE = false
+export const INVITATIONS_REDEEMABLE = true
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -113,37 +118,59 @@ export const INVITATION_COLUMNS =
   'id, household_id, created_by_member_id, created_at, expires_at, withdrawn_at, redeemed_at, redeemed_by_member_id'
 
 /**
- * The same normalisation `redeem_invitation` applies — `lower(btrim(code))`.
+ * The characters `redeem_invitation` strips from either end of a code — the
+ * second argument of its `btrim`, since `0041`: space, tab, carriage return,
+ * newline. Exactly these four, in this order, and `INVITATION_TRIM_SET` is the
+ * one place the client spells them.
+ */
+export const INVITATION_TRIM_SET = ' \t\r\n'
+
+/**
+ * The trim as a pattern, BUILT from the set rather than spelled a second time
+ * — review finding: a literal regex beside the constant made the constant
+ * decorative, since widening one left the other unchanged with nothing red
+ * between them. All four characters are safe unescaped inside a class.
+ */
+const TRIM_PATTERN = new RegExp(`^[${INVITATION_TRIM_SET}]+|[${INVITATION_TRIM_SET}]+$`, 'g')
+
+/**
+ * The same normalisation `redeem_invitation` applies —
+ * `lower(btrim(code, E' \t\r\n'))` since `0041` (#173 AC 8).
  *
- * SPACES ONLY, and this is a correction rather than a first draft. The first
- * version used `String.prototype.trim()` under a docstring asserting that
- * `btrim` with one argument "strips spaces, tabs, newlines and carriage
+ * FOUR CHARACTERS AND NOT `trim()`, and the history is two corrections deep.
+ * The first version used `String.prototype.trim()` under a docstring asserting
+ * that `btrim` with one argument "strips spaces, tabs, newlines and carriage
  * returns". It does not: `btrim(string)` removes the longest run of characters
- * from its second argument, and that argument DEFAULTS TO A SINGLE SPACE. So
- * Postgres trims `' '` and nothing else, while `.trim()` also takes tabs,
- * newlines and every Unicode space. *Measured 2026-09-10* in
- * `invitationMint.pglite.test.js`: `'  K7M3QP4RWN\t'` hashed by the old
- * version and by `digest(lower(btrim(...)))` came out DIFFERENT — the tab
- * survives on the server and not here.
+ * from its second argument, and that argument DEFAULTS TO A SINGLE SPACE.
+ * *Measured 2026-09-10* in `invitationMint.pglite.test.js`: `'  K7M3QP4RWN\t'`
+ * hashed by `trim()` and by `digest(lower(btrim(...)))` came out DIFFERENT — the
+ * tab survived on the server and not here. So #172 narrowed this to spaces
+ * only, to BE the server's function.
  *
- * At the mint this could never bite, because the generator emits no
- * whitespace at all. It matters because this function's whole claim is to BE
- * the server's normalisation, and a reader reusing it — #173 validating a
- * typed code before the call, say — would have been told a pasted code with a
- * trailing newline was fine while the server refused it. Matching exactly is
- * what lets the cross-check assert agreement for every input rather than for
- * the inputs the two happen to agree on.
+ * Then #173 met the consequence at the other end: a code copied out of a
+ * message arrives with its line ending, and `btrim(code)` left the newline in
+ * the digest, so a correct code was refused as unusable. Owner decision at
+ * #173's pickup (2026-09-11): widen the SERVER, in `0041`, to the four
+ * characters a paste or a keyboard can put around a code — and widen this to
+ * match, because this function's whole claim is still to be the server's
+ * normalisation and nothing friendlier. `.trim()` would be wider than the
+ * server again (every Unicode space), which is the first defect back.
+ *
+ * Matching exactly is what lets `invitationMint.pglite.test.js` assert
+ * agreement on the inputs that DIFFER — a tab, a newline, a carriage return —
+ * rather than only on the inputs the two happened to agree on.
  *
  * `lower()` and `toLowerCase()` agree on the alphabet, which is ASCII by
  * construction; they can differ on other scripts under some collations, and no
  * code this module mints contains one.
  *
- * Exported because the mint and the cross-check both need exactly this, and a
- * second spelling of it is the drift this file's header is about.
+ * Exported because the mint, the redemption and the cross-check all need
+ * exactly this, and a second spelling of it is the drift this file's header is
+ * about.
  */
 export function normalizeInvitationCode(value) {
   return String(value ?? '')
-    .replace(/^ +| +$/g, '')
+    .replace(TRIM_PATTERN, '')
     .toLowerCase()
 }
 
@@ -427,4 +454,91 @@ export function invitationDateLabel(at, timeZone) {
  */
 export function invitationShareText(code) {
   return `Your Taskr invitation code is ${code}. It works once, within ${INVITATION_LIFETIME_DAYS} days.`
+}
+
+/**
+ * What the redeemer is told when a code is refused — #173 AC 2 and AC 3.
+ *
+ * THE SERVER SAYS ONE SENTENCE FOR FOUR STATES, AND SO DOES THIS. `0040`
+ * section 4 and `docs/data-outside-production.md` Decision 4 clause 4: no such
+ * code, expired, withdrawn and already-redeemed all raise `that invitation
+ * cannot be used`, because four distinguishable refusals are an oracle —
+ * "withdrawn" tells whoever is guessing codes that they found a real one. AC 3
+ * asks that each be "refused with its own message"; owner decision at #173's
+ * pickup (2026-09-11): the surface's message is ONE sentence that names the
+ * three possibilities without saying which applied, so the person knows what
+ * to do (ask for a fresh code) and a guesser learns nothing. It names no
+ * household and no id, which `invitations.test.js` asserts against every
+ * refusal below.
+ *
+ * `alreadyMember` is the one refusal that necessarily says something, and it is
+ * reachable only by somebody already inside (`0040`). The invitation is NOT
+ * spent on that path — the function checks membership before the lock — and
+ * the sentence says so, because "the code was used" is the reading a person
+ * would otherwise take from a refusal.
+ *
+ * `signedOut` cannot be reached from this app's screens — every entry point to
+ * redemption is behind a session — but the function has that branch and a
+ * sentence for it is cheaper than a sentence about a JSON error.
+ */
+export const INVITATION_REFUSALS = Object.freeze({
+  unusable:
+    'That code cannot be used — it may have expired, been withdrawn, or already been used. Ask whoever gave it to you for a fresh one.',
+  alreadyMember: 'You are already in that household, so the code was left unused.',
+  signedOut: 'Sign in first, then enter the code.',
+})
+
+/**
+ * The sentence for a `redeem_invitation` refusal, keyed on the function's OWN
+ * words rather than on an error code — the three `raise exception` texts in
+ * `0040`, which `invitations.pglite.test.js` pins. Anything else is a fault
+ * (a network failure, an unapplied migration) and is reported as one, with the
+ * server's message, because a fault dressed as a refusal would tell somebody
+ * with a perfectly good code to go and ask for another.
+ */
+export function describeRedemptionRefusal(error) {
+  const message = String(error?.message ?? '')
+  if (message.includes('that invitation cannot be used')) return INVITATION_REFUSALS.unusable
+  if (message.includes('you are already in that household')) return INVITATION_REFUSALS.alreadyMember
+  if (message.includes('not authenticated')) return INVITATION_REFUSALS.signedOut
+  return `Could not use that code: ${message || 'no reason was given'}`
+}
+
+/**
+ * Spend a code and join its household — #173 AC 1 and AC 6.
+ *
+ * THROUGH THE FUNCTION AND NOTHING ELSE. `members_insert_same_household`
+ * requires a membership the redeemer does not have, and `claimed_by` is in no
+ * client insert grant, so a client insert against `members` is refused twice
+ * over before any policy is read (`0040` section 4, proven in
+ * `invitations.pglite.test.js`). This function therefore issues exactly one
+ * statement, the RPC, and `invitations.test.js` asserts through a recording
+ * client that no `.from('members')` is ever built on this path. The function
+ * is `security definer` and runs as its owner; the caller's identity reaches
+ * it as `auth.uid()` from the session, which is why there is no argument for
+ * WHO is joining.
+ *
+ * NORMALISED HERE AND AGAIN ON THE SERVER — the same four-character trim and
+ * the same lowering, by `normalizeInvitationCode`, which is written to be the
+ * server's function. Sending the normalised form is not a second opinion: the
+ * server would produce the same digest from the raw input. It is done here so
+ * that a blank code is refused with a sentence about the field rather than a
+ * round trip, and so that what crosses the wire is the ten characters and not
+ * the line ending that came with them.
+ *
+ * Resolves to the member row the function created — `returns public.members`,
+ * which PostgREST serves as one object — and the caller reads `household_id`
+ * off it to make the joined household the active one (AC 1's "the app
+ * switches to it") before the re-read that follows every write.
+ */
+export async function redeemInvitation(code) {
+  const normalized = normalizeInvitationCode(code)
+  if (!normalized) throw new Error('Type the invitation code first.')
+  const { data, error } = await getSupabase().rpc('redeem_invitation', { code: normalized })
+  if (error) {
+    const err = new Error(describeRedemptionRefusal(error))
+    err.cause = error
+    throw err
+  }
+  return data
 }

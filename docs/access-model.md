@@ -7,13 +7,19 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0040` are ALL applied to the live project** (`0040` on 2026-09-10 in #171's own
+- Status: **`0001`–`0041` are ALL applied to the live project** (`0041` on 2026-09-11 in #173's own
+  session, at md5 `ecabaf99ff72dcf9d92ce7a57085151a` (`8824 characters, 4 statements`), read back
+  identical — see its entry below; a BODY replace of `redeem_invitation` that **`npm run check:live`
+  cannot see** — *measured* **69 of 69** on both sides — and that
+  the read-only catalog query confirmed on both sides, the widened `btrim` absent before and present
+  after; `0040` on 2026-09-10 in #171's own
   session, at md5 `bd84210bf0e64eb21ce749411d84a83a` (`32878 characters, 19 statements`), read back
   identical — see its entry below; **`npm run check:live` is blind to that file in BOTH directions**,
   so its 65 of 65 is the same on either side and is NOT evidence the paste happened (**#172 listed
   the table the same day and read 66 of 66**, the new row green on arrival, then **68 of 68** once
-  its review round looped the live Realtime control over every excused table; the function half
-  stays unseen until #173 calls it) —
+  its review round looped the live Realtime control over every excused table; **#173 listed the
+  function on 2026-09-11 with its call site and read 69 of 69**,
+  the new row green on arrival too) —
   `npm run probe:live-grants` moved 19 of 20 → 20 of 20 on the file's own control row, and the
   read-only catalog query read the three policies, the function's ACL and its lock;
   `0039` on 2026-09-08 in #106's own
@@ -668,8 +674,11 @@
       the first excused table only, so `invitations`' exclusion had no live assertion. It now runs
       once per excused table plus an empty-set floor, and the live server refused `invitations` as
       NOT PUBLISHED. The first `LIVE_SCHEMA` entry here to arrive green rather than red-until-pasted, because
-      the file it probes was applied before any client read it. The function half stays unseen until
-      #173 lists `redeem_invitation` (#416). What the client does with the table:
+      the file it probes was applied before any client read it. The function half followed on
+      2026-09-11: #173 listed `redeem_invitation` in `LIVE_RPCS` with its call site
+      (`invitations.js redeemInvitation`), and that row was green on arrival for the same reason —
+      *measured* **69 of 69** (#416's second criterion). What the
+      client does with the table:
       - **The code is generated and hashed in the browser**, and only the digest crosses the wire —
         ten characters from a 31-symbol alphabet with no `0`/`o`/`1`/`l`/`i`, drawn by rejection
         sampling from `crypto.getRandomValues` (a plain `% 31` would bias the first eight symbols by
@@ -681,8 +690,10 @@
         takes tabs and newlines, so the first client normalisation hashed `'  K7M3QP4RWN\t'` to a
         digest the server would never reproduce. The client now trims spaces only, matching `btrim`
         exactly, and a pglite test pins `btrim`'s behaviour as a platform fact. The mint is unaffected
-        (the generator emits no whitespace); the redemption is not, since a code pasted with a
-        trailing newline is refused today — recorded on #173, whose AC 8 it lands on.
+        (the generator emits no whitespace); the redemption was, since a code pasted with a
+        trailing newline was refused — recorded on #173, whose AC 8 it landed on, and settled by
+        `0041` (below), which widens the server's set to space, tab, carriage return and newline
+        and the client's twin with it.
       - **Withdrawal stamps `withdrawn_at` from the database clock**, by sending the text `'now'`,
         which Postgres resolves when it casts the value — the same text-to-`timestamptz` leg
         `expires_at` rides on every mint. Filtered on both stamps being null, so a withdrawal that
@@ -693,14 +704,16 @@
         statement the app issues.
       - **Not watched** (`UNWATCHED_TABLES`, owner decision at pickup): a redemption on another phone
         reaches the organizer's list on their next refresh rather than the instant it happens.
-      - **The card is OFF until #173 ships redemption.** `INVITATIONS_REDEEMABLE` in
-        `src/lib/invitations.js` is `false`, and App wires the card and reads the list only when it
-        is true — owner decision 2026-09-10, at an escalation two review lenses raised
-        independently. #172 and #173 "must reach a release together", `release` is promoted from
-        `develop` as a whole branch, and a sentence was all that held the coupling; now code does,
-        whatever gets promoted. #173 carries the criterion that flips it. Everything above is built,
-        tested and measured with the flag on; `check:live` probes the table either way, since the
-        read's column list is in `LIVE_SCHEMA` regardless.
+      - **The card was OFF until #173 shipped redemption, and is ON since 2026-09-11.**
+        `INVITATIONS_REDEEMABLE` in `src/lib/invitations.js` shipped `false` with #172, and App
+        wires the card and reads the list only when it is true — owner decision 2026-09-10, at an
+        escalation two review lenses raised independently. #172 and #173 "must reach a release
+        together", `release` is promoted from `develop` as a whole branch, and a sentence was all
+        that held the coupling; code did instead, whatever got promoted. #173's AC 10 flipped it to
+        `true` in the same diff that added the call site, and `invitations.test.js` pins the value
+        in that direction now, so nothing switches redemption off without a diff that says so. The
+        gate stays in App rather than being folded away: it is the record of why the two were
+        coupled, and one line to change if redemption ever has to be withdrawn.
     - **The code is stored as a DIGEST and nowhere as a code** (AC 4, owner decision 2026-09-10,
       taken at a clickable question against storing the plaintext and withholding it by column
       grant). `token_hash bytea` is `extensions.digest(code, 'sha256')`, unique, and the plaintext
@@ -735,7 +748,10 @@
       already-redeemed all raise `that invitation cannot be used`, asserted EQUAL to each other and
       asserted not to name the household or its id. Four distinguishable answers would tell somebody
       guessing codes that they had found a real one. #173's surface draws its four messages from what
-      the person did, which is where that criterion lives. The one refusal that names anything —
+      the person did, which is where that criterion lives — and, owner decision at #173's pickup
+      (2026-09-11), that surface shows ONE sentence naming the three possibilities without saying
+      which applied, since a client cannot distinguish what the server refuses to distinguish
+      without the oracle this clause forbids. The one refusal that names anything —
       `you are already in that household` — is reachable only by somebody already inside, and it
       fires BEFORE the invitation is spent (#173 AC 2), asserted by redeeming the same code
       afterwards.
@@ -764,7 +780,10 @@
       2026-09-10. Consequence: **`check:live` reads the same on both sides of this paste and says
       nothing about whether it happened** — `probe:live-grants` and the read-only catalog query are
       what confirm it, and #172/#173 add the `LIVE_SCHEMA` and `LIVE_RPCS` entries with their
-      client code — #172 did its half on 2026-09-10 (**66 of 66**, the new row green on arrival).
+      client code — #172 did its half on 2026-09-10 (**66 of 66**, the new row green on arrival),
+      and #173 did the function half on 2026-09-11 (**69 of 69**,
+      that row green on arrival too, so the whole of `0040` is probed now and #416's obligation is
+      discharged by the two stories it named).
     - **Not in the Realtime publication**, and asserted absent rather than left out: `0037` fills it
       from `LIVE_SCHEMA`, `realtime.pglite.test.js` holds the two equal in both directions, and the
       story that adds the client read adds both. *(Corrected 2026-09-10: it did not. #172 added the
@@ -772,6 +791,52 @@
       organizer-only, and publishing would put `token_hash` on a channel for no other reader. The
       table is still out of the publication; the absence is a decision now rather than a
       consequence, and `invitations.pglite.test.js` asserts both halves of it.)*
+  - **`0041`** (#173) — `redeem_invitation` normalises with `lower(btrim(code, E' \t\r\n'))`
+    rather than `0040`'s `lower(btrim(code))`, so a code pasted with its line ending is accepted
+    (#173 AC 8). One expression widened; everything else about the function is `0040`'s and is
+    asserted preserved. Applied 2026-09-11 in #173's own session with `npm run migrate:live`,
+    before the merge (`0020`'s safe order), at md5 `ecabaf99ff72dcf9d92ce7a57085151a`
+    (`8824 characters, 4 statements`), read back identical. Every reading below was
+    taken on both sides in that session.
+    - **Why a migration and not a client trim — owner decision at pickup, 2026-09-11.** `btrim`
+      with one argument trims SPACES only (its set defaults to a single space; *measured
+      2026-09-10* under #172, pinned as a platform fact in `invitationMint.pglite.test.js`), so a
+      code copied out of #172's share message with its newline hashed to a digest no row holds and
+      was refused as unusable, with nothing on either side saying why. The client could have
+      stripped the wider set before the call — no migration, this client only. The server route
+      covers every caller and keeps the rule where `0040` put it: the normalisation lives in the
+      function and the client's `normalizeInvitationCode` is written to BE it, so the client widened
+      to the same four characters in the same change and the mint-to-redeem cross-check asserts the
+      pair agree on exactly the inputs that used to differ. Not `\s` and not `.trim()`: the set is
+      four characters, because a client wider than the server is #172's defect with the sign
+      flipped. Worth knowing, measured in the component test that found it: a single-line `<input>`
+      strips CR and LF from its value by the platform's own sanitisation, so the newline reaches the
+      server from a textarea or another client rather than from this app's field — which is a second
+      reason the server is the place to widen.
+    - **What the catalog read, before and after.** *Before*: `pg_get_functiondef` carrying
+      `btrim(redeem_invitation.code)` and NOT the widened form; *after*: the widened form present,
+      `prosecdef = true`, `search_path=""` (the catalog's quoted form), **executable by
+      `authenticated` and NOT by `anon`**, the primary-key lock still read back as a predicate
+      (`where i.id = target.id`), the comment naming `0041`, and the body md5 moved
+      `72c95ebf95127e61304a997f4a6b26f2` → `1e9f6d75e784b6d0b13843febdba2dc8` — `0028`'s reading, that a
+      `create or replace` preserves the ACL and the flags, taken on production rather than assumed.
+      The table's grants and policies were read in the same select as the control that nothing
+      else moved: exactly the three `0040` policies, fourteen column grants and no table-level grant for `authenticated`, identical on both sides.
+    - **`npm run check:live`: 69 of 69 on BOTH sides**, measured
+      rather than predicted. A body replace with the same name and argument set is invisible to a
+      probe that resolves by name and argument set (`0028`'s and `0029`'s blindness), so a green
+      run is not evidence this paste happened; the catalog query above is. The `redeem_invitation`
+      ROW itself is #173's, listed with the call site in the same change, and read green on arrival
+      because `0040` was already applied — the first RPC entry in `LIVE_RPCS` to arrive that way.
+    - **`npm run probe:live-grants`: 20 of 20 on both
+      sides.** No grant moves: the file restates `0034`'s revoke-then-grant so it carries the
+      complete privilege statement on its own, and the restatement is idempotent.
+    - **Re-runnable, and the re-paste hazard runs the other way.** Applying `0041` twice changes
+      nothing (asserted by md5). Re-pasting `0040` alone on top of it succeeds silently and REVERTS
+      the normalisation to spaces only — `0028`'s hazard exactly — and re-pasting `0041` restores
+      it; both directions are asserted in `invitationWhitespace.pglite.test.js`, with a positive
+      control that every pasted input it accepts was refused under `0040` alone. The safe re-paste
+      order is the whole sequence and now ends on `0041`.
   - **`0039`** (#106) — `member_capacity_source_known` admits a fourth word, `calendar_auto`, and
     `member_capacity.previous_minutes` arrives beside it: a calendar read that lands within the
     client's bound (`AUTO_APPLY_BOUND_MINUTES`, 120) of the week's current figure is written with
@@ -2056,8 +2121,11 @@ the stated reason. What it did not name:
   Re-pasting `0027` alone takes the completion-assigns-the-completer rule away; re-pasting `0007`
   takes it away too, because that file carries **both** functions — a prediction that only the undo
   half would go was written into the test and **falsified by running it**, which is why the arm
-  exists. `check:live` cannot see a function body, so the reversion is silent to it too; the repair
-  is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
+  exists. And, since `0041`, **`0040`**, which carries the `redeem_invitation` body `0041` superseded:
+  re-pasted alone it takes the widened whitespace normalisation away and a code pasted with its
+  line ending is refused again (*measured under #173, both directions in one run in
+  `invitationWhitespace.pglite.test.js`*). `check:live` cannot see a function body, so the reversion
+  is silent to it too; the repair is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
   until 2026-09-02.)* Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.

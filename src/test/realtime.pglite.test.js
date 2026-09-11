@@ -75,12 +75,17 @@ describe('#342 — the publication 0037 fills, against a real Postgres', () => {
   })
 
   it('leaves the self-scoped table out, on purpose and by name', async () => {
-    // `member_split_seen` is the one table the client reads and does not watch.
+    // `member_split_seen` was the one table the client read and did not watch
+    // until #172 excused `invitations` too; both are asserted below.
     // Asserted rather than left as an omission, because an absent entry and a
     // forgotten one look identical — and the reason is in UNWATCHED_TABLES.
-    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen'])
+    // #172 added `invitations` as the second, and it is asserted the same way:
+    // read by the client, excused by name, and absent from the publication.
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
     expect(LIVE_TABLES).toContain('member_split_seen')
     expect(await publishedTables(db)).not.toContain('member_split_seen')
+    expect(LIVE_TABLES).toContain('invitations')
+    expect(await publishedTables(db)).not.toContain('invitations')
   })
 
   it('publishes inserts, updates AND deletes — the unfiltered DELETE binding rests on the last', async () => {

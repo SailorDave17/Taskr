@@ -1325,6 +1325,11 @@ describe('#19 — no real household name reaches version control', () => {
   // left is a hole waiting for somebody to reuse the string.
   const NOT_NAMES = {
     Dishes: 'a chore title in App.test.jsx',
+    // #172 — the two DOMException names the Web Share API rejects with, in
+    // Invitations.test.jsx: a cancelled share (which must say nothing) and a
+    // refused one (which must say how to copy instead).
+    AbortError: 'a DOMException name — a cancelled navigator.share() rejects with it',
+    NotAllowedError: 'a DOMException name — a refused navigator.share() rejects with it',
     'Placeholder Chore': 'a chore title',
     'Placeholder Other Chore': 'a chore title',
     // #37 AC 4's fixture needs four chores in one household. Declared rather

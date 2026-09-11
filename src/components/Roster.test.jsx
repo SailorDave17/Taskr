@@ -2255,3 +2255,119 @@ describe('#341 — emailing a sign-in instead of setting one', () => {
     expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
   })
 })
+
+// #172 — who sees the invitation card at all. The card's INNER gates (a code on
+// screen, a list, the two-tap withdrawal) are Invitations.test.jsx's; this is
+// the ROLE gate, which lives here because Roster holds the active household's
+// organizer answer. Presence and absence are separate tests (AC 7), so removing
+// `isOrganizer` from the render condition reddens the absence tests and
+// removing the card reddens the presence one.
+describe('#172 — the invitation card follows the organizer role', () => {
+  const OUTSTANDING = [
+    {
+      id: 'inv-1',
+      household_id: 'h1',
+      created_by_member_id: 'm1',
+      created_at: '2026-09-10T19:04:00.000Z',
+      expires_at: '2099-09-17T19:04:00.000Z',
+      withdrawn_at: null,
+      redeemed_at: null,
+      redeemed_by_member_id: null,
+    },
+  ]
+  const wired = () => ({
+    onMintInvitation: vi.fn(),
+    onWithdrawInvitation: vi.fn(),
+    onDismissMintedCode: vi.fn(),
+  })
+
+  it('AC 1 — offers the organizer a control to create an invitation', () => {
+    setup({ isOrganizer: true, ...wired() })
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create an invitation code/i })).toBeInTheDocument()
+  })
+
+  it('AC 1 — pressing it reaches the handler App wired', () => {
+    const handlers = wired()
+    setup({ isOrganizer: true, ...handlers })
+    fireEvent.click(screen.getByRole('button', { name: /create an invitation code/i }))
+    expect(handlers.onMintInvitation).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3 — shows the organizer the outstanding list', () => {
+    setup({ isOrganizer: true, invitations: OUTSTANDING, ...wired() })
+    expect(screen.getByTestId('invitation-list')).toBeInTheDocument()
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('AC 5 — shows a member who is NOT the organizer no invitation control', () => {
+    // Handlers wired and rows handed in, deliberately: the only thing standing
+    // between this member and the card is the role, so this is the test that
+    // reddens when `isOrganizer` is dropped from the render condition.
+    setup({ isOrganizer: false, invitations: OUTSTANDING, ...wired() })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 5 — and no invitation list, even when rows reach the component', () => {
+    // App never reads them for a member (refresh() does not ask), but the
+    // screen must not depend on that: a list handed to a non-organizer's roster
+    // by any route is still not drawn.
+    setup({ isOrganizer: false, invitations: OUTSTANDING, ...wired() })
+    expect(screen.queryByTestId('invitation-list')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('invitation-inv-1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /withdraw the code created/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 5 — and no code, even if one is somehow held', () => {
+    setup({ isOrganizer: false, mintedCode: 'k7m3qp4rwn', ...wired() })
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+    expect(screen.queryByText('k7m3qp4rwn')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing new when no minter is wired — the #166 optional shape', () => {
+    // The wiring half of the condition, and a different gate from the role: an
+    // organizer's roster rendered by a caller that has not wired invitations is
+    // exactly the roster that shipped before this story.
+    setup({ isOrganizer: true, invitations: OUTSTANDING })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+  })
+
+  it('design-bar — the invitation card comes BEFORE Add someone', () => {
+    // Owner decision at the design-bar pass, 2026-09-10. At 360 wide the card
+    // started 2.4 screens down (y 1919 of 2636), under the add-by-email form
+    // #191 retires in favour of this one — so the forward path was the one a
+    // person had to scroll furthest to reach.
+    setup({ isOrganizer: true, ...wired() })
+    const card = screen.getByTestId('invitations-card')
+    const add = screen.getByRole('heading', { name: /add someone/i })
+    expect(card.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('AC 6 — follows the ROLE it is handed, not the person: the same roster flips with it', () => {
+    // At this level the "active household" is whatever `isOrganizer` says, so
+    // the component half of AC 6 is that the card tracks the prop in both
+    // directions on one mounted roster. App.test.jsx proves the prop itself is
+    // computed within the active household.
+    const handlers = wired()
+    const props = {
+      household: { id: 'h1', name: 'Placeholder Household' },
+      members: roster,
+      me: { id: 'm1', display_name: 'Placeholder One' },
+      periodStart: PERIOD,
+      onAdd: vi.fn(),
+      onSave: vi.fn(),
+      onRemove: vi.fn(),
+      onRefresh: vi.fn(),
+      onSetCapacity: vi.fn(),
+      onClearCapacity: vi.fn(),
+      ...handlers,
+    }
+    const { rerender } = render(<Roster {...props} isOrganizer />)
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    rerender(<Roster {...props} isOrganizer={false} />)
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    rerender(<Roster {...props} isOrganizer />)
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+  })
+})

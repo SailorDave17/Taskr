@@ -108,6 +108,13 @@ import {
   unarchiveList,
   unpurchaseItem,
 } from './lib/shopping.js'
+import {
+  INVITATIONS_REDEEMABLE,
+  listInvitations,
+  mintInvitation,
+  outstandingInvitations,
+  withdrawInvitation,
+} from './lib/invitations.js'
 import Announcement from './components/Announcement.jsx'
 import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
@@ -258,6 +265,18 @@ export default function App() {
   // credential: the refresh token is in `calendar_tokens`, which this client is
   // granted nothing on, so there is no version of this read that could leak one.
   const [connections, setConnections] = useState([])
+  // #172 — the organizer's outstanding invitations, read on every refresh like
+  // every other row here, and EMPTY for anybody who does not organise the
+  // household on screen (the read is not even made for them — see refresh()).
+  const [invitations, setInvitations] = useState([])
+  // #172 AC 2 — the one copy of a freshly minted code that exists anywhere.
+  // `0040` stores a digest, so this is not a cache of something the server
+  // could re-send: lose it and the code is gone. Held WITH the invitation's id,
+  // so withdrawing that same invitation takes a dead code off the screen rather
+  // than leaving it standing beside the list that no longer carries it.
+  // Cleared on a household switch and on sign-out, and never written anywhere
+  // that outlives this render tree.
+  const [minted, setMinted] = useState(null)
   // #101 — which calendar events this household has already imported, as the
   // ledger rows `0038` keeps: an event id and the chore it became, per row, and
   // nothing out of anybody's calendar. Server state through the same refresh,
@@ -539,6 +558,33 @@ export default function App() {
     }
     const uid = await currentUserId()
     setUserId(uid)
+    // #172 — the organizer's invitations, and ONLY the organizer's. Resolved
+    // against the roster and uid just read rather than the render's
+    // `isOrganizer`, which is the previous refresh's answer — the same reason
+    // the busy-fetch block below resolves `mine` here.
+    //
+    // NOT READ AT ALL for anybody else, and that is a choice about cost rather
+    // than about safety. `invitations_select_organizer` would answer a member's
+    // read with nothing, so reading unconditionally would be harmless — and
+    // would cost every member who can never see the list one round trip per
+    // refresh, which #351 priced at 562 ms on Slow 4G. The policy is still the
+    // guard (`invitationMint.pglite.test.js` proves it through this exact
+    // statement); this only stops asking a question whose answer is known.
+    const mineHere = found ? findClaimedMember(roster, uid, found.id) : null
+    const organizesHere = Boolean(mineHere && found && mineHere.id === found.organizer_member_id)
+    // Not read at all while no code can be redeemed (`INVITATIONS_REDEEMABLE`,
+    // false until #173) — there is no card to show it on.
+    const invitationRows =
+      organizesHere && INVITATIONS_REDEEMABLE ? await listInvitations(found.id) : []
+    setInvitations(invitationRows)
+    // RECONCILE THE SHOWN CODE WITH WHAT THE SERVER JUST SAID — review finding.
+    // A code withdrawn from the organizer's other device, or redeemed, used to
+    // stay on this screen after the next background refresh, Share still
+    // sending it, because nothing compared `minted` with the list. A fresh mint
+    // is safe from this: `handleMintInvitation` sets the code AFTER its own
+    // re-read, which already carries the new row.
+    const stillOutstanding = new Set(outstandingInvitations(invitationRows).map((row) => row.id))
+    setMinted((shown) => (shown && !stillOutstanding.has(shown.id) ? null : shown))
     // #96 — the FETCH's complaint clears only once a figure for THIS member and
     // THIS week has actually arrived, from another device or a reload: "the
     // calendar could not be read" stops being true the moment a read of it is
@@ -960,6 +1006,10 @@ export default function App() {
         activeIdRef.current = null
         choiceEpochRef.current += 1
         clearActiveHouseholdChoice()
+        // #172 — the shown code does not outlive the session that minted it,
+        // for #165 AC 7's reason: on a shared tablet the next person to sign in
+        // must not find somebody else's invitation code on their screen.
+        setMinted(null)
         return result
       }),
     [mutate],
@@ -1123,6 +1173,14 @@ export default function App() {
       // the connection is per member-and-household and still live.
       setAnnouncement(null)
       setCalendarRevokeNote(null)
+      // #172 — a code minted for household A is A's. Left standing it would be
+      // read out as an invitation to B, whose roster is now on screen under it.
+      setMinted(null)
+      // And A's LIST, for the same reason — review finding. B's roster and its
+      // organizer answer land a moment before B's invitations are read, so for
+      // that window (and for good, if a read in between fails) A's outstanding
+      // codes sat under B's "Waiting to be used", withdrawable there.
+      setInvitations([])
       return handleRefresh().catch(() => {})
     },
     [handleRefresh],
@@ -1640,6 +1698,56 @@ export default function App() {
   // nothing it cares about leaves it alone.
   const householdId = household?.id
   const myMemberId = me?.id
+
+  // #172 — mint an invitation for the household ON SCREEN, recorded against
+  // this person's own member row IN IT. Both ids come from state `refresh()`
+  // set, never re-resolved in the data layer: #159 measured a write landing in
+  // the other household when it re-resolved. `invitations_insert_organizer`
+  // refuses any other pairing regardless.
+  //
+  // The code arrives AFTER `mutate`'s re-read, so it lands on screen together
+  // with the new row in the list rather than a round trip ahead of it.
+  //
+  // HELD OUTSIDE THE ACTION, and that is review-fanout's headline, found by
+  // three lenses. The first version read the code off `mutate`'s return, and
+  // `mutate` rethrows when any unguarded read in the re-read fails — so an
+  // insert that COMMITTED followed by a flaky read threw the only copy of the
+  // code away while its row stayed live: AC 2's "shown once" became "shown
+  // zero times", under an error strip naming the read. Now a committed mint is
+  // shown whether or not the re-read worked, beside that read's error if it
+  // did not. A REFUSED mint leaves `made` null and shows nothing, correctly.
+  const handleMintInvitation = useCallback(async () => {
+    let made = null
+    try {
+      await mutate(async () => {
+        made = await mintInvitation({ householdId: household?.id, createdByMemberId: myMemberId })
+        return made
+      })
+    } catch {
+      // `mutate` has set the error strip — for a refused mint, or for a
+      // re-read that failed after the insert committed.
+    }
+    if (made) setMinted({ code: made.code, id: made.invitation?.id ?? null })
+  }, [mutate, household, myMemberId])
+
+  // #172 AC 4 — withdraw, then re-read. If the invitation withdrawn is the one
+  // whose code is still on screen, that code is dead the moment the stamp
+  // lands, so it leaves with the row rather than standing there looking usable.
+  //
+  // Cleared INSIDE the action, the moment the withdrawal resolves — review
+  // finding. It used to be cleared in a `.then` after `mutate`, which a failed
+  // re-read skips: the stamp committed, the code died, and it stayed on screen
+  // with Share still sending it.
+  const handleWithdrawInvitation = useCallback(
+    (id) =>
+      mutate(async () => {
+        await withdrawInvitation(id)
+        setMinted((shown) => (shown?.id === id ? null : shown))
+      }).catch(() => {}),
+    [mutate],
+  )
+
+  const handleDismissMintedCode = useCallback(() => setMinted(null), [])
   // #213 — ask the extraction endpoint what a chore description means. NOT
   // through `mutate()`, for #210's reason: a proposal is a list on screen the
   // member has not agreed to, so nothing is written, nothing re-reads, and
@@ -2216,6 +2324,17 @@ export default function App() {
           // row already fits five tabs into 263.2px at exactly 8px of padding
           // and this is household administration, which is what the Who tab is.
           onCreateHousehold={handleCreateAnotherHousehold}
+          // #172 — the invitation card. Roster shows it only to the organizer of
+          // the household on screen; `invitations` is already empty for anybody
+          // else because refresh() never asks on their behalf.
+          invitations={invitations}
+          mintedCode={minted?.code ?? null}
+          // Unwired while no code can be redeemed (`INVITATIONS_REDEEMABLE`, false
+          // until #173) — Roster's optional-wiring gate then renders no card at
+          // all, whoever is looking and whatever gets promoted to `release`.
+          onMintInvitation={INVITATIONS_REDEEMABLE ? handleMintInvitation : null}
+          onWithdrawInvitation={handleWithdrawInvitation}
+          onDismissMintedCode={handleDismissMintedCode}
           overrides={overrides}
           periodStart={periodStart}
           onSetCapacity={handleSetCapacity}

@@ -638,21 +638,31 @@ describe('#342 — the live project PUBLISHES every table this app watches for c
 })
 
 describe('#342 AC 6 — POSITIVE CONTROL: the publication check can actually fail', () => {
-  it('reports the one table the client reads and deliberately does NOT watch as unpublished', async () => {
-    // Live rather than synthetic, matching the table, RPC and Edge Function
-    // controls: this proves the join really reaches the server and that the
-    // server really refuses a table outside the publication. The subject is
-    // `member_split_seen`, which `0037` leaves out on purpose — so this row is
-    // ALSO the assertion that the self-scoped table stays unpublished, and a
-    // later migration that adds it (or a dashboard toggle) turns this red.
-    requireSession()
-    const [table] = Object.keys(UNWATCHED_TABLES)
-    expect(table).toBe('member_split_seen')
-    const probe = await probePublication(supabase, table)
-    const line = describePublicationError(table, probe)
-    expect(line, `${table} joined as though it were published`).toContain('NOT PUBLISHED')
-    expect(line).toContain(table)
+  // Live rather than synthetic, matching the table, RPC and Edge Function
+  // controls: each row proves the join really reaches the server and that the
+  // server really refuses a table outside the publication.
+  //
+  // ONE ROW PER EXCUSED TABLE since #172, and the loop is the review's finding.
+  // This was a single test pinned to `Object.keys(UNWATCHED_TABLES)[0]`, which
+  // was all of the set while `member_split_seen` was its only member. #172 made
+  // `invitations` the second — excused for a security reason, keeping
+  // `token_hash` off Realtime channels — and the pinned test never looked at
+  // it, so a migration or a dashboard toggle publishing it would have left
+  // every live instrument green. Each row is ALSO the assertion that its table
+  // stays unpublished.
+  it('has an excused table to probe, so an empty loop is impossible', () => {
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
   })
+
+  for (const table of Object.keys(UNWATCHED_TABLES)) {
+    it(`reports ${table}, which the client reads and deliberately does NOT watch, as unpublished`, async () => {
+      requireSession()
+      const probe = await probePublication(supabase, table)
+      const line = describePublicationError(table, probe)
+      expect(line, `${table} joined as though it were published`).toContain('NOT PUBLISHED')
+      expect(line).toContain(table)
+    })
+  }
 })
 
 describe('#78 — the probe reads schema, never a household', () => {

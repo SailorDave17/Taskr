@@ -55,7 +55,10 @@ describe('#342 — the watched list is derived from what the client reads', () =
       expect(LIVE_TABLES, `${table} is excused but the client does not read it`).toContain(table)
       expect(reason.length).toBeGreaterThan(20)
     }
-    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen'])
+    // #172 added the second, for the owner's reason at pickup: `invitations` is
+    // read by the organizer's device alone, and publishing it would put the row
+    // — `token_hash` among its columns — on a channel with no other reader.
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
   })
 
   it('scopes each table by a column its OWN client column list carries', () => {

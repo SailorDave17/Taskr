@@ -42,6 +42,115 @@ function unwrap({ data, error }, whatWeWereDoing) {
 }
 
 /**
+ * #430 — how many days a household pending deletion can still be restored.
+ *
+ * The database's `household_grace_period()` (migration 0042) is the authority;
+ * this is the number the delete confirm says out loud, and
+ * `householdDeletion.test.js` reads the migration and fails if they differ.
+ */
+export const GRACE_PERIOD_DAYS = 7
+
+/**
+ * Schedule the household for deletion — organizer only, refused otherwise by
+ * the RPC. It disappears for every member at once and is purged for good when
+ * the grace period ends, unless restored first.
+ */
+export async function requestHouseholdDeletion(householdId) {
+  return unwrap(
+    await getSupabase().rpc('request_household_deletion', { household_id: householdId }),
+    'scheduling the household for deletion',
+  )
+}
+
+/** Bring back a household pending deletion, while its grace period lasts. */
+export async function restoreHousehold(householdId) {
+  return unwrap(
+    await getSupabase().rpc('restore_household', { household_id: householdId }),
+    'restoring the household',
+  )
+}
+
+/**
+ * The households this person organizes that are pending deletion, soonest
+ * purge first: `{ household_id, household_name, deletion_requested_at, purge_after }`.
+ * Read through an RPC because such a household is no longer selectable.
+ */
+export async function householdDeletionStatus() {
+  return (
+    unwrap(await getSupabase().rpc('household_deletion_status'), 'reading households pending deletion') ??
+    []
+  )
+}
+
+/**
+ * #431 — hand the household to another member who has signed in. Organizer
+ * only: the RPC refuses anybody else, a member who has never signed in, and a
+ * household pending deletion.
+ */
+export async function transferHousehold(householdId, toMemberId) {
+  return unwrap(
+    await getSupabase().rpc('transfer_household', {
+      household_id: householdId,
+      to_member_id: toMemberId,
+    }),
+    'handing the household over',
+  )
+}
+
+/** #431 — the leave function's name, in one place; liveSchema.test.js resolves it. */
+const LEAVE_FUNCTION = 'leave-household'
+
+/**
+ * #431 — leave a household, through the `leave-household` Edge Function. It
+ * revokes this person's Google grant there, leaves as them, and deletes their
+ * sign-in when this was its last household (#262). Returns
+ * `{ accountDeleted, warning, revokeFailed }`: a warning means they HAVE left
+ * and only the sign-in survived, which must not read as a failure and invite a
+ * retry; `revokeFailed` means Google did not confirm the revoke, which the app
+ * turns into #99's sentence (review-fanout, 2026-09-11).
+ *
+ * No failure sentence here says "nothing was changed", the provisioning
+ * wording: the app re-deals the leaver's chores BEFORE this call, so by the
+ * time it fails something has changed. What is certain is only that they are
+ * still in the household.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is — the
+ * same rule `callProvisioning` gives.
+ */
+export async function leaveHousehold(householdId) {
+  if (!householdId) throw new Error('Which household? Leaving must name one.')
+  const { data, error } = await getSupabase().functions.invoke(LEAVE_FUNCTION, {
+    body: { householdId },
+  })
+  if (error) {
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const unreachable =
+      'Could not reach the leave service, so you are still in the household. Check this ' +
+      `device's connection — if it is fine, the ${LEAVE_FUNCTION} function has ` +
+      'not been deployed to this project yet (see docs/deploy-runbook.md).'
+    const err = new Error(
+      detail ||
+        (error?.name === 'FunctionsFetchError'
+          ? unreachable
+          : `Could not leave the household: ${error?.message ?? 'unknown error'}`),
+    )
+    err.cause = error
+    throw err
+  }
+  return {
+    accountDeleted: data?.accountDeleted === true,
+    warning: data?.warning ?? null,
+    revokeFailed: data?.revokeFailed === true,
+  }
+}
+
+/**
  * The same, plus the two member-write failures that are worth naming — #242.
  *
  * Both come from constraints `0007` added with `members.email`, and both reach
@@ -797,7 +906,18 @@ export async function addMember({ displayName, weeklyMinutes, householdId, email
   if (!name) throw new Error('A person needs a name.')
   if (!householdId) throw new Error('Which household? Adding a person must name one.')
 
+  // #191 — an address is REQUIRED. Until this story it was optional and an
+  // email-less row was minted a PIN sign-in by `provision-member`; that action
+  // is gone, so a row added without an address would be a person with no way
+  // in at all. Refused here as well as on the form, because the form is manners
+  // and this is the one call site through which a row is written — a second
+  // caller (a test, a script, a later surface) would otherwise recreate the
+  // retired state with nothing refusing it. Rows that ALREADY carry a null
+  // address are untouched: this guards the insert, not the column.
   const address = normalizeMemberEmail(email)
+  if (!address) {
+    throw new Error('A person needs an email address, so Taskr can send them their invitation.')
+  }
 
   return unwrapMemberWrite(
     await getSupabase()
@@ -806,11 +926,7 @@ export async function addMember({ displayName, weeklyMinutes, householdId, email
         household_id: householdId,
         display_name: name,
         weekly_minutes: normalizeMinutes(weeklyMinutes),
-        // Omitted entirely rather than sent as null when nobody typed one, so
-        // an insert from a caller that does not know about addresses is byte
-        // for byte the insert it was before #242. `undefined` is dropped by
-        // supabase-js; an explicit null would be a write.
-        ...(address === undefined ? {} : { email: address }),
+        email: address,
       })
       .select(MEMBER_COLUMNS)
       .single(),
@@ -828,11 +944,13 @@ export async function addMember({ displayName, weeklyMinutes, householdId, email
  * migration — the grant has been there since #62 with nothing to write through
  * it.
  *
- * Changing the address here does NOT move the account an already-provisioned
- * member signs in with. `provision-member` reads `members.email` when it MINTS,
- * and refuses once `claimed_by` is set; nothing re-points an existing auth user.
- * So on a claimed row this is a record of who they are, and the sign-in address
- * they already hold is whatever it was minted as.
+ * Changing the address here does NOT move the account a member already signs in
+ * with. `provision-member` reads `members.email` when it INVITES (it read it
+ * when it minted, until #191 removed the mint) and refuses once `claimed_by` is
+ * set; nothing re-points an existing auth user. So on a claimed row this is a
+ * record of who they are, and the sign-in address they already hold is whatever
+ * the account was created at — a real address by invitation, or the made-up one
+ * for a PIN account minted before #191.
  */
 export async function updateMember(id, { displayName, weeklyMinutes, email }) {
   const patch = {}
@@ -860,7 +978,9 @@ export async function updateMember(id, { displayName, weeklyMinutes, email }) {
  * Function's `revoke` action (#247/#262): `members_claimed_by_fkey` is ON
  * DELETE SET NULL, so a removal that dies between the halves leaves a member
  * showing "No sign-in yet" — a state the roster already renders and the
- * organizer recovers from with Give a sign-in. Row first would leave an
+ * organizer recovers from with Email an invitation (it was "Give a sign-in"
+ * until #191 retired the mint; a legacy row with no address needs one added
+ * first). Row first would leave an
  * account that can still sign in with no member row naming it, which is the
  * orphan #247 was filed about.
  *
@@ -966,12 +1086,13 @@ async function callProvisioning(action, { memberId, password, redirectTo }) {
   if (!memberId) throw new Error('Pick a person first.')
   // Revoke takes no password — deleting a sign-in has no credential to set —
   // and neither does invite, whose entire subject is that the organizer never
-  // chooses one (#341). So the floor applies only to the two actions that still
-  // mint a credential, and the list is spelled out rather than written as a
-  // negation: `action !== 'revoke'` silently included `invite` the moment it
-  // existed, and would have asked the organizer for a password of at least six
-  // characters on the path built to stop asking them at all.
-  const mintsACredential = action === 'provision' || action === 'reset'
+  // chooses one (#341). So the floor applies only to the one action that still
+  // takes a credential (#191 removed `provision`, the other one), and it is
+  // spelled out rather than written as a negation: `action !== 'revoke'`
+  // silently included `invite` the moment it existed, and would have asked the
+  // organizer for a password of at least six characters on the path built to
+  // stop asking them at all.
+  const mintsACredential = action === 'reset'
   if (mintsACredential && trimmed.length < 6) {
     throw new Error('That credential is too short — use at least 6 characters.')
   }
@@ -1014,16 +1135,12 @@ async function callProvisioning(action, { memberId, password, redirectTo }) {
   return data
 }
 
-/**
- * Give a member a way to sign in — #87 AC 2.
- *
- * The organizer stays signed in as themselves throughout, which is the whole
- * reason this is a server call: `auth.signUp()` would sign them out and into the
- * account it just made.
- */
-export async function provisionMember({ memberId, password }) {
-  return callProvisioning('provision', { memberId, password })
-}
+// `provisionMember` stood here from #87 until #191 — "give a member a way to
+// sign in", a `provision` action that minted an account at a password the
+// organizer typed. #191 AC 3 removed it from the client and the action from
+// the Edge Function in the same change, so there is no export to call and no
+// server branch to answer one. Recorded rather than silently gone, because the
+// name appears in three stories' criteria and a reader will look for it.
 
 /**
  * Email somebody an invitation they set their own password from — #341.
@@ -1041,9 +1158,10 @@ export async function provisionMember({ memberId, password }) {
  * #121's decision seen a third time and is recorded there rather than repaired
  * here.
  *
- * This replaces `provisionMember` for anybody with a real address; the function
- * refuses that call now (#341 AC 1). What is left of the old path is the
- * email-less row, and #191 retires the ability to create one.
+ * This replaced `provisionMember` for anybody with a real address (#341 AC 1),
+ * and #191 then retired the email-less row it survived for, so this is the ONLY
+ * way a new member gets a sign-in: `addMember` requires an address, and the
+ * roster's Add form calls this with the new row's id as part of the add.
  */
 export async function inviteMember({ memberId }) {
   return callProvisioning('invite', { memberId, redirectTo: confirmationRedirectTo() })
@@ -1058,8 +1176,12 @@ export async function inviteMember({ memberId }) {
  *
  * #341 narrowed who this is for rather than changing what it does. A member with
  * a REAL address is reset by `sendPasswordReset` below, so the organizer never
- * chooses their credential — this is now the email-less row's path only, and
- * goes when #191 retires the ability to create one.
+ * chooses their credential — this is the email-less row's path only. #191 then
+ * retired the ability to CREATE such a row and did NOT retire this: the accounts
+ * the old path minted still exist, still have no inbox, and a spoken credential
+ * is still the only thing that can reach them (owner decision, #191: retirement
+ * is of the add path, not of the accounts it created). So this shrinks to zero
+ * callers only as those rows are given an address or removed.
  */
 export async function resetMemberCredential({ memberId, password }) {
   return callProvisioning('reset', { memberId, password })

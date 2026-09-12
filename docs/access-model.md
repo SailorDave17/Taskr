@@ -43,7 +43,12 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds FIVE rows as of 2026-09-11 — #430's three
+  (`request_household_deletion`, `restore_household` and `household_deletion_status`, red until
+  `0042` is applied) and #431's two (`transfer_household` until `0043` is applied, and the
+  `leave-household` Edge Function until it is deployed); their whole history is the #430 and #431
+  bullet in the excused-red table below. Until #430 this sentence still read EMPTY, which is the
+  miss the paragraph at "grep this file" warns about. Before that it was
   EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
   opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
   joining a Realtime channel the way a phone does, red on purpose until `0037` was applied in its
@@ -1223,6 +1228,27 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#191 opened NO row on 2026-09-11 and changed `provision-member` anyway — the row this table
+  cannot hold.** The function lost its `provision` action and gained nothing; `check:live` probes a
+  function by NAME, so the deployed function answers green with or without the action, and this set
+  is unchanged on both sides of the redeploy by construction. The instrument for that half is
+  `check:deployed`, which reads `provision-member` STALE from the merge until `npm run
+  deploy:function` runs again. Recorded here so an empty delta on this table is not read as "nothing
+  to deploy" — it is the #171 lesson (a green `check:live` is not evidence the paste happened) in
+  the deploy direction.
+- **#430 opened THREE rows and #431 TWO on 2026-09-11, and neither story drained its rows in its
+  own session.** #430's are three RPC probes: `request_household_deletion`, `restore_household` and
+  `household_deletion_status`, red until `npm run migrate:live` applies `0042`. #431's are two:
+  - the `transfer_household` RPC probe, red until `0043` is applied;
+  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` ships it.
+
+  Both stories left the apply and the deploy to the owner's post-merge steps, because production is
+  built from `release` and the migration must land before the client that calls it is promoted.
+  **Not measured:** no `check:live` run was taken in either session, so these are the reds the
+  listings predict, not reds observed. Recorded in README's `check:live` cell by #431: #430 did
+  not reach that cell, and #431's review-fanout found it still saying empty (2026-09-11).
+  The RPCs that only Edge Functions call are deliberately unlisted: `leave_household`,
+  `member_tokens_to_revoke` and #430's purge functions.
 - **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
   One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
   as the seeded account and reading the `system` frame the server sends after the join — never
@@ -1827,11 +1853,13 @@ organizer's part in it.
 
    **What did NOT change**, and this is the part a reader will assume wrongly:
 
-   - **The email-less member keeps the PIN path exactly as described below.** `<id>@taskr.invalid` has
-     no mailbox by construction, so there is nothing to send and a spoken credential is the only
-     thing that can work. `provision-member`'s `provision` action survives for that row alone and is
-     **refused for any member with a real address**. #191 retires the ability to create such a row,
-     and the action goes with it.
+   - **The email-less member keeps the PIN path exactly as described below** — *narrowed 2026-09-11
+     (#191), see the extension under this list.* `<id>@taskr.invalid` has no mailbox by
+     construction, so there is nothing to send and a spoken credential is the only thing that can
+     work. Until #191, `provision-member`'s `provision` action survived for that row alone and was
+     **refused for any member with a real address**; #191 retired the ability to create such a row,
+     and the action went with it. What survives is the **reset** of a PIN account that already
+     exists, and nothing that mints one.
    - **`members.email` is still the discriminator**, and it now decides which of two *surfaces* an
      organizer sees as well as which address the account is reached at.
    - **The authorization shape is untouched.** `provision-member` was split into `handler.ts` and a
@@ -1842,6 +1870,46 @@ organizer's part in it.
      address is known, which is deliberate on its side and stops the call being an oracle for which
      addresses have accounts. The organizer is therefore told the mail was *sent*, never that it
      reached somebody real.
+
+   **Extended 2026-09-11 (#191) — the third reversal, completed.** #341 took the organizer's part
+   out of choosing a credential; #191 takes it out of *admission* altogether, and closes the
+   exception #341 left. Four things changed, and the fourth is the one to read twice:
+
+   - **Adding somebody IS inviting them.** The roster's Add form requires an email address and
+     sends the invitation as part of the add — one submit, two writes, the row first so a refused
+     send (the built-in mailer allows two an hour) leaves a person on the roster with the row's own
+     *Email an invitation* button as the retry, never a second add. `addMember` in
+     `src/lib/household.js` refuses a missing address too, so no caller can recreate the email-less
+     row the form no longer offers.
+   - **`provision-member` has no `provision` action.** `ACTIONS` is `invite`, `reset`, `revoke`;
+     `createUser` is gone from the handler and from its client type, and `gate.test.js` reads the
+     deployed source to hold it that way. A request naming `provision` is refused as unknown. **Deploy
+     consequence, stated in band:** the function changed and this story does not deploy it, so
+     production serves the old code — `provision` included — until `npm run deploy:function` runs
+     again (runbook §3). No `check:live` row moves, because that check probes the function by NAME
+     and cannot see an action; `check:deployed` reads it stale from the merge until the redeploy.
+     The excused-red set is therefore unchanged by this story, and that is a statement about the
+     instrument's blindness rather than about the deploy having happened.
+   - **The recipient names themselves, on the email path too.** #173 put "Your name in it" beside
+     the code; #191 puts it on the *Choose your password* screen an invitation lands on, blank and
+     required (owner decision, 2026-09-11, over a prefill of the organizer's word — a prefill the
+     person taps through leaves that word on the row). The name the organizer typed reaches the
+     invitation email as `invited_as` in the invite's `data` and personalises it only; the app never
+     reads it back. Written through the ordinary `updateMember` grant AFTER the password, in that
+     order because a name that failed to save is recoverable from the Who tab and a password that
+     failed to set is not.
+   - **Retirement is of the ADD path, not of the accounts it created** (owner decision, 2026-08-26).
+     Every account `provision` ever minted still exists, still has no inbox, and still needs a spoken
+     credential — so the `reset` action and the row's *Reset sign-in* form survive for exactly those
+     rows. A row with no address and no account gets no control at all, only a note saying the route
+     is an address. `signInAddressFor` in `src/lib/household.js` is now the ONE copy of the synthetic
+     address rule, read back for those accounts; the function's copy went with the mint.
+
+   What this does NOT touch: the code path (#171–#173) is the other admission route and stays —
+   email admits a **new** person, a code admits somebody who **already has** a sign-in, which
+   `inviteUserByEmail` refuses (#341 AC 3, measured). And the live RLS suite (`npm run test:rls`)
+   built both its fixture members through `provision`; it now refuses at its first fixture with a
+   sentence naming this, and needs a fixture of its own — filed as #436.
 
 **What #62 actually changes**, in the order it matters:
 
@@ -1903,6 +1971,10 @@ Function probe (#115), which is what the 20-of-20 bullet at the head of this pag
 organizer can add somebody to the roster and give them a sign-in, and that person signs in as
 themselves. Since 2026-08-21 the live RLS suite exercises the whole path over the wire (#88): add a
 member, provision them, sign in as them, and confirm the cross-household refusals still refuse.
+*(Dated: "give them a sign-in" and "provision them" describe the function as deployed up to
+2026-09-11. #191 removed the `provision` action — an organizer adds somebody WITH an address and
+the invitation goes out as part of the add — and the live RLS suite's fixture went with it; see the
+#191 extension under "Read this first" above.)*
 
 *This paragraph said the deploy **"is owner-only and has not happened"** until 2026-08-21 — for a
 day, while the header of this same page said `check:live` went green "immediately after
@@ -1975,7 +2047,8 @@ The rules, in the order the client runs them:
   organizer check is asked about the household on that member's row, and only then is `service_role`
   touched. Auth-first is the recoverable order — `members_claimed_by_fkey` is `ON DELETE SET NULL`, so
   a removal that dies between the halves leaves a member showing "No sign-in yet", a state the roster
-  renders and Give a sign-in repairs. Row-first would leave the orphan.
+  renders and an invitation repairs (*"Give a sign-in" until #191, 2026-09-11, retired the mint*).
+  Row-first would leave the orphan.
 - **The account is deleted only when this row is its last claim.** Since 0009 one person can hold
   member rows in two households under one account, so the function first checks (as `service_role`,
   necessarily — the caller cannot see other households) whether any other member row claims it.
@@ -1999,8 +2072,9 @@ by #62 on 2026-08-11. It is left in full because its reasoning is still the reas
 shape it has, and because the section immediately below — *why not real per-member auth users* — is
 the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
 the Edge Function that was unavailable is now the plan — and has since shipped: `provision-member`
-is deployed and mints exactly those accounts, so the "this app has no server" premise below is the
-one clause of the record that is no longer true of the app.
+is deployed and minted exactly those accounts from 2026-08-20 until #191 (2026-09-11) removed the
+mint, after which it invites, resets and revokes; so the "this app has no server" premise below is
+the one clause of the record that is no longer true of the app.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 
@@ -2294,7 +2368,106 @@ on 2026-09-08, not assumed.
 The cost side — the Free plan's 200 connections and 2,000,000 messages a month against a household
 of ten phones, and the kill condition — is in `docs/hosting-decision.md`.
 
+## Deleting a household — #430, 2026-09-11
+
+An organizer can delete their household from the Who tab. Owner decisions are on #430 and #427.
+
+- **Pending, not gone.** `request_household_deletion` sets `households.deletion_requested_at` and
+  `purge_after` (now plus `household_grace_period()`, seven days). The constraint
+  `households_deletion_is_whole` makes the pair both-or-neither.
+- **A pending household is nobody's.** The filter lives in the five functions that decide membership
+  by comparing `claimed_by` to the caller. The list was found by searching every migration, and it is
+  recorded in `0042`'s header:
+  - `current_household_ids()` (the predicate of about 30 policies and 18 RPCs)
+  - `acting_member()`
+  - `is_household_organizer()` (so the organizer-only policies and `provision-member` refuse too)
+  - `apply_assignments`
+  - `redeem_invitation`, which refuses in its usual one sentence, so a refusal cannot confirm a
+    household is being deleted
+- **The organizer's way back.** `restore_household` works until `purge_after`, then refuses, even if
+  the purge has not run yet. `household_deletion_status()` feeds the restore banner and lists a
+  household only until its `purge_after`, so the banner never offers a restore that would be refused;
+  the banner also drops one whose deadline passes while the tab is open. Both RPCs check the
+  organizer inline, because the patched `is_household_organizer()` is false for a pending household.
+- **The purge.** A daily Vercel cron calls `api/purge.js`, which calls the server-only
+  `purge-deleted-households` Edge Function with `PURGE_SHARED_SECRET`. This is the recorded exception
+  in `docs/hosting-decision.md`. For each due household the function:
+  1. revokes the Google grants first, because the cascade takes the tokens. It revokes what
+     `household_tokens_to_revoke` returns, which leaves out a person still connected in another
+     household: one Google account holds one grant with Taskr's single OAuth client, so revoking it
+     would break that household's calendar (owner decision at #430's review). Their token row still
+     goes with the cascade;
+  2. deletes each sign-in that claims nothing outside this household (#262's rule), **before** the
+     household. `members_claimed_by_fkey` is ON DELETE SET NULL, so this is #247's recoverable order:
+     a failed account step leaves the household due, and tomorrow's run retries it with the claimants
+     it still names. An account a concurrent run already deleted counts as done;
+  3. calls `purge_household` only once every account step succeeded (service_role only; it deletes
+     nothing that is not due, and is safe twice).
+
+  Every run is recorded in `household_purge_runs`: counts only, and no role holds a grant on it.
+  Vercel Hobby keeps logs for one hour and alerts on nothing, so this table is how a stopped purge is
+  told apart from a quiet week.
+- **Why functions and not grants.** `households_due_for_purge`, `household_tokens_to_revoke`,
+  `purge_household` and `record_household_purge_run` are executable by `service_role` alone. The exact list of tables
+  `service_role` may touch (`grants.pglite.test.js`) did not grow, and "delete a household whose
+  grace period is over" is a narrower power than a DELETE grant.
+- **Re-paste hazard, measured.** Re-pasting `0041` after `0042` silently takes the pending-deletion
+  refusal back out of `redeem_invitation`, and re-pasting `0042` restores it
+  (`householdDeletion.pglite.test.js`). **The safe re-paste order now ends at `0042`.**
+- **Excused reds.** `check:live` reads the three client RPCs red until `0042` is applied. The purge's
+  functions are not in `LIVE_RPCS`, because the app never calls them.
+
+## Leaving a household — #431, 2026-09-11
+
+A member can leave from the Who tab. An organizer first hands the household over, or deletes it
+(#430). The owner's decisions are on #427 and #431.
+
+- **Leaving is its own power, not a delete.** `leave_household(household_id)` (`0043`) takes no
+  member id, so it can only ever remove the caller. The members delete policy (`0007`/`0016`) and its
+  self-delete refusal are untouched, and the tests pinning them pass unchanged. It refuses the
+  organizer, and a household pending deletion, through `acting_member` as `0042` patched it.
+  **The pending refusal is deliberate** (owner, at #431's review): the household is already going,
+  and when the grace period ends the purge revokes every grant and deletes every sign-in that claims
+  nothing else, so a member is out by then without acting. The cost is a wait, and being back in if
+  the organizer restores it. The reasoning is also in `0043`'s header.
+- **Leaving and handing over serialise on the household row.** `leave_household` locks it before
+  its organizer check, so a hand-over racing a leave either lands first (and the leave refuses the
+  new organizer) or waits and fails its foreign key. Without it the two could leave a household with
+  no organizer. Found by #431's review-fanout; pglite has one connection, so the test pins the order,
+  not the race.
+- **The server half is the `leave-household` Edge Function**, because the refresh token behind a
+  Google grant is readable only by `service_role`, and deleting an auth user needs `auth.admin`. In
+  order, it:
+  1. refuses the organizer;
+  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant still
+     used in another household (#430's rule);
+  3. calls `leave_household` as the caller;
+  4. deletes the sign-in if that household was its last claim (#262).
+
+  If the token read fails, the person is still in the household and is asked to try again — their
+  open chores have already been re-dealt by then, and the app says so rather than "nothing was
+  changed". If Google refuses the revoke or cannot be reached, the leave goes ahead and the response
+  says `revokeFailed`, which the app turns into #99's sentence: the token row goes with the leave, so
+  nothing could retry it. If the sign-in cannot be deleted, the person is told as a warning, because
+  they have already left.
+- **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
+  a member of the same household who has signed in. An organizer who cannot sign in could provision
+  nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
+  besides `create_household`.
+- **The re-deal.** It runs in the browser before the leave, with the leaver left out
+  (`reassignHousehold({ householdId, leavingMemberId })`). Their hand-placed chores are released by
+  the leave itself and dealt at the next capacity change. A removal now re-deals afterwards too; a
+  re-deal that fails there is its own warning, and the removal is still reported as done (#247).
+- **Leaving now revokes Google.** `docs/refresh-charter.md:647-655` carries a dated amendment.
+- **Excused reds.** `check:live` reads `transfer_household` red until `0043` is applied, and
+  `leave-household` NOT DEPLOYED until it ships. `leave_household` and `member_tokens_to_revoke` are
+  called only by the function, so they are not in `LIVE_RPCS`.
+
 ## How the rules are enforced
+
+*(Historical: this section describes `0001`'s device model, which `0007` replaced. It is kept
+because it says why the model looked the way it did. Today's membership predicate is
+`current_household_ids()`; for deleting a household, see the #430 section above.)*
 
 Everything is in `supabase/migrations/0001_household_and_roster.sql`. Row-level security is on for all
 three tables with no permissive fallback.
@@ -2307,7 +2480,11 @@ three tables with no permissive fallback.
 - There is **no insert, update or delete policy on `households` or `household_devices` at all**. Those
   rows are created only by `create_household` and `join_household`, which run as definer. A client
   cannot mint a household, forge a membership, or rewrite a join code by any path, because no policy
-  exists that would permit it.
+  exists that would permit it. **Today** the block on deleting a household is two things, neither of
+  them in `0001`: `0019:162-163` revokes `delete` (with insert, select, truncate, references, trigger
+  and maintain) on `households` from `authenticated`, and still no delete policy exists. The one
+  client route to a deletion is #430's `request_household_deletion`, which schedules a purge rather
+  than deleting anything (the section above).
 - `claim_member` takes `FOR UPDATE` on the member row, so two phones racing to claim the same person
   serialise and the second is refused, rather than both reading "unclaimed" and both writing.
 
@@ -2380,8 +2557,9 @@ more, and the provider is disabled on the live project — see the #246 section 
 
 **Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
 five member rows, and two auth users — the two provisioned members, whose addresses are
-`<members.id>@taskr.invalid`. There is deliberately no client-reachable way to delete a household, so
-tidying is a manual statement in the SQL editor:
+`<members.id>@taskr.invalid`. Until #430 there was no client-reachable way to delete a household;
+since #430 an organizer can, but only through a seven-day grace period, so tidying test runs is
+still a manual statement in the SQL editor:
 
 ```sql
 delete from public.households where name like 'TEST 88 %';

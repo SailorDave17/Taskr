@@ -76,6 +76,11 @@ export const FUNCTION_NAMES = Object.freeze([
   // exchange from `calendar-busy/handler.ts` — so `check:deployed` walks that
   // import and reads a change to either file as this function going stale.
   'calendar-events',
+  // #431. Leaving a household: revokes the leaver's Google grant, calls
+  // `leave_household` (0043) as them, and deletes their sign-in where that was
+  // its last claim. Needs no secret beyond the three Supabase injects — Google's
+  // revocation endpoint takes the token alone, as `calendar-disconnect`'s does.
+  'leave-household',
 ])
 
 /**
@@ -98,16 +103,62 @@ export const FUNCTION_NAMES = Object.freeze([
 export const PENDING_FUNCTIONS = Object.freeze([])
 
 /**
+ * Functions the tree carries and deploys that the CLIENT NEVER INVOKES.
+ *
+ * #430, owner decision 2026-09-11. `FUNCTION_NAMES ∪ PENDING_FUNCTIONS` must
+ * equal `LIVE_EDGE_FUNCTIONS`, which must equal the app's `invoke()` call sites
+ * — both directions, both enforced — so a function called only by another
+ * server could not be listed anywhere without breaking that parity, and would
+ * have been deployed by hand and seen by no check. This list is the explicit,
+ * reasoned exception: deployed by a bare `npm run deploy:function`, walked by
+ * `check:deployed`, and refused by `deploy-function.test.js` if it ever
+ * overlaps the client's lists or appears at an `invoke()` site.
+ *
+ * Every entry here is deployed with `--no-verify-jwt`: its caller holds no user
+ * session, so the platform's JWT check would refuse every call, and the function
+ * authenticates its caller itself.
+ *
+ *   purge-deleted-households — #430. Called daily by the Vercel cron through
+ *     `api/purge.js` with a shared secret; purges households whose grace
+ *     period has ended. Needs the `PURGE_SHARED_SECRET` function secret.
+ */
+export const SERVER_ONLY_FUNCTIONS = Object.freeze(['purge-deleted-households'])
+
+/** The CLI command that deploys one function. Exported so the test can read the flags. */
+export function deployCommandFor(name, ref, serverOnly = SERVER_ONLY_FUNCTIONS) {
+  return [
+    'supabase',
+    'functions',
+    'deploy',
+    name,
+    '--project-ref',
+    ref,
+    '--use-api',
+    ...(serverOnly.includes(name) ? ['--no-verify-jwt'] : []),
+  ]
+}
+
+/**
  * Which functions this invocation should deploy.
  *
  * REFUSES an unknown name rather than passing it to the CLI. A typo would
  * otherwise reach `supabase functions deploy`, which fails with its own message
  * about a directory — sending somebody to look at the filesystem rather than at
  * what they typed.
+ *
+ * A bare invocation deploys every client-invoked function AND every server-only
+ * one (#430): a function left out of the default is a function whose deploy
+ * depends on somebody remembering its name.
  */
-export function functionsToDeploy(argv, known = FUNCTION_NAMES, pending = PENDING_FUNCTIONS) {
+export function functionsToDeploy(
+  argv,
+  known = FUNCTION_NAMES,
+  pending = PENDING_FUNCTIONS,
+  serverOnly = SERVER_ONLY_FUNCTIONS,
+) {
   const named = argv.filter((arg) => !arg.startsWith('-'))
-  if (named.length === 0) return [...known]
+  const deployable = [...known, ...serverOnly]
+  if (named.length === 0) return deployable
 
   // #210 — a name the client calls and the tree does not carry. Refused with
   // the reason rather than folded into "no such function", because the person
@@ -121,11 +172,11 @@ export function functionsToDeploy(argv, known = FUNCTION_NAMES, pending = PENDIN
     )
   }
 
-  const unknown = named.filter((name) => !known.includes(name))
+  const unknown = named.filter((name) => !deployable.includes(name))
   if (unknown.length) {
     throw new Error(
       `No such Edge Function in this repo: ${unknown.join(', ')}.\n` +
-        `Known functions: ${known.join(', ')}.`,
+        `Known functions: ${deployable.join(', ')}.`,
     )
   }
   return named
@@ -247,15 +298,7 @@ if (isMain) {
     process.exit(1)
   }
 
-  const commandFor = (name) => [
-    'supabase',
-    'functions',
-    'deploy',
-    name,
-    '--project-ref',
-    ref,
-    '--use-api',
-  ]
+  const commandFor = (name) => deployCommandFor(name, ref)
 
   console.log(`\nproject   : ${ref}   (derived from VITE_SUPABASE_URL)`)
   console.log(`functions : ${names.join(', ')}`)

@@ -679,8 +679,9 @@ CalendarControl.propTypes = {
 }
 
 /**
- * Give somebody a way to sign in, or replace the one they forgot — #87 AC 6,
- * rebuilt by #341.
+ * Email somebody their invitation or reset link, or reset a PIN account minted
+ * before #191 — #87 AC 6 ("give somebody a way to sign in", until the mint
+ * went), rebuilt by #341, narrowed by #191.
  *
  * Organizer-only, because the Edge Function refuses anybody else and a control
  * that renders for a person who will always be refused is a promise the app
@@ -693,11 +694,18 @@ CalendarControl.propTypes = {
  * never chooses, types or reads a credential for another adult — which is what
  * #341 is, stated three times by the owner before it was filed.
  *
- * A member with NO address keeps the form below, and it is unchanged. This is
- * the reason the old path survives rather than being deleted: `<id>@taskr.invalid`
- * has no mailbox by construction, so there is nowhere to send anything and a
- * typed credential is the only thing that can work. #191 retires the ability to
- * CREATE such a row, and this branch goes with it.
+ * A member with NO address is one of two things now, and #191 is what split
+ * them. Until #191 the organizer could ADD a person with no address and then
+ * mint them a sign-in at `<id>@taskr.invalid` with a PIN they chose; that add
+ * path is retired (an address is required on the form below, and
+ * `provision-member` no longer has a `provision` action at all). What survives
+ * is the accounts it already created: a PIN member who HAS a sign-in keeps the
+ * reset form, because `.invalid` has no mailbox by construction and a spoken
+ * credential is still the only thing that can reach them. A PIN member who
+ * never got one gets no control — there is nothing left that can mint it — and
+ * a note saying the route is to give them an address, after which the ordinary
+ * invitation applies. Retirement is of the ADD path, not of the accounts it
+ * created (owner decision, #191).
  *
  * What the old docblock argued is worth keeping, because it is the decision that
  * was reversed rather than a detail: "the organizer types the credential and
@@ -709,7 +717,7 @@ CalendarControl.propTypes = {
  * alternative it rejected is not the one #341 took: nothing displays a secret,
  * because nobody but the person ever knows one.
  */
-function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
+function SignInControl({ member, busy, onResetPin, onInvite, onSendReset }) {
   const [editing, setEditing] = useState(false)
   const [secret, setSecret] = useState('')
   const [complaint, setComplaint] = useState(null)
@@ -778,6 +786,26 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
     )
   }
 
+  // #191 AC 3 — a member with no address and no sign-in has NO control. The
+  // thing that used to sit here was "Give a sign-in": a PIN form whose submit
+  // minted an account at `<id>@taskr.invalid`, and that is the create-a-sign-in
+  // action this story removes from the Edge Function. Nothing on the client can
+  // reach it now, so offering the form would be a promise the app cannot keep —
+  // the same rule that hides the whole control from a non-organizer.
+  //
+  // A note rather than nothing, for the same reason the roster note exists:
+  // "No sign-in yet" with no route beside it reads as a bug. The route is the
+  // row's Edit form, where an address can be added; once it has one this
+  // component renders the invitation button above instead.
+  if (!hasSignIn) {
+    return (
+      <p className="card__note" data-testid={`no-address-${member.id}`}>
+        {member.display_name} has no email address on their row, so Taskr cannot
+        invite them. Edit the row to add one and the invitation goes to it.
+      </p>
+    )
+  }
+
   if (!editing) {
     return (
       <button
@@ -786,17 +814,17 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
         onClick={open}
         disabled={busy}
         data-testid={`provision-${member.id}`}
-        aria-label={
-          hasSignIn
-            ? `Reset the sign-in for ${member.display_name}`
-            : `Give ${member.display_name} a way to sign in`
-        }
+        aria-label={`Reset the sign-in for ${member.display_name}`}
       >
-        {hasSignIn ? 'Reset sign-in' : 'Give a sign-in'}
+        Reset sign-in
       </button>
     )
   }
 
+  // What is left of the PIN form: a RESET for an account minted before #191.
+  // The organizer still chooses this credential, and that is the one place the
+  // #341 rule does not reach — there is no inbox to send a link to, so the
+  // alternative to a spoken credential is no reset at all.
   return (
     <form
       className="stack member__signin-form"
@@ -811,13 +839,11 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
           return
         }
         setComplaint(null)
-        onProvision(member.id, secret, hasSignIn).then(close, () => {})
+        onResetPin(member.id, secret).then(close, () => {})
       }}
     >
       <label className="field">
-        <span className="field__label">
-          {hasSignIn ? `New PIN for ${member.display_name}` : `PIN for ${member.display_name}`}
-        </span>
+        <span className="field__label">New PIN for {member.display_name}</span>
         <input
           className="field__input"
           type="text"
@@ -839,9 +865,12 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
           the account was minted at is a UUID that appeared on no screen. */}
       {/* #341 rewrote this and the rewrite is smaller than it looks. Every word
           about telling somebody their PIN is still here, because on this branch
-          it is still TRUE: this form is now only reached by a member with no
-          address, for whom nothing can be emailed and a spoken credential is the
-          only thing that works. What changed is who reaches it.
+          it is still TRUE: this form is only reached by a member with no
+          address AND an account already minted at the synthetic one, for whom
+          nothing can be emailed and a spoken credential is the only thing that
+          works. #191 narrowed it again — the form no longer mints, only resets
+          — so `signInAddressFor` is a reading of what the account WAS minted
+          as, and the roster's one remaining copy of that rule.
 
           The sentence AC 5 sweeps for is gone from every row that HAS an
           address, which is what the criterion asks — not gone from the app,
@@ -857,10 +886,21 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
           member with a real address never renders this form at all. Left as a
           condition it would read as a live choice and quietly always take the
           same arm — the shape a later reader has no way to tell from a bug. */}
+      {/* review-fanout on #191 caught the sentence that stood here: "give them
+          an address above and Taskr can email them a reset link instead". False
+          — the account was minted AT the made-up address and `updateMember`
+          changes the row, never the auth user (the edit form's own note says
+          so), so a reset link would go to an address GoTrue has never heard of
+          and this form, the one thing that reaches the account, would stop
+          rendering for the row. Before #191 it promised an invitation instead,
+          false for the same reason on a claimed row. The honest sentence has no
+          route in it, because there is none from inside the app: re-pointing an
+          account is a Supabase dashboard action (`docs/access-model.md`). */}
       <p className="card__note">
         That address is one Taskr made up, because {member.display_name} has no
-        email on their row. It works, and it is long — give them an address above
-        and Taskr can email them an invitation instead.
+        email on their row. It works, and it is long. Adding an address to their
+        row later does not move this sign-in — the account stays at the made-up
+        address, and this PIN is still the way in.
       </p>
       {complaint ? (
         <p className="error" role="alert">
@@ -879,7 +919,7 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
           Cancel
         </button>
         <button className="button" type="submit" disabled={busy}>
-          {hasSignIn ? 'Reset it' : 'Give the sign-in'}
+          Reset it
         </button>
       </div>
     </form>
@@ -889,7 +929,7 @@ function SignInControl({ member, busy, onProvision, onInvite, onSendReset }) {
 SignInControl.propTypes = {
   member: PropTypes.object.isRequired,
   busy: PropTypes.bool,
-  onProvision: PropTypes.func.isRequired,
+  onResetPin: PropTypes.func.isRequired,
   onInvite: PropTypes.func.isRequired,
   onSendReset: PropTypes.func.isRequired,
 }
@@ -902,7 +942,7 @@ function MemberRow({
   isOrganizer,
   onSave,
   onRemove,
-  onProvision,
+  onResetPin,
   onInvite,
   onSendReset,
   onSetCapacity,
@@ -1040,11 +1080,11 @@ function MemberRow({
             that closes it. Organizer-only: the Edge Function refuses anybody
             else, and offering a control that is always refused is worse than
             not offering one. */}
-        {isOrganizer && onProvision ? (
+        {isOrganizer && onInvite ? (
           <SignInControl
             member={member}
             busy={busy}
-            onProvision={onProvision}
+            onResetPin={onResetPin}
             onInvite={onInvite}
             onSendReset={onSendReset}
           />
@@ -1165,7 +1205,7 @@ function MemberRow({
 
 MemberRow.propTypes = {
   isOrganizer: PropTypes.bool,
-  onProvision: PropTypes.func,
+  onResetPin: PropTypes.func,
   onInvite: PropTypes.func,
   onSendReset: PropTypes.func,
   member: PropTypes.object.isRequired,
@@ -1208,7 +1248,7 @@ export default function Roster({
   onAdd,
   onSave,
   onRemove,
-  onProvision,
+  onResetPin,
   onInvite,
   onSendReset,
   onRefresh,
@@ -1240,10 +1280,31 @@ export default function Roster({
   onMintInvitation = null,
   onWithdrawInvitation = null,
   onDismissMintedCode = null,
+  // #430 — the organizer's "Delete this household". Optional in the #166
+  // shape: a roster with no handler wired renders exactly what it did.
+  onDeleteHousehold = null,
+  deletionGraceDays = null,
+  // #431 — leaving, and the organizer's hand-over. Optional in the #166 shape.
+  onLeaveHousehold = null,
+  onHandOverAndLeave = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
   const [email, setEmail] = useState('')
+  // #191 — the add form's confirmation that the invitation went, and the
+  // refusal when it did not. Both cleared at the next submit, so neither
+  // describes a send other than the last one.
+  //
+  // The refusal is held HERE as well as reaching the shell's strip through
+  // `onInvite`, and the reason is a measurement (design-bar, 2026-09-12): the
+  // strip is the roster's last element, so at 360×800 a refused send left the
+  // organizer looking at a form that had just emptied — indistinguishable from
+  // success — with the sentence 754px below the fold, beside the delete-household
+  // card. Scrolling the strip into view (#360's remedy on the Shop tab) was
+  // measured too and moved them 663px away from the form to read it next to two
+  // destructive controls. The sentence belongs under the button they pressed.
+  const [added, setAdded] = useState(null)
+  const [addComplaint, setAddComplaint] = useState(null)
   // #166 — the second household's name, and what this person is called in it.
   //
   // THE ORGANIZER NAME IS DERIVED, NOT HELD, and the first version got this
@@ -1277,6 +1338,30 @@ export default function Roster({
   // to end a session on a device that is not in front of you, and a mis-tap
   // ends one that is.
   const [confirmingSignOutAll, setConfirmingSignOutAll] = useState(false)
+  // #430 — deleting the household is two taps, the Remove idiom: the mistake
+  // it guards is one tap on the wrong control.
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // #431 — leaving is two taps as well, and the organizer's confirm carries a
+  // choice of successor: somebody who has signed in, since an organizer who
+  // cannot sign in could provision nobody (0016's dead end).
+  const [confirmingLeave, setConfirmingLeave] = useState(false)
+  const [successorId, setSuccessorId] = useState('')
+  const successors = members.filter((m) => m.claimed_by && m.id !== me?.id)
+  const successorName = successors.find((m) => m.id === successorId)?.display_name ?? ''
+  // Design-bar, 2026-09-11 (#431): both confirms opened BELOW the fold at
+  // 360×800 when tapped from the bottom of the Who tab — measured, the member's
+  // "Leave …?" at y=821 and #430's "Delete …?" at y=801 in an 800px viewport,
+  // with nothing moving on screen, so the tap read as doing nothing. Each
+  // confirm now scrolls itself into view as it opens; `nearest` moves the page
+  // only as far as the confirm needs. Guarded: jsdom has no scrollIntoView.
+  const leaveConfirmRef = useRef(null)
+  const deleteConfirmRef = useRef(null)
+  useEffect(() => {
+    if (confirmingLeave) leaveConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [confirmingLeave])
+  useEffect(() => {
+    if (confirmingDelete) deleteConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [confirmingDelete])
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -1381,9 +1466,14 @@ export default function Roster({
             replacement is not prose — it is the control itself. */}
         {/* #341 AC 5, and the third reversal this sentence has been through —
             `docs/access-model.md`'s admission section carries the other two.
-            What it said until now was accurate and is the thing the story
-            removes: "They sign in with that address and a PIN you set — tell
+            What it said until then was accurate and is the thing that story
+            removed: "They sign in with that address and a PIN you set — tell
             them the PIN yourself, because no email is sent."
+
+            #191 moved it once more, and the move is smaller: "then email each
+            of them an invitation from their row" described a second press that
+            no longer exists — the invitation goes out as part of adding them.
+            The row's button survives for a send the mailer refused.
 
             Left as a note rather than deleted, because the organizer still needs
             to know that the address is the thing that matters and that what
@@ -1391,9 +1481,9 @@ export default function Roster({
             timing they cannot see from this screen. */}
         {isOrganizer ? (
           <p className="card__note" data-testid="provisioning-note">
-            Add people here with their email address, then email each of them an
-            invitation from their row. They choose their own password from that
-            email — you never set one, and never see it.
+            Add people here with their email address and Taskr emails each of
+            them an invitation as you add them. They choose their own password
+            from that email — you never set one, and never see it.
           </p>
         ) : null}
         {/* #152 — a household whose organizer row is gone. 0016 stops this being
@@ -1448,7 +1538,7 @@ export default function Roster({
                 isOrganizer={isOrganizer}
                 onSave={onSave}
                 onRemove={onRemove}
-                onProvision={onProvision}
+                onResetPin={onResetPin}
                 onInvite={onInvite}
                 onSendReset={onSendReset}
                 override={overrideFor(member.id)}
@@ -1498,12 +1588,17 @@ export default function Roster({
 
       {/* #172 — invite somebody by code. BEFORE "Add someone", owner decision
           at the design-bar pass, 2026-09-10: at 360 wide the card started 2.4
-          screens down (y 1919 of 2636), under the add-by-email form that #191
-          retires in favour of this one — so the forward path was the one a
-          person had to scroll furthest to reach. The two are the same act by
-          two routes and still read as a pair. Until #173 ships the redemption
-          a code minted here cannot be spent, which is why this story and #173
-          must reach a release together.
+          screens down (y 1919 of 2636), under the add-by-email form — so the
+          forward path was the one a person had to scroll furthest to reach.
+          The two are the same act by two routes and still read as a pair.
+          (This comment said #191 "retires" the add-by-email form "in favour of
+          this one" until 2026-09-11; it does not. #191 retired the PIN half of
+          adding — an address is required and the invitation is sent as part
+          of the add — and both routes stay: email admits a NEW person, a code
+          admits somebody who already has a sign-in, which `inviteUserByEmail`
+          refuses.) Until #173 shipped the redemption a code minted here could
+          not be spent, which is why that story and this one reached a release
+          together.
 
           THE GATE IS `isOrganizer`, and it is the only one that decides who
           sees this (AC 5). `isOrganizer` is App's answer for the ACTIVE
@@ -1531,15 +1626,43 @@ export default function Roster({
         <h2 id="add-heading" className="card__heading">
           Add someone
         </h2>
+        {/* #191 AC 1 — adding somebody SENDS their invitation. One submit, two
+            writes, in the order that keeps the first one safe alone: the row
+            is added, and only then is the invitation sent from it. If the send
+            is refused (the mailer allows two an hour, measured on #341) the
+            person is still on the roster with the row's own "Email an
+            invitation" button as the retry — so a refused send is never a
+            duplicate add, and the form clears either way because the add DID
+            happen. The refusal itself reaches the shell's error strip through
+            `onInvite`; what this form owns is the confirmation, and it says
+            "sent" only when the send resolved.
+
+            `onInvite` is wired-optional like every other handler on this
+            screen, and a roster with none wired adds without inviting — the
+            #242 shape, which is what the tests without one exercise. */}
         <form
           className="stack"
           onSubmit={(e) => {
             e.preventDefault()
-            onAdd({ displayName: name, weeklyMinutes: minutes || 0, email }).then(
-              () => {
+            const address = email
+            setAdded(null)
+            setAddComplaint(null)
+            onAdd({ displayName: name, weeklyMinutes: minutes || 0, email: address }).then(
+              (member) => {
                 setName('')
                 setMinutes('')
                 setEmail('')
+                if (!onInvite || !member?.id) return undefined
+                return onInvite(member.id).then(
+                  () => setAdded(`Added. Invitation sent to ${address}.`),
+                  // The person IS added — say so with the refusal, or the
+                  // organizer reads the emptied form as "nothing happened" and
+                  // adds them again.
+                  (err) =>
+                    setAddComplaint(
+                      `${name.trim()} is on the roster, but no invitation went: ${err?.message ?? 'the send was refused'}`,
+                    ),
+                )
               },
               () => {},
             )
@@ -1567,16 +1690,16 @@ export default function Roster({
               placeholder="120"
             />
           </label>
-          {/* #242 — the field the sign-in has always needed and nothing ever
-              collected. Optional, because a young child with no inbox is a real
-              member of a real household and the synthetic address still works
-              for them; the note says what leaving it blank costs, at the moment
-              it is being decided.
+          {/* #242 added this field, optional: a young child with no inbox was a
+              real member of a real household and the synthetic address still
+              worked for them.
 
-              #191 makes an address mandatory and retires this whole add path in
-              favour of an invitation. This is the interim, and it is deliberate:
-              #191 lands behind #171, #172, #177 and the router in #175, and
-              until then nobody can be admitted at all. */}
+              #191 made it REQUIRED, and with it retired the email-less add. The
+              cost was stated and accepted by the owner (2026-08-26): every new
+              member needs a working inbox, because the invitation is the only
+              way in and `provision-member` no longer mints anything. Members
+              added without one before this landed are untouched — their rows
+              keep the PIN reset above. */}
           <label className="field">
             <span className="field__label">Email address</span>
             <input
@@ -1586,16 +1709,32 @@ export default function Roster({
               onChange={(e) => setEmail(e.target.value)}
               placeholder="alex@example.com"
               autoComplete="off"
+              required
             />
           </label>
           <p className="card__note">
-            This is what they type to sign in. Leave it blank only for somebody
-            with no email of their own — Taskr will make an address up for them,
-            and it is long and awkward to pass on.
+            Their invitation goes here, and it is what they will sign in with.
+            They choose their own password from that email.
           </p>
-          <button className="button" type="submit" disabled={busy || !name.trim()}>
+          <button
+            className="button"
+            type="submit"
+            disabled={busy || !name.trim() || !email.trim()}
+          >
             Add to household
           </button>
+          {added ? (
+            // role="status", not role="alert": a confirmation, and the .error
+            // palette stays reserved for faults — the row control's own shape.
+            <p className="card__note" role="status" data-testid="add-note">
+              {added}
+            </p>
+          ) : null}
+          {addComplaint ? (
+            <p className="error" role="alert" data-testid="add-complaint">
+              {addComplaint}
+            </p>
+          ) : null}
         </form>
       </section>
 
@@ -1757,6 +1896,180 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #431 — leaving, in its own card just above deleting: both are ways out,
+          and both sit after everything done here week to week. A member
+          confirms and goes. The organizer's confirm offers the two ways out the
+          owner decided on (#427): hand the household to somebody who has signed
+          in, or delete it through #430's grace period. */}
+      {onLeaveHousehold && me ? (
+        <section className="card" aria-labelledby="leave-household-heading">
+          <h2 id="leave-household-heading" className="card__heading">
+            Leave this household
+          </h2>
+          {!confirmingLeave ? (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => {
+                setSuccessorId(successors[0]?.id ?? '')
+                setConfirmingLeave(true)
+              }}
+              disabled={busy}
+            >
+              Leave this household
+            </button>
+          ) : isOrganizer ? (
+            <div className="row" ref={leaveConfirmRef}>
+              <p className="card__note" data-testid="leave-household-warning">
+                You organize {household.name}, so before you go somebody has to take it on,
+                or it is deleted.
+                {deletionGraceDays
+                  ? ' Deleting it takes it from everyone, and you can restore it for ' +
+                    deletionGraceDays +
+                    ' days.'
+                  : ''}
+              </p>
+              {successors.length ? (
+                <>
+                  <label className="field">
+                    <span className="field__label">Hand it to</span>
+                    <select
+                      className="field__input"
+                      value={successorId}
+                      onChange={(event) => setSuccessorId(event.target.value)}
+                      disabled={busy}
+                    >
+                      {successors.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="button button--danger"
+                    type="button"
+                    onClick={() => {
+                      setConfirmingLeave(false)
+                      // The error is already on screen — App's mutate put it there.
+                      Promise.resolve(onHandOverAndLeave(household.id, successorId, me.id)).catch(() => {})
+                    }}
+                    disabled={busy || !successorId || !onHandOverAndLeave}
+                  >
+                    Hand it to {successorName} and leave
+                  </button>
+                </>
+              ) : (
+                <p className="card__note">
+                  Nobody else here has signed in yet, so it cannot be handed over.
+                </p>
+              )}
+              {onDeleteHousehold ? (
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  onClick={() => {
+                    setConfirmingLeave(false)
+                    // The error is already on screen — App's mutate put it there.
+                    Promise.resolve(onDeleteHousehold(household.id)).catch(() => {})
+                  }}
+                  disabled={busy}
+                >
+                  Delete {household.name} instead
+                </button>
+              ) : null}
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingLeave(false)}
+                disabled={busy}
+              >
+                Stay
+              </button>
+            </div>
+          ) : (
+            <div className="row" ref={leaveConfirmRef}>
+              <p className="card__note" data-testid="leave-household-warning">
+                You stop getting {household.name}’s chores, and the ones you hold go to the
+                others. Your calendar connection here is disconnected. If this is the only
+                household you are in, your sign-in is deleted too.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingLeave(false)
+                  // The error is already on screen — App's mutate put it there.
+                  Promise.resolve(onLeaveHousehold(household.id, me.id)).catch(() => {})
+                }}
+                disabled={busy}
+              >
+                Leave {household.name}?
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingLeave(false)}
+                disabled={busy}
+              >
+                Stay
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {/* #430 — deleting the household, in its own card at the BOTTOM of the
+          Who tab, after everything done here week to week. It first sat in the
+          household card under Sign out, looking like one of them; the owner
+          moved it at design-bar (2026-09-11). Confirm-in-place, and the
+          confirm says what goes and that it can be undone for a while. */}
+      {isOrganizer && onDeleteHousehold ? (
+        <section className="card" aria-labelledby="delete-household-heading">
+          <h2 id="delete-household-heading" className="card__heading">
+            Delete this household
+          </h2>
+          {confirmingDelete ? (
+            <div className="row" ref={deleteConfirmRef}>
+              <p className="card__note" data-testid="delete-household-warning">
+                Everyone in {household.name} loses it at once: its people, chores,
+                shopping lists and calendar connections. You can restore it for{' '}
+                {deletionGraceDays} days; after that it is deleted for good.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingDelete(false)
+                  // The error is already on screen — App's mutate put it there.
+                  Promise.resolve(onDeleteHousehold(household.id)).catch(() => {})
+                }}
+                disabled={busy}
+              >
+                Delete {household.name}?
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={busy}
+              >
+                Keep it
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={busy}
+            >
+              Delete this household
+            </button>
+          )}
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -1776,7 +2089,7 @@ Roster.propTypes = {
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
-  onProvision: PropTypes.func,
+  onResetPin: PropTypes.func,
   onInvite: PropTypes.func,
   onSendReset: PropTypes.func,
   onRefresh: PropTypes.func.isRequired,
@@ -1799,4 +2112,8 @@ Roster.propTypes = {
   onMintInvitation: PropTypes.func,
   onWithdrawInvitation: PropTypes.func,
   onDismissMintedCode: PropTypes.func,
+  onDeleteHousehold: PropTypes.func,
+  deletionGraceDays: PropTypes.number,
+  onLeaveHousehold: PropTypes.func,
+  onHandOverAndLeave: PropTypes.func,
 }

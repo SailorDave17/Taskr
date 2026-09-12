@@ -21,6 +21,16 @@ wrong.
 
 ## 1. Vercel — the front end
 
+**The purge cron (#430).** `vercel.json` declares one daily cron that calls `api/purge.js`, which
+calls the `purge-deleted-households` Edge Function (section 3). Crons run **only on the production
+deployment**, which builds from `release`. Set three **Production** environment variables:
+`CRON_SECRET` (at least 16 characters, letters and digits only; Vercel sends it as a Bearer
+header), `PURGE_FUNCTION_URL` (`https://<project-ref>.supabase.co/functions/v1/purge-deleted-households`)
+and `PURGE_SHARED_SECRET` (the same value as the Supabase function secret). Check **Settings →
+Functions → Fluid compute** is on: a project created before 2025-04-23 without it caps functions at
+60s. Vercel keeps Hobby logs for an hour and never retries a failed cron, so read the purge's own
+record in the SQL editor: `select * from public.household_purge_runs order by ran_at desc limit 7;`
+
 1. Sign in at [vercel.com](https://vercel.com) with the GitHub account that owns `SailorDave17/Taskr`.
    Hobby plan; no card required.
 2. **Add New → Project**, import `SailorDave17/Taskr`. Private repos are supported on Hobby. (Repos
@@ -252,6 +262,17 @@ persists anything.
      `auth.admin.inviteUserByEmail` sends, and it is a **different template from *Confirm signup***
      (#129's) — editing one does not touch the other. The reset link uses **Reset password**. Nothing
      needs changing for the path to work; this is here so an edit lands on the right one.
+     **Since #191 (2026-09-11) the function passes the name the organizer typed as
+     `invited_as` in the invitation's `data`**, so the template MAY read it as
+     `{{ .Data.invited_as }}` ("*{{ .Data.invited_as }}, you have been added to a household on
+     Taskr*"). That edit is yours and optional — #191 AC 1's "personalised with the typed name" is
+     delivered up to the template's edge and no further, because a template is dashboard state no
+     session can write. The value lands in `auth.users.raw_user_meta_data` **when the invite creates
+     the account**; a re-invite of a PENDING address (invited by another household, never accepted)
+     returns the same user unchanged, so that email renders the FIRST household's typed name
+     (GoTrue applies `data` on its create branch only — read off `internal/api/invite.go`, not
+     measured here). The app never reads it back, and the person names themselves on the password
+     screen.
    - **The redirect lands on the app root**, because `provision-member` is passed the origin the
      organizer was on, by the same `confirmationRedirectTo` rule as step 5. **Nothing to add to
      `Redirect URLs`** — the production origin and `http://localhost:5173` are already there, and the
@@ -283,6 +304,30 @@ for part of 2026-09-08, "four since #208" before that, and
 "three since #96" until 2026-09-07 — the count lives in
 `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
+
+**And one server-only function since #430: `purge-deleted-households`.** It is listed in
+`SERVER_ONLY_FUNCTIONS`, not `FUNCTION_NAMES`, because the app never invokes it; the same bare
+`npm run deploy:function` deploys it, adding `--no-verify-jwt`, since its caller is Vercel's cron,
+which holds no session. It refuses every call without its own secret, so set `PURGE_SHARED_SECRET`
+first. The value exists nowhere yet, so make one — letters and digits only, which also suits
+`CRON_SECRET` (make that one separately, the same way) — and set it from the clipboard, as in 3c:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | Set-Clipboard
+$s = Get-Clipboard; npx supabase secrets set PURGE_SHARED_SECRET=$s --project-ref <project ref>
+```
+
+Paste the same value into Vercel's `PURGE_SHARED_SECRET` (section 1) before clearing the clipboard.
+`npx supabase secrets list --project-ref <project ref>` then shows the name with a digest, never the
+value; an empty or unset secret makes the function answer "This function is not configured." and the
+cron log shows it for the hour Vercel keeps it.
+
+**And `leave-household` since #431**, the first function a member (not only the organizer) calls
+about their own membership. It is in `FUNCTION_NAMES`, so the bare `npm run deploy:function` ships
+it, and it needs no secret beyond the three Supabase injects: Google's revocation endpoint takes the
+token alone. Deploy it with `0043` applied. Until then `check:live` reads it NOT DEPLOYED and
+`transfer_household` red, both excused in the README.
+
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you
@@ -291,8 +336,13 @@ in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy 
 disagree, the script is right.)*
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
-and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
-sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
+and touches nothing here. Until `provision-member` has run, an organizer who adds somebody gets the
+row and a failed invitation (the row's *Email an invitation* button is the retry), and nobody but the
+organizer can sign in at all. **#191 (2026-09-11) changed this function without adding one**: its
+`provision` action is gone, so production keeps serving the old code — `provision` included — until
+this step is run again. That is harmless in the meantime (no client calls the action any more, and
+`check:live` probes the function by name, so it reads green either way), but `check:deployed` reads
+`provision-member` STALE from the merge until the redeploy, and the retirement is not live until then. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed. Until
 `calendar-busy` has, a connected member's roster row shows a sentence under this week's minutes —
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no

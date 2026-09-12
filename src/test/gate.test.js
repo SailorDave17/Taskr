@@ -2227,70 +2227,108 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
   })
 })
 
-// #242 — the sign-in address rule exists in two places, and cannot exist in one.
+// #242 — the sign-in address rule EXISTED in two places, and could not exist in
+// one, until #191 ended the duplication rather than moving the guard again.
 //
-// `signInAddressFor` in `src/lib/household.js` is what the roster shows an
-// organizer; `syntheticAddressFor` in `supabase/functions/provision-member/
-// index.ts` is what actually mints the account. The function is Deno and runs on
-// somebody else's machine, so it cannot import the client's module and the rule
-// is genuinely duplicated.
+// The history is the argument for what this block asserts now. `signInAddressFor`
+// in `src/lib/household.js` is what the roster shows an organizer;
+// `syntheticAddressFor` in the Edge Function was what actually MINTED the
+// account. The function is Deno and runs on somebody else's machine, so it could
+// not import the client's module and the rule was genuinely duplicated — and the
+// hazard was a bad one: the roster would go on displaying a confident address
+// that nothing signs in with, every test on both sides green, nobody finding out
+// until a real person could not get in. So this block read the function's
+// source and held the two copies equal. #341 moved the subject from `index.ts`
+// to `handler.ts` and the guard had to follow — it failed LOUDLY, because its
+// positive control asserted `createUser` was present.
 //
-// That duplication is the hazard this story created, and it is a bad one: the
-// roster would go on displaying a confident address that nothing signs in with,
-// and every test on both sides would stay green, because each half agrees with
-// itself. Nobody would find out until a real person could not get in — which is
-// exactly the failure #242 exists to repair, reintroduced by its own fix.
-//
-// So the copies cannot be merged and they can be stopped from drifting silently.
-// This reads the deployed source rather than the client's, deliberately: the
-// client's copy is the one under test everywhere else in the suite, and a guard
-// that reads it would be asserting a thing against itself.
-// #341 MOVED THIS GUARD, and the move is the point rather than a detail. The
-// minting code left `index.ts` for `handler.ts` when the function was split so
-// its mailer-refusal branch could be tested in `npm test`. A guard that names a
-// FILE follows its subject or it stops asking anything — and this one would not
-// have failed quietly: its own positive control asserts the source is over 1000
-// characters and contains `createUser`, and the new `index.ts` is neither. That
-// is the difference between this and `edge-function-cors.test.js`, which reads
-// `index.ts` and `handler.ts` and joins them, and so needed no change at all.
-describe('#242 — the client and the Edge Function agree on the synthetic address', () => {
+// #191 AC 3 removed the mint. `provision-member` no longer creates an account
+// at any address, so it no longer derives one, and there is ONE copy of the rule
+// left — the client's, read back for the accounts minted before this story.
+// What the guard has to hold now is the retirement itself, and it is held the
+// same way the copies were: by reading the deployed source. A `createUser` that
+// came back would be an organizer choosing somebody's password again, and every
+// client test would stay green because the client never calls it.
+describe('#242 → #191 — the synthetic address has one copy, and the function mints nothing', () => {
   const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
 
   // Built rather than written out, so this file does not itself contain the
   // literal it is hunting — the same reason the token block above builds its
-  // pattern. Written as a template with the id interpolated, which is the form
-  // BOTH copies use.
+  // pattern.
   const DOMAIN = ['taskr', 'invalid'].join('.')
 
-  const functionSource = () => readFileSync(resolve(process.cwd(), FUNCTION_SOURCE), 'utf8')
+  /** Every non-test source file under a directory, recursively. */
+  const sourcesUnder = (dir, pattern) => {
+    const out = []
+    const walk = (d) => {
+      for (const entry of readdirSync(d, { withFileTypes: true })) {
+        const full = resolve(d, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (pattern.test(entry.name) && !/\.test\./.test(entry.name)) out.push(full)
+      }
+    }
+    walk(dir)
+    return out
+  }
 
-  it('POSITIVE CONTROL: the function source is readable and is the minting path', () => {
+  const functionSource = () => readFileSync(resolve(process.cwd(), FUNCTION_SOURCE), 'utf8')
+  /** Comments blanked, because the retirement is RECORDED in prose that names the call. */
+  const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, '$1')
+  const functionCode = () => stripComments(functionSource())
+
+  // review-fanout on #191: a single-file read leaves a `createUser` reintroduced
+  // in a sibling module — `mint.ts` imported by the handler, or a new function
+  // directory — invisible. So the retirement is held over EVERY function file,
+  // and the client half over every data-layer and component file.
+  const allFunctionCode = () =>
+    sourcesUnder(resolve(process.cwd(), 'supabase/functions'), /\.ts$/)
+      .map((file) => stripComments(readFileSync(file, 'utf8')))
+      .join('\n')
+  const clientCode = () =>
+    [
+      ...sourcesUnder(resolve(process.cwd(), 'src/lib'), /\.jsx?$/),
+      ...sourcesUnder(resolve(process.cwd(), 'src/components'), /\.jsx?$/),
+    ]
+      .map((file) => stripComments(readFileSync(file, 'utf8')))
+      .join('\n')
+
+  it('POSITIVE CONTROL: the function source is readable and is the credential path', () => {
     // Without this, every assertion below passes just as well against an empty
     // string or a file that has been renamed out from under the guard — a scan
-    // of nothing finds no disagreement.
+    // of nothing finds no mint.
     const source = functionSource()
     expect(source.length).toBeGreaterThan(1000)
-    expect(source).toContain('createUser')
+    expect(source).toContain('inviteUserByEmail')
+    expect(source).toContain('updateUserById')
+    // And the stripping leaves the code: a regex that ate the file would make
+    // the absences below free.
+    expect(functionCode()).toContain('inviteUserByEmail')
+    // The wider walks found their subjects too — an empty join finds no mint.
+    expect(allFunctionCode()).toContain('inviteUserByEmail')
+    expect(clientCode()).toContain('inviteMember')
+    expect(clientCode()).toContain('provision-member')
   })
 
-  it('mints at the same address the roster tells the organizer to pass on', () => {
-    // The function derives the address from `members.id`; so does the client. A
-    // change to either side's domain, or to which column it prefers, breaks this
-    // rather than breaking a household.
-    expect(functionSource()).toContain(`@${DOMAIN}`)
+  it('#191 AC 3: no function creates an account at a password somebody else chose', () => {
+    const code = allFunctionCode()
+    expect(code).not.toMatch(/\bcreateUser\b/)
+    expect(code).not.toMatch(/['"]provision['"]/)
+    // No address is derived, because nothing is minted at one.
+    expect(code).not.toContain(`@${DOMAIN}`)
   })
 
-  it('still prefers a real address over the synthetic one, which is what #242 relies on', () => {
-    // The whole story rests on this line in the function: give a member a real
-    // address and the account is minted at it. If the coalesce is ever removed,
-    // the roster's email field silently stops reaching the sign-in and every
-    // client test stays green.
-    expect(functionSource()).toMatch(/member\.email\s*\?\?/)
+  it('#191 AC 3: no client code path names the retired action, under any wrapper', () => {
+    // The wrapper-absence and never-sends tests in household.test.js enumerate
+    // names; a new export or a component calling `functions.invoke` directly
+    // would pass both. This reads the source. `'provision-member'` — the
+    // function's NAME — is not the action and is deliberately not matched.
+    expect(clientCode()).not.toMatch(/['"`]provision['"`]/)
   })
 
-  it('and the client agrees, so the address on screen is the address that is minted', () => {
-    // Derived by CALLING the client's function rather than reading its source,
-    // so this compares behaviour on one side against the contract on the other.
+  it('and the client still answers for the accounts that were minted, preferring a real address', () => {
+    // Derived by CALLING the client's function rather than reading its source.
+    // This is the one copy now, and it is a reading of what an account WAS
+    // minted as — right for every account the retired action ever made.
     expect(signInAddressFor({ id: 'abc', email: null })).toBe(`abc@${DOMAIN}`)
     expect(signInAddressFor({ id: 'abc', email: 'someone@example.com' })).toBe(
       'someone@example.com',
@@ -2578,6 +2616,16 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     return entries
   }
 
+  // #430 — the ONE exemption, owner decision 2026-09-11, taken knowingly against
+  // this guard and docs/hosting-decision.md: a daily Vercel cron that purges
+  // households whose grace period has ended, because a privacy purge must run
+  // even if nobody opens the app. One pattern, in one file. The tests below
+  // assert it is still needed, that the cron is exactly one daily call to
+  // /api/purge, and that it excuses nothing else, so it cannot widen quietly.
+  const EXEMPT = [{ path: 'vercel.json', pattern: /"crons"\s*:/, story: '#430' }]
+  const isExempt = (path, pattern) =>
+    EXEMPT.some((entry) => entry.path === path && String(entry.pattern) === String(pattern))
+
   // Shared by the clean-tree assertion and every control below, so the
   // controls exercise the scan that guards and not a copy of it.
   function schedulerOffenders(entries) {
@@ -2585,11 +2633,52 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     for (const { path, text } of entries) {
       const code = stripComments(path, text)
       for (const { pattern, files } of SCHEDULERS) {
-        if (files.test(path) && pattern.test(code)) offenders.push(`${path}: ${pattern}`)
+        if (files.test(path) && pattern.test(code) && !isExempt(path, pattern)) {
+          offenders.push(`${path}: ${pattern}`)
+        }
       }
     }
     return offenders
   }
+
+  it('#430: the one exemption is still needed, so it cannot outlive its reason', () => {
+    const vercel = corpus().find((entry) => entry.path === 'vercel.json')
+    expect(vercel, 'vercel.json is gone: delete the #430 exemption with it').toBeDefined()
+    expect(EXEMPT[0].pattern.test(stripComments('vercel.json', vercel.text))).toBe(true)
+  })
+
+  it('#430: the exempt scheduler is exactly one once-a-day call to /api/purge', () => {
+    const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
+    expect(config.crons).toHaveLength(1)
+    expect(config.crons[0].path).toBe('/api/purge')
+    // Minute and hour fixed, every day: once daily, which is also Hobby's floor.
+    expect(config.crons[0].schedule).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/)
+  })
+
+  it('#430: api/ holds the one function the cron calls, and nothing else Vercel would deploy', () => {
+    // Vercel deploys every `api/**/*.{js,mjs,ts,tsx}` as a function, skipping only
+    // names under `_` or `.` — test files included. A test beside `api/purge.js`
+    // shipped as a public endpoint that errored on every request (#430 review).
+    const walk = (dir) =>
+      readdirSync(resolve(process.cwd(), dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`],
+      )
+    const deployed = walk('api').filter(
+      (path) => /\.(js|mjs|ts|tsx)$/.test(path) && !/\/[_.]/.test(path) && !path.endsWith('.d.ts'),
+    )
+    expect(deployed).toEqual(['api/purge.js'])
+  })
+
+  it('#430: the exemption is one pattern in one file, and nothing else there is excused', () => {
+    expect(EXEMPT).toHaveLength(1)
+    const planted = [
+      { path: 'vercel.json', text: '{ "crons": [], "note": "create extension if not exists pg_cron;" }' },
+      { path: 'planted/other.json', text: '{ "crons": [] }' },
+    ]
+    expect(schedulerOffenders(planted).sort()).toEqual(
+      ['planted/other.json: /"crons"\\s*:/', 'vercel.json: /pg_cron/i'].sort(),
+    )
+  })
 
   it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
     const paths = corpus().map((entry) => entry.path)

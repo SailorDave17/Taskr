@@ -111,6 +111,16 @@
 //
 // ── THE SHAPE, WHICH IS WHERE THE INTERESTING PART IS ──────────────────────
 //
+// **RED BY CONSTRUCTION SINCE 2026-09-11 (#191).** The two "provisioned"
+// members below were minted through `provision-member`'s `provision` action,
+// which #191 removed — an organizer never mints a sign-in again. The helper
+// that did it now throws at the first fixture with a sentence naming this, so
+// `beforeAll` fails loudly rather than the function answering 400 to a request
+// it no longer understands. The suite needs a fixture that does not mint (two
+// pre-seeded accounts, or the service key held here alone); #436 is where
+// that decision is taken. Everything below describes
+// the suite as it ran up to that date.
+//
 // One seeded account, two households, and two provisioned members:
 //
 //     organizer (seeded)  ──creates──>  H1 "inside"   ──provisions──> insider
@@ -162,9 +172,12 @@
 // consequence of the fix rather than an oversight. It costs nothing but rows.
 //
 // They are LEFT rather than cleaned up, and that is the same deliberate choice
-// the previous version documented: there is no client-reachable way to delete a
-// household — see `0001` — so tidying is a manual statement in the Supabase SQL
-// editor, and a suite that could delete households would need a capability the
+// the previous version documented. Until #430 there was no client-reachable way
+// to delete a household at all: `0019:162-163` revokes DELETE on `households`
+// from `authenticated`, and no delete policy exists. Since #430 an organizer can
+// ask for a deletion, but it takes effect only after a seven-day grace period and
+// this suite never asks — so tidying is still a manual statement in the Supabase
+// SQL editor, and a suite that could hard-delete households would need a capability the
 // app itself is designed not to have. `docs/access-model.md` carries the
 // statement. Two auth users per run is strictly better than the three anonymous
 // users the old file left, and unlike those they are identifiable: every
@@ -349,32 +362,34 @@ describe('row-level security under per-member sign-in, exercised over the wire',
   let completedChoreId
   let exclusionChoreId
 
-  /** Add a member and give them a sign-in, exactly as the app does. */
-  async function provision(client, householdId, displayName, password) {
-    const { data: member, error: addError } = await client
-      .from('members')
-      .insert({ household_id: householdId, display_name: displayName })
-      .select(MEMBER_COLUMNS)
-      .single()
-    expect(addError, `adding ${displayName} failed: ${addError?.message}`).toBeNull()
-
-    // A brand new member row is inert until this call: no `claimed_by`, so
-    // `current_household_ids()` returns nothing for them and every policy
-    // denies. Asserting it here is what makes the sign-in below meaningful.
-    expect(member.claimed_by, 'a new member must have no sign-in yet').toBeNull()
-    expect(member.email, 'a member with no real address keeps email NULL').toBeNull()
-
-    const { data, error } = await client.functions.invoke('provision-member', {
-      body: { action: 'provision', memberId: member.id, password },
-    })
-    if (error) {
-      throw new Error(
-        `provisioning ${displayName} failed: ${await describeFunctionError(error)}\n` +
-          'If this says the function was not reached, it may not be deployed to this ' +
-          'project — `npm run deploy:function`, and see docs/deploy-runbook.md.',
-      )
-    }
-    return { member, provision: data }
+  /**
+   * Add a member and give them a sign-in — which the app CANNOT do any more.
+   *
+   * #191 AC 3 (2026-09-11) removed `provision` from the Edge Function: an
+   * organizer never mints a sign-in at a credential they chose again, and the
+   * only way a new member gets one is an emailed invitation they set their own
+   * password from. This suite built both fixture members through that action
+   * and cannot build them through the invitation — it sends a real email to a
+   * real inbox (two an hour on the built-in mailer) and the account is unusable
+   * until somebody clicks the link — and it holds no service key by design
+   * (the anon key plus a seeded account is the whole point of testing over the
+   * wire as a client would).
+   *
+   * So this refuses LOUDLY at the first fixture rather than invoking an action
+   * the deployed function no longer has, which would fail one layer down with a
+   * 400 that reads like a deploy problem. The fixture this suite needs now is
+   * its own story: two pre-seeded accounts (`TASKR_SECOND_EMAIL` exists in
+   * `.env.local` already, for #293) claimed onto rows in the two households, or
+   * the service key held by this suite alone — #436. Until that lands, `npm run
+   * test:rls` is RED by construction and this sentence is why.
+   */
+  async function provision(client, householdId, displayName) {
+    throw new Error(
+      `#191 retired provision-member's "provision" action, so this suite cannot mint ` +
+        `a sign-in for ${displayName} in household ${householdId}. It needs a fixture that ` +
+        'does not depend on minting — see the docblock on this helper and #436. ' +
+        '`npm run test:rls` is red until that lands.',
+    )
   }
 
   beforeAll(async () => {
@@ -1285,8 +1300,14 @@ describe('row-level security under per-member sign-in, exercised over the wire',
 
   // ── the Edge Function's own authorization, over the wire ────────────────
 
-  describe('provisioning refuses a caller who is not the organizer', () => {
-    it('a member of the household cannot provision anybody', async () => {
+  describe('the organizer check refuses a caller who is not the organizer', () => {
+    // `reset` since #191 — `provision` is refused as an UNKNOWN action before
+    // the caller-scoped read, so a `provision` body here would answer 400
+    // "action must be …" for every caller and never reach the check these two
+    // tests are about (review-fanout on #191 caught the latent red). The
+    // organizer check runs before any action branch, so `reset` on a member
+    // with no sign-in still meets it first: 403, not the reset's own 409.
+    it('a member of the household cannot reset anybody else', async () => {
       // The function checks `is_household_organizer` THROUGH THE CALLER, so
       // this is a database answer rather than one the function decided.
       const { data: spare, error: addError } = await organizer
@@ -1297,21 +1318,21 @@ describe('row-level security under per-member sign-in, exercised over the wire',
       expect(addError, `seeding failed: ${addError?.message}`).toBeNull()
 
       const { error } = await insider.functions.invoke('provision-member', {
-        body: { action: 'provision', memberId: spare.id, password: `nope-${RUN}` },
+        body: { action: 'reset', memberId: spare.id, password: `nope-${RUN}` },
       })
-      expect(error, 'a non-organizer provisioned a sign-in').not.toBeNull()
+      expect(error, "a non-organizer reached somebody else's credential").not.toBeNull()
       expect(await describeFunctionError(error)).toMatch(/only the household organizer/i)
     })
 
-    it('and nobody can provision into a household they are not in', async () => {
+    it('and nobody can reach into a household they are not in', async () => {
       // The caller-scoped read is what refuses this: RLS scopes `members` to
       // the caller's household, so a member id from anywhere else is simply not
       // found. The refusal is deliberately indistinguishable from "no such
       // person", so this endpoint cannot be used to probe for valid ids.
       const { error } = await outsider.functions.invoke('provision-member', {
-        body: { action: 'provision', memberId: insiderMember.id, password: `nope-${RUN}` },
+        body: { action: 'reset', memberId: insiderMember.id, password: `nope-${RUN}` },
       })
-      expect(error, 'a stranger provisioned into our household').not.toBeNull()
+      expect(error, 'a stranger reached into our household').not.toBeNull()
       expect(await describeFunctionError(error)).toMatch(/no such person|not signed in|organizer/i)
     })
   })

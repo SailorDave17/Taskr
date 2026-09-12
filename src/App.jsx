@@ -13,7 +13,6 @@ import {
   listHouseholds,
   inviteMember,
   listMembers,
-  provisionMember,
   readAuthCallback,
   readSignInReturn,
   removeMember,
@@ -26,6 +25,13 @@ import {
   signOut,
   signUpOrganizer,
   updateMember,
+  // #430 — deleting and restoring a household.
+  GRACE_PERIOD_DAYS,
+  householdDeletionStatus,
+  leaveHousehold,
+  requestHouseholdDeletion,
+  transferHousehold,
+  restoreHousehold,
 } from './lib/household.js'
 import {
   clearActiveHouseholdChoice,
@@ -128,6 +134,7 @@ import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
 import ChoosePassword from './components/ChoosePassword.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
+import PendingDeletion from './components/PendingDeletion.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
 import Split from './components/Split.jsx'
@@ -394,6 +401,10 @@ export default function App() {
   // from it"), and it is the whole reason the tabs exist rather than a stack:
   // the thing judged at arm's length has to be the thing on screen.
   const [view, setView] = useState('split')
+  // #430 — households this person organizes that are pending deletion: what
+  // the restore banner shows. Read once at boot and after each delete or
+  // restore, not on every refresh (#351 priced a round trip at 562 ms).
+  const [pendingDeletions, setPendingDeletions] = useState([])
   // #358 — which shopping list the Shop tab is showing, held HERE and beside
   // `view` for the reason the tab strip is here: `Shopping` unmounts the moment
   // another tab is chosen, so a choice held inside it would last exactly as
@@ -845,7 +856,14 @@ export default function App() {
         }
 
         const found = await requestRefresh()
+        // #430 — the restore banner's boot-time read. A failure here must not
+        // keep anybody out of their household, so it reads as "none pending".
+        const pending = await Promise.resolve()
+          .then(() => householdDeletionStatus())
+          .then((rows) => (Array.isArray(rows) ? rows : []))
+          .catch(() => [])
         if (!cancelled) {
+          setPendingDeletions(pending)
           // #154 — the entry decision has ONE implementation, beside the screen
           // it picks, and its three branches are proven in Onboarding.test.jsx.
           setStatus(
@@ -1156,13 +1174,26 @@ export default function App() {
     },
     [requestRefresh],
   )
+  // #430 — the restore banner's list. Read at boot, after a delete or a
+  // restore (the household it names is no longer in the list mutate reads),
+  // and after a sign-in, since the banner belongs to whoever is signed in.
+  const refreshPendingDeletions = useCallback(
+    () =>
+      Promise.resolve()
+        .then(() => householdDeletionStatus())
+        .then((rows) => setPendingDeletions(Array.isArray(rows) ? rows : []))
+        .catch(() => {}),
+    [],
+  )
   const handleSignIn = useCallback(
     (credentials) => {
       // #304 — a fresh attempt answers the notice about the last one.
       setSignInNotice(null)
-      return mutate(() => signIn(credentials))
+      return mutate(() => signIn(credentials)).then((result) =>
+        refreshPendingDeletions().then(() => result),
+      )
     },
-    [mutate],
+    [mutate, refreshPendingDeletions],
   )
   // #304 — leaves the page. NOT through `mutate`: a successful start is a
   // navigation to Google, and the re-read `mutate` runs afterwards would go out
@@ -1212,6 +1243,10 @@ export default function App() {
         // be joined to a household by a code somebody else typed.
         clearPendingInvitation()
         setHeldInvitation(false)
+        // #430 — and the restore banner does not either: it names the last
+        // person's household and its purge date, and the next person to sign
+        // in on this tablet must not find it on their screen (#430 review).
+        setPendingDeletions([])
         return result
       }),
     [mutate],
@@ -1249,34 +1284,123 @@ export default function App() {
   // AFTER mutate() resolves, i.e. after the refresh, so the screen never shows
   // the person still listed under a message saying they were removed — and the
   // removal itself is never reported as a failure, which would invite a retry.
+  // #431 AC 4 — a removal re-deals, through the same run a capacity change
+  // triggers. Until #431 nothing did: the removed member's chores were left
+  // unassigned (0006's set null) until the next capacity change came along.
+  // The re-deal runs AFTER the removal has committed, and its failure is a
+  // warning of its own: #247's rule — a removal is never reported as failed,
+  // which would invite a retry that finds no row and so no warning — holds,
+  // and the sign-in warning shows either way (review-fanout, 2026-09-11).
   const handleRemove = useCallback(
     (id) =>
-      mutate(() => removeMember(id)).then((result) => {
-        if (result?.warning) setError(result.warning)
+      mutate(async () => {
+        const result = await removeMember(id)
+        try {
+          await reassignHousehold({ householdId: household?.id })
+          return result
+        } catch (err) {
+          return { ...result, redealFailure: err.message }
+        }
+      }).then((result) => {
+        const notes = [
+          result?.warning,
+          result?.redealFailure
+            ? `They were removed, but their chores were not dealt to the others: ${result.redealFailure}. ` +
+              'Deal these out on the Split tab to try again.'
+            : null,
+        ].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
         return result
       }),
-    [mutate],
+    [mutate, household],
   )
-  // #87 - give somebody a sign-in, or replace one they forgot. Routed through
-  // mutate() like every other write, so the roster re-reads from the server and
-  // the row's "Signed in" state comes from `claimed_by` rather than from an
-  // optimistic local guess about whether the Edge Function succeeded.
-  const handleProvision = useCallback(
-    (memberId, password, isReset) =>
-      mutate(() =>
-        isReset
-          ? resetMemberCredential({ memberId, password })
-          : provisionMember({ memberId, password }),
+  // #430 — delete and restore a household. Both through mutate, so the list
+  // is re-read and the shell lands on onboarding when the last household
+  // goes; then the banner's status is re-read (refreshPendingDeletions, above
+  // handleSignIn), because the household it names is no longer in that list.
+  const handleDeleteHousehold = useCallback(
+    (id) => mutate(() => requestHouseholdDeletion(id)).then(refreshPendingDeletions),
+    [mutate, refreshPendingDeletions],
+  )
+  const handleRestoreHousehold = useCallback(
+    (id) => mutate(() => restoreHousehold(id)).then(refreshPendingDeletions),
+    [mutate, refreshPendingDeletions],
+  )
+  // #431 — leaving. Re-deal FIRST with the leaver left out (owner decision:
+  // once they have left, their app can no longer run it), then leave through
+  // the Edge Function. The leaver's member id comes from the Roster, which has
+  // "me"; App derives "me" further down, too late for a dependency list. The
+  // remembered household goes either way, and when this was their last
+  // household their sign-in went with it, so this device signs out the way
+  // handleSignOut does. A sign-in that survived is a warning set after the
+  // re-read, like a removal's (#247) — they HAVE left.
+  const handleLeaveHousehold = useCallback(
+    (householdId, leavingMemberId) =>
+      mutate(async () => {
+        await reassignHousehold({ householdId, leavingMemberId })
+        let result
+        try {
+          result = await leaveHousehold(householdId)
+        } catch (err) {
+          // The re-deal has committed, so "nothing was changed" is no longer
+          // true: say what did change, and re-read so the screen shows it,
+          // since mutate skips its own re-read on a throw (review-fanout,
+          // 2026-09-11).
+          await requestRefresh().catch(() => {})
+          throw new Error(`Your open chores went to the others, but you have not left yet: ${err.message}`)
+        }
+        activeIdRef.current = null
+        choiceEpochRef.current += 1
+        clearActiveHouseholdChoice()
+        if (result.accountDeleted) {
+          await signOut({ everywhere: false }).catch(() => {})
+          setMinted(null)
+          clearPendingInvitation()
+          setHeldInvitation(false)
+          setPendingDeletions([])
+        }
+        return result
+      }).then((result) => {
+        // A surviving sign-in, and a revoke Google did not confirm (#99's
+        // sentence): both are true of a leave that SUCCEEDED, so neither is an
+        // error, and the second must reach a device that has just signed out.
+        const notes = [result?.warning, result?.revokeFailed ? revokeNoteFor({ revoked: false }) : null].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
+        return result
+      }),
+    [mutate, requestRefresh],
+  )
+  // #431 — the organizer's way out that keeps the household: hand it over, then
+  // leave as an ordinary member. Two writes, and the first is safe alone — an
+  // organizer who handed over and then failed to leave is a member who can try
+  // leaving again.
+  const handleHandOverAndLeave = useCallback(
+    (householdId, toMemberId, leavingMemberId) =>
+      mutate(() => transferHousehold(householdId, toMemberId)).then(() =>
+        handleLeaveHousehold(householdId, leavingMemberId),
       ),
+    [mutate, handleLeaveHousehold],
+  )
+  // #87 - replace the PIN of an account minted before #191. This handler used
+  // to give a sign-in as well (`isReset ? reset : provision`); #191 AC 3
+  // removed the create-a-sign-in action from the Edge Function and this is
+  // the client path that invoked it, so the branch went with it and the name
+  // followed — a handler called `handleProvision` that could no longer
+  // provision would be the misleading-name shape this file avoids. Routed
+  // through mutate() like every other write, so the roster re-reads from the
+  // server rather than guessing whether the Edge Function succeeded.
+  const handleResetPin = useCallback(
+    (memberId, password) => mutate(() => resetMemberCredential({ memberId, password })),
     [mutate],
   )
   /**
    * Email somebody an invitation instead of choosing their password — #341 AC 1.
    *
-   * Beside `handleProvision` rather than folded into it, because the two are no
-   * longer variants of one act. Provision takes a credential the organizer typed
-   * and reaches the roster's own screen; this takes nothing, and what it changes
-   * is in somebody else's inbox.
+   * Beside `handleResetPin` (which was `handleProvision` until #191) rather
+   * than folded into it, because the two are not variants of one act. The PIN
+   * reset takes a credential the organizer typed and reaches the roster's own
+   * screen; this takes nothing, and what it changes is in somebody else's
+   * inbox. Since #191 it is also what the Add form calls after a row lands.
    */
   const handleInvite = useCallback(
     (memberId) => mutate(() => inviteMember({ memberId })),
@@ -1310,9 +1434,23 @@ export default function App() {
    * The error is deliberately left set when the write fails: the screen stays,
    * because a password that was not set is a person who cannot sign in again if
    * they leave.
+   *
+   * #191 AC 2 — THE PERSON NAMES THEMSELVES, on the email path as on the code
+   * path. The organizer's typed name is on the row when the invitation goes
+   * out (there is no other place to hold it; `members.display_name` is not
+   * null), and the owner's decision is that it personalises the email only.
+   * So an invite arrival carries a name from the screen, and it is written
+   * AFTER the password, in that order on purpose: the password is the thing
+   * that lets them back in, and a name that failed to save is recoverable from
+   * the Who tab while a password that failed to set is not. The write goes
+   * through `mutate()` — the ordinary `updateMember` grant, #173's shape — so
+   * the roster re-reads under the person with the name they chose; a refused
+   * rename keeps the password and says so, in #173's words. The row is found
+   * as `me`: the invite action set `claimed_by` to this session's user before
+   * the email went, and boot loaded the household underneath this screen.
    */
   const handleChoosePassword = useCallback(
-    async (password) => {
+    async (password, name) => {
       setBusy(true)
       setError(null)
       try {
@@ -1324,8 +1462,27 @@ export default function App() {
       } finally {
         setBusy(false)
       }
+      const chosen = String(name ?? '').trim()
+      if (!chosen) return
+      // Resolved here rather than from the `me` the render derives further
+      // down, which is declared after this callback and would be read in its
+      // temporal dead zone from the dependency list. Same rule, same inputs.
+      const mine = findClaimedMember(members, userId, household?.id)
+      if (!mine) {
+        setError(
+          'Your password is set, but your name could not be saved because your row was not found. Edit it from your row on the Who tab.',
+        )
+        return
+      }
+      try {
+        await mutate(() => updateMember(mine.id, { displayName: chosen }))
+      } catch (err) {
+        setError(
+          `Your password is set, but your name could not be saved (${err.message}). Edit it from your row on the Who tab.`,
+        )
+      }
     },
-    [setBusy, setError],
+    [setBusy, setError, members, userId, household, mutate],
   )
 
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
@@ -2341,7 +2498,14 @@ export default function App() {
       <main className="shell">
         <ChoosePassword
           type={authCallback.type}
-          busy={busy}
+          // `status === 'loading'` too, since #191 (review-fanout): the name
+          // write resolves the person's row from `members`/`userId`, which boot
+          // is still loading underneath this screen — ~6–7 s on Slow 4G — and a
+          // submit inside that window set the password and dropped the name.
+          // Boot never sets `busy`, so this is the one signal that the row is
+          // there to rename. A failed boot ('failed') leaves the button live:
+          // the password is still the thing that lets them back in.
+          busy={busy || status === 'loading'}
           onChoose={handleChoosePassword}
         />
         {error ? (
@@ -2440,6 +2604,17 @@ export default function App() {
             </button>
           </div>
         </section>
+      ) : null}
+
+      {/* #430 — the way back from deleting a household, ABOVE onboarding and
+          the tabs alike: deleting your only household lands you on
+          onboarding, and undoing it is the one thing you might want next. */}
+      {(status === 'joined' || status === 'onboarding') && pendingDeletions.length ? (
+        <PendingDeletion
+          pending={pendingDeletions}
+          onRestore={handleRestoreHousehold}
+          busy={busy}
+        />
       ) : null}
 
       {status === 'onboarding' ? (
@@ -2565,11 +2740,17 @@ export default function App() {
           onAdd={handleAdd}
           onSave={handleSave}
           onRemove={handleRemove}
-          onProvision={handleProvision}
+          onResetPin={handleResetPin}
           onInvite={handleInvite}
           onSendReset={handleSendReset}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
+          // #430 — the organizer's "Delete this household".
+          onDeleteHousehold={handleDeleteHousehold}
+          deletionGraceDays={GRACE_PERIOD_DAYS}
+          // #431 — leaving, and the organizer's hand-over.
+          onLeaveHousehold={handleLeaveHousehold}
+          onHandOverAndLeave={handleHandOverAndLeave}
           // #166 — the affordance that did not exist. Owner decision at pickup:
           // its own card on this surface rather than an entry inside the
           // switcher or a second control on the shell row, because the shell

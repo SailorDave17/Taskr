@@ -129,6 +129,8 @@ export const MIGRATIONS = [
   '0039_calendar_auto_apply.sql',
   '0040_invitation_record.sql',
   '0041_invitation_code_whitespace.sql',
+  '0042_delete_a_household_with_a_grace_period.sql',
+  '0043_leave_or_hand_over_a_household.sql',
 ]
 
 export function migrationSql(name) {

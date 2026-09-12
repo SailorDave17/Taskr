@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { FUNCTION_NAMES } from './deploy-function.mjs'
+import { FUNCTION_NAMES, SERVER_ONLY_FUNCTIONS } from './deploy-function.mjs'
 import { TOKEN_PAGE } from './management-api.mjs'
 import {
   bundleFilesOf,
@@ -25,7 +25,9 @@ describe('the function list comes from deploy-function.mjs — AC 2', () => {
     // the day `FUNCTION_NAMES` gains a third entry — which is the scenario the
     // AC names. (A hand-copy of today's full list survives this until then;
     // the import in check-deployed.mjs is what makes that a non-event.)
-    expect(functionsToCheck()).toEqual([...FUNCTION_NAMES])
+    // Since #430 that includes the server-only functions, which the same script
+    // deploys and which go stale the same way.
+    expect(functionsToCheck()).toEqual([...FUNCTION_NAMES, ...SERVER_ONLY_FUNCTIONS])
   })
 
   it('POSITIVE CONTROL: the list is not empty, so the check cannot pass vacuously', () => {

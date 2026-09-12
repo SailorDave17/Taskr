@@ -790,6 +790,12 @@ body {
   background: rgba(127, 43, 43, 0.35);
   border: 1px solid #7f2b2b;
   border-radius: 0.5rem;
+  /* #191, measured at 360 wide: the mailer's refusal names the address it did
+     not send to, and an address cannot break — `placeholder.newcomer@example.test`
+     ran 263px into a 263px box (scrollWidth > clientWidth), touching the
+     border. Every sentence this strip carries from the Edge Function can
+     name one, so the wrap lives on the strip rather than on one caller. */
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------------------

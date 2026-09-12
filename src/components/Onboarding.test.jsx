@@ -636,3 +636,125 @@ describe('#173 — an error handed in from App is answered by the next act on th
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
+
+describe('#155 — a forgotten password, from the sign-in screen', () => {
+  const forgotLink = () => screen.getByRole('button', { name: /forgot your password\?/i })
+  const sendButton = () => screen.getByRole('button', { name: /email me a reset link/i })
+  const resetField = () => screen.getByLabelText(/^email$/i)
+  // Neither outcome may say whether the address has an account. GoTrue answers
+  // a reset for an unknown address exactly as it answers a known one, on
+  // purpose, and a sentence here that guessed would undo that. Asserted as an
+  // absence on BOTH branches rather than trusted to the wording.
+  const REVEALS = /no account|not found|unknown|does not exist|no such|not registered|recognis/i
+  const accepted = () => vi.fn().mockResolvedValue(undefined)
+  const refused = () =>
+    vi.fn().mockRejectedValue(new Error('Could not send that reset email: over_email_send_rate_limit'))
+
+  it('is not offered at all when no handler is wired — the #154 screen exactly', () => {
+    setup()
+    expect(screen.queryByRole('button', { name: /forgot/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: offers ONE control, as a link under the sign-in form, and looks nothing up on the way', () => {
+    const onForgotPassword = accepted()
+    setup({ onForgotPassword })
+    expect(screen.getAllByRole('button', { name: /forgot/i })).toHaveLength(1)
+    expect(forgotLink()).toHaveClass('button--link')
+    expect(forgotLink()).not.toHaveClass('button')
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.click(forgotLink())
+
+    // The card is up, the address came with them, and nothing has been asked
+    // of anybody yet — a lookup here is the thing AC 1 forbids.
+    expect(screen.getByRole('heading', { name: /forgotten your password/i })).toBeInTheDocument()
+    expect(resetField()).toHaveValue('kid@example.com')
+    expect(onForgotPassword).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/password or pin/i)).not.toBeInTheDocument()
+  })
+
+  it('will not send without an address', () => {
+    setup({ onForgotPassword: accepted() })
+    fireEvent.click(forgotLink())
+    expect(sendButton()).toBeDisabled()
+    fireEvent.change(resetField(), { target: { value: '   ' } })
+    expect(sendButton()).toBeDisabled()
+    fireEvent.change(resetField(), { target: { value: 'kid@example.com' } })
+    expect(sendButton()).toBeEnabled()
+  })
+
+  it('AC 3: an ACCEPTED request says a link is on its way if the address is known, and where to turn if nothing arrives', async () => {
+    const onForgotPassword = accepted()
+    setup({ onForgotPassword })
+    fireEvent.click(forgotLink())
+    fireEvent.change(resetField(), { target: { value: '  kid@example.com ' } })
+    await clickAndSettle(sendButton())
+
+    expect(onForgotPassword).toHaveBeenCalledWith('kid@example.com')
+    const note = screen.getByTestId('reset-note')
+    expect(note).toHaveAttribute('role', 'status')
+    expect(note).toHaveTextContent(
+      /if that address has a taskr account, a link to set a new password is on its way/i,
+    )
+    expect(note).toHaveTextContent(/ask your household organizer/i)
+    expect(note).not.toHaveTextContent(REVEALS)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('AC 2: a REFUSED request tells the person to ask their organizer, in words that do not say whether the address has an account', async () => {
+    setup({ onForgotPassword: refused() })
+    fireEvent.click(forgotLink())
+    fireEvent.change(resetField(), { target: { value: 'kid@example.com' } })
+    await clickAndSettle(sendButton())
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/could not send that reset email/i)
+    expect(alert).toHaveTextContent(/ask your household organizer/i)
+    expect(alert).not.toHaveTextContent(REVEALS)
+    expect(screen.queryByTestId('reset-note')).not.toBeInTheDocument()
+    // Still on the card with the address in the box, so a retry is one tap.
+    expect(resetField()).toHaveValue('kid@example.com')
+  })
+
+  it('a refusal is answered by the next request, and an acceptance replaces it', async () => {
+    const onForgotPassword = refused()
+    setup({ onForgotPassword })
+    fireEvent.click(forgotLink())
+    fireEvent.change(resetField(), { target: { value: 'kid@example.com' } })
+    await clickAndSettle(sendButton())
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+
+    onForgotPassword.mockResolvedValue(undefined)
+    await clickAndSettle(sendButton())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByTestId('reset-note')).toBeInTheDocument()
+  })
+
+  it('has a way back to sign in, and the note does not follow', async () => {
+    setup({ onForgotPassword: accepted() })
+    fireEvent.click(forgotLink())
+    fireEvent.change(resetField(), { target: { value: 'kid@example.com' } })
+    await clickAndSettle(sendButton())
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('reset-note')).not.toBeInTheDocument()
+    // Taking the link again starts clean: no stale acceptance over a new address.
+    fireEvent.click(forgotLink())
+    expect(screen.queryByTestId('reset-note')).not.toBeInTheDocument()
+  })
+
+  it('is disabled while a request is in flight, like every other control here', () => {
+    setup({ onForgotPassword: accepted(), busy: true })
+    expect(forgotLink()).toBeDisabled()
+  })
+
+  it('AC 6: the organizer paragraph no longer says the password cannot be reset from inside the app', () => {
+    setup({ onForgotPassword: accepted() })
+    fireEvent.click(startLink())
+    // The root claim stays — there IS nobody above the organizer — and the
+    // consequence it used to draw is the one this story made false.
+    expect(screen.getByText(/nobody above you/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot be reset from inside the app/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/sign-in screen can email you a link to set a new one/i)).toBeInTheDocument()
+  })
+})

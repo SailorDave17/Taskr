@@ -774,8 +774,21 @@ export default function App() {
         const callback = readAuthCallback(globalThis.location)
         const session = await currentSession()
         if (signInReturn || callback) {
-          const { pathname } = globalThis.location
-          globalThis.history?.replaceState?.(null, '', pathname)
+          // #155 AC 5 — strip the FRAGMENT and keep the QUERY. Two auth
+          // returns land on this one root URL on different channels: an
+          // invitation, a recovery or a provider refusal arrives in the
+          // fragment (the implicit flow's channel, read by the two calls
+          // above), and Google's calendar consent arrives in the query as
+          // `?code=&state=` (read by `readConsentReturn` below and stripped
+          // there once the code is spent). A strip to the bare pathname here
+          // consumed the consent's parameters before that read ever ran. The
+          // one query this branch DOES own is GoTrue's bad-flow-state return
+          // (`source: 'query'`), which carries no `state` and is nobody
+          // else's — so that is the case that strips whole. Measured rather
+          // than asserted: App.test.jsx boots on a URL carrying both.
+          const { pathname, search } = globalThis.location
+          const keepQuery = signInReturn?.source !== 'query' && search
+          globalThis.history?.replaceState?.(null, '', keepQuery ? `${pathname}${search}` : pathname)
         }
         const signInComplaint = signInReturn ? describeSignInReturn(signInReturn) : null
         if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
@@ -1420,6 +1433,28 @@ export default function App() {
     (member) => mutate(() => sendPasswordReset(member.email)),
     [mutate],
   )
+
+  /**
+   * The same mail, asked for by the person who forgot — #155, from the sign-in
+   * screen.
+   *
+   * NOT through `mutate()`, and the difference is the whole point: there is no
+   * session here. `mutate`'s post-action re-read would run as `anon`, which
+   * `0017` (#186) stripped of every privilege, and the refusal would land on
+   * the error strip over the top of a mail that went — #440's shape exactly.
+   * The busy flag is set by hand for the one thing `mutate` did that still
+   * matters: a second tap before the first answers is a second mail against a
+   * project-wide budget of two an hour. The screen words both outcomes itself,
+   * so no error is set here.
+   */
+  const handleForgotPassword = useCallback(async (email) => {
+    setBusy(true)
+    try {
+      await sendPasswordReset(email)
+    } finally {
+      setBusy(false)
+    }
+  }, [])
 
   /**
    * Finish an invitation or a recovery by setting a password — #341 AC 2.
@@ -2628,6 +2663,8 @@ export default function App() {
           // out, redeem one while signed in with no household.
           onJoin={handleJoinHousehold}
           onHoldInvitation={handleHoldInvitation}
+          // #155 — the reset request, direct to GoTrue with no session.
+          onForgotPassword={handleForgotPassword}
           heldInvitation={heldInvitation}
           // #173 — a held code refused at boot is reported by `mutate` onto
           // this, and no form on that screen submitted it, so the screen has

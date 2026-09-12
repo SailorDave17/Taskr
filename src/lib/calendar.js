@@ -40,6 +40,18 @@
 // `/oauth/google` path would read better in Google's registered-URI list and
 // would 404 on a hard load without a rewrite rule at Vercel — one more piece of
 // configuration outside git, for no behaviour. Owner decision at pickup.
+//
+// WHO ELSE LANDS ON THE ROOT, AND ON WHICH CHANNEL — #155 AC 5. Supabase's
+// auth links come back to the same `/` in the FRAGMENT: an invitation or a
+// password recovery as `#access_token=…&type=…` on the implicit flow, and a
+// provider refusal as `#error=…` (`readAuthCallback` and `readSignInReturn` in
+// household.js). This consent comes back in the QUERY, `?code=&state=`, keyed
+// by the `state` this file minted. Two channels, two readers, each reading only
+// its own: App's boot reads the fragment first (the client consumes it at
+// construction), strips ONLY the fragment, and then reads the query here. That
+// is measured rather than asserted — App.test.jsx boots on a URL carrying both
+// and each reader gets its parameters — because the sequencing note on #155
+// said the story would block on a router if it inverted, and it did not.
 
 import { getSupabase } from './supabase.js'
 import { MAX_EXPECTED_MINUTES, MIN_EXPECTED_MINUTES } from './chores.js'

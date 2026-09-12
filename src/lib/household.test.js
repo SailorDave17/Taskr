@@ -1519,6 +1519,24 @@ describe('#341 — the invitation path, at the data layer', () => {
       expect(readAuthCallback(at(`#${TOKEN}&type=recovery`))).toEqual({ type: 'recovery' })
     })
 
+    it('#155 AC 5: reads only the fragment, and the consent reader reads only the query — one URL, three readers, no overlap', async () => {
+      // The pure half of the measurement App.test.jsx makes on a boot: each
+      // reader sees exactly its own channel of a URL carrying a recovery in the
+      // fragment and a calendar consent in the query, and the sign-in-return
+      // reader, which reads both channels, sees nothing of either.
+      const { readConsentReturn } = await import('./calendar.js')
+      const location = { search: '?code=the-code&state=the-state', hash: `#${TOKEN}&type=recovery` }
+      expect(readAuthCallback(location)).toEqual({ type: 'recovery' })
+      expect(readConsentReturn(location.search)).toEqual({
+        code: 'the-code',
+        error: null,
+        state: 'the-state',
+      })
+      expect(readSignInReturn(location)).toBeNull()
+      // And a consent carries nothing this reader could mistake for an arrival.
+      expect(readAuthCallback({ search: location.search, hash: '' })).toBeNull()
+    })
+
     it('refuses a type it does not own, so an OAuth return is left alone', () => {
       // A Google sign-in comes back with a token and no type this screen owns.
       // Treating any token as an arrival would put a password screen in front of

@@ -76,6 +76,11 @@ describe('the credential flow is reachable from the app, not just exported', () 
     expect(app).toMatch(/onSignIn=\{/)
     expect(app).toMatch(/onCreate=\{/)
     expect(app).toMatch(/onSignInWithGoogle=\{/)
+    // #155 — the reset request. The prop is optional on the screen (so #154's
+    // tests render unchanged) and the control renders only when it is wired,
+    // so an unwired prop is a sign-in screen with no way back in and nothing
+    // red anywhere: exactly the shape this guard exists for.
+    expect(app).toMatch(/onForgotPassword=\{/)
   })
 
   it('#304 AC 4: exchanges no code — the flow is implicit, so a `?code=` on the root is never a sign-in', () => {
@@ -1953,23 +1958,26 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
   })
 
   it('the onboarding step count is unchanged from before this story', () => {
-    // FIVE cards and FIVE forms since #173 — sign in, create your own account,
-    // name the household, and the two join-with-a-code cards (one signed out,
-    // one signed in with no household) — of which a person is shown at most
+    // SIX cards and SIX forms since #155 — the five below plus the
+    // forgotten-password card, which asks for an address and nothing else:
+    // recovery, not capability. FIVE and FIVE from #173 to #155 — sign in,
+    // create your own account, name the household, and the two
+    // join-with-a-code cards (one signed out, one signed in with no household)
+    // — of which a person is shown at most
     // two at a time. It was THREE and THREE from #154 to #173 — #154 split the
     // organizer's signup out of the household form, because the two could
     // only ever succeed together on a project with email confirmation off —
     // and TWO and TWO from #37 to #154 (create a household, or sign in). Each
     // rework is what this literal exists to make visible in a diff. A
-    // capability step would be a SIXTH of each, and this is the number that
-    // says so: the two #173 cards are admission, not capability, and neither
-    // asks anything about what a person can do.
+    // capability step would be a SEVENTH of each, and this is the number that
+    // says so: the two #173 cards are admission and the #155 card is recovery,
+    // not capability, and none of them asks anything about what a person can do.
     //
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(5)
-    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(5)
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(6)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(6)
   })
 
   it('no component offers a capability screen, by any of the words one would be called', () => {

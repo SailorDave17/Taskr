@@ -57,6 +57,8 @@ export function entryStateFor({ session, household }) {
 //   signed out, view 'sign-up'   → Create your account (email + password)
 //   signed out, view 'join'      → Join with a code (#173): the code is held
 //                                  on this device, then sign in or sign up
+//   signed out, view 'reset'     → Forgotten your password? (#155): one
+//                                  address, and GoTrue emails the link
 //   signed in, no household      → Name the household, or sign out — AND,
 //                                  beside it, join one with a code (#173)
 //
@@ -78,6 +80,12 @@ export function entryStateFor({ session, household }) {
 // this browser. The mechanism and what it guarantees are
 // `src/lib/pendingInvitation.js`'s.
 
+// #155 — the route named by BOTH outcomes of a reset request. Lower-case
+// because it is spliced after a comma; each sentence below supplies its own
+// lead-in and full stop.
+const ASK_ORGANIZER =
+  'ask your household organizer to email you a reset link from the Who tab'
+
 export default function Onboarding({
   onCreate,
   onSignIn,
@@ -86,6 +94,9 @@ export default function Onboarding({
   onSignOut,
   onJoin,
   onHoldInvitation,
+  // #155 — the reset request. Optional so the #154 tests render unchanged;
+  // App always passes it, and gate.test.js says so.
+  onForgotPassword,
   heldInvitation = false,
   // #173 — App's own error, for the one write on this screen that no form
   // here submits: a held code applied at boot and refused. Every other
@@ -120,6 +131,12 @@ export default function Onboarding({
   const [password, setPassword] = useState('')
   const [signInEmail, setSignInEmail] = useState('')
   const [signInPassword, setSignInPassword] = useState('')
+  // #155 — the address a reset is asked for, seeded from the sign-in box when
+  // the person takes the link so an address already typed is not typed twice,
+  // and what an ACCEPTED request came back with. A refusal goes on the error
+  // strip like every other refusal on this screen.
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetNote, setResetNote] = useState(null)
   const [localError, setError] = useState(null)
   // #173 — the App-side error this screen has already answered. The prop has
   // no setter here, so a boot-time refusal would otherwise stand over the join
@@ -148,6 +165,7 @@ export default function Onboarding({
   const signUpReady = Boolean(email.trim()) && password.length >= PASSWORD_MIN_LENGTH
   const signInReady = Boolean(signInEmail.trim()) && Boolean(signInPassword)
   const joinReady = Boolean(code.trim()) && Boolean(joinName.trim())
+  const resetReady = Boolean(resetEmail.trim())
 
   // #173 — the signed-out half: keep the code and the name on this device,
   // then move to the sign-in card, which says the code is held. The person
@@ -237,6 +255,33 @@ export default function Onboarding({
     setError(null)
     setDismissedError(error)
     setView(next)
+  }
+
+  // #155 — the reset request, and the only two outcomes it can have.
+  //
+  // Not through `run()`, because the refused branch owes a sentence `run()`
+  // cannot add. GoTrue answers a reset for an unknown address exactly as it
+  // answers one for a known address — on purpose, so the call is not a way to
+  // find out who has an account — which means this screen can never say
+  // "recognised" or "unrecognised". What it CAN say is whether the request was
+  // accepted or refused, and both sentences name the organizer as the route
+  // if nothing arrives: the roster's "Email a reset link" reaches the same
+  // mail, and for a PIN member (no inbox at all) the organizer is the only
+  // route there is. Neither sentence may say whether the address has an
+  // account, and the tests assert the absence.
+  async function submitReset() {
+    setError(null)
+    setDismissedError(error)
+    setResetNote(null)
+    try {
+      await onForgotPassword(resetEmail.trim())
+      setResetNote(
+        'If that address has a Taskr account, a link to set a new password is on its way ' +
+          `— check your inbox. If nothing arrives, ${ASK_ORGANIZER}.`,
+      )
+    } catch (err) {
+      setError(`${err.message} Instead, ${ASK_ORGANIZER}.`)
+    }
   }
 
   return (
@@ -433,6 +478,29 @@ export default function Onboarding({
               Sign in
             </button>
           </form>
+          {/* #155 AC 1 — ONE control, for every address, and nothing looked
+              up before the submit (owner decision D7, 2026-08-26): the screen
+              cannot know what kind of address is in the box, and a lookup
+              that could would tell anybody who typed an address whether it
+              has an account. A link rather than a button: it is the exception
+              to signing in, not a second way to do it. Optional in the wiring
+              so the #154 tests render unchanged. */}
+          {onForgotPassword ? (
+            <p className="card__note">
+              <button
+                className="button--link"
+                type="button"
+                onClick={() => {
+                  setResetEmail(signInEmail)
+                  setResetNote(null)
+                  switchTo('reset')
+                }}
+                disabled={busy}
+              >
+                Forgot your password?
+              </button>
+            </p>
+          ) : null}
           {/* #304 — the other way in, for a member whose sign-in address is a
               Google account. A button, not a link like "Start a household":
               for the person it applies to this is a primary route, not a
@@ -533,6 +601,64 @@ export default function Onboarding({
         </section>
       ) : null}
 
+      {/* #155 — the way back in for a forgotten password. The request is
+          `submitReset` above, and the reason this card exists at all rather
+          than the sign-in form's own box doubling as the address: a person
+          who has forgotten a password should not be looking at a password
+          field while asking for a new one, and the sentence the request comes
+          back with belongs beside the address it was about. */}
+      {!signedIn && view === 'reset' ? (
+        <section className="card" aria-labelledby="reset-heading">
+          <h2 id="reset-heading" className="card__heading">
+            Forgotten your password?
+          </h2>
+          <p className="card__body">
+            Type the email you sign in with and Taskr will send you a link to
+            set a new one.
+          </p>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              submitReset()
+            }}
+          >
+            <label className="field">
+              <span className="field__label">Email</span>
+              <input
+                className="field__input"
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </label>
+            {resetNote ? (
+              // role="status", not role="alert": the request went, and the
+              // .error palette stays reserved for a refusal.
+              <p className="card__note" role="status" data-testid="reset-note">
+                {resetNote}
+              </p>
+            ) : null}
+            <button className="button" type="submit" disabled={busy || !resetReady}>
+              Email me a reset link
+            </button>
+          </form>
+          <p className="card__note">
+            Remembered it?{' '}
+            <button
+              className="button--link"
+              type="button"
+              onClick={() => switchTo('sign-in')}
+              disabled={busy}
+            >
+              Sign in instead
+            </button>
+          </p>
+        </section>
+      ) : null}
+
       {!signedIn && view === 'sign-up' ? (
         <section className="card" aria-labelledby="signup-heading">
           <h2 id="signup-heading" className="card__heading">
@@ -554,8 +680,9 @@ export default function Onboarding({
               First, your own account. You sign in with your own email and
               password, and you are the organizer &mdash; the person who adds
               everyone else and gives them their way in. There is nobody above
-              you, so if you lose this password it cannot be reset from inside
-              the app. You will name the household once you are signed in.
+              you, but if you ever lose this password the sign-in screen can
+              email you a link to set a new one. You will name the household
+              once you are signed in.
             </p>
           )}
           <form
@@ -627,6 +754,8 @@ Onboarding.propTypes = {
   // always passes all three, and gate.test.js says so.
   onJoin: PropTypes.func,
   onHoldInvitation: PropTypes.func,
+  // #155. Optional for the same reason; App always passes it.
+  onForgotPassword: PropTypes.func,
   heldInvitation: PropTypes.bool,
   error: PropTypes.string,
   signedIn: PropTypes.bool,

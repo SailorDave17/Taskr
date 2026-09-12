@@ -443,7 +443,8 @@ export function readSignInReturn(location = globalThis.location) {
 }
 
 /**
- * The kind of auth link this boot arrived on, or null — #341, and #155 later.
+ * The kind of auth link this boot arrived on, or null — #341 (invite) and
+ * #155 (recovery, asked for from the sign-in screen).
  *
  * `readSignInReturn` above reads the fragment's ERROR channel. This reads its
  * SUCCESS channel, and the two are deliberately separate functions over the same

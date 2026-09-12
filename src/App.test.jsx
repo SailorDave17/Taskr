@@ -7557,6 +7557,70 @@ describe('#341 — following an invitation, from App', () => {
     expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
   })
 
+  it('#155 AC 5: a recovery return and a calendar consent return on ONE URL do not consume each other', async () => {
+    // Measured, not asserted (the issue's own words): the recovery rides the
+    // FRAGMENT on the implicit flow and the consent rides the QUERY, keyed by
+    // `state`. Boot reads the fragment first, strips ONLY the fragment, then
+    // reads the query and strips that once the code is spent. The screen alone
+    // could not catch a strip that took the whole URL — the password screen
+    // renders either way — so the strip's own argument is the assertion.
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atFragment(`#${TOKEN}&type=recovery`)
+    globalThis.location.search = '?code=the-code&state=the-state'
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose a new password/i }),
+    ).toBeInTheDocument()
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    // First strip: the fragment only, the query still on the URL for the read
+    // that follows. Second: the spent code.
+    expect(replaceState.mock.calls[0]).toEqual([null, '', '/?code=the-code&state=the-state'])
+    expect(replaceState.mock.calls[1]).toEqual([null, '', '/'])
+  })
+
+  it('#155 AC 5: a bad-flow-state return in the QUERY still strips whole — it carries no state and is nobody else’s', async () => {
+    // The one query the fragment-side strip does own. Without `state` the
+    // calendar reader refuses it, so there is nothing to keep it for, and a
+    // reload holding it would announce the same spent failure twice.
+    api.currentSession.mockResolvedValue(null)
+    atFragment('')
+    globalThis.location.search = '?error=invalid_request&error_code=bad_oauth_state'
+    await renderApp()
+
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+  })
+
+  it('#155: the sign-in screen asks GoTrue for the reset directly — no session, so no re-read', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.sendPasswordReset.mockResolvedValue(undefined)
+    atFragment('')
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    api.listHouseholds.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: /forgot your password/i }))
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /email me a reset link/i })),
+    )
+
+    expect(api.sendPasswordReset).toHaveBeenCalledWith('kid@example.com')
+    // Not through `mutate`: its re-read would run with no session, as `anon`,
+    // which 0017 stripped — and the refusal would land over the top of a mail
+    // that went (#440's shape). The fake would have answered that read with a
+    // household, so a re-read here is not merely wasteful, it is visible.
+    expect(api.listHouseholds).not.toHaveBeenCalled()
+    expect(screen.getByTestId('reset-note')).toHaveTextContent(/on its way/i)
+    expect(screen.queryByRole('navigation', { name: /household surfaces/i })).not.toBeInTheDocument()
+  })
+
   it('ignores a fragment whose type is neither', async () => {
     // A Google sign-in return carries a token and no `type` this screen owns.
     // Treating any token as an arrival would put a password screen in front of

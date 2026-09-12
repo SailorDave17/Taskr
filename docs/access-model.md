@@ -2024,9 +2024,15 @@ cannot be synthetic. So the answer is now **Supabase's own password-reset flow**
 
 Two things that are deliberately true and worth stating rather than implying:
 
-- **The UI for it is not built.** The mechanism is standard and needs no server, but until a "forgot
-  your password" link exists an organizer would have to trigger it from the dashboard. That is a
-  smaller gap than the old answer, and it is still a gap.
+- **The UI for it is built — #155, 2026-09-12.** The sign-in screen offers one *Forgot your
+  password?* control for every address, with nothing looked up before the submit (a check that could
+  tell the screen which kind of address it holds would tell anybody who typed one whether it has an
+  account). GoTrue accepts an unknown address exactly as it accepts a known one, so the screen
+  reports the request as **accepted** or **refused**, never as recognised, and both sentences name
+  the organizer's *Email a reset link* as the route if nothing arrives. The link lands on the
+  `type=recovery` screen #341 built, alongside the invitation. *This bullet read "The UI for it is
+  not built … it is still a gap" from 2026-08-20 to 2026-09-12; the gap is closed, and the two
+  dates are here so the next reader knows how long it stood.*
 - **The organizer is still the root.** There is nobody above them to authorise anything; what changed
   is that they can now prove who they are to Supabase instead of to a person with database access.
   That is acceptable for a household app and would not be for anything else.

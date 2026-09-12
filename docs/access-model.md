@@ -1228,6 +1228,14 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#191 opened NO row on 2026-09-11 and changed `provision-member` anyway — the row this table
+  cannot hold.** The function lost its `provision` action and gained nothing; `check:live` probes a
+  function by NAME, so the deployed function answers green with or without the action, and this set
+  is unchanged on both sides of the redeploy by construction. The instrument for that half is
+  `check:deployed`, which reads `provision-member` STALE from the merge until `npm run
+  deploy:function` runs again. Recorded here so an empty delta on this table is not read as "nothing
+  to deploy" — it is the #171 lesson (a green `check:live` is not evidence the paste happened) in
+  the deploy direction.
 - **#430 opened THREE rows and #431 TWO on 2026-09-11, and neither story drained its rows in its
   own session.** #430's are three RPC probes: `request_household_deletion`, `restore_household` and
   `household_deletion_status`, red until `npm run migrate:live` applies `0042`. #431's are two:
@@ -1845,11 +1853,13 @@ organizer's part in it.
 
    **What did NOT change**, and this is the part a reader will assume wrongly:
 
-   - **The email-less member keeps the PIN path exactly as described below.** `<id>@taskr.invalid` has
-     no mailbox by construction, so there is nothing to send and a spoken credential is the only
-     thing that can work. `provision-member`'s `provision` action survives for that row alone and is
-     **refused for any member with a real address**. #191 retires the ability to create such a row,
-     and the action goes with it.
+   - **The email-less member keeps the PIN path exactly as described below** — *narrowed 2026-09-11
+     (#191), see the extension under this list.* `<id>@taskr.invalid` has no mailbox by
+     construction, so there is nothing to send and a spoken credential is the only thing that can
+     work. Until #191, `provision-member`'s `provision` action survived for that row alone and was
+     **refused for any member with a real address**; #191 retired the ability to create such a row,
+     and the action went with it. What survives is the **reset** of a PIN account that already
+     exists, and nothing that mints one.
    - **`members.email` is still the discriminator**, and it now decides which of two *surfaces* an
      organizer sees as well as which address the account is reached at.
    - **The authorization shape is untouched.** `provision-member` was split into `handler.ts` and a
@@ -1860,6 +1870,46 @@ organizer's part in it.
      address is known, which is deliberate on its side and stops the call being an oracle for which
      addresses have accounts. The organizer is therefore told the mail was *sent*, never that it
      reached somebody real.
+
+   **Extended 2026-09-11 (#191) — the third reversal, completed.** #341 took the organizer's part
+   out of choosing a credential; #191 takes it out of *admission* altogether, and closes the
+   exception #341 left. Four things changed, and the fourth is the one to read twice:
+
+   - **Adding somebody IS inviting them.** The roster's Add form requires an email address and
+     sends the invitation as part of the add — one submit, two writes, the row first so a refused
+     send (the built-in mailer allows two an hour) leaves a person on the roster with the row's own
+     *Email an invitation* button as the retry, never a second add. `addMember` in
+     `src/lib/household.js` refuses a missing address too, so no caller can recreate the email-less
+     row the form no longer offers.
+   - **`provision-member` has no `provision` action.** `ACTIONS` is `invite`, `reset`, `revoke`;
+     `createUser` is gone from the handler and from its client type, and `gate.test.js` reads the
+     deployed source to hold it that way. A request naming `provision` is refused as unknown. **Deploy
+     consequence, stated in band:** the function changed and this story does not deploy it, so
+     production serves the old code — `provision` included — until `npm run deploy:function` runs
+     again (runbook §3). No `check:live` row moves, because that check probes the function by NAME
+     and cannot see an action; `check:deployed` reads it stale from the merge until the redeploy.
+     The excused-red set is therefore unchanged by this story, and that is a statement about the
+     instrument's blindness rather than about the deploy having happened.
+   - **The recipient names themselves, on the email path too.** #173 put "Your name in it" beside
+     the code; #191 puts it on the *Choose your password* screen an invitation lands on, blank and
+     required (owner decision, 2026-09-11, over a prefill of the organizer's word — a prefill the
+     person taps through leaves that word on the row). The name the organizer typed reaches the
+     invitation email as `invited_as` in the invite's `data` and personalises it only; the app never
+     reads it back. Written through the ordinary `updateMember` grant AFTER the password, in that
+     order because a name that failed to save is recoverable from the Who tab and a password that
+     failed to set is not.
+   - **Retirement is of the ADD path, not of the accounts it created** (owner decision, 2026-08-26).
+     Every account `provision` ever minted still exists, still has no inbox, and still needs a spoken
+     credential — so the `reset` action and the row's *Reset sign-in* form survive for exactly those
+     rows. A row with no address and no account gets no control at all, only a note saying the route
+     is an address. `signInAddressFor` in `src/lib/household.js` is now the ONE copy of the synthetic
+     address rule, read back for those accounts; the function's copy went with the mint.
+
+   What this does NOT touch: the code path (#171–#173) is the other admission route and stays —
+   email admits a **new** person, a code admits somebody who **already has** a sign-in, which
+   `inviteUserByEmail` refuses (#341 AC 3, measured). And the live RLS suite (`npm run test:rls`)
+   built both its fixture members through `provision`; it now refuses at its first fixture with a
+   sentence naming this, and needs a fixture of its own — filed as #436.
 
 **What #62 actually changes**, in the order it matters:
 
@@ -1921,6 +1971,10 @@ Function probe (#115), which is what the 20-of-20 bullet at the head of this pag
 organizer can add somebody to the roster and give them a sign-in, and that person signs in as
 themselves. Since 2026-08-21 the live RLS suite exercises the whole path over the wire (#88): add a
 member, provision them, sign in as them, and confirm the cross-household refusals still refuse.
+*(Dated: "give them a sign-in" and "provision them" describe the function as deployed up to
+2026-09-11. #191 removed the `provision` action — an organizer adds somebody WITH an address and
+the invitation goes out as part of the add — and the live RLS suite's fixture went with it; see the
+#191 extension under "Read this first" above.)*
 
 *This paragraph said the deploy **"is owner-only and has not happened"** until 2026-08-21 — for a
 day, while the header of this same page said `check:live` went green "immediately after
@@ -1993,7 +2047,8 @@ The rules, in the order the client runs them:
   organizer check is asked about the household on that member's row, and only then is `service_role`
   touched. Auth-first is the recoverable order — `members_claimed_by_fkey` is `ON DELETE SET NULL`, so
   a removal that dies between the halves leaves a member showing "No sign-in yet", a state the roster
-  renders and Give a sign-in repairs. Row-first would leave the orphan.
+  renders and an invitation repairs (*"Give a sign-in" until #191, 2026-09-11, retired the mint*).
+  Row-first would leave the orphan.
 - **The account is deleted only when this row is its last claim.** Since 0009 one person can hold
   member rows in two households under one account, so the function first checks (as `service_role`,
   necessarily — the caller cannot see other households) whether any other member row claims it.
@@ -2017,8 +2072,9 @@ by #62 on 2026-08-11. It is left in full because its reasoning is still the reas
 shape it has, and because the section immediately below — *why not real per-member auth users* — is
 the argument #62 had to answer rather than one it ignored. It answered it by removing the premise:
 the Edge Function that was unavailable is now the plan — and has since shipped: `provision-member`
-is deployed and mints exactly those accounts, so the "this app has no server" premise below is the
-one clause of the record that is no longer true of the app.
+is deployed and minted exactly those accounts from 2026-08-20 until #191 (2026-09-11) removed the
+mint, after which it invites, resets and revokes; so the "this app has no server" premise below is
+the one clause of the record that is no longer true of the app.
 
 **An organizer-set PIN, carried on the member row, checked by the database.**
 

@@ -177,7 +177,6 @@ const {
   normalizeMinutes,
   inviteMember,
   leaveHousehold,
-  provisionMember,
   readAuthCallback,
   readSignInReturn,
   removeMember,
@@ -819,6 +818,7 @@ describe('maintaining the roster', () => {
       weeklyMinutes: 120,
       householdId: 'h1',
       household_id: 'somewhere-else',
+      email: 'placeholder.one@example.com',
     })
 
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
@@ -830,22 +830,37 @@ describe('maintaining the roster', () => {
   // above passes just as well against a function that hard-codes the first
   // household it can find.
   it('writes into the household it was asked for, not the first one going', async () => {
-    await addMember({ displayName: 'Placeholder Two', weeklyMinutes: 60, householdId: 'h2' })
+    await addMember({
+      displayName: 'Placeholder Two',
+      weeklyMinutes: 60,
+      householdId: 'h2',
+      email: 'placeholder.two@example.com',
+    })
 
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.household_id).toBe('h2')
   })
 
   it('trims a name before storing it', async () => {
-    await addMember({ displayName: '  Placeholder One  ', weeklyMinutes: 0, householdId: 'h1' })
+    await addMember({
+      displayName: '  Placeholder One  ',
+      weeklyMinutes: 0,
+      householdId: 'h1',
+      email: 'placeholder.one@example.com',
+    })
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.display_name).toBe('Placeholder One')
   })
 
   it('refuses a blank name before spending a round trip', async () => {
-    await expect(addMember({ displayName: '   ', weeklyMinutes: 60, householdId: 'h1' })).rejects.toThrow(
-      /needs a name/i,
-    )
+    await expect(
+      addMember({
+        displayName: '   ',
+        weeklyMinutes: 60,
+        householdId: 'h1',
+        email: 'placeholder.one@example.com',
+      }),
+    ).rejects.toThrow(/needs a name/i)
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
@@ -856,7 +871,12 @@ describe('maintaining the roster', () => {
   // property is restated against what the function actually reads.
   it('refuses to add anyone when no household is named', async () => {
     await expect(
-      addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: undefined }),
+      addMember({
+        displayName: 'Placeholder One',
+        weeklyMinutes: 60,
+        householdId: undefined,
+        email: 'placeholder.one@example.com',
+      }),
     ).rejects.toThrow(/which household/i)
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
@@ -889,14 +909,20 @@ describe('maintaining the roster', () => {
     expect(insert.row.email).toBe('placeholder.one@example.com')
   })
 
-  // The half that keeps the OLD insert byte for byte what it was: a caller that
-  // does not mention an address must not start writing nulls into the column.
-  // `0007`'s null means "no real inbox, so a synthetic address and a PIN", and a
-  // write is a different act from an omission even when the stored value agrees.
-  it('omits the column entirely when nobody typed an address', async () => {
-    await addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: 'h1' })
-    const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
-    expect(insert.row).not.toHaveProperty('email')
+  // #191 — INVERTED. Until then this test held the old insert byte for byte
+  // when nobody typed an address ("omits the column entirely"), because
+  // `0007`'s null meant "no real inbox, so a synthetic address and a PIN".
+  // There is no PIN to mint any more, so a row with no address is a person
+  // with no way in, and the data layer refuses it before the round trip — on
+  // every spelling of absent, since a blank and a null both used to reach the
+  // insert.
+  it('#191: refuses to add a person with no address, before the round trip', async () => {
+    for (const email of [undefined, null, '', '   ']) {
+      await expect(
+        addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: 'h1', email }),
+      ).rejects.toThrow(/needs an email address/i)
+    }
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
   it('clears the address when the field is emptied, rather than ignoring the edit', async () => {
@@ -1157,7 +1183,7 @@ function httpError(body) {
   return error
 }
 
-describe('provisioning a sign-in - #87, and how it fails - #112', () => {
+describe('the PIN reset - #87, how it fails - #112, and what #191 took away', () => {
 
   async function failureFrom(call) {
     let thrown = null
@@ -1173,6 +1199,26 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     return thrown
   }
 
+  // #191 AC 3 — "no client code path invokes provision-member's create-a-sign-in
+  // action". The retired-credential describe above asserts the #62 drops the
+  // same way, and for the same reason: a wrapper left behind turns a
+  // compile-time absence into a runtime refusal discovered on a phone.
+  it('#191 AC 3: exports no provisionMember, so nothing can call the retired action', async () => {
+    const household = await import('./household.js')
+    expect(household.provisionMember, 'provisionMember is still exported').toBeUndefined()
+  })
+
+  it('#191 AC 3: never sends "provision" to the function, whatever else it sends', async () => {
+    // The wrappers that survive, each exercised, and the body of every call
+    // read back: the action this story removed must not be among them.
+    invokeResult = { data: { ok: true }, error: null }
+    await resetMemberCredential({ memberId: 'm1', password: 'a good one' })
+    await inviteMember({ memberId: 'm1' })
+    const actions = calls.filter((c) => c.op === 'invoke').map((c) => c.body.action)
+    expect(actions).toEqual(['reset', 'invite'])
+    expect(actions).not.toContain('provision')
+  })
+
   it("passes the function's own refusal through verbatim", () => {
     // The function answers in sentences on purpose: "Only the household
     // organizer can do that" is something the person can act on, and replacing
@@ -1181,11 +1227,11 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
       data: null,
       error: httpError({ error: 'Only the household organizer can do that.' }),
     }
-    return failureFrom(() => provisionMember({ memberId: 'm1', password: 'a good one' })).then(
-      (thrown) => {
-        expect(thrown.message).toBe('Only the household organizer can do that.')
-      },
-    )
+    return failureFrom(() =>
+      resetMemberCredential({ memberId: 'm1', password: 'a good one' }),
+    ).then((thrown) => {
+      expect(thrown.message).toBe('Only the household organizer can do that.')
+    })
   })
 
   it('says what is wrong and what to do when the request never got an answer', async () => {
@@ -1197,7 +1243,7 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     // function that was never deployed.
     invokeResult = { data: null, error: fetchError() }
     const thrown = await failureFrom(() =>
-      provisionMember({ memberId: 'm1', password: 'a good one' }),
+      resetMemberCredential({ memberId: 'm1', password: 'a good one' }),
     )
 
     expect(thrown.message).not.toMatch(/Failed to send a request/)
@@ -1205,7 +1251,7 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     expect(thrown.message).toMatch(/provision-member/)
     expect(thrown.message).toMatch(/deployed/i)
     // The one thing that IS certain: a request that never left cannot have
-    // half-provisioned anybody, and saying so stops an organizer retrying into a
+    // half-reset anybody, and saying so stops an organizer retrying into a
     // state they are afraid of.
     expect(thrown.message).toMatch(/nothing was changed/i)
   })
@@ -1224,22 +1270,24 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     // rather than a 400 from the admin API - and checked before the call, so a
     // typo costs nothing.
     invokeResult = { data: null, error: fetchError() }
-    const thrown = await failureFrom(() => provisionMember({ memberId: 'm1', password: 'abc' }))
+    const thrown = await failureFrom(() =>
+      resetMemberCredential({ memberId: 'm1', password: 'abc' }),
+    )
     expect(thrown.message).toMatch(/at least 6/)
     expect(calls.filter((call) => call.op === 'invoke')).toEqual([])
   })
 
-  it('POSITIVE CONTROL: a successful provision reaches the function and returns its answer', async () => {
+  it('POSITIVE CONTROL: a successful reset reaches the function and returns its answer', async () => {
     // Without this, every assertion above could be satisfied by a client that
     // always fails - and the fake would be proving nothing about the happy path
     // it is standing in for.
-    invokeResult = { data: { ok: true, action: 'provision', memberId: 'm1' }, error: null }
-    const result = await provisionMember({ memberId: 'm1', password: 'a good one' })
-    expect(result).toEqual({ ok: true, action: 'provision', memberId: 'm1' })
+    invokeResult = { data: { ok: true, action: 'reset', memberId: 'm1' }, error: null }
+    const result = await resetMemberCredential({ memberId: 'm1', password: 'a good one' })
+    expect(result).toEqual({ ok: true, action: 'reset', memberId: 'm1' })
     expect(calls).toContainEqual({
       op: 'invoke',
       name: 'provision-member',
-      body: { action: 'provision', memberId: 'm1', password: 'a good one' },
+      body: { action: 'reset', memberId: 'm1', password: 'a good one' },
     })
   })
 })

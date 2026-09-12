@@ -262,6 +262,17 @@ persists anything.
      `auth.admin.inviteUserByEmail` sends, and it is a **different template from *Confirm signup***
      (#129's) — editing one does not touch the other. The reset link uses **Reset password**. Nothing
      needs changing for the path to work; this is here so an edit lands on the right one.
+     **Since #191 (2026-09-11) the function passes the name the organizer typed as
+     `invited_as` in the invitation's `data`**, so the template MAY read it as
+     `{{ .Data.invited_as }}` ("*{{ .Data.invited_as }}, you have been added to a household on
+     Taskr*"). That edit is yours and optional — #191 AC 1's "personalised with the typed name" is
+     delivered up to the template's edge and no further, because a template is dashboard state no
+     session can write. The value lands in `auth.users.raw_user_meta_data` **when the invite creates
+     the account**; a re-invite of a PENDING address (invited by another household, never accepted)
+     returns the same user unchanged, so that email renders the FIRST household's typed name
+     (GoTrue applies `data` on its create branch only — read off `internal/api/invite.go`, not
+     measured here). The app never reads it back, and the person names themselves on the password
+     screen.
    - **The redirect lands on the app root**, because `provision-member` is passed the origin the
      organizer was on, by the same `confirmationRedirectTo` rule as step 5. **Nothing to add to
      `Redirect URLs`** — the production origin and `http://localhost:5173` are already there, and the
@@ -325,8 +336,13 @@ in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy 
 disagree, the script is right.)*
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
-and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
-sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
+and touches nothing here. Until `provision-member` has run, an organizer who adds somebody gets the
+row and a failed invitation (the row's *Email an invitation* button is the retry), and nobody but the
+organizer can sign in at all. **#191 (2026-09-11) changed this function without adding one**: its
+`provision` action is gone, so production keeps serving the old code — `provision` included — until
+this step is run again. That is harmless in the meantime (no client calls the action any more, and
+`check:live` probes the function by name, so it reads green either way), but `check:deployed` reads
+`provision-member` STALE from the merge until the redeploy, and the retirement is not live until then. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed. Until
 `calendar-busy` has, a connected member's roster row shows a sentence under this week's minutes —
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no

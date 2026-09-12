@@ -22,7 +22,7 @@ function setup(overrides = {}) {
     onSignOut: vi.fn().mockResolvedValue(undefined),
     onSetCapacity: vi.fn().mockResolvedValue(undefined),
     onClearCapacity: vi.fn().mockResolvedValue(undefined),
-    onProvision: vi.fn().mockResolvedValue(undefined),
+    onResetPin: vi.fn().mockResolvedValue(undefined),
     onInvite: vi.fn().mockResolvedValue(undefined),
     onSendReset: vi.fn().mockResolvedValue(undefined),
     onDeleteHousehold: vi.fn().mockResolvedValue(undefined),

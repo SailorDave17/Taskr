@@ -115,7 +115,12 @@ function makeWorld(overrides = {}) {
             return world.createUserResult
           },
           inviteUserByEmail: async (email, opts) => {
-            record(role, { op: 'inviteUserByEmail', email, redirectTo: opts?.redirectTo })
+            record(role, {
+              op: 'inviteUserByEmail',
+              email,
+              redirectTo: opts?.redirectTo,
+              data: opts?.data,
+            })
             return world.inviteResult
           },
           updateUserById: async (id, attrs) => {
@@ -214,6 +219,17 @@ describe('#341 — provision-member, the invitation path', () => {
     // The whole story: no credential is chosen for anybody. `createUser` takes a
     // password and this path must never reach it.
     expect(opsOf(world, 'createUser')).toHaveLength(0)
+  })
+
+  it('#191 AC 1: carries the name the organizer typed as template data, and nothing else', async () => {
+    // "Personalised with the typed name": the *Invite user* template can read
+    // `{{ .Data.invited_as }}`. Asserted as the WHOLE data object so a second
+    // field cannot ride along unnoticed — the person names themselves on
+    // arrival, and the app never reads this back.
+    const world = makeWorld()
+    await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+    expect(opsOf(world, 'inviteUserByEmail')[0].data).toEqual({ invited_as: MEMBER.display_name })
   })
 
   it('attaches the freshly created account to the member row, as service_role', async () => {
@@ -329,7 +345,7 @@ describe('#341 — provision-member, the invitation path', () => {
       expect(isAddressTakenError(null)).toBe(false)
     })
 
-    it.each(SHAPES)('answers 409 naming reset, and does not claim the row (%s)', async (_label, error) => {
+    it.each(SHAPES)('answers 409 naming the code route, and does not claim the row (%s)', async (_label, error) => {
       const world = makeWorld({ inviteResult: { data: { user: null }, error } })
       const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
 
@@ -337,9 +353,12 @@ describe('#341 — provision-member, the invitation path', () => {
       const body = await res.json()
       expect(body.error).toContain(MEMBER.email)
       // The organizer must not read this as "the email went" — AC 3 in as many
-      // words, so the sentence is asserted to say both halves.
+      // words, so the sentence is asserted to say both halves. The route named
+      // was "reset sign-in" until #191's review: an established account joins
+      // a second household with a CODE (#173), and this row's control cannot
+      // reset anything.
       expect(body.error).toMatch(/no invitation was sent/i)
-      expect(body.error).toMatch(/reset sign-in/i)
+      expect(body.error).toMatch(/with a code/i)
       expect(opsOf(world, 'update')).toHaveLength(0)
     })
   })
@@ -403,8 +422,14 @@ describe('#341 — provision-member, the invitation path', () => {
   })
 })
 
-describe('#341 AC 1 — provision is refused for a member who has an inbox', () => {
-  it('refuses, and points at the invitation instead', async () => {
+describe('#191 AC 3 — provision is gone, for every member', () => {
+  // Until #191 this block was "#341 AC 1 — provision is refused for a member who
+  // has an inbox", with a control asserting the email-less row STILL minted.
+  // That control is inverted now: the action is not refused with a reason, it
+  // is not an action, and a fake that OFFERS `createUser` records that nobody
+  // reached for it — which is the difference between "no account was created"
+  // and "the fake could not create one".
+  it('refuses provision as an unknown action for a member with an address', async () => {
     const world = makeWorld()
     const res = await call(world, {
       action: 'provision',
@@ -412,21 +437,17 @@ describe('#341 AC 1 — provision is refused for a member who has an inbox', () 
       password: 'longenough',
     })
 
-    expect(res.status).toBe(409)
+    expect(res.status).toBe(400)
     const { error } = await res.json()
-    expect(error).toContain(MEMBER.display_name)
-    expect(error).toMatch(/send them an invitation/i)
-    // The point of the criterion: no account is minted at a password somebody
-    // else chose. Asserted on a fake that offers `createUser` and records it.
+    expect(error).toMatch(/action must be/i)
+    expect(error).not.toContain('provision')
     expect(opsOf(world, 'createUser')).toHaveLength(0)
     expect(opsOf(world, 'update')).toHaveLength(0)
   })
 
-  it('still mints for an email-less row, which is the only caller left', async () => {
-    // The other half, and the reason this is a refusal rather than a deletion:
-    // a member with no address cannot be invited, so removing `provision`
-    // outright would leave them with no way in at all. #191 retires the ability
-    // to CREATE such a row, and this branch goes with it.
+  it('refuses it for an email-less row too — the one caller #341 left is gone', async () => {
+    // The row this action survived for. `addMember` no longer creates one, and
+    // the accounts that already exist are reached by `reset`, not by a mint.
     const world = makeWorld()
     const res = await call(world, {
       action: 'provision',
@@ -434,17 +455,52 @@ describe('#341 AC 1 — provision is refused for a member who has an inbox', () 
       password: 'longenough',
     })
 
-    expect(res.status).toBe(200)
-    const created = opsOf(world, 'createUser')
-    expect(created).toHaveLength(1)
-    expect(created[0].email).toBe(`${PIN_MEMBER.id}@taskr.invalid`)
+    expect(res.status).toBe(400)
+    expect(opsOf(world, 'createUser')).toHaveLength(0)
     expect(opsOf(world, 'inviteUserByEmail')).toHaveLength(0)
+    expect(opsOf(world, 'update')).toHaveLength(0)
+    // Refused before any client is built: an unknown action never reads the
+    // member, so nothing about the household is consulted for it.
+    expect(opsOf(world, 'select')).toHaveLength(0)
+  })
+
+  it('a reset for somebody with no sign-in says to invite them, not to provision them', async () => {
+    const world = makeWorld()
+    const res = await call(world, { action: 'reset', memberId: MEMBER.id, password: 'longenough' })
+
+    expect(res.status).toBe(409)
+    const { error } = await res.json()
+    expect(error).toMatch(/invite them first/i)
+    expect(error).not.toMatch(/provision/i)
+  })
+
+  it('an address that already holds a sign-in is pointed at a CODE, not at Reset sign-in', async () => {
+    // review-fanout on #191: the 409 said "Use Reset sign-in instead" since
+    // #341, while the row's control reads *Email an invitation* (its
+    // `claimed_by` is null) and every press lands here again. Since #173 an
+    // established account joins a second household by redeeming a code as
+    // itself; the refusal is where the organizer learns that. Both halves
+    // asserted: the route named, and the wrong route absent.
+    const world = makeWorld({
+      inviteResult: {
+        data: { user: null },
+        error: { code: 'email_exists', status: 422, message: 'Email address already registered' },
+      },
+    })
+    const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+    expect(res.status).toBe(409)
+    const { error } = await res.json()
+    expect(error).toMatch(/no invitation was sent/i)
+    expect(error).toMatch(/with a code/i)
+    expect(error).not.toMatch(/reset sign-in/i)
+    expect(opsOf(world, 'update')).toHaveLength(0)
   })
 
   it('hasRealAddress is the one predicate, and treats blank as absent', () => {
-    // Three branches turn on this. A member row whose address is an empty string
-    // is a row somebody cleared, and treating it as real would send an
-    // invitation to nowhere and refuse the provision that could have helped.
+    // The invite branch turns on this. A member row whose address is an empty
+    // string is a row somebody cleared, and treating it as real would send an
+    // invitation to nowhere.
     expect(hasRealAddress({ email: 'placeholder.one@example.test' })).toBe(true)
     expect(hasRealAddress({ email: null })).toBe(false)
     expect(hasRealAddress({ email: '   ' })).toBe(false)
@@ -492,15 +548,18 @@ describe('provision-member — the platform contract the split must not change',
     expect(callerHeader).toBe('Bearer caller-jwt')
   })
 
-  it('names all four actions, and refuses anything else', async () => {
-    expect([...ACTIONS]).toEqual(['provision', 'invite', 'reset', 'revoke'])
+  it('names all three actions, and refuses anything else', async () => {
+    // Four until #191 removed `provision`; the list is asserted whole so a
+    // fourth cannot come back without this line moving.
+    expect([...ACTIONS]).toEqual(['invite', 'reset', 'revoke'])
     const world = makeWorld()
     const res = await call(world, { action: 'mint', memberId: MEMBER.id })
     expect(res.status).toBe(400)
     const { error } = await res.json()
-    // The refusal is built FROM the list, so a fifth action cannot be added
+    // The refusal is built FROM the list, so a fourth action cannot be added
     // without the sentence following it.
     for (const action of ACTIONS) expect(error).toContain(action)
+    expect(error).not.toContain('provision')
   })
 
   it('refuses when a secret is missing rather than answering degraded', async () => {

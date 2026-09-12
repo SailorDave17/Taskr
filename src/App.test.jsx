@@ -7097,6 +7097,98 @@ describe('#164/#166 — the review fan-out’s three, held in place', () => {
   })
 })
 
+// #191 AC 1 — adding somebody sends their invitation, at the level only App can
+// answer: the roster's Add form calls `onAdd` and then `onInvite` with the id
+// the add returned, and it is App that wires both to the data layer. The
+// component test proves the ORDER and the id on the props; this proves the
+// props reach `addMember` and `inviteMember`, with the household on screen.
+describe('#191 — adding somebody sends their invitation, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+  const organizer = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const NEW_ADDRESS = 'placeholder.three@example.com'
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizer])
+    api.addMember.mockResolvedValue({
+      id: 'm9',
+      display_name: 'Placeholder Three',
+      weekly_minutes: 0,
+      claimed_by: null,
+      email: NEW_ADDRESS,
+    })
+    api.inviteMember.mockResolvedValue({ ok: true, action: 'invite', memberId: 'm9' })
+  })
+
+  const addSomeone = async () => {
+    await renderApp('Who')
+    const form = (await screen.findByRole('button', { name: /add to household/i })).closest('form')
+    fireEvent.change(within(form).getByLabelText(/^name$/i), {
+      target: { value: 'Placeholder Three' },
+    })
+    fireEvent.change(within(form).getByLabelText(/email address/i), {
+      target: { value: NEW_ADDRESS },
+    })
+    await act(
+      async () =>
+        void fireEvent.click(within(form).getByRole('button', { name: /add to household/i })),
+    )
+    return form
+  }
+
+  it('adds with the household on screen, then invites the row the add returned', async () => {
+    await addSomeone()
+
+    expect(api.addMember).toHaveBeenCalledWith({
+      displayName: 'Placeholder Three',
+      weeklyMinutes: 0,
+      email: NEW_ADDRESS,
+      householdId: 'h1',
+    })
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm9' })
+    // The row first, then the invitation FOR that row — never the other way,
+    // and never both at once.
+    expect(api.addMember.mock.invocationCallOrder[0]).toBeLessThan(
+      api.inviteMember.mock.invocationCallOrder[0],
+    )
+    expect(await screen.findByTestId('add-note')).toHaveTextContent(
+      `Invitation sent to ${NEW_ADDRESS}`,
+    )
+  })
+
+  it("a refused send puts the function's sentence on the strip and claims no send", async () => {
+    // The mailer's refusal (#341 AC 4's one fact) reaches the shell through
+    // `mutate`, and the form must not say "sent" beside it. The row exists.
+    api.inviteMember.mockRejectedValueOnce(
+      new Error(
+        `The sign-in was not created and no email was sent to ${NEW_ADDRESS} — ` +
+          'the mail service refused it. Try again in a little while.',
+      ),
+    )
+    await addSomeone()
+
+    expect(api.addMember).toHaveBeenCalledTimes(1)
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm9' })
+    // The function's own sentence reaches the form's alert (design-bar,
+    // 2026-09-12) — asserted INSIDE the form, because the shell's strip carries
+    // it too and a page-wide query would pass with the local one missing.
+    const form = screen.getByRole('button', { name: /add to household/i }).closest('form')
+    expect(await within(form).findByRole('alert')).toHaveTextContent(/no email was sent/i)
+    expect(screen.queryByTestId('add-note')).not.toBeInTheDocument()
+  })
+})
+
 // #341 — following an invitation, at the level only App can answer.
 //
 // The component test covers what `ChoosePassword` DRAWS. These cover the three
@@ -7220,11 +7312,16 @@ describe('#341 — following an invitation, from App', () => {
     expect(replaceState).toHaveBeenCalledWith(null, '', '/')
   })
 
+  /** #191 — an invite arrival asks for a name too, so every submit below types one. */
+  const typeName = (name = 'Placeholder Three') =>
+    fireEvent.change(screen.getByTestId('choose-name-input'), { target: { value: name } })
+
   it('sets the password and lands them in their household', async () => {
     atFragment(`#${TOKEN}&type=invite`)
     await renderApp()
     await screen.findByRole('heading', { name: /choose your password/i })
 
+    typeName()
     fireEvent.change(screen.getByTestId('choose-password-input'), {
       target: { value: 'a-good-password' },
     })
@@ -7239,6 +7336,152 @@ describe('#341 — following an invitation, from App', () => {
     expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
   })
 
+  // -------------------------------------------------------------------------
+  // #191 AC 2 — the recipient names themselves, on the EMAIL path
+  // -------------------------------------------------------------------------
+
+  it('#191 AC 2: writes the name the person chose to THEIR row, after the password', async () => {
+    // The organizer's typed name is on the row when the invitation goes out;
+    // the person's own word replaces it here. Their row is the one the invite
+    // action claimed to this session's user — `me` — and the write goes AFTER
+    // the password, because a password that failed to set strands them and a
+    // name that failed to save does not.
+    atFragment(`#${TOKEN}&type=invite`)
+    // review-fanout on #191: with ONE row in the fixture, `members[0]` passes
+    // this test as well as `findClaimedMember` does. An unclaimed row listed
+    // FIRST is what makes the claimed-by match the only way to reach 'm1'.
+    api.listMembers.mockResolvedValue([
+      { id: 'm0', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null, email: null },
+      me,
+    ])
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName(' Placeholder Three ')
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.updateMember).toHaveBeenCalledTimes(1)
+    expect(api.updateMember).toHaveBeenCalledWith('m1', { displayName: 'Placeholder Three' })
+    expect(api.setOwnPassword.mock.invocationCallOrder[0]).toBeLessThan(
+      api.updateMember.mock.invocationCallOrder[0],
+    )
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+  })
+
+  it('#191 AC 2: when no row is theirs, the password is still set and the strip says so', async () => {
+    // The `!mine` branch had no test (review-fanout). The password write is
+    // the thing that lets them back in and goes first regardless; the name is
+    // the recoverable half, and the sentence names where.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.listMembers.mockResolvedValue([])
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your row was not found/i)
+  })
+
+  it('#191 AC 2: the submit waits for the household to load, so the row is there to rename', async () => {
+    // review-fanout on #191: boot renders this screen BEFORE `requestRefresh`
+    // has populated `members`/`userId` (~6–7 s on Slow 4G), and a submit in
+    // that window used to set the password and drop the name. The button is
+    // disabled until the load settles; asserted by holding the household read
+    // open, then releasing it.
+    let release
+    api.listHouseholds.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve([household])
+        }),
+    )
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+    expect(screen.getByRole('button', { name: /set my password/i })).toBeDisabled()
+
+    await act(async () => {
+      release()
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /set my password/i })).toBeEnabled(),
+    )
+  })
+
+  it('#191 AC 2: refuses to submit with no name, before any write', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).not.toHaveBeenCalled()
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/what the household should call you/i)
+  })
+
+  it('#191 AC 2: a refused rename keeps the password set and says so, in the household', async () => {
+    // #173's shape on the code path, repeated here: the person is IN, with the
+    // organizer's word still on their row and a sentence saying how to fix it.
+    // The password write is not undone and the screen is not kept up — both
+    // would be worse than the name being wrong for a minute.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.updateMember.mockRejectedValueOnce(new Error('saving the change: permission denied'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your name could not be saved/i)
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('#191 AC 2: a RECOVERY asks for no name and writes none', async () => {
+    // The other arrival on the same screen: somebody replacing a lost password
+    // already has a name on their row, and asking again would be a second
+    // spelling to keep in step.
+    atFragment(`#${TOKEN}&type=recovery`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose a new password/i })
+
+    expect(screen.queryByTestId('choose-name-input')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /save my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
   it('keeps the screen up when the write fails, and says so', async () => {
     // A password that was not set is a person who cannot sign in again once they
     // leave. Dismissing the screen on a failure would strand them with no way
@@ -7248,6 +7491,7 @@ describe('#341 — following an invitation, from App', () => {
     await renderApp()
     await screen.findByRole('heading', { name: /choose your password/i })
 
+    typeName()
     fireEvent.change(screen.getByTestId('choose-password-input'), {
       target: { value: 'a-good-password' },
     })
@@ -7264,6 +7508,7 @@ describe('#341 — following an invitation, from App', () => {
     await renderApp()
     await screen.findByRole('heading', { name: /choose your password/i })
 
+    typeName()
     fireEvent.change(screen.getByTestId('choose-password-input'), { target: { value: 'abc' } })
     await act(async () =>
       void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),

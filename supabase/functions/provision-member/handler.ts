@@ -1,5 +1,8 @@
-// Provision, invite, reset and revoke a member's credential — the half of #62
-// that needs a server, plus #341's invitation path.
+// Invite, reset and revoke a member's credential — the half of #62 that needs a
+// server, plus #341's invitation path. The `provision` action this function is
+// named for — an organizer minting an account at a password they typed — was
+// removed by #191 AC 3 (2026-09-11); the name stays because it is the deployed
+// function's, in `LIVE_EDGE_FUNCTIONS`, the deploy list and every runbook step.
 //
 // WHY THE HANDLER IS A SEPARATE MODULE FROM `index.ts`
 //
@@ -25,8 +28,9 @@
 // The move is a MOVE. Every comment below was written for the code it sits on
 // and is carried across unchanged, because the authorization argument is the
 // part of this file most expensive to reconstruct and the part a reader most
-// needs. What is new is the `invite` action and the refusal `provision` now
-// gives a member with a real address.
+// needs. What #341 added was the `invite` action and a refusal of `provision`
+// for a member with a real address; what #191 then removed was `provision`
+// itself, once the email-less row it survived for could no longer be created.
 //
 // WHY THIS FUNCTION EXISTS AT ALL
 //
@@ -73,27 +77,26 @@
 // could swap it out would be testing a different function; what the injection
 // buys is a fake GoTrue, not a fake permission check.
 
-// `.invalid` is reserved by RFC 2606 and can never resolve, so a synthetic
-// address has no mailbox by construction — which is why a reset is an admin
-// password update and not an emailed link (#87 AC 3). It is also why a synthetic
-// member can never be INVITED: #341's whole path is an email arriving.
-//
-// Derived from `members.id`, never stored: `members.email` stays NULL for a
-// member without a real address, and that null IS the discriminator 0007
-// established. Storing the synthetic address would destroy the distinction
-// between "has a real inbox" and "does not".
-export function syntheticAddressFor(memberId: string): string {
-  return `${memberId}@taskr.invalid`
-}
+// `syntheticAddressFor` stood here until #191: `<members.id>@taskr.invalid`,
+// the address `provision` minted an email-less member's account at. `.invalid`
+// is reserved by RFC 2606 and can never resolve, so that address has no mailbox
+// by construction — which is still why a `reset` is an admin password update
+// and not an emailed link (#87 AC 3), and why such a member can never be
+// INVITED: #341's whole path is an email arriving. Nothing here derives the
+// address any more, because nothing here mints: `reset` acts on `claimed_by`,
+// and the roster's `signInAddressFor` (src/lib/household.js) is the one
+// remaining copy of the rule, read back for the accounts that already exist.
+// `members.email` stays NULL for those rows, and that null IS the
+// discriminator 0007 established.
 
 /**
  * Whether this member has a real inbox — the `0007` discriminator, in one place.
  *
- * Exported because three branches now turn on it and each would otherwise spell
- * it itself: `invite` requires one, `provision` refuses one (#341 AC 1), and the
- * minting address prefers one. A predicate spelled three ways is three chances
- * for one of them to drift, and the drift would be silent — every branch agrees
- * with itself.
+ * Exported because more than one branch turned on it and each would otherwise
+ * spell it itself: `invite` requires one, and until #191 `provision` refused
+ * one (#341 AC 1) and the minting address preferred one. A predicate spelled
+ * more than one way is that many chances for a copy to drift, and the drift
+ * would be silent — every branch agrees with itself.
  */
 export function hasRealAddress(member: { email?: string | null }): boolean {
   return typeof member.email === 'string' && member.email.trim().length > 0
@@ -129,8 +132,14 @@ export const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-/** The four actions this endpoint takes. Exported so the test cannot drift from the refusal message. */
-export const ACTIONS = ['provision', 'invite', 'reset', 'revoke'] as const
+/**
+ * The three actions this endpoint takes. Exported so the test cannot drift from
+ * the refusal message. `provision` was the fourth until #191 removed it — an
+ * organizer can no longer create a sign-in at a credential they chose, and a
+ * request naming it is refused as unknown rather than answered with a reason,
+ * because there is no branch left to explain.
+ */
+export const ACTIONS = ['invite', 'reset', 'revoke'] as const
 
 export type Action = (typeof ACTIONS)[number]
 
@@ -153,14 +162,14 @@ export interface SupabaseLike {
   auth: {
     getUser(): Promise<{ data: { user: { id: string } | null } | null }>
     admin: {
-      createUser(attrs: {
-        email: string
-        password?: string
-        email_confirm?: boolean
-      }): Promise<{ data: { user: { id: string } | null } | null; error: any }>
+      // `createUser` was in this shape until #191. It is gone from the TYPE as
+      // well as from the code, so a branch that reached for it again would
+      // fail to compile rather than quietly mint; the test's fake still OFFERS
+      // it and records it, so "no account was created" stays an assertion
+      // about a client that could have.
       inviteUserByEmail(
         email: string,
-        options?: { redirectTo?: string },
+        options?: { redirectTo?: string; data?: Record<string, unknown> },
       ): Promise<{ data: { user: { id: string } | null } | null; error: any }>
       updateUserById(id: string, attrs: { password?: string }): Promise<{ error: any }>
       deleteUser(id: string): Promise<{ error: any }>
@@ -255,8 +264,9 @@ export function createHandler(deps: ProvisionMemberDeps) {
     // Supabase's own floor is 6. Stated here rather than left to the admin API so
     // the refusal is a sentence the organizer can act on. Revoke takes no
     // password: deleting a sign-in has no credential to set. Neither does invite
-    // — #341's whole point is that the organizer never chooses one.
-    const needsPassword = action === 'provision' || action === 'reset'
+    // — #341's whole point is that the organizer never chooses one. So the only
+    // action that takes one is the reset of a PIN account minted before #191.
+    const needsPassword = action === 'reset'
     if (needsPassword && password.length < 6) {
       return refuse('That credential is too short — use at least 6 characters.', 400)
     }
@@ -361,7 +371,8 @@ export function createHandler(deps: ProvisionMemberDeps) {
       // is load-bearing: `members_claimed_by_fkey` is ON DELETE SET NULL, so a
       // removal that dies between the halves leaves a member with "No sign-in
       // yet" — a state the roster renders and the organizer can recover from
-      // with Give a sign-in. The other order leaves an account that can still
+      // by inviting them again ("with Give a sign-in" until #191 retired the
+      // mint). The other order leaves an account that can still
       // sign in with no member row naming it, which is the orphan #247 is about.
       if (!member.claimed_by) {
         // Not reset's 409. Reset needs a target to act on; revoke's goal is an
@@ -441,7 +452,8 @@ export function createHandler(deps: ProvisionMemberDeps) {
 
     if (action === 'reset') {
       if (!member.claimed_by) {
-        return refuse('That person has no sign-in yet — provision one first.', 409)
+        // "provision one first" until #191; there is nothing to provision now.
+        return refuse('That person has no sign-in yet — invite them first.', 409)
       }
       const { error } = await asService.auth.admin.updateUserById(member.claimed_by, {
         password,
@@ -483,9 +495,23 @@ export function createHandler(deps: ProvisionMemberDeps) {
       }
 
       const address = member.email as string
+      // #191 AC 1 — the invitation is "personalised with the typed name". The
+      // name the organizer typed reaches the email as template data
+      // (`{{ .Data.invited_as }}` in the *Invite user* template, which is a
+      // dashboard edit and the owner's — `docs/deploy-runbook.md` §2). It is
+      // deliberately NOT the person's display name and the app never reads it
+      // back: the owner's decision is that the typed name personalises the
+      // email only, and the person names themselves at the password screen.
+      //
+      // PRECONDITION (review-fanout on #191, read off GoTrue's `invite.go`):
+      // `data` is applied only when the invite CREATES the account. A re-invite
+      // of a PENDING address — invited by another household, never accepted —
+      // returns the same user unchanged, so its metadata keeps the FIRST
+      // household's typed name and the second email renders that one. Template
+      // personalisation only; the person still names themselves on arrival.
       const { data: invited, error: inviteError } = await asService.auth.admin.inviteUserByEmail(
         address,
-        { redirectTo },
+        { redirectTo, data: { invited_as: member.display_name } },
       )
 
       if (inviteError || !invited?.user) {
@@ -493,9 +519,17 @@ export function createHandler(deps: ProvisionMemberDeps) {
           // AC 3. The organizer must NOT read this as "the email went" — that is
           // the whole reason this is a distinct sentence rather than a generic
           // failure, and it names the route out.
+          //
+          // The route is a CODE, since #173 — this said "Use Reset sign-in
+          // instead" from #341 until #191's review, which was wrong twice over:
+          // the row's control reads *Email an invitation* (its `claimed_by` is
+          // null, so every press lands here again), and a reset link would go
+          // to an account that belongs to another household's roster. An
+          // established account joins a second household by redeeming a code
+          // as itself (#173); this refusal is where an organizer learns that.
           return refuse(
             `${address} already has a Taskr sign-in, so no invitation was sent. ` +
-              'Use Reset sign-in instead.',
+              'Invite them with a code instead (Who tab, "Invite somebody by code") — they join as that account.',
             409,
           )
         }
@@ -546,74 +580,18 @@ export function createHandler(deps: ProvisionMemberDeps) {
       })
     }
 
-    // provision
-    if (member.claimed_by) {
-      // Not an error worth failing on silently — say which state we are in, so the
-      // organizer knows the answer is "use reset" rather than "try again".
-      return refuse('That person already has a sign-in — reset it instead.', 409)
-    }
-
-    // #341 AC 1 — a member with a REAL address is invited, never minted. The
-    // organizer choosing somebody else's password is the thing this story
-    // removes, and leaving the old path reachable for exactly the members it
-    // applies to would leave it reachable for everybody who matters.
+    // The `provision` branch stood here from #87 until #191 — read the member's
+    // address, coalesce to `syntheticAddressFor(member.id)`, `createUser` at a
+    // password the organizer typed with `email_confirm: true`, then claim the
+    // row. #341 had narrowed it to the email-less row ("only until #191 retires
+    // the ability to create one"), and #191 did: `addMember` requires an
+    // address, so no caller for this branch can exist and the whole action
+    // went, along with the password floor above for it and `createUser` from
+    // the client shape. An organizer never mints anybody's credential again.
     //
-    // IN BAND, because the criterion asks for it: this branch survives ONLY for
-    // an email-less row, and only until #191 retires the ability to create one.
-    // When #191 lands there is no member without an address, and with it no
-    // caller for this branch — at which point the whole `provision` action goes,
-    // along with the password floor above and this comment.
-    if (hasRealAddress(member)) {
-      return refuse(
-        `${member.display_name} has an email address, so they set their own password — ` +
-          'send them an invitation instead.',
-        409,
-      )
-    }
-
-    // A member with a REAL address signs in with it; one without gets the
-    // synthetic form. `member.email` is null for everybody the Edge Function
-    // provisions, which is exactly what 0007 says the column means.
-    //
-    // The coalesce is kept rather than simplified to the synthetic form, even
-    // though the refusal above means only the right-hand side can now be
-    // reached. Removing it would make this line agree with the guard by
-    // accident: `gate.test.js`'s #242 block reads this source for
-    // `member.email ??` precisely because the roster's displayed address and the
-    // minted one have to be the same rule, and that rule is still true — what
-    // changed is which action applies it.
-    const address = member.email ?? syntheticAddressFor(member.id)
-
-    const { data: created, error: createError } = await asService.auth.admin.createUser({
-      email: address,
-      password,
-      // No inbox exists for a synthetic address, so a confirmation mail could
-      // never be answered. Confirming at creation is the only workable state.
-      email_confirm: true,
-    })
-    if (createError || !created?.user) {
-      return refuse(`Could not create that sign-in: ${createError?.message ?? 'unknown'}`, 400)
-    }
-
-    const { error: claimError } = await asService
-      .from('members')
-      .update({ claimed_by: created.user.id })
-      .eq('id', member.id)
-
-    if (claimError) {
-      // The auth user exists but is attached to nobody. Roll it back rather than
-      // leaving an orphan that makes the next provision fail on a duplicate
-      // address with no way for the organizer to see why.
-      await asService.auth.admin.deleteUser(created.user.id)
-      return refuse('Could not attach that sign-in to the person.', 400)
-    }
-
-    return json({
-      ok: true,
-      action: 'provision',
-      memberId: member.id,
-      email: address,
-      claimedBy: created.user.id,
-    })
+    // Unreachable: `ACTIONS` was checked at the top and every action above has
+    // returned. TypeScript still wants an ending return, and the same refusal
+    // the unknown-action guard gives is the honest one — never a silent 200.
+    return refuse(`action must be ${ACTIONS.map((a) => `"${a}"`).join(', ')}.`, 400)
   }
 }

@@ -13,7 +13,6 @@ import {
   listHouseholds,
   inviteMember,
   listMembers,
-  provisionMember,
   readAuthCallback,
   readSignInReturn,
   removeMember,
@@ -1382,26 +1381,26 @@ export default function App() {
       ),
     [mutate, handleLeaveHousehold],
   )
-  // #87 - give somebody a sign-in, or replace one they forgot. Routed through
-  // mutate() like every other write, so the roster re-reads from the server and
-  // the row's "Signed in" state comes from `claimed_by` rather than from an
-  // optimistic local guess about whether the Edge Function succeeded.
-  const handleProvision = useCallback(
-    (memberId, password, isReset) =>
-      mutate(() =>
-        isReset
-          ? resetMemberCredential({ memberId, password })
-          : provisionMember({ memberId, password }),
-      ),
+  // #87 - replace the PIN of an account minted before #191. This handler used
+  // to give a sign-in as well (`isReset ? reset : provision`); #191 AC 3
+  // removed the create-a-sign-in action from the Edge Function and this is
+  // the client path that invoked it, so the branch went with it and the name
+  // followed — a handler called `handleProvision` that could no longer
+  // provision would be the misleading-name shape this file avoids. Routed
+  // through mutate() like every other write, so the roster re-reads from the
+  // server rather than guessing whether the Edge Function succeeded.
+  const handleResetPin = useCallback(
+    (memberId, password) => mutate(() => resetMemberCredential({ memberId, password })),
     [mutate],
   )
   /**
    * Email somebody an invitation instead of choosing their password — #341 AC 1.
    *
-   * Beside `handleProvision` rather than folded into it, because the two are no
-   * longer variants of one act. Provision takes a credential the organizer typed
-   * and reaches the roster's own screen; this takes nothing, and what it changes
-   * is in somebody else's inbox.
+   * Beside `handleResetPin` (which was `handleProvision` until #191) rather
+   * than folded into it, because the two are not variants of one act. The PIN
+   * reset takes a credential the organizer typed and reaches the roster's own
+   * screen; this takes nothing, and what it changes is in somebody else's
+   * inbox. Since #191 it is also what the Add form calls after a row lands.
    */
   const handleInvite = useCallback(
     (memberId) => mutate(() => inviteMember({ memberId })),
@@ -1435,9 +1434,23 @@ export default function App() {
    * The error is deliberately left set when the write fails: the screen stays,
    * because a password that was not set is a person who cannot sign in again if
    * they leave.
+   *
+   * #191 AC 2 — THE PERSON NAMES THEMSELVES, on the email path as on the code
+   * path. The organizer's typed name is on the row when the invitation goes
+   * out (there is no other place to hold it; `members.display_name` is not
+   * null), and the owner's decision is that it personalises the email only.
+   * So an invite arrival carries a name from the screen, and it is written
+   * AFTER the password, in that order on purpose: the password is the thing
+   * that lets them back in, and a name that failed to save is recoverable from
+   * the Who tab while a password that failed to set is not. The write goes
+   * through `mutate()` — the ordinary `updateMember` grant, #173's shape — so
+   * the roster re-reads under the person with the name they chose; a refused
+   * rename keeps the password and says so, in #173's words. The row is found
+   * as `me`: the invite action set `claimed_by` to this session's user before
+   * the email went, and boot loaded the household underneath this screen.
    */
   const handleChoosePassword = useCallback(
-    async (password) => {
+    async (password, name) => {
       setBusy(true)
       setError(null)
       try {
@@ -1449,8 +1462,27 @@ export default function App() {
       } finally {
         setBusy(false)
       }
+      const chosen = String(name ?? '').trim()
+      if (!chosen) return
+      // Resolved here rather than from the `me` the render derives further
+      // down, which is declared after this callback and would be read in its
+      // temporal dead zone from the dependency list. Same rule, same inputs.
+      const mine = findClaimedMember(members, userId, household?.id)
+      if (!mine) {
+        setError(
+          'Your password is set, but your name could not be saved because your row was not found. Edit it from your row on the Who tab.',
+        )
+        return
+      }
+      try {
+        await mutate(() => updateMember(mine.id, { displayName: chosen }))
+      } catch (err) {
+        setError(
+          `Your password is set, but your name could not be saved (${err.message}). Edit it from your row on the Who tab.`,
+        )
+      }
     },
-    [setBusy, setError],
+    [setBusy, setError, members, userId, household, mutate],
   )
 
   const handleRefresh = useCallback(() => mutate(async () => {}), [mutate])
@@ -2466,7 +2498,14 @@ export default function App() {
       <main className="shell">
         <ChoosePassword
           type={authCallback.type}
-          busy={busy}
+          // `status === 'loading'` too, since #191 (review-fanout): the name
+          // write resolves the person's row from `members`/`userId`, which boot
+          // is still loading underneath this screen — ~6–7 s on Slow 4G — and a
+          // submit inside that window set the password and dropped the name.
+          // Boot never sets `busy`, so this is the one signal that the row is
+          // there to rename. A failed boot ('failed') leaves the button live:
+          // the password is still the thing that lets them back in.
+          busy={busy || status === 'loading'}
           onChoose={handleChoosePassword}
         />
         {error ? (
@@ -2701,7 +2740,7 @@ export default function App() {
           onAdd={handleAdd}
           onSave={handleSave}
           onRemove={handleRemove}
-          onProvision={handleProvision}
+          onResetPin={handleResetPin}
           onInvite={handleInvite}
           onSendReset={handleSendReset}
           onRefresh={handleRefresh}

@@ -39,7 +39,8 @@ export function entryStateFor({ session, household }) {
 // WHY THE ACCOUNT AND THE HOUSEHOLD ARE TWO SUBMITS. The organizer's own
 // account is created with `signUp`, which is the one signup a client is
 // allowed to do, because the account being created is the caller's own
-// (everybody else is provisioned server-side — see the roster screen). Until
+// (everybody else is INVITED from the roster and sets their own — #341, and
+// #191 made that the only way in; nobody is provisioned server-side now). Until
 // #154 that signup and `create_household` ran inside ONE submit, and the pair
 // could only ever succeed on a project with email confirmation OFF. The live
 // project has it ON (`mailer_autoconfirm: false`, measured 2026-08-26), so

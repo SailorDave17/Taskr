@@ -72,6 +72,26 @@ describe('planReassignment — a member leaving (#431)', () => {
     expect(plan(chores, null).placements.map((p) => p.chore_id)).toEqual(['c3'])
   })
 
+  it('deals nothing to the leaver even when every tie would go to them', () => {
+    // The leaver here sorts FIRST (m-alex), so a planner that left them among
+    // the members would win every tie for them. The first test cannot see
+    // that: its leaver, m-sam, sorts last and loses every tie by accident
+    // (review-fanout, 2026-09-11).
+    const chores = [row('c1', 30, { holder: 'm-alex', source: 'auto' }), row('c2', 20)]
+    const { placements } = plan(chores, 'm-alex')
+    expect(placements).toHaveLength(2)
+    expect(placements.map((p) => p.member_id)).not.toContain('m-alex')
+  })
+
+  it('counts no churn for the work taken off the leaver', () => {
+    // What the missing incumbent actually changes (see the docblock): with the
+    // leaver entered as the previous holder, both chores would count as moved.
+    const chores = [row('c1', 60, { holder: 'm-sam', source: 'auto' }), row('c2', 40, { holder: 'm-sam', source: 'auto' })]
+    const { verdict } = plan(chores, 'm-sam')
+    expect(verdict.jobsMoved).toBe(0)
+    expect(verdict.minutesMoved).toBe(0)
+  })
+
   it('changes nothing about anybody else’s chores that a plain re-deal would not', () => {
     const chores = [row('c1', 30, { holder: 'm-alex', source: 'manual' }), row('c2', 20, { holder: 'm-robin', source: 'auto' })]
     expect(plan(chores, 'm-sam').placements).toEqual(plan(chores, null).placements)

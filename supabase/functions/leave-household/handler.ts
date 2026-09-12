@@ -23,12 +23,21 @@
 //      token for can never be revoked. If the tokens cannot be READ, nothing
 //      happens and the person is told to try again: unlike the purge, which
 //      retries tomorrow, a leave is somebody standing there, and leaving anyway
-//      would orphan the grant.
+//      would orphan the grant. A revoke Google REFUSES or cannot be reached
+//      does not stop the leave (calendar-disconnect's reason: it is usually a
+//      grant already gone), but the response says so — `revokeFailed` —
+//      because after the leave Taskr holds nothing that could try again, and
+//      #99 decided that state gets a sentence (review-fanout, 2026-09-11).
 //   3. `leave_household`, AS THE CALLER.
 //   4. Delete their login if this household was its last claim (#262's rule).
 //      Last, because deleting the account first would leave nobody to call
 //      step 3 as. A failure here is reported as a warning, not an error: the
 //      person HAS left, and saying otherwise invites a retry that cannot work.
+//
+// A HOUSEHOLD PENDING DELETION answers 403, like one the caller was never in:
+// the member read below asks row-level security, which asks the helper 0042
+// patched. Deliberate — the reasoning is in 0043's header (owner decision at
+// #431's review, 2026-09-11).
 //
 // COUNTS ONLY in the response: no token and no other person is named.
 
@@ -166,14 +175,20 @@ export function createHandler(deps: LeaveHouseholdDeps) {
     })
     if (tokenError) {
       return refuse(
-        'Could not check your calendar connection, so nothing was changed. Try leaving again.',
+        'Could not check your calendar connection, so you are still in the household. Try leaving again.',
         503,
       )
     }
+    // `attempted` beside `revoked`, so a refused or unreachable revoke is not
+    // read as "there was nothing to revoke" — see the header.
+    let attempted = 0
     let revoked = 0
     for (const token of tokens ?? []) {
-      if (token?.refresh_token && (await revokeAtGoogle(deps, token.refresh_token))) revoked++
+      if (!token?.refresh_token) continue
+      attempted++
+      if (await revokeAtGoogle(deps, token.refresh_token)) revoked++
     }
+    const revokeFailed = revoked < attempted
 
     // 3. The leave itself, as the caller.
     const { error: leaveError } = await asCaller.rpc('leave_household', { household_id: householdId })
@@ -188,15 +203,15 @@ export function createHandler(deps: LeaveHouseholdDeps) {
       .eq('claimed_by', callerId)
       .limit(1)
     if (othersError) {
-      return json({ ok: true, left: true, revoked, accountDeleted: false, warning: ACCOUNT_NOT_DELETED })
+      return json({ ok: true, left: true, revoked, revokeFailed, accountDeleted: false, warning: ACCOUNT_NOT_DELETED })
     }
     if ((others ?? []).length > 0) {
-      return json({ ok: true, left: true, revoked, accountDeleted: false, kept: 'claimed-elsewhere' })
+      return json({ ok: true, left: true, revoked, revokeFailed, accountDeleted: false, kept: 'claimed-elsewhere' })
     }
     const { error: deleteError } = await asService.auth.admin.deleteUser(callerId)
     if (deleteError) {
-      return json({ ok: true, left: true, revoked, accountDeleted: false, warning: ACCOUNT_NOT_DELETED })
+      return json({ ok: true, left: true, revoked, revokeFailed, accountDeleted: false, warning: ACCOUNT_NOT_DELETED })
     }
-    return json({ ok: true, left: true, revoked, accountDeleted: true })
+    return json({ ok: true, left: true, revoked, revokeFailed, accountDeleted: true })
   }
 }

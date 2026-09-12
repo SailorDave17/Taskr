@@ -656,7 +656,10 @@ half turns out not to be worth its days.
   **Amended 2026-09-11, #431 — leaving now revokes the Google grant.** The owner reversed this
   bullet on #427: every way out — leaving, deleting a household (#430), deleting an account (#432) —
   revokes server-side, before any token row goes. Leaving goes through the `leave-household` Edge
-  Function, which revokes the leaver's grant and only then calls `leave_household` (`0043`). One
+  Function, which revokes the leaver's grant and only then calls `leave_household` (`0043`). The
+  revoke is still best-effort: one Google refuses or cannot be reached does not stop the leave, and
+  since the token row goes with it nothing could retry, so the leaver is told with #99's sentence
+  (added at #431's review, 2026-09-11). One
   exception, carried from #430's review: a person still connected in another household keeps their
   grant, because one Google account holds one grant with Taskr's OAuth client and revoking it would
   break that household's calendar. The coupling the original bullet avoided — an irreversible

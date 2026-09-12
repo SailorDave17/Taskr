@@ -80,9 +80,12 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  *   the change budget to move (#41, #49 AC 3).
  * - #431 — the member LEAVING (`leavingMemberId`) is dealt nothing. They are
  *   left out of the members; their open auto chores are freed with NO
- *   incumbent, because the stability rule must not prefer somebody who is
- *   going, nor charge the change budget to move work off them (a bound budget
- *   would leave it on a person who no longer exists); and what they finished or
+ *   incumbent. The allocator would not keep work on somebody it was not given
+ *   anyway — an incumbent must still be a candidate (allocation.js) — so what
+ *   the missing incumbent changes is the CHURN: work taken off a person who is
+ *   going is not a move the verdict should count. (This said the budget could
+ *   bind work to the leaver until #431's review-fanout found the allocator's
+ *   guard, 2026-09-11.) What they finished or
  *   placed by hand is DROPPED rather than pinned — the allocator throws on a
  *   pin to a member it was not given, and their hand-placed chores are released
  *   by the leave itself (the member row's foreign key sets the holder to null)

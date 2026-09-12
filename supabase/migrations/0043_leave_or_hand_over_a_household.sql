@@ -24,6 +24,23 @@
 -- it. The re-deal of the leaver's chores runs in the browser BEFORE the leave
 -- (owner decision on #431), because afterwards the leaver can no longer run it.
 --
+-- A household PENDING DELETION cannot be left (owner decision at #431's review,
+-- 2026-09-11). Leaving asks `acting_member`, which 0042 patched so that a
+-- pending household is nobody's, so the exit inherits the entrance's refusal —
+-- deliberately, and this is why: the household is already going. When the
+-- grace period ends the purge revokes every grant and deletes every sign-in that
+-- claims nothing else, so a member is out by then without doing anything. The
+-- cost, accepted: somebody who wants out sooner waits, and is back in if the
+-- organizer restores it.
+--
+-- Leaving and handing over serialise on the household row (review-fanout,
+-- 2026-09-11). `leave_household` locks it before asking whether the caller
+-- organizes, and `transfer_household`'s UPDATE needs the same row, so a
+-- hand-over racing a leave either lands first — and the leave then refuses the
+-- new organizer — or waits, and then fails its foreign key on the member row
+-- the leave deleted. Without the lock the two could interleave into a household
+-- with no organizer: 0016's dead end.
+--
 -- Re-runnable: `create or replace`, and grants and revokes, which are idempotent.
 
 -- ---------------------------------------------------------------------------
@@ -51,6 +68,10 @@ begin
   if leaving is null then
     raise exception 'you are not a member of that household';
   end if;
+
+  -- Serialise with transfer_household — see the header. Taken BEFORE the
+  -- organizer check, so the check reads a hand-over that committed first.
+  perform 1 from public.households h where h.id = leave_household.household_id for update;
 
   -- The organizer first hands the household over or deletes it (#430). Leaving
   -- as the organizer would set organizer_member_id to NULL and end the

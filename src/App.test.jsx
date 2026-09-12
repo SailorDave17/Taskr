@@ -8113,4 +8113,45 @@ describe('leaving a household, from App (#431)', () => {
     const removed = callOrder(api.removeMember, () => true)
     expect(removed).toBeLessThan(reassignApi.reassignHousehold.mock.invocationCallOrder.at(-1))
   })
+
+  // The four below are #431's review-fanout (2026-09-11).
+  it('reports a removal as done when only its re-deal fails, and keeps the sign-in warning (#247)', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, { ...signedInOther, claimed_by: null }])
+    api.removeMember.mockResolvedValue({ warning: 'Their sign-in was not deleted.' })
+    reassignApi.reassignHousehold.mockRejectedValue(new Error('re-deal refused'))
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/sign-in was not deleted/)
+    expect(alert).toHaveTextContent(/They were removed, but their chores were not dealt to the others: re-deal refused/)
+    expect(api.removeMember).toHaveBeenCalledTimes(1)
+  })
+
+  it('says the chores already went when the leave fails after the re-deal, and re-reads', async () => {
+    api.leaveHousehold.mockRejectedValue(new Error('Could not reach the leave service, so you are still in the household.'))
+    await renderApp('Who')
+    const readsBefore = api.listMembers.mock.calls.length
+    await leave()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/your open chores went to the others, but you have not left yet/i)
+    expect(alert).not.toHaveTextContent(/nothing was changed/i)
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('tells the leaver when Google did not confirm the revoke, signed out or not (#99)', async () => {
+    api.leaveHousehold.mockResolvedValue({ accountDeleted: true, warning: null, revokeFailed: true })
+    await renderApp('Who')
+    await leave()
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    expect(await screen.findByText(/Google may still list Taskr/)).toBeInTheDocument()
+  })
+
+  it('says nothing about Google when the revoke went through', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Google may still list Taskr/)).toBeNull()
+  })
 })

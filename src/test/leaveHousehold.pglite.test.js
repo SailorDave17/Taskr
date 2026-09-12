@@ -203,18 +203,26 @@ describe('leaving and handing over a household, run against a real Postgres (#43
           'Placeholder Other Household',
           'Placeholder Other Organizer',
         ])
-        return rows[0].id
+        return rows[0]
       })
       const { rows: elsewhere } = await db.query(
         `insert into public.members (household_id, display_name, weekly_minutes, claimed_by)
          values ($1, 'Placeholder One', 60, $2) returning id`,
-        [staying, member],
+        [staying.id, member],
       )
       await connect(household, memberRowId, 'token-member-here')
-      await connect(staying, elsewhere[0].id, 'token-member-elsewhere')
+      await connect(staying.id, elsewhere[0].id, 'token-member-elsewhere')
+      // Everybody else's grants exist at BOTH assertions — one in this
+      // household, one in the other. Without them a read of every token in the
+      // table looks exactly like a read of the leaver's, and the function's
+      // `t.member_id = …` clause could be deleted on a green suite
+      // (review-fanout, 2026-09-11).
+      await connect(household, organizerRowId, 'token-organizer-here')
+      await connect(staying.id, staying.organizer_member_id, 'token-outsider-elsewhere')
       expect(await offered(memberRowId)).toEqual([])
-      // POSITIVE CONTROL: once the other connection goes, the grant here is offered.
-      await db.query('delete from public.calendar_tokens where household_id = $1', [staying])
+      // POSITIVE CONTROL: once the leaver's other connection goes, the grant
+      // here is offered — and only it.
+      await db.query('delete from public.calendar_tokens where member_id = $1', [elsewhere[0].id])
       expect(await offered(memberRowId)).toEqual(['token-member-here'])
     })
   })
@@ -229,6 +237,22 @@ describe('leaving and handing over a household, run against a real Postgres (#43
     expect(sql).toMatch(
       /^revoke all on function public\.member_tokens_to_revoke\(uuid\) from public, anon, authenticated;/m,
     )
+  })
+
+  it('locks the household row before asking whether the caller organizes, so a racing hand-over cannot orphan it', () => {
+    // One pglite connection cannot run two transactions at once, so the race
+    // itself is not reproducible here; the ORDER that prevents it is. The
+    // interleaving it closes is in 0043's header (review-fanout, 2026-09-11).
+    const sql = blankSqlComments(migrationSql(FILE))
+    const body = sql.slice(
+      sql.indexOf('create or replace function public.leave_household'),
+      sql.indexOf('create or replace function public.transfer_household'),
+    )
+    const lock = body.search(/from public\.households h where h\.id = leave_household\.household_id for update;/)
+    const check = body.indexOf('public.is_household_organizer(leave_household.household_id)')
+    expect(lock).toBeGreaterThan(-1)
+    expect(check).toBeGreaterThan(-1)
+    expect(lock).toBeLessThan(check)
   })
 
   it('re-applying the file changes nothing', async () => {

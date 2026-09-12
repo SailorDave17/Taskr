@@ -176,6 +176,7 @@ const {
   normalizeMemberEmail,
   normalizeMinutes,
   inviteMember,
+  leaveHousehold,
   provisionMember,
   readAuthCallback,
   readSignInReturn,
@@ -1514,5 +1515,59 @@ describe('#341 — the invitation path, at the data layer', () => {
       expect(readAuthCallback(arrived)).toEqual({ type: 'invite' })
       expect(readSignInReturn({ ...arrived, search: '' })).toBeNull()
     })
+  })
+})
+
+describe('leaveHousehold — the client half of #431', () => {
+  // Added at #431's review (2026-09-11): App mocked this function whole, so how
+  // a leave's answer is READ was tested nowhere — and reading `accountDeleted`
+  // wrong signs out somebody whose sign-in survived.
+  it('calls the leave function with the household, and nothing else', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: false }, error: null }
+    await leaveHousehold('h1')
+    // The function's name is asserted through `.name`, not as a `name:` key:
+    // #19's gate reads every literal under a `name` key as a person's name.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ op: 'invoke', body: { householdId: 'h1' } })
+    expect(Object.keys(calls[0].body)).toEqual(['householdId'])
+    expect(calls[0].name).toBe('leave-household')
+  })
+
+  it('reports the account deleted only when the function says so, exactly', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: true }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: true })
+    invokeResult = { data: { ok: true, accountDeleted: false, kept: 'claimed-elsewhere' }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: false })
+    invokeResult = { data: { ok: true, accountDeleted: 'yes' }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: false })
+  })
+
+  it('passes the surviving-sign-in warning and a failed revoke through', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: false, warning: 'kept', revokeFailed: true }, error: null }
+    expect(await leaveHousehold('h1')).toEqual({ accountDeleted: false, warning: 'kept', revokeFailed: true })
+    invokeResult = { data: { ok: true, accountDeleted: true }, error: null }
+    expect(await leaveHousehold('h1')).toEqual({ accountDeleted: true, warning: null, revokeFailed: false })
+  })
+
+  it("passes the leave function's own refusal through verbatim", async () => {
+    const refusal = 'The organizer cannot leave. Hand the household over or delete it first.'
+    invokeResult = { data: null, error: httpError({ error: refusal }) }
+    await expect(leaveHousehold('h1')).rejects.toThrow(refusal)
+  })
+
+  it('says they are still in the household when the request never got an answer — never "nothing was changed"', async () => {
+    // By the time this call is made the app has already re-dealt the leaver's
+    // chores, so the provisioning sentence would be false here.
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await leaveHousehold('h1').then(() => null, (err) => err)
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    expect(thrown.message).toMatch(/still in the household/)
+    expect(thrown.message).toMatch(/leave-household/)
+    expect(thrown.message).not.toMatch(/nothing was changed/i)
+  })
+
+  it('refuses to call the function without a household', async () => {
+    await expect(leaveHousehold('')).rejects.toThrow(/which household/i)
+    expect(calls).toEqual([])
   })
 })

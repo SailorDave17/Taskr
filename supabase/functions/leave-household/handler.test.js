@@ -147,7 +147,11 @@ describe('who may call leave-household (#431)', () => {
     await handle(post({ householdId: 'household-1', memberId: 'member-b', userId: 'auth-b' }))
     const read = log.find(([role, kind, table]) => role === 'caller' && kind === 'select' && table === 'members')
     expect(read[3]).toBe('claimed_by=auth-a household_id=household-1')
-    expect(log.some(([, , a, b]) => a === 'auth-b' || b === 'auth-b')).toBe(false)
+    expect(log.find(([, , fn]) => fn === 'member_tokens_to_revoke')[3]).toEqual({ member_id: 'member-a' })
+    // Every entry, RPC arguments included: a member id taken from the body would
+    // show up only there (review-fanout, 2026-09-11 — the old check read two
+    // positional fields and would have passed `member_id: body.memberId`).
+    expect(JSON.stringify(log)).not.toMatch(/member-b|auth-b/)
   })
 
   it('refuses the organizer before revoking anything — they hand it over or delete it first', async () => {
@@ -174,7 +178,7 @@ describe('what leaving does, in what order (#431)', () => {
       'service deleteUser auth-a',
     ])
     expect(log.find(([, kind]) => kind === 'revoke')[2]).toBe(GOOGLE_REVOKE_ENDPOINT)
-    expect(await response.json()).toEqual({ ok: true, left: true, revoked: 1, accountDeleted: true })
+    expect(await response.json()).toEqual({ ok: true, left: true, revoked: 1, revokeFailed: false, accountDeleted: true })
   })
 
   it('asks about the tokens of the leaver\'s own member row, and leaves the household the body named', async () => {
@@ -195,12 +199,19 @@ describe('what leaving does, in what order (#431)', () => {
     expect(kinds(log)).toContain('service rpc member_tokens_to_revoke')
   })
 
-  it('still leaves when Google refuses or cannot be reached — a refused revoke is usually a grant already gone', async () => {
+  it('still leaves when Google refuses or cannot be reached, and says so — the leave takes the token with it', async () => {
     for (const googleOk of [false, 'throw']) {
       const { handle } = harness(script(), { googleOk })
       const body = await (await handle(post())).json()
-      expect(body, String(googleOk)).toMatchObject({ left: true, revoked: 0, accountDeleted: true })
+      expect(body, String(googleOk)).toMatchObject({ left: true, revoked: 0, revokeFailed: true, accountDeleted: true })
     }
+  })
+
+  it('says no revoke failed when there was no grant to revoke — the state the count alone could not tell apart', async () => {
+    const { handle, fetch } = harness(script({ tokens: [] }))
+    const body = await (await handle(post())).json()
+    expect(body).toMatchObject({ left: true, revoked: 0, revokeFailed: false })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('keeps a login that still claims another household (#262)', async () => {

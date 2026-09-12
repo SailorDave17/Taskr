@@ -1288,14 +1288,29 @@ export default function App() {
   // #431 AC 4 — a removal re-deals, through the same run a capacity change
   // triggers. Until #431 nothing did: the removed member's chores were left
   // unassigned (0006's set null) until the next capacity change came along.
+  // The re-deal runs AFTER the removal has committed, and its failure is a
+  // warning of its own: #247's rule — a removal is never reported as failed,
+  // which would invite a retry that finds no row and so no warning — holds,
+  // and the sign-in warning shows either way (review-fanout, 2026-09-11).
   const handleRemove = useCallback(
     (id) =>
       mutate(async () => {
         const result = await removeMember(id)
-        await reassignHousehold({ householdId: household?.id })
-        return result
+        try {
+          await reassignHousehold({ householdId: household?.id })
+          return result
+        } catch (err) {
+          return { ...result, redealFailure: err.message }
+        }
       }).then((result) => {
-        if (result?.warning) setError(result.warning)
+        const notes = [
+          result?.warning,
+          result?.redealFailure
+            ? `They were removed, but their chores were not dealt to the others: ${result.redealFailure}. ` +
+              'Deal these out on the Split tab to try again.'
+            : null,
+        ].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
         return result
       }),
     [mutate, household],
@@ -1324,7 +1339,17 @@ export default function App() {
     (householdId, leavingMemberId) =>
       mutate(async () => {
         await reassignHousehold({ householdId, leavingMemberId })
-        const result = await leaveHousehold(householdId)
+        let result
+        try {
+          result = await leaveHousehold(householdId)
+        } catch (err) {
+          // The re-deal has committed, so "nothing was changed" is no longer
+          // true: say what did change, and re-read so the screen shows it,
+          // since mutate skips its own re-read on a throw (review-fanout,
+          // 2026-09-11).
+          await requestRefresh().catch(() => {})
+          throw new Error(`Your open chores went to the others, but you have not left yet: ${err.message}`)
+        }
         activeIdRef.current = null
         choiceEpochRef.current += 1
         clearActiveHouseholdChoice()
@@ -1337,10 +1362,14 @@ export default function App() {
         }
         return result
       }).then((result) => {
-        if (result?.warning) setError(result.warning)
+        // A surviving sign-in, and a revoke Google did not confirm (#99's
+        // sentence): both are true of a leave that SUCCEEDED, so neither is an
+        // error, and the second must reach a device that has just signed out.
+        const notes = [result?.warning, result?.revokeFailed ? revokeNoteFor({ revoked: false }) : null].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
         return result
       }),
-    [mutate],
+    [mutate, requestRefresh],
   )
   // #431 — the organizer's way out that keeps the household: hand it over, then
   // leave as an ordinary member. Two writes, and the first is safe alone — an

@@ -29,7 +29,9 @@ import {
   // #430 — deleting and restoring a household.
   GRACE_PERIOD_DAYS,
   householdDeletionStatus,
+  leaveHousehold,
   requestHouseholdDeletion,
+  transferHousehold,
   restoreHousehold,
 } from './lib/household.js'
 import {
@@ -1283,13 +1285,35 @@ export default function App() {
   // AFTER mutate() resolves, i.e. after the refresh, so the screen never shows
   // the person still listed under a message saying they were removed — and the
   // removal itself is never reported as a failure, which would invite a retry.
+  // #431 AC 4 — a removal re-deals, through the same run a capacity change
+  // triggers. Until #431 nothing did: the removed member's chores were left
+  // unassigned (0006's set null) until the next capacity change came along.
+  // The re-deal runs AFTER the removal has committed, and its failure is a
+  // warning of its own: #247's rule — a removal is never reported as failed,
+  // which would invite a retry that finds no row and so no warning — holds,
+  // and the sign-in warning shows either way (review-fanout, 2026-09-11).
   const handleRemove = useCallback(
     (id) =>
-      mutate(() => removeMember(id)).then((result) => {
-        if (result?.warning) setError(result.warning)
+      mutate(async () => {
+        const result = await removeMember(id)
+        try {
+          await reassignHousehold({ householdId: household?.id })
+          return result
+        } catch (err) {
+          return { ...result, redealFailure: err.message }
+        }
+      }).then((result) => {
+        const notes = [
+          result?.warning,
+          result?.redealFailure
+            ? `They were removed, but their chores were not dealt to the others: ${result.redealFailure}. ` +
+              'Deal these out on the Split tab to try again.'
+            : null,
+        ].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
         return result
       }),
-    [mutate],
+    [mutate, household],
   )
   // #430 — delete and restore a household. Both through mutate, so the list
   // is re-read and the shell lands on onboarding when the last household
@@ -1302,6 +1326,61 @@ export default function App() {
   const handleRestoreHousehold = useCallback(
     (id) => mutate(() => restoreHousehold(id)).then(refreshPendingDeletions),
     [mutate, refreshPendingDeletions],
+  )
+  // #431 — leaving. Re-deal FIRST with the leaver left out (owner decision:
+  // once they have left, their app can no longer run it), then leave through
+  // the Edge Function. The leaver's member id comes from the Roster, which has
+  // "me"; App derives "me" further down, too late for a dependency list. The
+  // remembered household goes either way, and when this was their last
+  // household their sign-in went with it, so this device signs out the way
+  // handleSignOut does. A sign-in that survived is a warning set after the
+  // re-read, like a removal's (#247) — they HAVE left.
+  const handleLeaveHousehold = useCallback(
+    (householdId, leavingMemberId) =>
+      mutate(async () => {
+        await reassignHousehold({ householdId, leavingMemberId })
+        let result
+        try {
+          result = await leaveHousehold(householdId)
+        } catch (err) {
+          // The re-deal has committed, so "nothing was changed" is no longer
+          // true: say what did change, and re-read so the screen shows it,
+          // since mutate skips its own re-read on a throw (review-fanout,
+          // 2026-09-11).
+          await requestRefresh().catch(() => {})
+          throw new Error(`Your open chores went to the others, but you have not left yet: ${err.message}`)
+        }
+        activeIdRef.current = null
+        choiceEpochRef.current += 1
+        clearActiveHouseholdChoice()
+        if (result.accountDeleted) {
+          await signOut({ everywhere: false }).catch(() => {})
+          setMinted(null)
+          clearPendingInvitation()
+          setHeldInvitation(false)
+          setPendingDeletions([])
+        }
+        return result
+      }).then((result) => {
+        // A surviving sign-in, and a revoke Google did not confirm (#99's
+        // sentence): both are true of a leave that SUCCEEDED, so neither is an
+        // error, and the second must reach a device that has just signed out.
+        const notes = [result?.warning, result?.revokeFailed ? revokeNoteFor({ revoked: false }) : null].filter(Boolean)
+        if (notes.length) setError(notes.join(' '))
+        return result
+      }),
+    [mutate, requestRefresh],
+  )
+  // #431 — the organizer's way out that keeps the household: hand it over, then
+  // leave as an ordinary member. Two writes, and the first is safe alone — an
+  // organizer who handed over and then failed to leave is a member who can try
+  // leaving again.
+  const handleHandOverAndLeave = useCallback(
+    (householdId, toMemberId, leavingMemberId) =>
+      mutate(() => transferHousehold(householdId, toMemberId)).then(() =>
+        handleLeaveHousehold(householdId, leavingMemberId),
+      ),
+    [mutate, handleLeaveHousehold],
   )
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
@@ -2630,6 +2709,9 @@ export default function App() {
           // #430 — the organizer's "Delete this household".
           onDeleteHousehold={handleDeleteHousehold}
           deletionGraceDays={GRACE_PERIOD_DAYS}
+          // #431 — leaving, and the organizer's hand-over.
+          onLeaveHousehold={handleLeaveHousehold}
+          onHandOverAndLeave={handleHandOverAndLeave}
           // #166 — the affordance that did not exist. Owner decision at pickup:
           // its own card on this surface rather than an entry inside the
           // switcher or a second control on the shell row, because the shell

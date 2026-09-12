@@ -76,6 +76,11 @@ export const FUNCTION_NAMES = Object.freeze([
   // exchange from `calendar-busy/handler.ts` — so `check:deployed` walks that
   // import and reads a change to either file as this function going stale.
   'calendar-events',
+  // #431. Leaving a household: revokes the leaver's Google grant, calls
+  // `leave_household` (0043) as them, and deletes their sign-in where that was
+  // its last claim. Needs no secret beyond the three Supabase injects — Google's
+  // revocation endpoint takes the token alone, as `calendar-disconnect`'s does.
+  'leave-household',
 ])
 
 /**

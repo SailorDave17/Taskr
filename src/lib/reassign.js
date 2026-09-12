@@ -78,6 +78,18 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  * - Every other open chore is FREED, and its current holder (if any) enters
  *   `previous` — the incumbent the stability rule prefers on ties and charges
  *   the change budget to move (#41, #49 AC 3).
+ * - #431 — the member LEAVING (`leavingMemberId`) is dealt nothing. They are
+ *   left out of the members; their open auto chores are freed with NO
+ *   incumbent. The allocator would not keep work on somebody it was not given
+ *   anyway — an incumbent must still be a candidate (allocation.js) — so what
+ *   the missing incumbent changes is the CHURN: work taken off a person who is
+ *   going is not a move the verdict should count. (This said the budget could
+ *   bind work to the leaver until #431's review-fanout found the allocator's
+ *   guard, 2026-09-11.) What they finished or
+ *   placed by hand is DROPPED rather than pinned — the allocator throws on a
+ *   pin to a member it was not given, and their hand-placed chores are released
+ *   by the leave itself (the member row's foreign key sets the holder to null)
+ *   for the next re-deal. Owner decision on #431: re-deal first, then leave.
  *
  * `placements` covers exactly the freed set: whom each chore landed on, or null
  * where nobody is eligible (#49 AC 5) — the flagged unassigned state the
@@ -91,8 +103,17 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  * the budget verdict depends on the state the run replaced — which is exactly
  * why it travels with the result instead of being derived again elsewhere.
  */
-export function planReassignment({ members, chores, exclusions, overrides, periodStart }) {
-  const capacities = capacitiesFor(members, overrides, periodStart)
+export function planReassignment({
+  members,
+  chores,
+  exclusions,
+  overrides,
+  periodStart,
+  leavingMemberId = null,
+}) {
+  // #431 — see the docblock.
+  const staying = leavingMemberId == null ? members : members.filter((m) => m.id !== leavingMemberId)
+  const capacities = capacitiesFor(staying, overrides, periodStart)
 
   const allocatorChores = []
   const previous = []
@@ -105,6 +126,15 @@ export function planReassignment({ members, chores, exclusions, overrides, perio
 
     const holder = chore.assigned_member_id ?? null
     const done = !isOutstanding(chore)
+
+    // #431 — the leaver's work: done or hand-placed is dropped, open auto work
+    // is freed with no incumbent. See the docblock.
+    if (leavingMemberId != null && holder === leavingMemberId) {
+      if (done || chore.assigned_source === 'manual') continue
+      freed.add(chore.id)
+      allocatorChores.push({ id: chore.id, expectedMinutes: chore.expected_minutes || 0, assignedMemberId: null })
+      continue
+    }
 
     if (done) {
       if (holder == null) continue
@@ -185,7 +215,8 @@ async function readHousehold(householdId) {
  * Recompute the household's open-chore assignments and store the result.
  *
  * Called after a capacity write lands (weekly override set or cleared, baseline
- * edited) — the automatic half of the grooming decision, with nobody pressing
+ * edited), after a removal, and — with `leavingMemberId` — just before a member
+ * leaves (#431) — the automatic half of the grooming decision, with nobody pressing
  * an assign button and nobody asked to approve (#49 AC 2).
  *
  * Each attempt is a full fresh cycle: version first (see the header), then
@@ -194,7 +225,7 @@ async function readHousehold(householdId) {
  * top, where the re-read now includes whatever moved it. Any other error is
  * real and surfaces to the caller, whose `mutate()` already puts it on screen.
  */
-export async function reassignHousehold({ householdId }) {
+export async function reassignHousehold({ householdId, leavingMemberId = null }) {
   if (!householdId) throw new Error('Which household? Re-assignment must name one.')
 
   let refused = null
@@ -213,6 +244,7 @@ export async function reassignHousehold({ householdId }) {
       exclusions,
       overrides,
       periodStart,
+      leavingMemberId,
     })
 
     // Every key explicit — no shorthand — because liveSchema.test.js derives

@@ -83,6 +83,74 @@ export async function householdDeletionStatus() {
 }
 
 /**
+ * #431 — hand the household to another member who has signed in. Organizer
+ * only: the RPC refuses anybody else, a member who has never signed in, and a
+ * household pending deletion.
+ */
+export async function transferHousehold(householdId, toMemberId) {
+  return unwrap(
+    await getSupabase().rpc('transfer_household', {
+      household_id: householdId,
+      to_member_id: toMemberId,
+    }),
+    'handing the household over',
+  )
+}
+
+/** #431 — the leave function's name, in one place; liveSchema.test.js resolves it. */
+const LEAVE_FUNCTION = 'leave-household'
+
+/**
+ * #431 — leave a household, through the `leave-household` Edge Function. It
+ * revokes this person's Google grant there, leaves as them, and deletes their
+ * sign-in when this was its last household (#262). Returns
+ * `{ accountDeleted, warning, revokeFailed }`: a warning means they HAVE left
+ * and only the sign-in survived, which must not read as a failure and invite a
+ * retry; `revokeFailed` means Google did not confirm the revoke, which the app
+ * turns into #99's sentence (review-fanout, 2026-09-11).
+ *
+ * No failure sentence here says "nothing was changed", the provisioning
+ * wording: the app re-deals the leaver's chores BEFORE this call, so by the
+ * time it fails something has changed. What is certain is only that they are
+ * still in the household.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is — the
+ * same rule `callProvisioning` gives.
+ */
+export async function leaveHousehold(householdId) {
+  if (!householdId) throw new Error('Which household? Leaving must name one.')
+  const { data, error } = await getSupabase().functions.invoke(LEAVE_FUNCTION, {
+    body: { householdId },
+  })
+  if (error) {
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const unreachable =
+      'Could not reach the leave service, so you are still in the household. Check this ' +
+      `device's connection — if it is fine, the ${LEAVE_FUNCTION} function has ` +
+      'not been deployed to this project yet (see docs/deploy-runbook.md).'
+    const err = new Error(
+      detail ||
+        (error?.name === 'FunctionsFetchError'
+          ? unreachable
+          : `Could not leave the household: ${error?.message ?? 'unknown error'}`),
+    )
+    err.cause = error
+    throw err
+  }
+  return {
+    accountDeleted: data?.accountDeleted === true,
+    warning: data?.warning ?? null,
+    revokeFailed: data?.revokeFailed === true,
+  }
+}
+
+/**
  * The same, plus the two member-write failures that are worth naming — #242.
  *
  * Both come from constraints `0007` added with `members.email`, and both reach

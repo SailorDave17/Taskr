@@ -4,7 +4,7 @@
 // already; the setup below is that file's `setup()` narrowed to what this
 // control needs. Values are synthetic — see #19.
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Roster from './Roster.jsx'
 
 const household = { id: 'h1', name: 'Placeholder Household' }
@@ -92,5 +92,36 @@ describe('deleting the household from the Who tab (#430)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^keep it$/i }))
     expect(onDeleteHousehold).not.toHaveBeenCalled()
     expect(deleteButton()).toBeInTheDocument()
+  })
+})
+
+describe('the confirm scrolls itself into view as it opens (#431 design-bar, 2026-09-11)', () => {
+  // Measured on #431's prototype at 360×800: tapped from the bottom of the Who
+  // tab, "Delete …?" opened at y=801 in an 800px viewport — shipped that way in
+  // #430. jsdom has no layout, so the request is what can be asserted here.
+  const original = Element.prototype.scrollIntoView
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+  afterEach(() => {
+    Element.prototype.scrollIntoView = original
+  })
+
+  it('requests one scroll, to the confirm, when it opens', () => {
+    setup()
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+    fireEvent.click(deleteButton())
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(Element.prototype.scrollIntoView.mock.instances[0]).toBe(
+      screen.getByTestId('delete-household-warning').parentElement,
+    )
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'nearest' }))
+  })
+
+  it('POSITIVE CONTROL: the confirm still opens in a browser with no scrollIntoView at all', () => {
+    Element.prototype.scrollIntoView = undefined
+    setup()
+    fireEvent.click(deleteButton())
+    expect(screen.getByRole('button', { name: /^delete placeholder household\?$/i })).toBeInTheDocument()
   })
 })

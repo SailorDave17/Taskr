@@ -43,7 +43,12 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds FIVE rows as of 2026-09-11 — #430's three
+  (`request_household_deletion`, `restore_household` and `household_deletion_status`, red until
+  `0042` is applied) and #431's two (`transfer_household` until `0043` is applied, and the
+  `leave-household` Edge Function until it is deployed); their whole history is the #430 and #431
+  bullet in the excused-red table below. Until #430 this sentence still read EMPTY, which is the
+  miss the paragraph at "grep this file" warns about. Before that it was
   EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
   opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
   joining a Realtime channel the way a phone does, red on purpose until `0037` was applied in its
@@ -1223,6 +1228,19 @@
   head of *What is not done*. Since #78 the authority is a **check, not this page**: run
   `npm run check:live` and believe its output. What is written here is the *reasoning* — why each
   migration exists and what it grants — which is the half a check cannot carry.
+- **#430 opened THREE rows and #431 TWO on 2026-09-11, and neither story drained its rows in its
+  own session.** #430's are three RPC probes: `request_household_deletion`, `restore_household` and
+  `household_deletion_status`, red until `npm run migrate:live` applies `0042`. #431's are two:
+  - the `transfer_household` RPC probe, red until `0043` is applied;
+  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` ships it.
+
+  Both stories left the apply and the deploy to the owner's post-merge steps, because production is
+  built from `release` and the migration must land before the client that calls it is promoted.
+  **Not measured:** no `check:live` run was taken in either session, so these are the reds the
+  listings predict, not reds observed. Recorded in README's `check:live` cell by #431: #430 did
+  not reach that cell, and #431's review-fanout found it still saying empty (2026-09-11).
+  The RPCs that only Edge Functions call are deliberately unlisted: `leave_household`,
+  `member_tokens_to_revoke` and #430's purge functions.
 - **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
   One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
   as the seeded account and reading the `system` frame the server sends after the join — never
@@ -2342,6 +2360,52 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   (`householdDeletion.pglite.test.js`). **The safe re-paste order now ends at `0042`.**
 - **Excused reds.** `check:live` reads the three client RPCs red until `0042` is applied. The purge's
   functions are not in `LIVE_RPCS`, because the app never calls them.
+
+## Leaving a household — #431, 2026-09-11
+
+A member can leave from the Who tab. An organizer first hands the household over, or deletes it
+(#430). The owner's decisions are on #427 and #431.
+
+- **Leaving is its own power, not a delete.** `leave_household(household_id)` (`0043`) takes no
+  member id, so it can only ever remove the caller. The members delete policy (`0007`/`0016`) and its
+  self-delete refusal are untouched, and the tests pinning them pass unchanged. It refuses the
+  organizer, and a household pending deletion, through `acting_member` as `0042` patched it.
+  **The pending refusal is deliberate** (owner, at #431's review): the household is already going,
+  and when the grace period ends the purge revokes every grant and deletes every sign-in that claims
+  nothing else, so a member is out by then without acting. The cost is a wait, and being back in if
+  the organizer restores it. The reasoning is also in `0043`'s header.
+- **Leaving and handing over serialise on the household row.** `leave_household` locks it before
+  its organizer check, so a hand-over racing a leave either lands first (and the leave refuses the
+  new organizer) or waits and fails its foreign key. Without it the two could leave a household with
+  no organizer. Found by #431's review-fanout; pglite has one connection, so the test pins the order,
+  not the race.
+- **The server half is the `leave-household` Edge Function**, because the refresh token behind a
+  Google grant is readable only by `service_role`, and deleting an auth user needs `auth.admin`. In
+  order, it:
+  1. refuses the organizer;
+  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant still
+     used in another household (#430's rule);
+  3. calls `leave_household` as the caller;
+  4. deletes the sign-in if that household was its last claim (#262).
+
+  If the token read fails, the person is still in the household and is asked to try again — their
+  open chores have already been re-dealt by then, and the app says so rather than "nothing was
+  changed". If Google refuses the revoke or cannot be reached, the leave goes ahead and the response
+  says `revokeFailed`, which the app turns into #99's sentence: the token row goes with the leave, so
+  nothing could retry it. If the sign-in cannot be deleted, the person is told as a warning, because
+  they have already left.
+- **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
+  a member of the same household who has signed in. An organizer who cannot sign in could provision
+  nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
+  besides `create_household`.
+- **The re-deal.** It runs in the browser before the leave, with the leaver left out
+  (`reassignHousehold({ householdId, leavingMemberId })`). Their hand-placed chores are released by
+  the leave itself and dealt at the next capacity change. A removal now re-deals afterwards too; a
+  re-deal that fails there is its own warning, and the removal is still reported as done (#247).
+- **Leaving now revokes Google.** `docs/refresh-charter.md:647-655` carries a dated amendment.
+- **Excused reds.** `check:live` reads `transfer_household` red until `0043` is applied, and
+  `leave-household` NOT DEPLOYED until it ships. `leave_household` and `member_tokens_to_revoke` are
+  called only by the function, so they are not in `LIVE_RPCS`.
 
 ## How the rules are enforced
 

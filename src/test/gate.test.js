@@ -2945,3 +2945,68 @@ describe('#192 — the reserved probe name is honoured, and cannot be occupied',
     expect(isProbeFile('0014_scope_reads_to_one_household.sql')).toBe(false)
   })
 })
+
+// #426 — the link-styled buttons meet WCAG AA on the dark surfaces they sit on.
+// Asserted against the STYLESHEET with the WCAG 2.x relative-luminance formula,
+// because jsdom applies no stylesheet: a component test would pass identically
+// with the rule pointed back at --accent. Both sides of the pairing are read
+// out of `src/index.css` — the token's value out of `:root`, the reference out
+// of the `.button--link` rule — so the value drifting darker, the surface
+// drifting lighter, or the rule quietly re-pointed each redden here.
+//
+// MEASURED in a real browser at 360×800 before this story: every .button--link
+// on the sign-in, sign-up, join and reset screens computed to rgb(31, 111, 92)
+// on rgb(26, 33, 40) — 2.70:1 at 13px, the faintest text on the first screen a
+// newcomer sees. The CONTROL below keeps that fact: --accent is a fill colour
+// (light ink sits on it at 5.72:1) and cannot also be the text colour.
+describe('#426 — the link-styled buttons meet 4.5:1 on the dark surfaces they sit on', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const root = css.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
+  const token = (name) => root.match(new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{6})\\s*;`))?.[1]
+
+  const channel = (c) => {
+    const v = c / 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  }
+  const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+  const AA_TEXT = 4.5
+
+  it('POSITIVE CONTROL: the formula is the WCAG one — black on white is 21:1, a colour on itself 1:1', () => {
+    expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5)
+    expect(contrast('#1a2128', '#1a2128')).toBe(1)
+  })
+
+  it('POSITIVE CONTROL: every token in the pairing is read out of :root, not defaulted', () => {
+    for (const name of ['accent', 'accent-ink', 'surface', 'bg']) {
+      expect(token(name), `--${name} not found in :root`).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+  })
+
+  it('CONTROL: the fill accent is still below 4.5:1 on the card, so a separate text accent is still earned', () => {
+    // The day --accent clears 4.5:1 as text, --accent-ink is a second copy of
+    // one value and should be folded back — this is what says so.
+    expect(contrast(token('accent'), token('surface'))).toBeLessThan(AA_TEXT)
+  })
+
+  it('.button--link takes its colour from the text accent, not the fill accent', () => {
+    const rule = css.match(/\.button--link\s*\{([^}]*)\}/)?.[1]
+    expect(rule, 'no .button--link rule in the stylesheet').toBeDefined()
+    expect(rule).toMatch(/color\s*:\s*var\(--accent-ink\)\s*;/)
+    expect(rule).not.toMatch(/var\(--accent\)/)
+  })
+
+  it('the text accent clears 4.5:1 on --surface, the card every link button sits on', () => {
+    expect(contrast(token('accent-ink'), token('surface'))).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  it('and on --bg, so a link button placed outside a card is covered too', () => {
+    expect(contrast(token('accent-ink'), token('bg'))).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+})

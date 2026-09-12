@@ -40,6 +40,9 @@ const api = {
   // a household pending deletion.
   householdDeletionStatus: vi.fn(async () => []),
   requestHouseholdDeletion: vi.fn(async () => ({})),
+  // #431
+  leaveHousehold: vi.fn(async () => ({ accountDeleted: false, warning: null })),
+  transferHousehold: vi.fn(async () => ({})),
   restoreHousehold: vi.fn(async () => ({})),
 }
 
@@ -440,6 +443,8 @@ beforeEach(() => {
   api.householdDeletionStatus.mockResolvedValue([])
   api.requestHouseholdDeletion.mockResolvedValue({})
   api.restoreHousehold.mockResolvedValue({})
+  api.leaveHousehold.mockResolvedValue({ accountDeleted: false, warning: null })
+  api.transferHousehold.mockResolvedValue({})
   // #342 — a channel that opens and can be closed, and nothing arrives on it
   // unless a test pushes something through the handlers it recorded.
   realtimeApi.subscribeToHousehold.mockReset()
@@ -8005,5 +8010,107 @@ describe('deleting and restoring a household, from App (#430)', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
 
     expect(await screen.findByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+  })
+})
+
+describe('leaving a household, from App (#431)', () => {
+  // The signed-in person is person-a (the suite's default session), on the
+  // roster as m1; m9 organizes, so m1 is an ordinary member.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const organizerRow = { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' }
+  const signedInOther = { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: 'person-b' }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizerRow, me])
+  })
+
+  const leave = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () => void fireEvent.click(screen.getByRole('button', { name: /^leave placeholder household\?$/i })),
+    )
+  }
+  const callOrder = (mock, match) => mock.mock.invocationCallOrder[mock.mock.calls.findIndex(match)]
+
+  it('re-deals the chores without the leaver FIRST, then leaves through the function', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1', leavingMemberId: 'm1' })
+    expect(api.leaveHousehold).toHaveBeenCalledWith('h1')
+    const redeal = callOrder(reassignApi.reassignHousehold, ([args]) => args?.leavingMemberId === 'm1')
+    const left = callOrder(api.leaveHousehold, () => true)
+    expect(redeal).toBeLessThan(left)
+  })
+
+  it('leaves nothing when the re-deal fails: nothing has changed, and they can try again', async () => {
+    reassignApi.reassignHousehold.mockRejectedValue(new Error('re-deal refused'))
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/re-deal refused/)
+  })
+
+  it('shows a sign-in that survived as a warning, because they HAVE left', async () => {
+    api.leaveHousehold.mockResolvedValue({
+      accountDeleted: false,
+      warning: 'You have left the household, but your sign-in was not deleted. It can still sign in until it is.',
+    })
+    await renderApp('Who')
+    await leave()
+    expect(await screen.findByText(/your sign-in was not deleted/i)).toBeInTheDocument()
+  })
+
+  it('signs this device out when the leave took their last household, and the sign-in with it', async () => {
+    api.leaveHousehold.mockResolvedValue({ accountDeleted: true, warning: null })
+    await renderApp('Who')
+    await leave()
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  it('does not sign out when the sign-in is kept for another household', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
+    expect(api.signOut).not.toHaveBeenCalled()
+  })
+
+  it('the organizer hands it over and leaves the same way: transfer, then the re-deal without them, then the leave', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, signedInOther])
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^hand it to placeholder two and leave$/i })),
+    )
+    expect(api.transferHousehold).toHaveBeenCalledWith('h1', 'm2')
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1', leavingMemberId: 'm1' })
+    expect(api.leaveHousehold).toHaveBeenCalledWith('h1')
+    const handed = callOrder(api.transferHousehold, () => true)
+    const redeal = callOrder(reassignApi.reassignHousehold, ([args]) => args?.leavingMemberId === 'm1')
+    const left = callOrder(api.leaveHousehold, () => true)
+    expect(handed).toBeLessThan(redeal)
+    expect(redeal).toBeLessThan(left)
+  })
+
+  it('re-deals after the organizer removes somebody (AC 4), which nothing did before', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, { ...signedInOther, claimed_by: null }])
+    api.removeMember.mockResolvedValue({ warning: null })
+    await renderApp('Who')
+    const before = reassignApi.reassignHousehold.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })))
+    expect(api.removeMember).toHaveBeenCalledWith('m2')
+    expect(reassignApi.reassignHousehold.mock.calls.slice(before)).toEqual([[{ householdId: 'h1' }]])
+    const removed = callOrder(api.removeMember, () => true)
+    expect(removed).toBeLessThan(reassignApi.reassignHousehold.mock.invocationCallOrder.at(-1))
   })
 })

@@ -1244,6 +1244,9 @@ export default function Roster({
   // shape: a roster with no handler wired renders exactly what it did.
   onDeleteHousehold = null,
   deletionGraceDays = null,
+  // #431 — leaving, and the organizer's hand-over. Optional in the #166 shape.
+  onLeaveHousehold = null,
+  onHandOverAndLeave = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -1284,6 +1287,27 @@ export default function Roster({
   // #430 — deleting the household is two taps, the Remove idiom: the mistake
   // it guards is one tap on the wrong control.
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // #431 — leaving is two taps as well, and the organizer's confirm carries a
+  // choice of successor: somebody who has signed in, since an organizer who
+  // cannot sign in could provision nobody (0016's dead end).
+  const [confirmingLeave, setConfirmingLeave] = useState(false)
+  const [successorId, setSuccessorId] = useState('')
+  const successors = members.filter((m) => m.claimed_by && m.id !== me?.id)
+  const successorName = successors.find((m) => m.id === successorId)?.display_name ?? ''
+  // Design-bar, 2026-09-11 (#431): both confirms opened BELOW the fold at
+  // 360×800 when tapped from the bottom of the Who tab — measured, the member's
+  // "Leave …?" at y=821 and #430's "Delete …?" at y=801 in an 800px viewport,
+  // with nothing moving on screen, so the tap read as doing nothing. Each
+  // confirm now scrolls itself into view as it opens; `nearest` moves the page
+  // only as far as the confirm needs. Guarded: jsdom has no scrollIntoView.
+  const leaveConfirmRef = useRef(null)
+  const deleteConfirmRef = useRef(null)
+  useEffect(() => {
+    if (confirmingLeave) leaveConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [confirmingLeave])
+  useEffect(() => {
+    if (confirmingDelete) deleteConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [confirmingDelete])
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -1764,6 +1788,129 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #431 — leaving, in its own card just above deleting: both are ways out,
+          and both sit after everything done here week to week. A member
+          confirms and goes. The organizer's confirm offers the two ways out the
+          owner decided on (#427): hand the household to somebody who has signed
+          in, or delete it through #430's grace period. */}
+      {onLeaveHousehold && me ? (
+        <section className="card" aria-labelledby="leave-household-heading">
+          <h2 id="leave-household-heading" className="card__heading">
+            Leave this household
+          </h2>
+          {!confirmingLeave ? (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => {
+                setSuccessorId(successors[0]?.id ?? '')
+                setConfirmingLeave(true)
+              }}
+              disabled={busy}
+            >
+              Leave this household
+            </button>
+          ) : isOrganizer ? (
+            <div className="row" ref={leaveConfirmRef}>
+              <p className="card__note" data-testid="leave-household-warning">
+                You organize {household.name}, so before you go somebody has to take it on,
+                or it is deleted.
+                {deletionGraceDays
+                  ? ' Deleting it takes it from everyone, and you can restore it for ' +
+                    deletionGraceDays +
+                    ' days.'
+                  : ''}
+              </p>
+              {successors.length ? (
+                <>
+                  <label className="field">
+                    <span className="field__label">Hand it to</span>
+                    <select
+                      className="field__input"
+                      value={successorId}
+                      onChange={(event) => setSuccessorId(event.target.value)}
+                      disabled={busy}
+                    >
+                      {successors.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="button button--danger"
+                    type="button"
+                    onClick={() => {
+                      setConfirmingLeave(false)
+                      // The error is already on screen — App's mutate put it there.
+                      Promise.resolve(onHandOverAndLeave(household.id, successorId, me.id)).catch(() => {})
+                    }}
+                    disabled={busy || !successorId || !onHandOverAndLeave}
+                  >
+                    Hand it to {successorName} and leave
+                  </button>
+                </>
+              ) : (
+                <p className="card__note">
+                  Nobody else here has signed in yet, so it cannot be handed over.
+                </p>
+              )}
+              {onDeleteHousehold ? (
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  onClick={() => {
+                    setConfirmingLeave(false)
+                    // The error is already on screen — App's mutate put it there.
+                    Promise.resolve(onDeleteHousehold(household.id)).catch(() => {})
+                  }}
+                  disabled={busy}
+                >
+                  Delete {household.name} instead
+                </button>
+              ) : null}
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingLeave(false)}
+                disabled={busy}
+              >
+                Stay
+              </button>
+            </div>
+          ) : (
+            <div className="row" ref={leaveConfirmRef}>
+              <p className="card__note" data-testid="leave-household-warning">
+                You stop getting {household.name}’s chores, and the ones you hold go to the
+                others. Your calendar connection here is disconnected. If this is the only
+                household you are in, your sign-in is deleted too.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingLeave(false)
+                  // The error is already on screen — App's mutate put it there.
+                  Promise.resolve(onLeaveHousehold(household.id, me.id)).catch(() => {})
+                }}
+                disabled={busy}
+              >
+                Leave {household.name}?
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingLeave(false)}
+                disabled={busy}
+              >
+                Stay
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {/* #430 — deleting the household, in its own card at the BOTTOM of the
           Who tab, after everything done here week to week. It first sat in the
           household card under Sign out, looking like one of them; the owner
@@ -1775,7 +1922,7 @@ export default function Roster({
             Delete this household
           </h2>
           {confirmingDelete ? (
-            <div className="row">
+            <div className="row" ref={deleteConfirmRef}>
               <p className="card__note" data-testid="delete-household-warning">
                 Everyone in {household.name} loses it at once: its people, chores,
                 shopping lists and calendar connections. You can restore it for{' '}
@@ -1786,7 +1933,8 @@ export default function Roster({
                 type="button"
                 onClick={() => {
                   setConfirmingDelete(false)
-                  onDeleteHousehold(household.id)
+                  // The error is already on screen — App's mutate put it there.
+                  Promise.resolve(onDeleteHousehold(household.id)).catch(() => {})
                 }}
                 disabled={busy}
               >
@@ -1858,4 +2006,6 @@ Roster.propTypes = {
   onDismissMintedCode: PropTypes.func,
   onDeleteHousehold: PropTypes.func,
   deletionGraceDays: PropTypes.number,
+  onLeaveHousehold: PropTypes.func,
+  onHandOverAndLeave: PropTypes.func,
 }

@@ -653,6 +653,14 @@ half turns out not to be worth its days.
   Disconnect asks Google to revoke; LEAVING a household still does not, so a member who wants the
   grant gone presses Disconnect before they leave. #99's revoke is best-effort besides, so even that
   act can leave Google holding a grant it says so on screen.)*
+  **Amended 2026-09-11, #431 — leaving now revokes the Google grant.** The owner reversed this
+  bullet on #427: every way out — leaving, deleting a household (#430), deleting an account (#432) —
+  revokes server-side, before any token row goes. Leaving goes through the `leave-household` Edge
+  Function, which revokes the leaver's grant and only then calls `leave_household` (`0043`). One
+  exception, carried from #430's review: a person still connected in another household keeps their
+  grant, because one Google account holds one grant with Taskr's OAuth client and revoking it would
+  break that household's calendar. The coupling the original bullet avoided — an irreversible
+  household action tied to a calendar story's schedule — is gone, since #99 shipped the revoke.
 
 **What is not decided here.** How the client scopes a read to one household is deliberately left to a
 measurement story — `members` and `chores` both withhold `household_id` from the client select

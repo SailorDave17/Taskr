@@ -29,7 +29,9 @@ import {
   // #430 — deleting and restoring a household.
   GRACE_PERIOD_DAYS,
   householdDeletionStatus,
+  leaveHousehold,
   requestHouseholdDeletion,
+  transferHousehold,
   restoreHousehold,
 } from './lib/household.js'
 import {
@@ -1283,13 +1285,20 @@ export default function App() {
   // AFTER mutate() resolves, i.e. after the refresh, so the screen never shows
   // the person still listed under a message saying they were removed — and the
   // removal itself is never reported as a failure, which would invite a retry.
+  // #431 AC 4 — a removal re-deals, through the same run a capacity change
+  // triggers. Until #431 nothing did: the removed member's chores were left
+  // unassigned (0006's set null) until the next capacity change came along.
   const handleRemove = useCallback(
     (id) =>
-      mutate(() => removeMember(id)).then((result) => {
+      mutate(async () => {
+        const result = await removeMember(id)
+        await reassignHousehold({ householdId: household?.id })
+        return result
+      }).then((result) => {
         if (result?.warning) setError(result.warning)
         return result
       }),
-    [mutate],
+    [mutate, household],
   )
   // #430 — delete and restore a household. Both through mutate, so the list
   // is re-read and the shell lands on onboarding when the last household
@@ -1302,6 +1311,47 @@ export default function App() {
   const handleRestoreHousehold = useCallback(
     (id) => mutate(() => restoreHousehold(id)).then(refreshPendingDeletions),
     [mutate, refreshPendingDeletions],
+  )
+  // #431 — leaving. Re-deal FIRST with the leaver left out (owner decision:
+  // once they have left, their app can no longer run it), then leave through
+  // the Edge Function. The leaver's member id comes from the Roster, which has
+  // "me"; App derives "me" further down, too late for a dependency list. The
+  // remembered household goes either way, and when this was their last
+  // household their sign-in went with it, so this device signs out the way
+  // handleSignOut does. A sign-in that survived is a warning set after the
+  // re-read, like a removal's (#247) — they HAVE left.
+  const handleLeaveHousehold = useCallback(
+    (householdId, leavingMemberId) =>
+      mutate(async () => {
+        await reassignHousehold({ householdId, leavingMemberId })
+        const result = await leaveHousehold(householdId)
+        activeIdRef.current = null
+        choiceEpochRef.current += 1
+        clearActiveHouseholdChoice()
+        if (result.accountDeleted) {
+          await signOut({ everywhere: false }).catch(() => {})
+          setMinted(null)
+          clearPendingInvitation()
+          setHeldInvitation(false)
+          setPendingDeletions([])
+        }
+        return result
+      }).then((result) => {
+        if (result?.warning) setError(result.warning)
+        return result
+      }),
+    [mutate],
+  )
+  // #431 — the organizer's way out that keeps the household: hand it over, then
+  // leave as an ordinary member. Two writes, and the first is safe alone — an
+  // organizer who handed over and then failed to leave is a member who can try
+  // leaving again.
+  const handleHandOverAndLeave = useCallback(
+    (householdId, toMemberId, leavingMemberId) =>
+      mutate(() => transferHousehold(householdId, toMemberId)).then(() =>
+        handleLeaveHousehold(householdId, leavingMemberId),
+      ),
+    [mutate, handleLeaveHousehold],
   )
   // #87 - give somebody a sign-in, or replace one they forgot. Routed through
   // mutate() like every other write, so the roster re-reads from the server and
@@ -2630,6 +2680,9 @@ export default function App() {
           // #430 — the organizer's "Delete this household".
           onDeleteHousehold={handleDeleteHousehold}
           deletionGraceDays={GRACE_PERIOD_DAYS}
+          // #431 — leaving, and the organizer's hand-over.
+          onLeaveHousehold={handleLeaveHousehold}
+          onHandOverAndLeave={handleHandOverAndLeave}
           // #166 — the affordance that did not exist. Owner decision at pickup:
           // its own card on this surface rather than an entry inside the
           // switcher or a second control on the shell row, because the shell

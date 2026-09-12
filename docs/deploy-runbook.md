@@ -311,6 +311,12 @@ Paste the same value into Vercel's `PURGE_SHARED_SECRET` (section 1) before clea
 value; an empty or unset secret makes the function answer "This function is not configured." and the
 cron log shows it for the hour Vercel keeps it.
 
+**And `leave-household` since #431**, the first function a member (not only the organizer) calls
+about their own membership. It is in `FUNCTION_NAMES`, so the bare `npm run deploy:function` ships
+it, and it needs no secret beyond the three Supabase injects: Google's revocation endpoint takes the
+token alone. Deploy it with `0043` applied. Until then `check:live` reads it NOT DEPLOYED and
+`transfer_household` red, both excused in the README.
+
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you

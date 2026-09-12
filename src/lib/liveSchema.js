@@ -231,6 +231,8 @@ export const LIVE_RPCS = Object.freeze([
   Object.freeze({ fn: 'request_household_deletion', args: Object.freeze({ household_id: 'uuid' }) }),
   Object.freeze({ fn: 'restore_household', args: Object.freeze({ household_id: 'uuid' }) }),
   Object.freeze({ fn: 'household_deletion_status', args: Object.freeze({}) }),
+  // #431 — the organizer hands the household over. `0043`; red until it is applied.
+  Object.freeze({ fn: 'transfer_household', args: Object.freeze({ household_id: 'uuid', to_member_id: 'uuid' }) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied
   // — the same deliberate window every migration-borne entry here has had — and
   // `0018` was applied on 2026-08-27 (#231), so this reads green now.
@@ -563,6 +565,10 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // and neither clears the other. RED on purpose until `npm run
   // deploy:function` ships it.
   'calendar-events',
+  // #431. Invoked by `leaveHousehold` (src/lib/household.js): revokes the
+  // leaver's Google grant, leaves as them, deletes a last-claim sign-in. Reads
+  // NOT DEPLOYED until `npm run deploy:function` ships it.
+  'leave-household',
 ])
 
 /**

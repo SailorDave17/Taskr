@@ -8,6 +8,11 @@
 // the purge secret. It holds no Supabase key: the Edge Function does the work
 // with the service key, which never leaves Supabase.
 //
+// It also keeps the free Supabase project warm, as a SIDE EFFECT: a free
+// project pauses after a week with no activity, and this is activity every day.
+// That is a workaround for the pause (docs/hosting-decision.md), not a design —
+// retire or thin out this cron and the project can pause again.
+//
 // Environment (Vercel project, Production):
 //   CRON_SECRET          set by the owner; Vercel sends it as `Authorization: Bearer`
 //   PURGE_FUNCTION_URL   https://<project-ref>.supabase.co/functions/v1/purge-deleted-households

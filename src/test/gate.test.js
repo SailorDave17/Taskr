@@ -2617,6 +2617,20 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     expect(config.crons[0].schedule).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/)
   })
 
+  it('#430: api/ holds the one function the cron calls, and nothing else Vercel would deploy', () => {
+    // Vercel deploys every `api/**/*.{js,mjs,ts,tsx}` as a function, skipping only
+    // names under `_` or `.` — test files included. A test beside `api/purge.js`
+    // shipped as a public endpoint that errored on every request (#430 review).
+    const walk = (dir) =>
+      readdirSync(resolve(process.cwd(), dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`],
+      )
+    const deployed = walk('api').filter(
+      (path) => /\.(js|mjs|ts|tsx)$/.test(path) && !/\/[_.]/.test(path) && !path.endsWith('.d.ts'),
+    )
+    expect(deployed).toEqual(['api/purge.js'])
+  })
+
   it('#430: the exemption is one pattern in one file, and nothing else there is excused', () => {
     expect(EXEMPT).toHaveLength(1)
     const planted = [

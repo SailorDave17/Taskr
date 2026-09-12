@@ -298,8 +298,18 @@ disagree, the script is right.)*
 `SERVER_ONLY_FUNCTIONS`, not `FUNCTION_NAMES`, because the app never invokes it; the same bare
 `npm run deploy:function` deploys it, adding `--no-verify-jwt`, since its caller is Vercel's cron,
 which holds no session. It refuses every call without its own secret, so set `PURGE_SHARED_SECRET`
-first, with the clipboard form in 3c: `npx supabase secrets set PURGE_SHARED_SECRET=$s --project-ref <ref>`.
-The same value goes into Vercel (section 1).
+first. The value exists nowhere yet, so make one — letters and digits only, which also suits
+`CRON_SECRET` (make that one separately, the same way) — and set it from the clipboard, as in 3c:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | Set-Clipboard
+$s = Get-Clipboard; npx supabase secrets set PURGE_SHARED_SECRET=$s --project-ref <project ref>
+```
+
+Paste the same value into Vercel's `PURGE_SHARED_SECRET` (section 1) before clearing the clipboard.
+`npx supabase secrets list --project-ref <project ref>` then shows the name with a digest, never the
+value; an empty or unset secret makes the function answer "This function is not configured." and the
+cron log shows it for the hour Vercel keeps it.
 
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would

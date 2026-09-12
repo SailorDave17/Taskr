@@ -4,9 +4,14 @@
 // whether Vercel actually sends the cron (only a production run shows that),
 // and whether the Edge Function purges correctly (its own handler.test.js and
 // householdDeletion.pglite.test.js).
+//
+// It lives here and NOT beside `api/purge.js`: Vercel deploys every file under
+// `api/` as a function, test files included, so a test there ships as a public
+// endpoint that errors on every request (#430 review). gate.test.js holds
+// `api/` to the one function.
 
 import { describe, expect, it, vi } from 'vitest'
-import { createPurgeProxy, sameSecret } from './purge.js'
+import { createPurgeProxy, sameSecret } from '../../api/purge.js'
 
 const ENV = {
   CRON_SECRET: 'cron-secret-placeholder-0123456789',

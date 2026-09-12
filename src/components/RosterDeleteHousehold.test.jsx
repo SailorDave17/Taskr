@@ -34,7 +34,9 @@ function setup(overrides = {}) {
       me={null}
       periodStart="2026-08-10"
       isOrganizer
-      deletionGraceDays={7}
+      // 5, not the product's 7: a Roster that printed a hardcoded 7 would pass
+      // a fixture of 7 (#430 review). App.test proves App passes the real one.
+      deletionGraceDays={5}
       {...handlers}
       {...overrides}
     />,
@@ -73,7 +75,7 @@ describe('deleting the household from the Who tab (#430)', () => {
     expect(warning).toHaveTextContent(household.name)
     expect(warning).toHaveTextContent(/people, chores/)
     expect(warning).toHaveTextContent(/calendar connections/)
-    expect(warning).toHaveTextContent(/restore it for 7 days/)
+    expect(warning).toHaveTextContent(/restore it for 5 days/)
   })
 
   it('deletes the household on screen when confirmed', () => {

@@ -1173,13 +1173,26 @@ export default function App() {
     },
     [requestRefresh],
   )
+  // #430 — the restore banner's list. Read at boot, after a delete or a
+  // restore (the household it names is no longer in the list mutate reads),
+  // and after a sign-in, since the banner belongs to whoever is signed in.
+  const refreshPendingDeletions = useCallback(
+    () =>
+      Promise.resolve()
+        .then(() => householdDeletionStatus())
+        .then((rows) => setPendingDeletions(Array.isArray(rows) ? rows : []))
+        .catch(() => {}),
+    [],
+  )
   const handleSignIn = useCallback(
     (credentials) => {
       // #304 — a fresh attempt answers the notice about the last one.
       setSignInNotice(null)
-      return mutate(() => signIn(credentials))
+      return mutate(() => signIn(credentials)).then((result) =>
+        refreshPendingDeletions().then(() => result),
+      )
     },
-    [mutate],
+    [mutate, refreshPendingDeletions],
   )
   // #304 — leaves the page. NOT through `mutate`: a successful start is a
   // navigation to Google, and the re-read `mutate` runs afterwards would go out
@@ -1229,6 +1242,10 @@ export default function App() {
         // be joined to a household by a code somebody else typed.
         clearPendingInvitation()
         setHeldInvitation(false)
+        // #430 — and the restore banner does not either: it names the last
+        // person's household and its purge date, and the next person to sign
+        // in on this tablet must not find it on their screen (#430 review).
+        setPendingDeletions([])
         return result
       }),
     [mutate],
@@ -1276,16 +1293,8 @@ export default function App() {
   )
   // #430 — delete and restore a household. Both through mutate, so the list
   // is re-read and the shell lands on onboarding when the last household
-  // goes; then the banner's status is re-read, because the household it
-  // names is no longer in the list mutate reads.
-  const refreshPendingDeletions = useCallback(
-    () =>
-      Promise.resolve()
-        .then(() => householdDeletionStatus())
-        .then((rows) => setPendingDeletions(Array.isArray(rows) ? rows : []))
-        .catch(() => {}),
-    [],
-  )
+  // goes; then the banner's status is re-read (refreshPendingDeletions, above
+  // handleSignIn), because the household it names is no longer in that list.
   const handleDeleteHousehold = useCallback(
     (id) => mutate(() => requestHouseholdDeletion(id)).then(refreshPendingDeletions),
     [mutate, refreshPendingDeletions],

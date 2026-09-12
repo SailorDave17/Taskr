@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { GRACE_PERIOD_DAYS } from './household.js'
 
-// #430 — the number the confirm and the banner say, held equal to the one the
+// #430 — the number the delete confirm says, held equal to the one the
 // database enforces. Migration 0042's `household_grace_period()` is the
 // authority; a change to either side without the other fails here, not in a
 // person's inbox a week later.

@@ -2311,21 +2311,30 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   - `redeem_invitation`, which refuses in its usual one sentence, so a refusal cannot confirm a
     household is being deleted
 - **The organizer's way back.** `restore_household` works until `purge_after`, then refuses, even if
-  the purge has not run yet. `household_deletion_status()` feeds the restore banner. Both check the
+  the purge has not run yet. `household_deletion_status()` feeds the restore banner and lists a
+  household only until its `purge_after`, so the banner never offers a restore that would be refused;
+  the banner also drops one whose deadline passes while the tab is open. Both RPCs check the
   organizer inline, because the patched `is_household_organizer()` is false for a pending household.
 - **The purge.** A daily Vercel cron calls `api/purge.js`, which calls the server-only
   `purge-deleted-households` Edge Function with `PURGE_SHARED_SECRET`. This is the recorded exception
   in `docs/hosting-decision.md`. For each due household the function:
-  1. revokes every Google grant first, because the cascade takes the tokens;
-  2. calls `purge_household` (service_role only; it deletes nothing that is not due, and is safe
-     twice);
-  3. deletes each sign-in left with no claim (#262's rule).
+  1. revokes the Google grants first, because the cascade takes the tokens. It revokes what
+     `household_tokens_to_revoke` returns, which leaves out a person still connected in another
+     household: one Google account holds one grant with Taskr's single OAuth client, so revoking it
+     would break that household's calendar (owner decision at #430's review). Their token row still
+     goes with the cascade;
+  2. deletes each sign-in that claims nothing outside this household (#262's rule), **before** the
+     household. `members_claimed_by_fkey` is ON DELETE SET NULL, so this is #247's recoverable order:
+     a failed account step leaves the household due, and tomorrow's run retries it with the claimants
+     it still names. An account a concurrent run already deleted counts as done;
+  3. calls `purge_household` only once every account step succeeded (service_role only; it deletes
+     nothing that is not due, and is safe twice).
 
   Every run is recorded in `household_purge_runs`: counts only, and no role holds a grant on it.
   Vercel Hobby keeps logs for one hour and alerts on nothing, so this table is how a stopped purge is
   told apart from a quiet week.
-- **Why functions and not grants.** `households_due_for_purge`, `purge_household` and
-  `record_household_purge_run` are executable by `service_role` alone. The exact list of tables
+- **Why functions and not grants.** `households_due_for_purge`, `household_tokens_to_revoke`,
+  `purge_household` and `record_household_purge_run` are executable by `service_role` alone. The exact list of tables
   `service_role` may touch (`grants.pglite.test.js`) did not grow, and "delete a household whose
   grace period is over" is a narrower power than a DELETE grant.
 - **Re-paste hazard, measured.** Re-pasting `0041` after `0042` silently takes the pending-deletion
@@ -2351,7 +2360,11 @@ three tables with no permissive fallback.
 - There is **no insert, update or delete policy on `households` or `household_devices` at all**. Those
   rows are created only by `create_household` and `join_household`, which run as definer. A client
   cannot mint a household, forge a membership, or rewrite a join code by any path, because no policy
-  exists that would permit it.
+  exists that would permit it. **Today** the block on deleting a household is two things, neither of
+  them in `0001`: `0019:162-163` revokes `delete` (with insert, select, truncate, references, trigger
+  and maintain) on `households` from `authenticated`, and still no delete policy exists. The one
+  client route to a deletion is #430's `request_household_deletion`, which schedules a purge rather
+  than deleting anything (the section above).
 - `claim_member` takes `FOR UPDATE` on the member row, so two phones racing to claim the same person
   serialise and the second is refused, rather than both reading "unclaimed" and both writing.
 

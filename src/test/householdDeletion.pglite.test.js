@@ -11,8 +11,11 @@
 // can prove lives here: who may request, restore and read the status; that a
 // household pending deletion is unreachable to its members through the tables
 // AND through the definer functions that check membership themselves; that the
-// purge's functions refuse every client; that a purge leaves no row behind and
-// is safe to run twice; and that re-applying the file changes nothing.
+// purge's functions refuse every client role this harness models (the hosted
+// platform's by-name grants are asserted on the source instead — the harness
+// cannot see them); which Google grants the purge may revoke; that a purge
+// leaves no row behind and is safe to run twice; and that re-applying the file
+// changes nothing.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -23,6 +26,7 @@ import {
   newDevice,
   provisionMember,
 } from './support/pgliteSupabase.js'
+import { blankSqlComments } from './support/retiredVocabulary.js'
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -58,6 +62,17 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
         where id = $1`,
       [household],
     )
+
+  /** A calendar connection for one member, written as the owner the way calendar.pglite.test.js does. */
+  const connectCalendar = (householdId, memberId, refreshToken) =>
+    db.query(
+      `insert into public.calendar_tokens (household_id, member_id, refresh_token, scope)
+       values ($1, $2, $3, 'https://www.googleapis.com/auth/calendar.freebusy')`,
+      [householdId, memberId, refreshToken],
+    )
+
+  const organizerRowId = async () =>
+    (await db.query('select organizer_member_id as id from public.households where id = $1', [household])).rows[0].id
 
   /** Every public table with a household_id column, and its rows for this household. */
   const rowsLeftFor = async (id) => {
@@ -211,6 +226,9 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
       expect(row.purge_after).toBeNull()
       const households = await rpc(member, 'select id from public.households')
       expect(households.map((h) => h.id)).toEqual([household])
+      // The status lists pending households only: a restored one drops out
+      // (#430 review — nothing else exercised the only-pending half).
+      expect(await status(organizer)).toEqual([])
     })
 
     it('refuses a member who is not the organizer', async () => {
@@ -224,6 +242,12 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
       expect(result.error).toMatch(/grace period has ended/)
     })
 
+    it('stops listing it in the status once the grace period has ended, since a restore would be refused', async () => {
+      expect(await status(organizer)).toHaveLength(1)
+      await expire()
+      expect(await status(organizer)).toEqual([])
+    })
+
     it('refuses a household that is not pending', async () => {
       await restore(organizer)
       const result = await attempt(() => restore(organizer))
@@ -234,10 +258,14 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
   describe('the purge functions', () => {
     const PURGE_FUNCTIONS = [
       'households_due_for_purge()',
+      'household_tokens_to_revoke(uuid)',
       'purge_household(uuid)',
       'record_household_purge_run(integer, integer, integer)',
     ]
 
+    // In THIS harness only: pgliteSupabase.js sets default privileges for
+    // tables, not functions, so `authenticated` and `anon` read false here
+    // whether or not a revoke names them. The next test is the half that can see it.
     it('are executable by service_role and by no client role', async () => {
       for (const fn of PURGE_FUNCTIONS) {
         const { rows } = await db.query(
@@ -246,6 +274,21 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
                   has_function_privilege('anon', 'public.${fn}', 'execute') as anon`,
         )
         expect(rows[0], fn).toEqual({ service: true, authenticated: false, anon: false })
+      }
+    })
+
+    it('revoke EXECUTE from authenticated and anon by name in the source, which the hosted platform grants and this harness cannot see', () => {
+      // The hosted project grants EXECUTE on a new function to anon,
+      // authenticated and service_role by name (0017 recorded it on the live
+      // complete_chore), so a revoke that leaves a role out leaves that role's
+      // grant standing — measured in PGlite at #430's review. The idiom is
+      // invitations.pglite.test.js's.
+      const sql = blankSqlComments(migrationSql(FILE))
+      for (const fn of PURGE_FUNCTIONS) {
+        const name = fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expect(sql, fn).toMatch(
+          new RegExp(`^revoke all on function public\\.${name}\\s+from public, anon, authenticated;`, 'm'),
+        )
       }
     })
 
@@ -259,6 +302,43 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
       expect([...due[0].claimants].sort()).toEqual([organizer, member].sort())
     })
 
+    it('offer every grant for revoking except one whose person is still connected in another household', async () => {
+      // The member is claimed here AND in a household that is staying, with a
+      // calendar connected in both; one Google account holds one grant with
+      // Taskr's client, so revoking theirs would break the other household's
+      // calendar (owner decision at #430's review). The organizer is connected
+      // here only.
+      const staying = await asDevice(db, outsider, async () => {
+        const { rows } = await db.query('select * from public.create_household($1, $2)', [
+          'Placeholder Other Household',
+          'Placeholder Other Organizer',
+        ])
+        return rows[0].id
+      })
+      const { rows: elsewhere } = await db.query(
+        `insert into public.members (household_id, display_name, weekly_minutes, claimed_by)
+         values ($1, 'Placeholder One', 60, $2) returning id`,
+        [staying, member],
+      )
+      await connectCalendar(household, await organizerRowId(), 'token-organizer')
+      await connectCalendar(household, memberRowId, 'token-member-here')
+      await connectCalendar(staying, elsewhere[0].id, 'token-member-elsewhere')
+
+      const offered = async () =>
+        (
+          await asService(
+            async () => (await db.query('select refresh_token from public.household_tokens_to_revoke($1)', [household])).rows,
+          )
+        )
+          .map((row) => row.refresh_token)
+          .sort()
+
+      expect(await offered()).toEqual(['token-organizer'])
+      // POSITIVE CONTROL: once the other connection goes, the member's grant here is offered too.
+      await db.query('delete from public.calendar_tokens where household_id = $1', [staying])
+      expect(await offered()).toEqual(['token-member-here', 'token-organizer'])
+    })
+
     it('will not delete a household that is not due, whoever calls', async () => {
       await request(organizer)
       const purged = await asService(async () =>
@@ -270,10 +350,12 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
     })
 
     it('leaves no row of a due household in any public table, and a second call is a no-op', async () => {
+      await connectCalendar(household, await organizerRowId(), 'token-organizer')
       await request(organizer)
       await expire()
       const before = await rowsLeftFor(household)
       expect(Object.keys(before.left).length, 'the positive control: rows exist to delete').toBeGreaterThan(1)
+      expect(before.left.calendar_tokens, 'the positive control: a Google grant exists to lose').toBe(1)
 
       const first = await asService(async () =>
         (await db.query('select public.purge_household($1) as ok', [household])).rows[0].ok,
@@ -287,6 +369,21 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
       const after = await rowsLeftFor(household)
       expect(after.tablesChecked).toBeGreaterThan(10)
       expect(after.left).toEqual({})
+    })
+
+    it('can be refused by no table: every foreign key into households cascades, whatever the fixture left empty', async () => {
+      // The purge test above has rows in only a few tables; a foreign key that
+      // stopped cascading on an EMPTY table would refuse nothing there and
+      // every real purge of a household holding such rows (#430 review). The
+      // catalog sees every table at once.
+      const { rows } = await db.query(
+        `select conrelid::regclass::text as tbl, conname, confdeltype::text as on_delete
+           from pg_constraint
+          where contype = 'f' and confrelid = 'public.households'::regclass
+          order by 1, 2`,
+      )
+      expect(rows.length, 'the positive control: there are foreign keys to check').toBeGreaterThan(5)
+      expect(rows.filter((row) => row.on_delete !== 'c').map((row) => `${row.tbl}.${row.conname}`)).toEqual([])
     })
 
     it('records a run in a table no role can read or write directly', async () => {

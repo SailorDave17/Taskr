@@ -443,13 +443,20 @@ as $$
   join public.members m on m.id = h.organizer_member_id
   where m.claimed_by = (select auth.uid())
     and h.deletion_requested_at is not null
+    -- Restorable only. Past purge_after restore_household refuses, so the
+    -- banner must not offer it; the row stays until the purge runs, which can
+    -- be a day or more later (#430 review). It ALSO excludes a household that
+    -- is not pending: purge_after is null there (the pair is both-or-neither)
+    -- and null > now() is never true. So the line above is a spare, kept because
+    -- it says what the query is for; the mutation pass removes both to prove it.
+    and h.purge_after > now()
   order by h.purge_after;
 $$;
 
 comment on function public.household_deletion_status() is
-  'Households the caller organizes that are pending deletion, soonest purge '
-  'first: what the restore banner reads, since such a household is no longer '
-  'selectable. Story #430.';
+  'Households the caller organizes that are pending deletion and can still be '
+  'restored, soonest purge first: what the restore banner reads, since such a '
+  'household is no longer selectable. Story #430.';
 
 revoke all on function public.request_household_deletion(uuid) from public, anon;
 revoke all on function public.restore_household(uuid) from public, anon;
@@ -490,6 +497,40 @@ $$;
 comment on function public.households_due_for_purge() is
   'service_role only: households whose grace period has ended, each with the '
   'auth users that claimed a member in it. Story #430.';
+
+-- The Google grants the purge revokes for one household: every refresh token
+-- there EXCEPT one whose person is still connected in another household. One
+-- Google account holds ONE grant with Taskr's single OAuth client, so revoking
+-- that token would break the other household's calendar (owner decision at
+-- #430's review, 2026-09-11). The row itself still goes with the cascade.
+-- "Another household" is any other calendar_tokens row: when that household is
+-- purged too, it is processed on its own, this one is gone by then, and its
+-- grant is revoked there.
+create or replace function public.household_tokens_to_revoke(household_id uuid)
+returns table (refresh_token text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select t.refresh_token
+  from public.calendar_tokens t
+  join public.members m on m.id = t.member_id
+  where t.household_id = household_tokens_to_revoke.household_id
+    and not exists (
+      select 1
+      from public.calendar_tokens other
+      join public.members om on om.id = other.member_id
+      where m.claimed_by is not null
+        and om.claimed_by = m.claimed_by
+        and other.household_id <> t.household_id
+    );
+$$;
+
+comment on function public.household_tokens_to_revoke(uuid) is
+  'service_role only: the refresh tokens the purge revokes at Google for one '
+  'household, leaving out a person still connected in another household. '
+  'Story #430.';
 
 -- Delete one household, but only one whose grace period is over, whoever calls.
 -- Idempotent: a second call finds nothing and returns false. The cascade takes
@@ -559,10 +600,12 @@ comment on function public.record_household_purge_run(integer, integer, integer)
   'service_role only: record one purge run. Story #430.';
 
 revoke all on function public.households_due_for_purge() from public, anon, authenticated;
+revoke all on function public.household_tokens_to_revoke(uuid) from public, anon, authenticated;
 revoke all on function public.purge_household(uuid) from public, anon, authenticated;
 revoke all on function public.record_household_purge_run(integer, integer, integer)
   from public, anon, authenticated;
 grant execute on function public.households_due_for_purge() to service_role;
+grant execute on function public.household_tokens_to_revoke(uuid) to service_role;
 grant execute on function public.purge_household(uuid) to service_role;
 grant execute on function public.record_household_purge_run(integer, integer, integer)
   to service_role;

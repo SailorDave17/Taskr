@@ -20,14 +20,19 @@ export function formatPurgeDate(iso) {
   })
 }
 
-export default function PendingDeletion({ pending = [], onRestore, busy = false }) {
-  if (!pending.length) return null
+export default function PendingDeletion({ pending = [], onRestore, busy = false, now = Date.now() }) {
+  // Past its purge_after a household belongs to the purge: restore refuses it,
+  // so it is not offered (#430 review). The status RPC stops listing it at the
+  // same moment; this covers a tab that read the list before the deadline and
+  // is still open after it.
+  const restorable = pending.filter((entry) => new Date(entry.purge_after).getTime() > now)
+  if (!restorable.length) return null
   return (
     <section className="card" aria-labelledby="pending-deletion-heading">
       <h2 id="pending-deletion-heading" className="card__heading">
         Scheduled for deletion
       </h2>
-      {pending.map((entry) => (
+      {restorable.map((entry) => (
         <div key={entry.household_id} className="row row--between">
           {/* The date is the whole rule; restating the period beside it was a
               second sentence saying the same thing (owner, design-bar 2026-09-11). */}
@@ -59,4 +64,5 @@ PendingDeletion.propTypes = {
   ),
   onRestore: PropTypes.func.isRequired,
   busy: PropTypes.bool,
+  now: PropTypes.number,
 }

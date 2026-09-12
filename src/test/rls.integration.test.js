@@ -162,9 +162,12 @@
 // consequence of the fix rather than an oversight. It costs nothing but rows.
 //
 // They are LEFT rather than cleaned up, and that is the same deliberate choice
-// the previous version documented: there is no client-reachable way to delete a
-// household — see `0001` — so tidying is a manual statement in the Supabase SQL
-// editor, and a suite that could delete households would need a capability the
+// the previous version documented. Until #430 there was no client-reachable way
+// to delete a household at all: `0019:162-163` revokes DELETE on `households`
+// from `authenticated`, and no delete policy exists. Since #430 an organizer can
+// ask for a deletion, but it takes effect only after a seven-day grace period and
+// this suite never asks — so tidying is still a manual statement in the Supabase
+// SQL editor, and a suite that could hard-delete households would need a capability the
 // app itself is designed not to have. `docs/access-model.md` carries the
 // statement. Two auth users per run is strictly better than the three anonymous
 // users the old file left, and unlike those they are identifiable: every

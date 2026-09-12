@@ -7885,6 +7885,12 @@ describe('deleting and restoring a household, from App (#430)', () => {
     organizer_member_id: 'm1',
   }
 
+  // Relative to now: the banner hides a household past its purge_after, so a
+  // fixed date would turn these red on the day it passed.
+  const DAY = 86_400_000
+  const requestedAt = new Date(Date.now() - DAY).toISOString()
+  const purgeAfter = new Date(Date.now() + 6 * DAY).toISOString()
+
   beforeEach(() => {
     api.listHouseholds.mockResolvedValue([organized])
     api.listMembers.mockResolvedValue([
@@ -7893,9 +7899,15 @@ describe('deleting and restoring a household, from App (#430)', () => {
   })
 
   it('the organizer deletes the household on screen, and the banner is re-read afterwards', async () => {
+    const { GRACE_PERIOD_DAYS } = await vi.importActual('./lib/household.js')
     await renderApp('Who')
     const readsBefore = api.householdDeletionStatus.mock.calls.length
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    // #430 review: the confirm says the real grace period, which reaches Roster
+    // only through App's prop — the Roster suite deliberately uses another number.
+    expect(screen.getByTestId('delete-household-warning')).toHaveTextContent(
+      `restore it for ${GRACE_PERIOD_DAYS} days`,
+    )
     await act(
       async () =>
         void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
@@ -7909,8 +7921,8 @@ describe('deleting and restoring a household, from App (#430)', () => {
       {
         household_id: 'h9',
         household_name: 'Placeholder Household',
-        deletion_requested_at: '2026-09-11T15:00:00Z',
-        purge_after: '2026-09-18T15:00:00Z',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
       },
     ])
     await renderApp()
@@ -7925,8 +7937,8 @@ describe('deleting and restoring a household, from App (#430)', () => {
       {
         household_id: 'h9',
         household_name: 'Placeholder Household',
-        deletion_requested_at: '2026-09-11T15:00:00Z',
-        purge_after: '2026-09-18T15:00:00Z',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
       },
     ])
     await renderApp()
@@ -7948,5 +7960,50 @@ describe('deleting and restoring a household, from App (#430)', () => {
     await renderApp('Who')
     expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^delete this household$/i })).toBeInTheDocument()
+  })
+
+  it('clears the restore banner at sign-out, so the next person on this device never sees it', async () => {
+    // #430 review, and the shared-tablet rule of #165 AC 7 / #172 / #173: the
+    // banner names the last person's household and the day it goes.
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp('Who')
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+  })
+
+  it('reads the restore banner again after a sign-in, since it belongs to whoever is signed in', async () => {
+    // The fake sign-in flips the fixtures the way a real one flips the
+    // server's answers: signed out, nobody's banner; signed in, theirs.
+    api.currentSession.mockResolvedValue(null)
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.householdDeletionStatus.mockResolvedValue([
+        {
+          household_id: 'h9',
+          household_name: 'Placeholder Household',
+          deletion_requested_at: requestedAt,
+          purge_after: purgeAfter,
+        },
+      ])
+      return { user: { id: 'person-a' } }
+    })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(await screen.findByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
   })
 })

@@ -45,7 +45,7 @@ function unwrap({ data, error }, whatWeWereDoing) {
  * #430 — how many days a household pending deletion can still be restored.
  *
  * The database's `household_grace_period()` (migration 0042) is the authority;
- * this is the number the confirm and the banner say out loud, and
+ * this is the number the delete confirm says out loud, and
  * `householdDeletion.test.js` reads the migration and fails if they differ.
  */
 export const GRACE_PERIOD_DAYS = 7

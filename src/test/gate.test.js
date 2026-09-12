@@ -2578,6 +2578,16 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     return entries
   }
 
+  // #430 — the ONE exemption, owner decision 2026-09-11, taken knowingly against
+  // this guard and docs/hosting-decision.md: a daily Vercel cron that purges
+  // households whose grace period has ended, because a privacy purge must run
+  // even if nobody opens the app. One pattern, in one file. The tests below
+  // assert it is still needed, that the cron is exactly one daily call to
+  // /api/purge, and that it excuses nothing else, so it cannot widen quietly.
+  const EXEMPT = [{ path: 'vercel.json', pattern: /"crons"\s*:/, story: '#430' }]
+  const isExempt = (path, pattern) =>
+    EXEMPT.some((entry) => entry.path === path && String(entry.pattern) === String(pattern))
+
   // Shared by the clean-tree assertion and every control below, so the
   // controls exercise the scan that guards and not a copy of it.
   function schedulerOffenders(entries) {
@@ -2585,11 +2595,52 @@ describe('#98 AC 5 — nothing in the tree schedules work; every periodic read i
     for (const { path, text } of entries) {
       const code = stripComments(path, text)
       for (const { pattern, files } of SCHEDULERS) {
-        if (files.test(path) && pattern.test(code)) offenders.push(`${path}: ${pattern}`)
+        if (files.test(path) && pattern.test(code) && !isExempt(path, pattern)) {
+          offenders.push(`${path}: ${pattern}`)
+        }
       }
     }
     return offenders
   }
+
+  it('#430: the one exemption is still needed, so it cannot outlive its reason', () => {
+    const vercel = corpus().find((entry) => entry.path === 'vercel.json')
+    expect(vercel, 'vercel.json is gone: delete the #430 exemption with it').toBeDefined()
+    expect(EXEMPT[0].pattern.test(stripComments('vercel.json', vercel.text))).toBe(true)
+  })
+
+  it('#430: the exempt scheduler is exactly one once-a-day call to /api/purge', () => {
+    const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
+    expect(config.crons).toHaveLength(1)
+    expect(config.crons[0].path).toBe('/api/purge')
+    // Minute and hour fixed, every day: once daily, which is also Hobby's floor.
+    expect(config.crons[0].schedule).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/)
+  })
+
+  it('#430: api/ holds the one function the cron calls, and nothing else Vercel would deploy', () => {
+    // Vercel deploys every `api/**/*.{js,mjs,ts,tsx}` as a function, skipping only
+    // names under `_` or `.` — test files included. A test beside `api/purge.js`
+    // shipped as a public endpoint that errored on every request (#430 review).
+    const walk = (dir) =>
+      readdirSync(resolve(process.cwd(), dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`],
+      )
+    const deployed = walk('api').filter(
+      (path) => /\.(js|mjs|ts|tsx)$/.test(path) && !/\/[_.]/.test(path) && !path.endsWith('.d.ts'),
+    )
+    expect(deployed).toEqual(['api/purge.js'])
+  })
+
+  it('#430: the exemption is one pattern in one file, and nothing else there is excused', () => {
+    expect(EXEMPT).toHaveLength(1)
+    const planted = [
+      { path: 'vercel.json', text: '{ "crons": [], "note": "create extension if not exists pg_cron;" }' },
+      { path: 'planted/other.json', text: '{ "crons": [] }' },
+    ]
+    expect(schedulerOffenders(planted).sort()).toEqual(
+      ['planted/other.json: /"crons"\\s*:/', 'vercel.json: /pg_cron/i'].sort(),
+    )
+  })
 
   it('POSITIVE CONTROL: there is a corpus to scan, so an empty pass is impossible', () => {
     const paths = corpus().map((entry) => entry.path)

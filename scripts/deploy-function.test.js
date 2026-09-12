@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest'
 import {
   FUNCTION_NAMES,
   PENDING_FUNCTIONS,
+  SERVER_ONLY_FUNCTIONS,
+  deployCommandFor,
   functionsToDeploy,
   parseEnvFile,
   projectRefFrom,
@@ -180,14 +182,15 @@ describe('which functions an invocation deploys', () => {
     // disjointness test above, and it stood as a test of its own until a
     // review read it as guarding the pending branch — which an empty argv
     // never reaches (review-fanout, 2026-09-04).
-    expect(functionsToDeploy([])).toEqual([...FUNCTION_NAMES])
+    // Since #430 the deployable set includes the server-only functions.
+    expect(functionsToDeploy([])).toEqual([...FUNCTION_NAMES, ...SERVER_ONLY_FUNCTIONS])
     for (const name of PENDING_FUNCTIONS) expect(functionsToDeploy([])).not.toContain(name)
   })
 
   it('ignores flags, so --dry-run does not read as a function name', () => {
     // `process.argv.slice(2)` carries the flags too, and `--dry-run` reaching
     // the name filter would refuse the very invocation that is meant to be safe.
-    expect(functionsToDeploy(['--dry-run'])).toEqual([...FUNCTION_NAMES])
+    expect(functionsToDeploy(['--dry-run'])).toEqual([...FUNCTION_NAMES, ...SERVER_ONLY_FUNCTIONS])
   })
 
   it('narrows to a named function', () => {
@@ -199,6 +202,43 @@ describe('which functions an invocation deploys', () => {
     // sends somebody to look at the filesystem instead of at what they typed.
     expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/No such Edge Function/)
     expect(() => functionsToDeploy(['calendar-conect'])).toThrow(/calendar-connect/)
+  })
+})
+
+describe('server-only functions (#430)', () => {
+  it('are deployed by a bare invocation, and each has a directory the CLI can deploy', () => {
+    for (const name of SERVER_ONLY_FUNCTIONS) {
+      expect(functionsToDeploy([])).toContain(name)
+      const entry = resolve(process.cwd(), 'supabase/functions', name, 'index.ts')
+      expect(existsSync(entry), `no supabase/functions/${name}/index.ts`).toBe(true)
+    }
+  })
+
+  it('never overlap the client lists, so the app can never invoke one', () => {
+    // LIVE_EDGE_FUNCTIONS equals the app's invoke() call sites, in both
+    // directions (liveSchema.test.js), so absence from it IS "never invoked".
+    for (const name of SERVER_ONLY_FUNCTIONS) {
+      expect(FUNCTION_NAMES).not.toContain(name)
+      expect(PENDING_FUNCTIONS).not.toContain(name)
+      expect(LIVE_EDGE_FUNCTIONS).not.toContain(name)
+    }
+  })
+
+  it('deploy with --no-verify-jwt, and no client-invoked function does', () => {
+    for (const name of SERVER_ONLY_FUNCTIONS) {
+      expect(deployCommandFor(name, 'abcdefgh')).toContain('--no-verify-jwt')
+    }
+    for (const name of FUNCTION_NAMES) {
+      expect(deployCommandFor(name, 'abcdefgh')).not.toContain('--no-verify-jwt')
+    }
+  })
+
+  it('narrows to a named server-only function rather than refusing it as unknown', () => {
+    expect(functionsToDeploy(['purge-deleted-households'])).toEqual(['purge-deleted-households'])
+  })
+
+  it('POSITIVE CONTROL: there is one, so the assertions above have something to check', () => {
+    expect(SERVER_ONLY_FUNCTIONS.length).toBeGreaterThan(0)
   })
 })
 

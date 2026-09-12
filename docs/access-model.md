@@ -2294,7 +2294,60 @@ on 2026-09-08, not assumed.
 The cost side — the Free plan's 200 connections and 2,000,000 messages a month against a household
 of ten phones, and the kill condition — is in `docs/hosting-decision.md`.
 
+## Deleting a household — #430, 2026-09-11
+
+An organizer can delete their household from the Who tab. Owner decisions are on #430 and #427.
+
+- **Pending, not gone.** `request_household_deletion` sets `households.deletion_requested_at` and
+  `purge_after` (now plus `household_grace_period()`, seven days). The constraint
+  `households_deletion_is_whole` makes the pair both-or-neither.
+- **A pending household is nobody's.** The filter lives in the five functions that decide membership
+  by comparing `claimed_by` to the caller. The list was found by searching every migration, and it is
+  recorded in `0042`'s header:
+  - `current_household_ids()` (the predicate of about 30 policies and 18 RPCs)
+  - `acting_member()`
+  - `is_household_organizer()` (so the organizer-only policies and `provision-member` refuse too)
+  - `apply_assignments`
+  - `redeem_invitation`, which refuses in its usual one sentence, so a refusal cannot confirm a
+    household is being deleted
+- **The organizer's way back.** `restore_household` works until `purge_after`, then refuses, even if
+  the purge has not run yet. `household_deletion_status()` feeds the restore banner and lists a
+  household only until its `purge_after`, so the banner never offers a restore that would be refused;
+  the banner also drops one whose deadline passes while the tab is open. Both RPCs check the
+  organizer inline, because the patched `is_household_organizer()` is false for a pending household.
+- **The purge.** A daily Vercel cron calls `api/purge.js`, which calls the server-only
+  `purge-deleted-households` Edge Function with `PURGE_SHARED_SECRET`. This is the recorded exception
+  in `docs/hosting-decision.md`. For each due household the function:
+  1. revokes the Google grants first, because the cascade takes the tokens. It revokes what
+     `household_tokens_to_revoke` returns, which leaves out a person still connected in another
+     household: one Google account holds one grant with Taskr's single OAuth client, so revoking it
+     would break that household's calendar (owner decision at #430's review). Their token row still
+     goes with the cascade;
+  2. deletes each sign-in that claims nothing outside this household (#262's rule), **before** the
+     household. `members_claimed_by_fkey` is ON DELETE SET NULL, so this is #247's recoverable order:
+     a failed account step leaves the household due, and tomorrow's run retries it with the claimants
+     it still names. An account a concurrent run already deleted counts as done;
+  3. calls `purge_household` only once every account step succeeded (service_role only; it deletes
+     nothing that is not due, and is safe twice).
+
+  Every run is recorded in `household_purge_runs`: counts only, and no role holds a grant on it.
+  Vercel Hobby keeps logs for one hour and alerts on nothing, so this table is how a stopped purge is
+  told apart from a quiet week.
+- **Why functions and not grants.** `households_due_for_purge`, `household_tokens_to_revoke`,
+  `purge_household` and `record_household_purge_run` are executable by `service_role` alone. The exact list of tables
+  `service_role` may touch (`grants.pglite.test.js`) did not grow, and "delete a household whose
+  grace period is over" is a narrower power than a DELETE grant.
+- **Re-paste hazard, measured.** Re-pasting `0041` after `0042` silently takes the pending-deletion
+  refusal back out of `redeem_invitation`, and re-pasting `0042` restores it
+  (`householdDeletion.pglite.test.js`). **The safe re-paste order now ends at `0042`.**
+- **Excused reds.** `check:live` reads the three client RPCs red until `0042` is applied. The purge's
+  functions are not in `LIVE_RPCS`, because the app never calls them.
+
 ## How the rules are enforced
+
+*(Historical: this section describes `0001`'s device model, which `0007` replaced. It is kept
+because it says why the model looked the way it did. Today's membership predicate is
+`current_household_ids()`; for deleting a household, see the #430 section above.)*
 
 Everything is in `supabase/migrations/0001_household_and_roster.sql`. Row-level security is on for all
 three tables with no permissive fallback.
@@ -2307,7 +2360,11 @@ three tables with no permissive fallback.
 - There is **no insert, update or delete policy on `households` or `household_devices` at all**. Those
   rows are created only by `create_household` and `join_household`, which run as definer. A client
   cannot mint a household, forge a membership, or rewrite a join code by any path, because no policy
-  exists that would permit it.
+  exists that would permit it. **Today** the block on deleting a household is two things, neither of
+  them in `0001`: `0019:162-163` revokes `delete` (with insert, select, truncate, references, trigger
+  and maintain) on `households` from `authenticated`, and still no delete policy exists. The one
+  client route to a deletion is #430's `request_household_deletion`, which schedules a purge rather
+  than deleting anything (the section above).
 - `claim_member` takes `FOR UPDATE` on the member row, so two phones racing to claim the same person
   serialise and the second is refused, rather than both reading "unclaimed" and both writing.
 
@@ -2380,8 +2437,9 @@ more, and the provider is disabled on the live project — see the #246 section 
 
 **Cleanup.** Each run leaves, on the live project, **two** households named `TEST 88 <timestamp> ...`,
 five member rows, and two auth users — the two provisioned members, whose addresses are
-`<members.id>@taskr.invalid`. There is deliberately no client-reachable way to delete a household, so
-tidying is a manual statement in the SQL editor:
+`<members.id>@taskr.invalid`. Until #430 there was no client-reachable way to delete a household;
+since #430 an organizer can, but only through a seven-day grace period, so tidying test runs is
+still a manual statement in the SQL editor:
 
 ```sql
 delete from public.households where name like 'TEST 88 %';

@@ -35,6 +35,12 @@ const api = {
   inviteMember: vi.fn(),
   sendPasswordReset: vi.fn(),
   setOwnPassword: vi.fn(),
+  // #430 — deleting a household. Defaults that change nothing, so every test
+  // that is not about deletion renders exactly what it did before: nobody has
+  // a household pending deletion.
+  householdDeletionStatus: vi.fn(async () => []),
+  requestHouseholdDeletion: vi.fn(async () => ({})),
+  restoreHousehold: vi.fn(async () => ({})),
 }
 
 // #34. Mocked separately from household.js because it is a separate module, and
@@ -430,6 +436,10 @@ beforeEach(() => {
     needsConfirmation: false,
   })
   api.signOut.mockResolvedValue(undefined)
+  // #430 — nobody has a household pending deletion unless a test says so.
+  api.householdDeletionStatus.mockResolvedValue([])
+  api.requestHouseholdDeletion.mockResolvedValue({})
+  api.restoreHousehold.mockResolvedValue({})
   // #342 — a channel that opens and can be closed, and nothing arrives on it
   // unless a test pushes something through the handlers it recorded.
   realtimeApi.subscribeToHousehold.mockReset()
@@ -7857,5 +7867,143 @@ describe('#173 — redeeming an invitation code, from App', () => {
     // this is the real constant: TRUE since this story.
     const real = await vi.importActual('./lib/invitations.js')
     expect(real.INVITATIONS_REDEEMABLE).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #430 — deleting and restoring a household, WIRED. Roster's and the banner's
+// own tests prove each component; these prove App hands them the handlers that
+// reach the data layer, with the household on screen. "Exported is not
+// reachable" is this repo's recorded reason for the second half.
+// ---------------------------------------------------------------------------
+
+describe('deleting and restoring a household, from App (#430)', () => {
+  const organized = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+
+  // Relative to now: the banner hides a household past its purge_after, so a
+  // fixed date would turn these red on the day it passed.
+  const DAY = 86_400_000
+  const requestedAt = new Date(Date.now() - DAY).toISOString()
+  const purgeAfter = new Date(Date.now() + 6 * DAY).toISOString()
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([organized])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+  })
+
+  it('the organizer deletes the household on screen, and the banner is re-read afterwards', async () => {
+    const { GRACE_PERIOD_DAYS } = await vi.importActual('./lib/household.js')
+    await renderApp('Who')
+    const readsBefore = api.householdDeletionStatus.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    // #430 review: the confirm says the real grace period, which reaches Roster
+    // only through App's prop — the Roster suite deliberately uses another number.
+    expect(screen.getByTestId('delete-household-warning')).toHaveTextContent(
+      `restore it for ${GRACE_PERIOD_DAYS} days`,
+    )
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
+    )
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    expect(api.householdDeletionStatus.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('shows a pending household above the tabs at boot, and restores the one it names', async () => {
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp()
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^restore/i })))
+    expect(api.restoreHousehold).toHaveBeenCalledWith('h9')
+  })
+
+  it('shows the banner on the onboarding screen too, where deleting your only household lands you', async () => {
+    api.listHouseholds.mockResolvedValue([])
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp()
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+  })
+
+  it('still boots when the status read answers nothing at all, not only when it rejects', async () => {
+    // The hardening's own test: a plain `.catch` covers a rejection and not a
+    // read that returns no promise or no list, which is what took every boot
+    // down in this story's first run (the mock reset left it answering undefined).
+    api.householdDeletionStatus.mockReturnValue(undefined)
+    await renderApp('Who')
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^delete this household$/i })).toBeInTheDocument()
+  })
+
+  it('still boots when the status read fails, because it must never keep anybody out', async () => {
+    api.householdDeletionStatus.mockRejectedValue(new Error('status read failed'))
+    await renderApp('Who')
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^delete this household$/i })).toBeInTheDocument()
+  })
+
+  it('clears the restore banner at sign-out, so the next person on this device never sees it', async () => {
+    // #430 review, and the shared-tablet rule of #165 AC 7 / #172 / #173: the
+    // banner names the last person's household and the day it goes.
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp('Who')
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+  })
+
+  it('reads the restore banner again after a sign-in, since it belongs to whoever is signed in', async () => {
+    // The fake sign-in flips the fixtures the way a real one flips the
+    // server's answers: signed out, nobody's banner; signed in, theirs.
+    api.currentSession.mockResolvedValue(null)
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.householdDeletionStatus.mockResolvedValue([
+        {
+          household_id: 'h9',
+          household_name: 'Placeholder Household',
+          deletion_requested_at: requestedAt,
+          purge_after: purgeAfter,
+        },
+      ])
+      return { user: { id: 'person-a' } }
+    })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(await screen.findByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
   })
 })

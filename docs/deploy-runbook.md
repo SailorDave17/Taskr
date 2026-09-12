@@ -21,6 +21,16 @@ wrong.
 
 ## 1. Vercel — the front end
 
+**The purge cron (#430).** `vercel.json` declares one daily cron that calls `api/purge.js`, which
+calls the `purge-deleted-households` Edge Function (section 3). Crons run **only on the production
+deployment**, which builds from `release`. Set three **Production** environment variables:
+`CRON_SECRET` (at least 16 characters, letters and digits only; Vercel sends it as a Bearer
+header), `PURGE_FUNCTION_URL` (`https://<project-ref>.supabase.co/functions/v1/purge-deleted-households`)
+and `PURGE_SHARED_SECRET` (the same value as the Supabase function secret). Check **Settings →
+Functions → Fluid compute** is on: a project created before 2025-04-23 without it caps functions at
+60s. Vercel keeps Hobby logs for an hour and never retries a failed cron, so read the purge's own
+record in the SQL editor: `select * from public.household_purge_runs order by ran_at desc limit 7;`
+
 1. Sign in at [vercel.com](https://vercel.com) with the GitHub account that owns `SailorDave17/Taskr`.
    Hobby plan; no card required.
 2. **Add New → Project**, import `SailorDave17/Taskr`. Private repos are supported on Hobby. (Repos
@@ -283,6 +293,24 @@ for part of 2026-09-08, "four since #208" before that, and
 "three since #96" until 2026-09-07 — the count lives in
 `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
+
+**And one server-only function since #430: `purge-deleted-households`.** It is listed in
+`SERVER_ONLY_FUNCTIONS`, not `FUNCTION_NAMES`, because the app never invokes it; the same bare
+`npm run deploy:function` deploys it, adding `--no-verify-jwt`, since its caller is Vercel's cron,
+which holds no session. It refuses every call without its own secret, so set `PURGE_SHARED_SECRET`
+first. The value exists nowhere yet, so make one — letters and digits only, which also suits
+`CRON_SECRET` (make that one separately, the same way) — and set it from the clipboard, as in 3c:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | Set-Clipboard
+$s = Get-Clipboard; npx supabase secrets set PURGE_SHARED_SECRET=$s --project-ref <project ref>
+```
+
+Paste the same value into Vercel's `PURGE_SHARED_SECRET` (section 1) before clearing the clipboard.
+`npx supabase secrets list --project-ref <project ref>` then shows the name with a digest, never the
+value; an empty or unset secret makes the function answer "This function is not configured." and the
+cron log shows it for the hour Vercel keeps it.
+
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you

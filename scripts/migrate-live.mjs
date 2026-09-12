@@ -30,7 +30,8 @@
 // restriction above, and the fact that DECIDING TO PASTE is still the owner's —
 // `docs/deploy-runbook.md` section 5 says so for both routes, and a migration
 // reaching the live project is still a deliberate act with a sequence: apply,
-// then promote `rebuild/v1` to `release`.
+// then promote `develop` to `release`. (This named `rebuild/v1`, retired on
+// 2026-08-27, until #430 corrected it.)
 
 import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'

@@ -224,6 +224,13 @@ export const LIVE_RPCS = Object.freeze([
     args: Object.freeze({ chore_id: 'uuid', member_id: 'uuid' }),
   }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
+  // #430, arriving with `0042` — red on purpose until that file is applied, the
+  // same deliberate window every migration-borne entry here has had. The two
+  // writers answer the read-only GET with `25006` once they resolve (PRESENT);
+  // the status read has no arguments and resolves as a plain read.
+  Object.freeze({ fn: 'request_household_deletion', args: Object.freeze({ household_id: 'uuid' }) }),
+  Object.freeze({ fn: 'restore_household', args: Object.freeze({ household_id: 'uuid' }) }),
+  Object.freeze({ fn: 'household_deletion_status', args: Object.freeze({}) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied
   // — the same deliberate window every migration-borne entry here has had — and
   // `0018` was applied on 2026-08-27 (#231), so this reads green now.

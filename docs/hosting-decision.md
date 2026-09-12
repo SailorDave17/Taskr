@@ -68,6 +68,29 @@ Vercel also offers cron jobs (100 per project on Hobby) as a fallback trigger, w
 Supabase project warm as a side effect. Note that is a *workaround for the pause*, and calling it
 that in the code beats discovering it later as folklore.
 
+**Amended 2026-09-11, #430 — one scheduled job now exists, by owner decision, taken knowingly
+against both this section and the Vercel Serverless rejection below.** It is a once-daily Vercel
+cron (`vercel.json`) calling `api/purge.js`, which calls the `purge-deleted-households` Edge Function
+with a shared secret. That function purges households whose seven-day deletion grace period has
+ended.
+
+- **Why a privacy purge is the exception.** A grace period promises that deleted data goes when it
+  ends *even if nobody returns*. The client-triggered pattern above can keep that promise only while
+  somebody still uses the app, and repeating chores never needed that guarantee.
+- **What it costs, stated rather than discovered:**
+  - It is the second deployment surface and second secret store the rejection below warned about.
+    Vercel holds `CRON_SECRET` and `PURGE_SHARED_SECRET`, and **never** the Supabase service key,
+    which stays with the Edge Function.
+  - Vercel Hobby runs a cron at most daily, anywhere within the hour, and never retries a failure.
+  - Hobby keeps logs for one hour, so the purge records every run in `household_purge_runs`.
+  - Crons run only on the production deployment, which builds from `release`.
+- **It does not solve the pause; it outlasts it.** The daily call keeps the project warm as a side
+  effect, which is the workaround this section's previous paragraph names. It is named in `api/purge.js`
+  too.
+
+`src/test/gate.test.js`'s #98 AC 5 guard exempts exactly this one entry, and asserts that the
+exemption is still needed and that it covers nothing else. Everything else stays client-triggered.
+
 ### Auth for members without email — feeds the roster story (#5)
 
 *(Superseded twice since this was researched: #62 moved every member to a real per-member auth
@@ -145,7 +168,8 @@ Functions** — `provision-member` and `calendar-connect` — with a committed d
 **Rejected alternatives, and why:**
 
 - **Vercel Serverless functions** — a second deployment surface and a second secret store, for no
-  benefit the tree suggests. The Supabase auth context already exists at the Edge Function, the
+  benefit the tree suggests. *(Accepted for exactly one case on 2026-09-11, the #430 purge cron;
+  see the amendment under "Scheduled functions" above.)* The Supabase auth context already exists at the Edge Function, the
   secret sits next to the data, and one platform holds credentials.
 - **A client-side provider key** — the `VITE_` secret-key defect wearing a different hat. A secret
   in the bundle is public; `src/lib/keyShape.js` exists because a secret key reached a published

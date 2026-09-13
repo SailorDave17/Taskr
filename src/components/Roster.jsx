@@ -1605,12 +1605,18 @@ export default function Roster({
           household — `me.id === household.organizer_member_id`, both resolved
           within the household on screen — so a person who organises one
           household and merely belongs to another sees this card in the first
-          and not the second, by construction (AC 6). `onMintInvitation` is the
-          wiring-optional half, not a second opinion about the role.
+          and not the second, by construction (AC 6). The three handlers are
+          the wiring-optional half, not a second opinion about the role — and
+          it is ALL THREE, not the minter alone (#420). The card's Withdraw
+          calls `onWithdrawInvitation` on its second tap and would throw on a
+          null; measured under jsdom as an UNCAUGHT TypeError, the kind a green
+          test cannot catch. So a caller that wires only the minter gets no
+          card — the #166 optional shape — rather than a control that breaks
+          when pressed.
 
           This is not the guard: `0040`'s three organizer-only policies are,
           and they refuse the read and both writes to anybody else. */}
-      {isOrganizer && onMintInvitation ? (
+      {isOrganizer && onMintInvitation && onWithdrawInvitation && onDismissMintedCode ? (
         <Invitations
           invitations={invitations}
           mintedCode={mintedCode}

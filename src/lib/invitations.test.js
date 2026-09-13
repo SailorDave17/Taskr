@@ -73,13 +73,47 @@ function stubClient({ data = [], error = null, single = null } = {}) {
 
 const argsOf = (client, name) => client.calls.filter(([called]) => called === name).map(([, arg]) => arg)
 
+/**
+ * The parameter names of a function, as its source spells them — defaults
+ * stripped, so a second `= …` parameter COUNTS (#420). `Function.length` stops
+ * counting at the first default and cannot see one; the test below pins that.
+ */
+const parameterNames = (fn) => {
+  const source = fn.toString()
+  const open = source.indexOf('(')
+  let depth = 0
+  let close = open
+  for (; close < source.length; close += 1) {
+    if (source[close] === '(') depth += 1
+    else if (source[close] === ')' && (depth -= 1) === 0) break
+  }
+  return source
+    .slice(open + 1, close)
+    .split(',')
+    .map((parameter) => parameter.split('=')[0].trim())
+    .filter(Boolean)
+}
+
+/** The bytes of a string as lower-case hex — the wire form of a `bytea` (#420). */
+const hexOf = (text) =>
+  Array.from(new TextEncoder().encode(text), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
 describe('#172 AC 2 — a code is not derivable from the household id', () => {
   it('takes no input but its random source, so there is nothing of the household to derive it from', () => {
     // The structural half of the criterion: the generator's ONLY parameter is
     // the byte source, and the mint calls it with none. A code built from the
     // household id would need that id as an argument, and there is no slot for
     // it to arrive through.
-    expect(generateInvitationCode.length).toBeLessThanOrEqual(1)
+    //
+    // Read off the SOURCE, not `Function.length` (#420): `length` counts only
+    // the parameters before the first default, so it read 0 here and went on
+    // reading 0 with a second, defaulted parameter beside the byte source —
+    // measured, 0 red on exactly that mutation. The two lines after the
+    // assertion are the control: the instrument sees a second defaulted
+    // parameter, and `length` does not.
+    expect(parameterNames(generateInvitationCode)).toEqual(['randomBytes'])
+    expect(parameterNames((bytes = null, householdId = null) => [bytes, householdId])).toEqual(['bytes', 'householdId'])
+    expect(((bytes = null, householdId = null) => [bytes, householdId]).length).toBe(0)
     const fixed = () => Uint8Array.from(Array.from({ length: INVITATION_CODE_LENGTH }, (_, n) => n))
     // Same bytes, same code, whatever household is in play — because no
     // household is in play.
@@ -437,7 +471,15 @@ describe('#172 — what each write actually sends', () => {
     const { code } = await mintInvitation({ householdId: 'h1', createdByMemberId: 'm1' })
     // The assertion this whole design exists for: the plaintext appears nowhere
     // in anything that crosses the wire.
-    expect(JSON.stringify(client.calls)).not.toContain(code)
+    const wire = JSON.stringify(client.calls)
+    expect(wire).not.toContain(code)
+    // Nor as HEX (#420). `token_hash` is a `bytea` and the wire form of one is
+    // `\x` + hex, so a mint that sent the code's own bytes in place of a digest
+    // would carry the code as hex, which the substring search above cannot
+    // see — measured, 0 red on exactly that mutation before this line.
+    // Case-folded, because a hex encoder may spell a–f either way.
+    expect(hexOf('k7')).toBe('6b37')
+    expect(wire.toLowerCase()).not.toContain(hexOf(code))
   })
 
   it('refuses a mint that names no household or no minter', async () => {

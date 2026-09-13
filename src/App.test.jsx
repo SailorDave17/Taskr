@@ -1234,7 +1234,41 @@ describe('#172 — the invitation card, through App', () => {
       createdByMemberId: 'm-a1',
     })
     expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
-    // The code lands together with its row, because it is set after the re-read.
+    // Both are on screen once the mint has settled. That is ALL this pair can
+    // see: `act` has flushed the re-read and the set before either assertion
+    // runs, so the order between them is the next test's (#420 — this comment
+    // used to claim the ordering, and the mutation that set the code a round
+    // trip early left this test green).
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('#420 — the code waits for the re-read: nothing is shown until its row has been read back', async () => {
+    // The ORDER `handleMintInvitation` states — the code is set after its own
+    // re-read — observed from inside the window rather than after it. The
+    // refresh reconciles the shown code against the rows it just read and
+    // clears one whose row is missing, so a code set a round trip early is
+    // wiped by the very re-read that would have carried its row. Three
+    // sibling tests here redden on that only because their fixtures never
+    // return the row; this one holds the list read open and looks.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    let release = null
+    invitationsApi.listInvitations.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    // The mint has committed and the refresh is parked on the invitation read.
+    await waitFor(() => expect(invitationsApi.mintInvitation).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(release).not.toBeNull())
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+
+    await act(async () => release([invitationRow('inv-1')]))
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
     expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
   })
 

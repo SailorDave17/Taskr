@@ -2506,6 +2506,34 @@ describe('#172 — the invitation card follows the organizer role', () => {
     expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
   })
 
+  // #420 — the gate is all THREE handlers, not the minter alone. `Invitations`
+  // calls `onWithdraw` on the second Withdraw tap; handed a null it throws, and
+  // under jsdom that surfaced as an UNCAUGHT error the probe could not even
+  // catch (measured: one green test, exit 1). So a caller that wires the minter
+  // without the other two gets the roster that shipped before #172 rather than
+  // a control that breaks when pressed. One case per missing handler, so that
+  // dropping any single conjunct from the gate reddens its own test.
+  it('renders no card when ONLY the minter is wired — its controls call the other two (#420)', () => {
+    setup({ isOrganizer: true, invitations: OUTSTANDING, mintedCode: 'k7m3qp4rwn', onMintInvitation: vi.fn() })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /withdraw the code created/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /hide the code/i })).not.toBeInTheDocument()
+  })
+
+  it('renders no card without the withdraw handler, whatever else is wired (#420)', () => {
+    const { onMintInvitation, onDismissMintedCode } = wired()
+    setup({ isOrganizer: true, invitations: OUTSTANDING, mintedCode: 'k7m3qp4rwn', onMintInvitation, onDismissMintedCode })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /withdraw the code created/i })).not.toBeInTheDocument()
+  })
+
+  it('renders no card without the dismiss handler, whatever else is wired (#420)', () => {
+    const { onMintInvitation, onWithdrawInvitation } = wired()
+    setup({ isOrganizer: true, invitations: OUTSTANDING, mintedCode: 'k7m3qp4rwn', onMintInvitation, onWithdrawInvitation })
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /hide the code/i })).not.toBeInTheDocument()
+  })
+
   it('design-bar — the invitation card comes BEFORE Add someone', () => {
     // Owner decision at the design-bar pass, 2026-09-10. At 360 wide the card
     // started 2.4 screens down (y 1919 of 2636), under the add-by-email form

@@ -786,9 +786,67 @@ than against a status code (an auth-walled platform answers `200` from its login
 `<title>Taskr</title>`, `theme-color #1f6f5c`, `/assets/index-*.js`, `manifest.webmanifest` with
 `display: standalone` and all three icons resolving, and `sw.js` served as JavaScript.
 
-One thing that looks like a defect and is not: grepping the main bundle for `serviceWorker` or
-`registerSW` finds **nothing**. Registration is injected by `vite-plugin-pwa` as a separate
-`<script id="vite-plugin-pwa:register-sw" src="/registerSW.js">` tag in `index.html`. Check there.
+Where registration lives changed with #347. **Since #347** the registration is in the main bundle
+(`registerSW` from `virtual:pwa-register`, called by `src/lib/appUpdate.js`, which pulls
+`workbox-window` in with it), and `index.html` carries **no** `vite-plugin-pwa:register-sw` script and
+there is no `registerSW.js`. `src/test/pwaBuild.test.js` builds the app and refuses either. *(Until
+2026-09-13 this paragraph said grepping the bundle for `registerSW` finds nothing because the plugin
+injected a separate one-line `<script id="vite-plugin-pwa:register-sw" src="/registerSW.js">` —
+true of every build before #347, which is why an older build still greps clean.)*
+
+### What a member with the app open sees after a deploy (#347)
+
+**The new build, without doing anything.** The app looks for a new worker when it opens, every time
+it becomes visible again, and every `UPDATE_CHECK_INTERVAL_MS` — **one hour** — while it stays
+open (`src/lib/appUpdate.js`). When one is found:
+
+- **Nothing is being edited** → the page takes the new worker and reloads onto the new build at
+  once. The footer's `build <sha>` changes; that is how to see which build a device runs.
+- **Something typed that is still in its field** → the reload waits until the field is cleared or
+  closed. A save that clears or closes its form releases it; **a submit on its own does not**,
+  because its save may still be in flight or be refused (owner decision at the #347 review). While
+  an update waits on an edit, the page looks again every `DEFERRED_RECHECK_MS` — one second. A
+  select or checkbox counts only inside a form: the form-less ones (a chore's assignee, skip and
+  exclusion pickers, the household switcher) save the moment they change, so there is nothing to
+  protect. Coming back to the app does **not** override an unfinished edit (owner decision,
+  2026-09-13), so nothing typed is lost to an update.
+- **Offline** → the check is skipped rather than queued, and runs again at the next return or
+  interval.
+
+So the longest an idle member waits for a deploy is **one hour**, and in practice it is the next
+time they come back to the app. Two limits, stated: an edit form that keeps its text after a
+successful save holds the update until it is closed; and a second open tab that is mid-edit
+reloads too, because the new worker takes over every tab at once.
+
+**A deploy whose app fails on load is replaced by the next good deploy, or by a rollback, within
+about a minute.** The updater starts before the app and loads separately from it (`src/main.jsx`).
+When the app fails to load, the updater looks for a new build every `RECOVERY_CHECK_INTERVAL_MS` —
+**one minute** — instead of every hour (owner decision, 2026-09-13), because a blank page has
+nothing on it to protect and nobody comes back to it on purpose. So the remedy for a broken
+production deploy is the ordinary one: ship the fix or put the previous deployment back in
+production, and open phones move off the broken build by themselves. *Measured on #347 with the
+recovery check, nothing touched after the good build went up*: a first-visit page left blank by a
+broken build moved to the good one 33.6 s after it was served. A page already on a good build took
+a broken deploy, went blank, and moved to the fix 50.2 s after the fix was served — 61 s after the
+broken page loaded, which is the one-minute tick. *Measured on #347 before that order*: a build that threw on load left the page blank, and two reloads after a good deploy stayed
+blank — only closing every Taskr window recovered it. What is still not covered is a breakage
+inside the updater's own small chunk, and a render-time crash (the app loads, then throws while
+drawing), which falls back to the hourly check.
+
+**Once, on the #347 deploy itself.** A device still running a build from before #347 has none of
+this code, so it cannot pick the new build up by itself. A reload does not move it either: the old
+worker stays in charge and serves the old build until **every** Taskr window on the device is
+closed — on Android, swipe the installed app away from recents and close any Taskr browser tab,
+then open it again. After that one full close, the footer shows the #347 build, and every later
+deploy behaves as described above. It is also why #347's live observation is taken on the deploy
+**after** that one, not on #347's own.
+
+**`registerType: 'autoUpdate'` alone did not deliver this, and re-reading the config will suggest it
+did.** Until #347 the config said `autoUpdate`, and the generated worker did take control of an open
+page — but nothing imported the plugin's client module, so the page went on running the old
+JavaScript until its next navigation, which an installed PWA never makes (measured 2026-09-05; cairn
+note `vite-plugin-pwa-autoupdate-ships-no-reload`). The config is now `registerType: 'prompt'` with
+`injectRegister: false`, and the reasons are in `vite.config.js`.
 
 If iOS ever joins the household, `apple-touch-icon` and `apple-mobile-web-app-*` meta tags are the
 addition needed; they were deliberately left out rather than added speculatively for a platform

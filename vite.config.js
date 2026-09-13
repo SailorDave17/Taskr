@@ -58,7 +58,33 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // #347 — `prompt`, with registration done by `src/lib/appUpdate.js`
+      // through the plugin's client module. Until #347 this read `autoUpdate`
+      // with the default `injectRegister`, which shipped a worker that took
+      // control of an open page while the page went on running the OLD
+      // JavaScript: the reload lives in `virtual:pwa-register`, and nothing
+      // imported it. Two facts read from the plugin's source decide the
+      // shape. Its `autoUpdate` client reloads on an update unconditionally,
+      // so it cannot wait for somebody to finish typing. And it sets the
+      // worker's `skipWaiting`/`clientsClaim` ONLY while `injectRegister` is
+      // `auto` or unset (`dist/index.js`), so turning the inline registration
+      // off under `autoUpdate` would have left a new worker waiting forever.
+      // Under `prompt` the worker waits on purpose, workbox emits the
+      // SKIP_WAITING handler, and the app decides when to take the update.
+      registerType: 'prompt',
+      // One registration path: the app's. `false` stops the plugin emitting
+      // `registerSW.js` and its `<script id="vite-plugin-pwa:register-sw">`,
+      // which src/test/pwaBuild.test.js refuses in a real build.
+      injectRegister: false,
+      // #347 — and the new worker claims open pages it does not yet control.
+      // Measured on #347 without it: a page on its FIRST visit (no worker
+      // controlled it when it loaded) found an update, the app took it, the new
+      // worker activated — and the page was never taken over, so it went on
+      // running the old build until it navigated. `clientsClaim` makes the
+      // takeover reach that page too; the SKIP_WAITING handler still decides
+      // WHEN, and src/lib/appUpdate.js reloads that one page itself, because
+      // the plugin only reloads a page that had a controller at registration.
+      workbox: { clientsClaim: true },
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Taskr',

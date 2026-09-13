@@ -34,9 +34,9 @@ import { useState } from 'react'
  * screen cannot afford. The name field differs for the same reason — somebody
  * replacing a lost password already has a name on their row.
  *
- * #155 is NOT delivered by this file. What it still owes is the way IN — a
- * "forgotten your password" control that asks GoTrue to send the recovery
- * email. This is only the landing.
+ * The way IN for a recovery — the "Forgot your password?" control on the
+ * sign-in screen that asks GoTrue to send the mail — is `Onboarding.jsx`'s
+ * (#155). This is only the landing.
  */
 
 /** The floor Supabase itself enforces, restated so the refusal arrives without a round trip. */

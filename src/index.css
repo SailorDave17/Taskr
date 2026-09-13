@@ -5,6 +5,16 @@
   --ink: #e8eef2;
   --ink-dim: #9aa9b4;
   --accent: #1f6f5c;
+  /* #426 — the accent for TEXT on the dark surfaces. --accent is a fill and a
+     border colour: light ink sits on it at 5.72:1, so it is dark by design,
+     and as small text it is 2.70:1 on --surface and 2.99:1 on --bg — short
+     of WCAG AA's 4.5:1 (MEASURED in a real browser at 360×800 on every
+     signed-out screen, 2026-09-12). Lightening --accent itself was rejected:
+     the first value to clear 4.5:1 on --surface (#2f9a80) drops the filled
+     button's ink to 3.29:1, so one token cannot be both the fill and the
+     text. This is the same hue at l=46% instead of 28%: 6.50:1 on --surface,
+     7.21:1 on --bg. gate.test.js computes both from this file. */
+  --accent-ink: #33b798;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -405,7 +415,9 @@ body {
   padding: 0.5rem 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  /* #426 — the text accent, not the fill accent: this is 13px text on a
+     card, and --accent measured 2.70:1 there. */
+  color: var(--accent-ink);
   font: inherit;
   text-decoration: underline;
   text-underline-offset: 0.15em;

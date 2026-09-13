@@ -76,6 +76,11 @@ describe('the credential flow is reachable from the app, not just exported', () 
     expect(app).toMatch(/onSignIn=\{/)
     expect(app).toMatch(/onCreate=\{/)
     expect(app).toMatch(/onSignInWithGoogle=\{/)
+    // #155 — the reset request. The prop is optional on the screen (so #154's
+    // tests render unchanged) and the control renders only when it is wired,
+    // so an unwired prop is a sign-in screen with no way back in and nothing
+    // red anywhere: exactly the shape this guard exists for.
+    expect(app).toMatch(/onForgotPassword=\{/)
   })
 
   it('#304 AC 4: exchanges no code — the flow is implicit, so a `?code=` on the root is never a sign-in', () => {
@@ -1405,6 +1410,9 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out': 'a button label — the this-device-only sign-out control',
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
+    // #440 — the reason phrase of an HTTP 500, which is what the auth server's
+    // refusal of a Sign out everywhere carries in App.test.jsx's fixture.
+    'Internal Server Error': 'an HTTP 500 reason phrase — the refused logout in the #440 sign-out tests',
     // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
     // tests because they find the control by that name, which is the point:
     // the control's own text is the household's name, so the only stable way
@@ -1953,23 +1961,26 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
   })
 
   it('the onboarding step count is unchanged from before this story', () => {
-    // FIVE cards and FIVE forms since #173 — sign in, create your own account,
-    // name the household, and the two join-with-a-code cards (one signed out,
-    // one signed in with no household) — of which a person is shown at most
+    // SIX cards and SIX forms since #155 — the five below plus the
+    // forgotten-password card, which asks for an address and nothing else:
+    // recovery, not capability. FIVE and FIVE from #173 to #155 — sign in,
+    // create your own account, name the household, and the two
+    // join-with-a-code cards (one signed out, one signed in with no household)
+    // — of which a person is shown at most
     // two at a time. It was THREE and THREE from #154 to #173 — #154 split the
     // organizer's signup out of the household form, because the two could
     // only ever succeed together on a project with email confirmation off —
     // and TWO and TWO from #37 to #154 (create a household, or sign in). Each
     // rework is what this literal exists to make visible in a diff. A
-    // capability step would be a SIXTH of each, and this is the number that
-    // says so: the two #173 cards are admission, not capability, and neither
-    // asks anything about what a person can do.
+    // capability step would be a SEVENTH of each, and this is the number that
+    // says so: the two #173 cards are admission and the #155 card is recovery,
+    // not capability, and none of them asks anything about what a person can do.
     //
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(5)
-    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(5)
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(6)
+    expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(6)
   })
 
   it('no component offers a capability screen, by any of the words one would be called', () => {
@@ -2935,5 +2946,70 @@ describe('#192 — the reserved probe name is honoured, and cannot be occupied',
     expect(isProbeFile(`9999_${PROBE_MARKER}.plant.tmp.sql`)).toBe(true)
     expect(isProbeFile('src/lib/household.js')).toBe(false)
     expect(isProbeFile('0014_scope_reads_to_one_household.sql')).toBe(false)
+  })
+})
+
+// #426 — the link-styled buttons meet WCAG AA on the dark surfaces they sit on.
+// Asserted against the STYLESHEET with the WCAG 2.x relative-luminance formula,
+// because jsdom applies no stylesheet: a component test would pass identically
+// with the rule pointed back at --accent. Both sides of the pairing are read
+// out of `src/index.css` — the token's value out of `:root`, the reference out
+// of the `.button--link` rule — so the value drifting darker, the surface
+// drifting lighter, or the rule quietly re-pointed each redden here.
+//
+// MEASURED in a real browser at 360×800 before this story: every .button--link
+// on the sign-in, sign-up, join and reset screens computed to rgb(31, 111, 92)
+// on rgb(26, 33, 40) — 2.70:1 at 13px, the faintest text on the first screen a
+// newcomer sees. The CONTROL below keeps that fact: --accent is a fill colour
+// (light ink sits on it at 5.72:1) and cannot also be the text colour.
+describe('#426 — the link-styled buttons meet 4.5:1 on the dark surfaces they sit on', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const root = css.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
+  const token = (name) => root.match(new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{6})\\s*;`))?.[1]
+
+  const channel = (c) => {
+    const v = c / 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  }
+  const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+  const AA_TEXT = 4.5
+
+  it('POSITIVE CONTROL: the formula is the WCAG one — black on white is 21:1, a colour on itself 1:1', () => {
+    expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5)
+    expect(contrast('#1a2128', '#1a2128')).toBe(1)
+  })
+
+  it('POSITIVE CONTROL: every token in the pairing is read out of :root, not defaulted', () => {
+    for (const name of ['accent', 'accent-ink', 'surface', 'bg']) {
+      expect(token(name), `--${name} not found in :root`).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+  })
+
+  it('CONTROL: the fill accent is still below 4.5:1 on the card, so a separate text accent is still earned', () => {
+    // The day --accent clears 4.5:1 as text, --accent-ink is a second copy of
+    // one value and should be folded back — this is what says so.
+    expect(contrast(token('accent'), token('surface'))).toBeLessThan(AA_TEXT)
+  })
+
+  it('.button--link takes its colour from the text accent, not the fill accent', () => {
+    const rule = css.match(/\.button--link\s*\{([^}]*)\}/)?.[1]
+    expect(rule, 'no .button--link rule in the stylesheet').toBeDefined()
+    expect(rule).toMatch(/color\s*:\s*var\(--accent-ink\)\s*;/)
+    expect(rule).not.toMatch(/var\(--accent\)/)
+  })
+
+  it('the text accent clears 4.5:1 on --surface, the card every link button sits on', () => {
+    expect(contrast(token('accent-ink'), token('surface'))).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  it('and on --bg, so a link button placed outside a card is covered too', () => {
+    expect(contrast(token('accent-ink'), token('bg'))).toBeGreaterThanOrEqual(AA_TEXT)
   })
 })

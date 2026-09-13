@@ -48,6 +48,10 @@ import {
 
 vi.setConfig({ testTimeout: 30_000 })
 
+/** The bytes of a string as lower-case hex — how `row_to_json` renders a `bytea` (#420). */
+const hexOf = (text) =>
+  Array.from(new TextEncoder().encode(text), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
 describe('#172 — minting through the client, redeeming through 0040', () => {
   let db, home
 
@@ -233,6 +237,16 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
       ])
       expect(rows[0].whole).not.toContain(code)
       expect(rows[0].whole).not.toContain(code.toUpperCase())
+      // Nor as HEX (#420). `token_hash` is a `bytea`, which `row_to_json`
+      // renders as `\x` + hex under the default `bytea_output`, so a mint that
+      // sent the code's own bytes in place of a digest would put the code in
+      // this row as hex — invisible to the two searches above (measured, 0 red
+      // on exactly that mutation before these lines). Under `bytea_output =
+      // 'escape'` the same bytes render as the printable characters
+      // themselves, which the plaintext searches above DO catch, so the two
+      // pairs together cover both output formats.
+      expect(rows[0].whole.toLowerCase()).not.toContain(hexOf(code))
+      expect(rows[0].whole.toLowerCase()).not.toContain(hexOf(code.toUpperCase()))
     })
 
     it('the row the mint returns carries no token_hash — the client never reads it back', async () => {

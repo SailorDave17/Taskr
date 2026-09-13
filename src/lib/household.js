@@ -273,6 +273,28 @@ export async function currentSession() {
 }
 
 /**
+ * Whether this device holds NO session any more — #440.
+ *
+ * Not `!(await currentSession())`, and the difference is the whole point.
+ * `getSession()` answers a null session in two states. With storage empty it
+ * is `{ session: null, error: null }`: nobody is signed in here. With the
+ * access token past its expiry and the refresh failing on the network, it is
+ * `{ session: null, error: AuthRetryableFetchError }` while the refresh token is
+ * STILL IN STORAGE — and the next boot with a connection signs that person
+ * straight back in. `currentSession()` drops the error, so the two read alike.
+ *
+ * Measured on #440 (auth-js 2.112.1): a tablet an hour past expiry, offline, had
+ * Sign out tapped; the first draft read `currentSession()`'s null as gone,
+ * landed on "This device is signed out", and a reload once back online came up
+ * signed in as the same person. So gone is a null session AND no error, and
+ * anything else is "not known to be gone", which the caller treats as signed in.
+ */
+export async function sessionIsGone() {
+  const { data, error } = await getSupabase().auth.getSession()
+  return !data?.session && !error
+}
+
+/**
  * Sign a person in with the credential they hold.
  *
  * Both kinds go through here. A member with a real address types it; a member
@@ -443,7 +465,8 @@ export function readSignInReturn(location = globalThis.location) {
 }
 
 /**
- * The kind of auth link this boot arrived on, or null — #341, and #155 later.
+ * The kind of auth link this boot arrived on, or null — #341 (invite) and
+ * #155 (recovery, asked for from the sign-in screen).
  *
  * `readSignInReturn` above reads the fragment's ERROR channel. This reads its
  * SUCCESS channel, and the two are deliberately separate functions over the same
@@ -652,6 +675,30 @@ export async function signOut({ everywhere = false } = {}) {
     err.cause = error
     throw err
   }
+}
+
+/**
+ * Call `onEnded` whenever the auth client reports this device's session has
+ * ended — #440, the half no control on this device drives.
+ *
+ * Another device's Sign out everywhere (#291) revoking this one's refresh
+ * token, a refresh the server refuses, a sign-out in another tab of the same
+ * browser: auth-js removes the stored session in each and emits `SIGNED_OUT`.
+ * Nothing listened until #440, so the next tap, focus or Realtime echo re-read
+ * the household as `anon`, `0017` refused it, and the household stayed on
+ * screen behind the refusal — #440's screen, with nobody pressing Sign out.
+ *
+ * The callback is invoked synchronously and must not await the auth client
+ * (supabase-js holds its lock while it notifies); App's only sets state.
+ *
+ * @param {() => void} onEnded
+ * @returns {() => void} unsubscribe
+ */
+export function onSignedOut(onEnded) {
+  const { data } = getSupabase().auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') onEnded()
+  })
+  return () => data?.subscription?.unsubscribe()
 }
 
 /**

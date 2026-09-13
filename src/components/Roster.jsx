@@ -1253,6 +1253,8 @@ export default function Roster({
   onSendReset,
   onRefresh,
   onSignOut,
+  // #440 review — App's answer to a refused Sign out, shown beside the control.
+  signOutComplaint = null,
   overrides = [],
   periodStart = null,
   onSetCapacity,
@@ -1452,6 +1454,16 @@ export default function Roster({
             </div>
           ) : null}
         </div>
+        {/* #440 review — the answer to a refused Sign out, BESIDE the control.
+            This component's own strip is its last element, far below this
+            card, and a person who pressed Sign out and saw nothing change near
+            it reads the button as broken — cairn's
+            a-refusal-on-a-shared-strip-is-off-screen-from-the-control-that-caused-it. */}
+        {signOutComplaint ? (
+          <p className="error" role="alert" data-testid="sign-out-complaint">
+            {signOutComplaint}
+          </p>
+        ) : null}
         {/* The join code lived here, with a note conceding it was "deterrence,
             not a lock". #62 is what replaced it: everyone signs in as
             themselves, so a household is no longer only as private as the least
@@ -1605,12 +1617,18 @@ export default function Roster({
           household — `me.id === household.organizer_member_id`, both resolved
           within the household on screen — so a person who organises one
           household and merely belongs to another sees this card in the first
-          and not the second, by construction (AC 6). `onMintInvitation` is the
-          wiring-optional half, not a second opinion about the role.
+          and not the second, by construction (AC 6). The three handlers are
+          the wiring-optional half, not a second opinion about the role — and
+          it is ALL THREE, not the minter alone (#420). The card's Withdraw
+          calls `onWithdrawInvitation` on its second tap and would throw on a
+          null; measured under jsdom as an UNCAUGHT TypeError, the kind a green
+          test cannot catch. So a caller that wires only the minter gets no
+          card — the #166 optional shape — rather than a control that breaks
+          when pressed.
 
           This is not the guard: `0040`'s three organizer-only policies are,
           and they refuse the read and both writes to anybody else. */}
-      {isOrganizer && onMintInvitation ? (
+      {isOrganizer && onMintInvitation && onWithdrawInvitation && onDismissMintedCode ? (
         <Invitations
           invitations={invitations}
           mintedCode={mintedCode}
@@ -2086,6 +2104,7 @@ Roster.propTypes = {
   isOrganizer: PropTypes.bool,
   busy: PropTypes.bool,
   error: PropTypes.string,
+  signOutComplaint: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,

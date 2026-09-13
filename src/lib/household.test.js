@@ -91,7 +91,24 @@ const fakeClient = {
     return Promise.resolve(results[name] ?? { data: null, error: null })
   },
   auth: {
-    getSession: () => Promise.resolve({ data: { session: authState.session ?? null } }),
+    // #440 — `sessionError` is auth-js's third state: a null session WITH an
+    // error, which is what an expired token and a failed refresh answer.
+    getSession: () =>
+      Promise.resolve({ data: { session: authState.session ?? null }, error: authState.sessionError ?? null }),
+    // #440 — the listener. Records the callback so a test can emit an event,
+    // and hands back the subscription shape supabase-js returns.
+    onAuthStateChange: (callback) => {
+      authState.listeners = [...(authState.listeners ?? []), callback]
+      return {
+        data: {
+          subscription: {
+            unsubscribe: () => {
+              calls.push({ op: 'unsubscribe' })
+            },
+          },
+        },
+      }
+    },
     getUser: () => Promise.resolve({ data: { user: authState.user ?? null } }),
     // `signInAnonymously` stood here until #62. It is gone rather than left
     // unused: a stub for a call the app must never make again would let a
@@ -189,6 +206,9 @@ const {
   signOut,
   signUpOrganizer,
   updateMember,
+  // #440
+  onSignedOut,
+  sessionIsGone,
 } = await import('./household.js')
 
 beforeEach(() => {
@@ -504,6 +524,47 @@ describe('signing in as a person', () => {
     const scopes = calls.filter((c) => c.op === 'signOut').map((c) => c.options?.scope)
     expect(scopes).toEqual(['local', 'global', 'local'])
     expect(scopes).not.toContain(undefined)
+  })
+})
+
+describe('whether the session is gone, and hearing when it ends — #440', () => {
+  // `getSession()` answers a null session in two states, and App's sign-out
+  // lands on only one of them. Measured on #440: offline an hour past the
+  // access token's expiry, auth-js answered null WITH an error while the
+  // refresh token was still stored, and reading that as gone let the same
+  // person back in on the next boot with a connection.
+  it('is gone when storage holds no session and nothing went wrong reading it', async () => {
+    expect(await sessionIsGone()).toBe(true)
+  })
+
+  it('is NOT gone when the session reads null because the refresh failed', async () => {
+    // auth-js's AuthRetryableFetchError; only its presence is read.
+    authState.sessionError = { message: 'Failed to fetch' }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('is not gone while a session is held', async () => {
+    authState.session = { user: { id: 'person-1' } }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('hears SIGNED_OUT and nothing else', () => {
+    const ended = vi.fn()
+    onSignedOut(ended)
+    const [emit] = authState.listeners
+    for (const event of ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED', 'PASSWORD_RECOVERY']) {
+      emit(event, null)
+    }
+    expect(ended).not.toHaveBeenCalled()
+    emit('SIGNED_OUT', null)
+    expect(ended).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands back an unsubscribe that reaches the subscription', () => {
+    const unsubscribe = onSignedOut(() => {})
+    expect(calls).not.toContainEqual({ op: 'unsubscribe' })
+    unsubscribe()
+    expect(calls).toContainEqual({ op: 'unsubscribe' })
   })
 })
 
@@ -1517,6 +1578,24 @@ describe('#341 — the invitation path, at the data layer', () => {
 
     it('reads a recovery arrival', () => {
       expect(readAuthCallback(at(`#${TOKEN}&type=recovery`))).toEqual({ type: 'recovery' })
+    })
+
+    it('#155 AC 5: reads only the fragment, and the consent reader reads only the query — one URL, three readers, no overlap', async () => {
+      // The pure half of the measurement App.test.jsx makes on a boot: each
+      // reader sees exactly its own channel of a URL carrying a recovery in the
+      // fragment and a calendar consent in the query, and the sign-in-return
+      // reader, which reads both channels, sees nothing of either.
+      const { readConsentReturn } = await import('./calendar.js')
+      const location = { search: '?code=the-code&state=the-state', hash: `#${TOKEN}&type=recovery` }
+      expect(readAuthCallback(location)).toEqual({ type: 'recovery' })
+      expect(readConsentReturn(location.search)).toEqual({
+        code: 'the-code',
+        error: null,
+        state: 'the-state',
+      })
+      expect(readSignInReturn(location)).toBeNull()
+      // And a consent carries nothing this reader could mistake for an arrival.
+      expect(readAuthCallback({ search: location.search, hash: '' })).toBeNull()
     })
 
     it('refuses a type it does not own, so an OAuth return is left alone', () => {

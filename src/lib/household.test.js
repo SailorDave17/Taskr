@@ -91,7 +91,24 @@ const fakeClient = {
     return Promise.resolve(results[name] ?? { data: null, error: null })
   },
   auth: {
-    getSession: () => Promise.resolve({ data: { session: authState.session ?? null } }),
+    // #440 — `sessionError` is auth-js's third state: a null session WITH an
+    // error, which is what an expired token and a failed refresh answer.
+    getSession: () =>
+      Promise.resolve({ data: { session: authState.session ?? null }, error: authState.sessionError ?? null }),
+    // #440 — the listener. Records the callback so a test can emit an event,
+    // and hands back the subscription shape supabase-js returns.
+    onAuthStateChange: (callback) => {
+      authState.listeners = [...(authState.listeners ?? []), callback]
+      return {
+        data: {
+          subscription: {
+            unsubscribe: () => {
+              calls.push({ op: 'unsubscribe' })
+            },
+          },
+        },
+      }
+    },
     getUser: () => Promise.resolve({ data: { user: authState.user ?? null } }),
     // `signInAnonymously` stood here until #62. It is gone rather than left
     // unused: a stub for a call the app must never make again would let a
@@ -189,6 +206,9 @@ const {
   signOut,
   signUpOrganizer,
   updateMember,
+  // #440
+  onSignedOut,
+  sessionIsGone,
 } = await import('./household.js')
 
 beforeEach(() => {
@@ -504,6 +524,47 @@ describe('signing in as a person', () => {
     const scopes = calls.filter((c) => c.op === 'signOut').map((c) => c.options?.scope)
     expect(scopes).toEqual(['local', 'global', 'local'])
     expect(scopes).not.toContain(undefined)
+  })
+})
+
+describe('whether the session is gone, and hearing when it ends — #440', () => {
+  // `getSession()` answers a null session in two states, and App's sign-out
+  // lands on only one of them. Measured on #440: offline an hour past the
+  // access token's expiry, auth-js answered null WITH an error while the
+  // refresh token was still stored, and reading that as gone let the same
+  // person back in on the next boot with a connection.
+  it('is gone when storage holds no session and nothing went wrong reading it', async () => {
+    expect(await sessionIsGone()).toBe(true)
+  })
+
+  it('is NOT gone when the session reads null because the refresh failed', async () => {
+    // auth-js's AuthRetryableFetchError; only its presence is read.
+    authState.sessionError = { message: 'Failed to fetch' }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('is not gone while a session is held', async () => {
+    authState.session = { user: { id: 'person-1' } }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('hears SIGNED_OUT and nothing else', () => {
+    const ended = vi.fn()
+    onSignedOut(ended)
+    const [emit] = authState.listeners
+    for (const event of ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED', 'PASSWORD_RECOVERY']) {
+      emit(event, null)
+    }
+    expect(ended).not.toHaveBeenCalled()
+    emit('SIGNED_OUT', null)
+    expect(ended).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands back an unsubscribe that reaches the subscription', () => {
+    const unsubscribe = onSignedOut(() => {})
+    expect(calls).not.toContainEqual({ op: 'unsubscribe' })
+    unsubscribe()
+    expect(calls).toContainEqual({ op: 'unsubscribe' })
   })
 })
 

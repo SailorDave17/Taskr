@@ -44,7 +44,17 @@ const api = {
   leaveHousehold: vi.fn(async () => ({ accountDeleted: false, warning: null })),
   transferHousehold: vi.fn(async () => ({})),
   restoreHousehold: vi.fn(async () => ({})),
+  // #440 — whether the local session is gone (a null session AND no error),
+  // and the SIGNED_OUT listener. Stubbed: both talk to the auth client.
+  sessionIsGone: vi.fn(),
+  onSignedOut: vi.fn(),
 }
+
+// #440 — the SIGNED_OUT listeners App subscribed, one per mounted instance,
+// so a test can fire the event the way auth-js would; and the unsubscribe each
+// subscription hands back, which a remount's cleanup must call.
+let signedOutListeners = []
+const unsubscribeSignedOut = vi.fn()
 
 // #34. Mocked separately from household.js because it is a separate module, and
 // the pure validators are kept real (importActual below) so a test cannot pass
@@ -438,7 +448,24 @@ beforeEach(() => {
     session: { user: { id: 'person-a' } },
     needsConfirmation: false,
   })
-  api.signOut.mockResolvedValue(undefined)
+  // #440 — a sign-out ENDS the session, the way auth-js does: the next
+  // `getSession()` finds none. It used to resolve and leave the session in
+  // place, which was harmless while a sign-out re-read the household and is
+  // not now that it remounts the app: the fresh boot asks `currentSession()`,
+  // and a fake that still answers with a session boots the last person back in.
+  api.signOut.mockImplementation(async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+  })
+  // #440 — gone exactly when the fake holds no session, the ordinary answer.
+  // The offline-past-expiry case (a null session AND an error) is set by the
+  // tests about it.
+  api.sessionIsGone.mockImplementation(async () => (await api.currentSession()) == null)
+  signedOutListeners = []
+  api.onSignedOut.mockImplementation((listener) => {
+    signedOutListeners.push(listener)
+    return unsubscribeSignedOut
+  })
   // #430 — nobody has a household pending deletion unless a test says so.
   api.householdDeletionStatus.mockResolvedValue([])
   api.requestHouseholdDeletion.mockResolvedValue({})
@@ -1370,6 +1397,7 @@ describe('#172 — the invitation card, through App', () => {
     await screen.findByTestId('minted-code-value')
 
     api.signOut.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue(null)
       api.currentUserId.mockResolvedValue(null)
       api.listHouseholds.mockResolvedValue([])
     })
@@ -1377,6 +1405,7 @@ describe('#172 — the invitation card, through App', () => {
     await screen.findByRole('button', { name: /^sign in$/i })
 
     api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
       api.currentUserId.mockResolvedValue('person-a')
       api.listHouseholds.mockResolvedValue([HOME])
       return { user: { id: 'person-a' } }
@@ -1385,6 +1414,10 @@ describe('#172 — the invitation card, through App', () => {
     fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
     await click(screen.getByRole('button', { name: /^sign in$/i }))
 
+    // #440 — a sign-out remounts the app, so signing back in opens on the
+    // default tab the way a fresh boot does, not on the tab the last session
+    // was showing. Walk to the card.
+    await click(await screen.findByRole('button', { name: 'Who' }))
     expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
     expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
   })
@@ -7936,7 +7969,10 @@ describe('#173 — redeeming an invitation code, from App', () => {
     // Left behind by somebody else on this device, after this boot's read.
     hold()
 
+    // #440 — the session goes too, as auth-js's does: the remounted boot
+    // then takes the signed-out branch rather than reading with a stale one.
     api.signOut.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue(null)
       api.currentUserId.mockResolvedValue(null)
       api.listHouseholds.mockResolvedValue([])
     })
@@ -8496,5 +8532,412 @@ describe('leaving a household, from App (#431)', () => {
     await leave()
     expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
     expect(screen.queryByText(/Google may still list Taskr/)).toBeNull()
+  })
+})
+
+describe('#440 — a session that ends here lands on the sign-in form, and nothing is read after it', () => {
+  // #431's fixture: person-a is m1, an ordinary member; m9 organizes.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const organizerRow = { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' }
+
+  // THE GRANT LAYER, as the live project has had it since `0017` (#186): a
+  // household read with no session is REFUSED, not empty, in the words
+  // `unwrap` puts on PostgREST's 42501. The suite's default `listHouseholds`
+  // answers whoever asks — which is exactly why every sign-out test was green
+  // while production kept the household on screen behind this sentence.
+  const REFUSED = 'loading your households: permission denied for table households'
+  let session
+  let inHousehold
+  // auth-js's third state: offline past the access token's expiry, the refresh
+  // fails retryably, `getSession()` answers a null session WITH an error, and
+  // the refresh token is still stored. `currentSession()` reads it as null;
+  // `sessionIsGone()` must not read it as gone.
+  let sessionUnknown
+
+  beforeEach(() => {
+    session = { user: { id: 'person-a' } }
+    inHousehold = true
+    sessionUnknown = false
+    api.sessionIsGone.mockImplementation(async () => !session && !sessionUnknown)
+    api.currentSession.mockImplementation(async () => session)
+    api.currentUserId.mockImplementation(async () => session?.user.id ?? null)
+    api.listHouseholds.mockImplementation(async () => {
+      if (!session) throw new Error(REFUSED)
+      return inHousehold ? [household] : []
+    })
+    api.listMembers.mockResolvedValue([organizerRow, me])
+    // auth-js on success: the local session is gone.
+    api.signOut.mockImplementation(async () => {
+      session = null
+    })
+  })
+
+  const click = async (element) => act(async () => void fireEvent.click(element))
+  /**
+   * Every household read made after `mock`'s first call. Throws when `mock` was
+   * never called, so "no reads after it" cannot pass on an act that never ran.
+   */
+  const readsAfter = (mock) => {
+    const at = mock.mock.invocationCallOrder[0]
+    if (at === undefined) throw new Error('readsAfter: that call never happened')
+    return api.listHouseholds.mock.invocationCallOrder.filter((order) => order > at)
+  }
+  /** The reads #440 is about: any household read after the (first) sign-out. */
+  const readsAfterSignOut = () => readsAfter(api.signOut)
+  const expectSignedOutScreen = async () => {
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
+    // Nothing of the household the last person was looking at.
+    expect(screen.queryByRole('region', { name: /who is in the household/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder One')).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Organizer')).not.toBeInTheDocument()
+  }
+  const leave = async () => {
+    await click(screen.getByRole('button', { name: /^leave this household$/i }))
+    await click(screen.getByRole('button', { name: /^leave placeholder household\?$/i }))
+  }
+
+  it('the fixture refuses a signed-out household read the way the live grant layer does', async () => {
+    // The control every test below leans on: without it, "no refusal on screen"
+    // could mean the fake would never have refused anything.
+    await expect(api.listHouseholds()).resolves.toEqual([household])
+    session = null
+    await expect(api.listHouseholds()).rejects.toThrow('permission denied for table households')
+  })
+
+  it('AC 1 / AC 3: Sign out lands on the sign-in form with no refusal, no household, and no read after it', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('AC 2: Sign out everywhere, once confirmed, lands the same way', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out everywhere$/i }))
+    expect(api.signOut).not.toHaveBeenCalled()
+    await click(screen.getByRole('button', { name: /^sign out on every device\?$/i }))
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: true })
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('the signed-in-but-no-household screen signs out to the sign-in form too', async () => {
+    inHousehold = false
+    await renderApp()
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a logout the server refused still lands, because auth-js ended the local session anyway — and lands clean', async () => {
+    // auth-js 2.112.1 `_signOut`: anything but a 401/403/404 still removes the
+    // local session, THEN returns the error. The fake does both, in that order.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      throw Object.assign(new Error('Could not sign out: Failed to fetch'), {
+        cause: { message: 'Failed to fetch' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    // The design pass's verdict (2026-09-13): the device IS signed out and
+    // nothing on it holds the token, so a sentence saying the server did not
+    // confirm it is an alarm with nothing to act on. It lands clean.
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a refused Sign out everywhere lands too, and names the devices that may still be signed in', async () => {
+    api.signOut.mockImplementation(async () => {
+      session = null
+      throw Object.assign(new Error('Could not sign out: Internal Server Error'), {
+        cause: { message: 'Internal Server Error' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out everywhere$/i }))
+    await click(screen.getByRole('button', { name: /^sign out on every device\?$/i }))
+
+    await expectSignedOutScreen()
+    const said = screen.getByTestId('sign-in-return')
+    expect(said).toHaveTextContent(/your other devices may still be signed in/i)
+    expect(said).toHaveTextContent(/choose sign out everywhere again/i)
+    // The library's own reason, not the data layer's wrapper around it: the
+    // wrapper begins "Could not sign out", which beside "This device is
+    // signed out" contradicts itself (review-fanout, 2026-09-13).
+    expect(said).toHaveTextContent('(Internal Server Error)')
+    expect(said).not.toHaveTextContent(/could not sign out/i)
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a refused logout that left the session in place changes nothing, and says why', async () => {
+    api.signOut.mockRejectedValue(new Error('Could not sign out: Failed to fetch'))
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    // Still signed in, still here. A remount would have taken this sentence
+    // with it — the fresh instance's state starts empty — so the complaint
+    // being here is also the proof that nothing was remounted.
+    const complaint = await screen.findByTestId('sign-out-complaint')
+    expect(complaint).toHaveTextContent('Could not sign out: Failed to fetch')
+    // BESIDE the control that was pressed, in the card that holds it — not on
+    // the shared strip at the foot of the tab (review-fanout, 2026-09-13).
+    expect(
+      within(screen.getByRole('region', { name: /^placeholder household$/i })).getByTestId('sign-out-complaint'),
+    ).toBe(complaint)
+    expect(screen.getByRole('region', { name: /who is in the household/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    // Nothing was carried either: the sentence that says "this device is
+    // signed out" would be false here.
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+  })
+
+  it('offline past the token expiry, a refused logout whose session is still stored lands nowhere, and says so beside the control', async () => {
+    // auth-js fails the refresh inside `_useSession` retryably, removes
+    // nothing, and `getSession()` answers a null session WITH an error. The
+    // first draft read that null as gone and said "signed out"; measured on
+    // #440, a reload once online came back signed in as the same person.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      sessionUnknown = true
+      throw Object.assign(new Error('Could not sign out: Failed to fetch'), {
+        cause: { message: 'Failed to fetch' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    expect(await screen.findByTestId('sign-out-complaint')).toHaveTextContent('Could not sign out: Failed to fetch')
+    expect(screen.getByRole('region', { name: /who is in the household/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it('the leave that deleted the account lands on the sign-in form, carrying what the leave owes them', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    await expectSignedOutScreen()
+    // #99's sentence, true of a leave that SUCCEEDED, on the screen they are
+    // now on rather than lost with the refused re-read.
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/Google may still list Taskr/)
+    expect(screen.queryByText(REFUSED)).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+    // Nor between the leave and the sign-out: the account is gone, so there is
+    // nothing this device may read, and `mutate` skips its re-read.
+    expect(readsAfter(api.leaveHousehold)).toEqual([])
+  })
+
+  it('the leave that deleted the account and owes nothing lands on a clean sign-in form', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null }
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+    expect(readsAfter(api.leaveHousehold)).toEqual([])
+  })
+
+  it('a leave whose sign-out left the session in place shows what the leave did, and says both', async () => {
+    // `revokeFailed` so the notes are not empty: with none, keeping or dropping
+    // them from the sentence is the same string and the test could not tell.
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    api.signOut.mockRejectedValue(new Error('Could not sign out: Failed to fetch'))
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    // The household they left is not left on screen: the read `mutate` skipped
+    // for a session that was meant to be over runs here instead.
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not sign out: Failed to fetch')
+    expect(alert).toHaveTextContent(/Google may still list Taskr/)
+    expect(screen.queryByRole('region', { name: /who is in the household/i })).not.toBeInTheDocument()
+    expect(readsAfterSignOut().length).toBeGreaterThan(0)
+  })
+
+  it('holds every control while the leave that deleted the account is signing out', async () => {
+    let finishSignOut
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    api.signOut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSignOut = () => {
+            session = null
+            resolve()
+          }
+        }),
+    )
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    // The sign-out is in flight over the household just left, and nothing on
+    // it may be pressed — Sign out above all, whose second `endSession` could
+    // land last and replace the Google note this one carries.
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /^sign out$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^sign out everywhere$/i })).toBeDisabled()
+
+    await act(async () => finishSignOut())
+    await expectSignedOutScreen()
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/Google may still list Taskr/)
+  })
+
+  it('a session ended somewhere else lands on the sign-in form and says so, with nothing read after it', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(signedOutListeners).toHaveLength(1)
+    const readsBefore = api.listHouseholds.mock.calls.length
+    // A code held on this device, as #173 leaves one: the next person must not
+    // inherit it, however the session ended.
+    window.localStorage.setItem('taskr.pendingInvitation', JSON.stringify({ code: 'k7m3qp4rwn', name: 'Placeholder Three' }))
+
+    // What auth-js does when another device's Sign out everywhere revokes this
+    // one's refresh token: the stored session goes, and SIGNED_OUT is emitted.
+    await act(async () => {
+      session = null
+      signedOutListeners[0]()
+    })
+
+    await expectSignedOutScreen()
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/signed out from somewhere else/i)
+    expect(window.localStorage.getItem('taskr.pendingInvitation')).toBeNull()
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.listHouseholds.mock.calls.length).toBe(readsBefore)
+    expect(screen.queryByText(REFUSED)).not.toBeInTheDocument()
+  })
+
+  it("this device's own sign-out is not also read as a session ended somewhere else", async () => {
+    // auth-js emits SIGNED_OUT from INSIDE its own sign-out, and the fake does
+    // too — then lets a task pass before the sign-out resolves. In the same
+    // task React batches the listener's landing with `endSession`'s and the
+    // second simply wins, so no test could tell whether the listener stood
+    // aside (measured on #440: removing the guard reddened nothing). With a
+    // task between them the listener's landing RENDERS: a second remount, and a
+    // moment of "signed out from somewhere else" on the screen of the person
+    // who just pressed Sign out. One remount is what proves the guard held.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      signedOutListeners.at(-1)()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    // One subscription per mounted instance: the first, and exactly one remount.
+    expect(signedOutListeners).toHaveLength(2)
+  })
+
+  it('a SIGNED_OUT while nobody is signed in changes nothing', async () => {
+    // A boot that finds a dead session emits the event on its way to the
+    // sign-in screen it is already showing; that must not remount it again.
+    session = null
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    const bootsBefore = api.currentSession.mock.calls.length
+
+    await act(async () => signedOutListeners.at(-1)())
+
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(api.currentSession.mock.calls.length).toBe(bootsBefore)
+  })
+
+  it('the remounted app lets go of the old subscription and holds one of its own', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    // Counted as a DELTA: Testing Library unmounts the previous test's app
+    // after this file's afterEach clears the spy, so the absolute count
+    // carries one call over from whichever test ran before (measured: 2).
+    const unsubscribedBefore = unsubscribeSignedOut.mock.calls.length
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await expectSignedOutScreen()
+
+    expect(unsubscribeSignedOut.mock.calls.length - unsubscribedBefore).toBe(1)
+    expect(signedOutListeners).toHaveLength(2)
+  })
+
+  it('the next person to sign in on this device inherits nothing the last one left in memory', async () => {
+    // The skipped notice is set at boot and cleared by nothing but a new
+    // instance — the shape of the state a hand-kept reset list would forget.
+    choresApi.catchUpRepeats.mockResolvedValue({ created: 2, skipped: 3 })
+    const SKIPPED = '3 repeat occurrences older than the catch-up window were skipped rather than piled onto this week.'
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getByText(SKIPPED)).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await expectSignedOutScreen()
+
+    api.signIn.mockImplementation(async () => {
+      session = { user: { id: 'person-a' } }
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // Joined again — the control that the screen below is a household at all.
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByText(SKIPPED)).not.toBeInTheDocument()
   })
 })

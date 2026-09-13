@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import PropTypes from 'prop-types'
 import { buildInfo } from './buildInfo.js'
 import { reportHref, reportScreen } from './lib/reportProblem.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
@@ -13,12 +14,14 @@ import {
   listHouseholds,
   inviteMember,
   listMembers,
+  onSignedOut,
   readAuthCallback,
   readSignInReturn,
   removeMember,
   resetMemberCredential,
   resolveActiveHousehold,
   sendPasswordReset,
+  sessionIsGone,
   setOwnPassword,
   signIn,
   signInWithGoogle,
@@ -208,7 +211,70 @@ const EMPTY_SHOPPING = { lists: [], runs: [], items: [] }
  */
 const NO_PAST_RUNS = { loading: false, loaded: false, runs: [], items: [] }
 
+/**
+ * #440 — what a session that ended without the server's word still owes the
+ * person, which is something only for "everywhere". By the time this is shown
+ * the device IS signed out (`endSession` lands only once the local session is
+ * known to be gone); what is unknown is the server's half. For "everywhere"
+ * that half is the whole point — the other devices — and the sentence carries
+ * something to do. For a plain sign-out it carries nothing: this device is
+ * signed out and nothing on it holds the token, so the design pass (owner's
+ * verdict, 2026-09-13) dropped the red sentence that said so — an alarm with
+ * nothing to act on, on the screen the next person picks up.
+ */
+function sessionEndComplaint(err, { everywhere }) {
+  if (!everywhere) return null
+  const reason = err?.cause?.message || err?.message || 'no reason was given'
+  return `This device is signed out, but your other devices may still be signed in: the server did not confirm signing out everywhere (${reason}). Sign in and choose Sign out everywhere again.`
+}
+
+/**
+ * #440 — the sentence for a session this device did not end: another device's
+ * Sign out everywhere, another tab, or a sign-in the server would not renew.
+ */
+const ENDED_ELSEWHERE =
+  'This device was signed out from somewhere else — Sign out everywhere on another device, another tab, or a sign-in that expired. Sign in again to carry on.'
+
+/**
+ * The app — one `Shell` per session on this device (#440).
+ *
+ * A session that ENDS here (Sign out, Sign out everywhere, the leave that took
+ * the account with it) remounts `Shell` under a new key rather than re-reading.
+ * The fresh instance boots, finds no session, and takes boot's signed-out
+ * branch, which reads nothing: the screen a reload reaches, without the
+ * network. The re-read it replaces was the defect — it ran after the session
+ * had gone, `0017` (#186) refuses a household read by `anon`, and the household
+ * stayed on screen behind the refusal until somebody reloaded.
+ *
+ * A remount rather than resetting state by hand (owner decision at pickup,
+ * 2026-09-13): everything the last person left in memory — the announcement
+ * `refresh()` never clears, the notices, the open tab and list, a background
+ * read still in flight — goes with the old instance by construction, so the
+ * next person to sign in on a shared tablet starts where a fresh boot starts.
+ * A reset list would have to be joined by every future piece of per-person
+ * state, and the one that forgot would be found on somebody else's screen.
+ *
+ * `notice` is the one thing carried across: a sentence the signed-out person
+ * still needs, shown on the sign-in screen in the slot a failed sign-in return
+ * uses (`signInNotice`).
+ */
 export default function App() {
+  const [session, setSession] = useState({ epoch: 0, notice: null })
+  const handleSessionEnded = useCallback(
+    (notice) => setSession(({ epoch }) => ({ epoch: epoch + 1, notice: notice || null })),
+    [],
+  )
+  return (
+    <Shell key={session.epoch} carriedNotice={session.notice} onSessionEnded={handleSessionEnded} />
+  )
+}
+
+Shell.propTypes = {
+  carriedNotice: PropTypes.string,
+  onSessionEnded: PropTypes.func.isRequired,
+}
+
+function Shell({ carriedNotice = null, onSessionEnded }) {
   const [status, setStatus] = useState('loading')
   const [household, setHousehold] = useState(null)
   // #164 — EVERY household this person belongs to, in `listHouseholds()`'s
@@ -347,7 +413,13 @@ export default function App() {
   // shown on the sign-in screen. Separate from `error` because that strip is not
   // rendered while a person is signed out, and this is a sentence for exactly
   // that person.
-  const [signInNotice, setSignInNotice] = useState(null)
+  //
+  // #440 — and, seeded from `carriedNotice`, the one sentence a session that
+  // ended on this device still owes the person who ended it: a Sign out
+  // everywhere the server did not confirm, a revoke Google did not, or the
+  // news that the session was ended somewhere else. `App` carries it across
+  // the remount; boot overwrites it only with a complaint of its own.
+  const [signInNotice, setSignInNotice] = useState(carriedNotice)
   // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
   // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
   // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
@@ -791,9 +863,14 @@ export default function App() {
           globalThis.history?.replaceState?.(null, '', keepQuery ? `${pathname}${search}` : pathname)
         }
         const signInComplaint = signInReturn ? describeSignInReturn(signInReturn) : null
+        // #440 — a sign-out lands HERE too, not only a cold open: it remounts
+        // the app instead of re-reading (see `App`), and this branch is why
+        // that is safe — it reads nothing. A sentence carried across the
+        // remount is already in `signInNotice`, so only a complaint of boot's
+        // own replaces it.
         if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
           if (!cancelled) {
-            setSignInNotice(signInComplaint)
+            if (signInComplaint) setSignInNotice(signInComplaint)
             setStatus('onboarding')
           }
           return
@@ -908,13 +985,19 @@ export default function App() {
    * state from the response. Slower by one round trip and correct by
    * construction: what the next device to load will see is exactly what this
    * device now shows.
+   *
+   * #440 — except after an action whose result has ended the session
+   * (`endsSession(result)` true): that re-read would go out as `anon`, which
+   * `0017` (#186) refuses, so it is skipped and the caller hands over to
+   * `endSession`. Sign-out itself does not come through here at all.
    */
   const mutate = useCallback(
-    async (action) => {
+    async (action, { endsSession } = {}) => {
       setBusy(true)
       setError(null)
       try {
         const result = await action()
+        if (endsSession?.(result)) return result
         const found = await requestRefresh()
         setStatus(found ? 'joined' : 'onboarding')
         return result
@@ -1231,38 +1314,120 @@ export default function App() {
   // account, which is the lost-or-stolen-device answer and the only reason the
   // library's `global` default is still reachable at all. The scope is decided
   // by the control the person pressed, never by an unstated default.
+  //
+  // #440 — THE ONE WAY THIS DEVICE ENDS A SESSION, and it reads nothing
+  // afterwards. Sign out, Sign out everywhere and the leave that took the
+  // account with it all come through `endSession`; a session ended anywhere
+  // ELSE arrives through the `SIGNED_OUT` listener below and lands the same way.
+  // Until #440 the first two ran inside `mutate`, whose re-read went out after
+  // the session had gone — as `anon`, which `0017` (#186) refuses on
+  // `households` — so the refusal landed on the strip and the household stayed
+  // on screen behind it until a reload, on every account (measured on
+  // production while verifying #169). Boot had been audited for `0017` and says
+  // so; the read after a sign-out, which STARTS signed in and ends anonymous,
+  // had not. `onSessionEnded` remounts the app instead (see `App`), and the
+  // fresh boot's signed-out branch reads nothing.
+  //
+  // A FAILED LOGOUT IS NOT A SURVIVING SESSION, AND A NULL SESSION IS NOT A
+  // GONE ONE. auth-js 2.112.1's `_signOut` removes the local session before it
+  // returns any error but a 401/403/404 — measured on #440 with the logout
+  // aborted and with it answered 500: the token left storage both times. But
+  // offline past the access token's expiry it fails BEFORE the logout (the
+  // refresh inside `_useSession` fails retryably and nothing is removed), and
+  // `getSession()` then answers a null session WITH an error while the refresh
+  // token is still stored. Measured too: the first draft read that null as
+  // gone, landed on the sign-in form, and a reload online came back signed in
+  // as the same person (review-fanout, 2026-09-13). So `sessionIsGone()` asks
+  // for a null session AND no error. Gone: land, carrying what the person
+  // still needs. Anything else: nothing ended, nothing is cleared, and the
+  // failure is handed back.
+  //
+  // STORAGE OUTLIVES THE REMOUNT, so the two device-held values are cleared
+  // here — and only once the session is known to be gone, so a sign-out that
+  // did not happen does not cost this device a preference it still needs:
+  // #165 AC 7's remembered household (on a shared tablet the next person must
+  // not land in a household somebody else picked) and #173's held invitation
+  // code (nor be joined by a code somebody else typed). Component state —
+  // #172's minted code, #430's restore banner, the announcement `refresh()`
+  // never clears — goes with the old instance.
+  //
+  // `endingRef` keeps the listener out of it: auth-js emits `SIGNED_OUT` from
+  // inside this device's own sign-out, and without the flag that echo would
+  // remount again with "signed out from somewhere else" over what this path
+  // carries.
+  const endingRef = useRef(false)
+  const forgetDevice = useCallback(() => {
+    clearActiveHouseholdChoice()
+    clearPendingInvitation()
+  }, [])
+  const endSession = useCallback(
+    async ({ everywhere = false, notes = [] } = {}) => {
+      endingRef.current = true
+      let failure = null
+      try {
+        await signOut({ everywhere })
+      } catch (err) {
+        failure = err
+      }
+      if (failure && !(await sessionIsGone().catch(() => false))) {
+        endingRef.current = false
+        return failure
+      }
+      forgetDevice()
+      onSessionEnded(
+        [failure ? sessionEndComplaint(failure, { everywhere }) : null, ...notes]
+          .filter(Boolean)
+          .join(' '),
+      )
+      return null
+    },
+    [onSessionEnded, forgetDevice],
+  )
+  // #440 — a session ended somewhere other than this screen: another device's
+  // Sign out everywhere (#291's lost-device control, aimed at this one),
+  // another tab, or a refresh the server refused. auth-js removes the stored
+  // session and emits `SIGNED_OUT`, and until this listener nothing heard it:
+  // the next tap, focus or Realtime echo re-read as `anon` and #440's screen
+  // came back with nobody pressing Sign out here (the review's escalation;
+  // owner decision, 2026-09-13, to close it in this story). Ignored while this
+  // device is ending the session itself (`endingRef`), and while nobody is
+  // signed in: a boot that finds a dead session emits the same event on its
+  // way to the sign-in screen it is already showing.
+  const signedInRef = useRef(false)
+  useEffect(() => {
+    signedInRef.current = Boolean(userId)
+  }, [userId])
+  useEffect(() => {
+    if (!hasSupabaseConfig) return undefined
+    return onSignedOut(() => {
+      if (endingRef.current || !signedInRef.current) return
+      endingRef.current = true
+      forgetDevice()
+      onSessionEnded(ENDED_ELSEWHERE)
+    })
+  }, [onSessionEnded, forgetDevice])
+  // #440 review — a refused sign-out is answered BESIDE the control that was
+  // pressed. The shared strip is the Who tab's last element, far below the
+  // Sign out row (cairn's `a-refusal-on-a-shared-strip-is-off-screen-from-the-control-that-caused-it`),
+  // and since `sessionIsGone()` that refusal is what a tablet offline past its
+  // token's expiry gets.
+  const [signOutComplaint, setSignOutComplaint] = useState(null)
   const handleSignOut = useCallback(
-    (options) =>
-      mutate(async () => {
-        const result = await signOut(options)
-        // #165 AC 7 — the remembered household does not outlive the session
-        // that chose it. This is a household app and a shared tablet is the
-        // likely case: without this, the next person to sign in on it lands on
-        // a household somebody else picked, and every read they make is scoped
-        // to it. Cleared AFTER the sign-out succeeds, so a refused sign-out
-        // does not cost this device a preference it still needs.
-        //
-        // The ref goes with it, because `mutate` re-reads immediately below and
-        // a stale id would resolve against the next session's membership set.
-        activeIdRef.current = null
-        choiceEpochRef.current += 1
-        clearActiveHouseholdChoice()
-        // #172 — the shown code does not outlive the session that minted it,
-        // for #165 AC 7's reason: on a shared tablet the next person to sign in
-        // must not find somebody else's invitation code on their screen.
-        setMinted(null)
-        // #173 — and a code HELD for redemption does not outlive it either, for
-        // the same tablet: the next person to sign in on this device must not
-        // be joined to a household by a code somebody else typed.
-        clearPendingInvitation()
-        setHeldInvitation(false)
-        // #430 — and the restore banner does not either: it names the last
-        // person's household and its purge date, and the next person to sign
-        // in on this tablet must not find it on their screen (#430 review).
-        setPendingDeletions([])
-        return result
-      }),
-    [mutate],
+    async (options) => {
+      setBusy(true)
+      setError(null)
+      setSignOutComplaint(null)
+      try {
+        // A failure comes back only when the session survived, so the person
+        // is still here and still signed in: say why nothing changed. Not
+        // rethrown — both controls fire this from a bare `onClick`.
+        const failure = await endSession(options)
+        if (failure) setSignOutComplaint(failure.message)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [endSession],
   )
   // #159 AC 4 — every write names the household THIS SCREEN IS SHOWING, taken
   // from the `household` state that `refresh()` set, rather than re-resolving it
@@ -1344,44 +1509,67 @@ export default function App() {
   // the Edge Function. The leaver's member id comes from the Roster, which has
   // "me"; App derives "me" further down, too late for a dependency list. The
   // remembered household goes either way, and when this was their last
-  // household their sign-in went with it, so this device signs out the way
-  // handleSignOut does. A sign-in that survived is a warning set after the
-  // re-read, like a removal's (#247) — they HAVE left.
+  // household their sign-in went with it, so the session ends through
+  // `endSession` (#440) rather than a re-read. A sign-in that survived is a
+  // warning set after the re-read, like a removal's (#247) — they HAVE left.
   const handleLeaveHousehold = useCallback(
     (householdId, leavingMemberId) =>
-      mutate(async () => {
-        await reassignHousehold({ householdId, leavingMemberId })
-        let result
-        try {
-          result = await leaveHousehold(householdId)
-        } catch (err) {
-          // The re-deal has committed, so "nothing was changed" is no longer
-          // true: say what did change, and re-read so the screen shows it,
-          // since mutate skips its own re-read on a throw (review-fanout,
-          // 2026-09-11).
-          await requestRefresh().catch(() => {})
-          throw new Error(`Your open chores went to the others, but you have not left yet: ${err.message}`)
-        }
-        activeIdRef.current = null
-        choiceEpochRef.current += 1
-        clearActiveHouseholdChoice()
-        if (result.accountDeleted) {
-          await signOut({ everywhere: false }).catch(() => {})
-          setMinted(null)
-          clearPendingInvitation()
-          setHeldInvitation(false)
-          setPendingDeletions([])
-        }
-        return result
-      }).then((result) => {
+      mutate(
+        async () => {
+          await reassignHousehold({ householdId, leavingMemberId })
+          let result
+          try {
+            result = await leaveHousehold(householdId)
+          } catch (err) {
+            // The re-deal has committed, so "nothing was changed" is no longer
+            // true: say what did change, and re-read so the screen shows it,
+            // since mutate skips its own re-read on a throw (review-fanout,
+            // 2026-09-11).
+            await requestRefresh().catch(() => {})
+            throw new Error(`Your open chores went to the others, but you have not left yet: ${err.message}`)
+          }
+          activeIdRef.current = null
+          choiceEpochRef.current += 1
+          clearActiveHouseholdChoice()
+          return result
+        },
+        // #440 — a leave that took the account with it has ended the session:
+        // nothing is left that this device may read, so `mutate` skips its
+        // re-read and the session ends below.
+        { endsSession: (result) => Boolean(result?.accountDeleted) },
+      ).then(async (result) => {
         // A surviving sign-in, and a revoke Google did not confirm (#99's
         // sentence): both are true of a leave that SUCCEEDED, so neither is an
-        // error, and the second must reach a device that has just signed out.
+        // error, and the second must reach a device that has just signed out —
+        // which since #440 means riding across the remount onto the sign-in
+        // screen.
         const notes = [result?.warning, result?.revokeFailed ? revokeNoteFor({ revoked: false }) : null].filter(Boolean)
+        if (result?.accountDeleted) {
+          // #440 review — `busy` is HELD across the sign-out. `mutate` released
+          // it in its `finally` before this ran, and for one sign-out round trip
+          // every control on the household just left was live again — Sign out
+          // included, whose second `endSession` could land last and replace the
+          // note this one carries.
+          setBusy(true)
+          try {
+            const failure = await endSession({ notes })
+            if (failure) {
+              // The account is gone and the local session somehow is not. Show
+              // what the leave did — the read `mutate` skipped — and say both.
+              setError([...notes, failure.message].join(' '))
+              await requestRefresh()
+                .then((found) => setStatus(found ? 'joined' : 'onboarding'))
+                .catch(() => {})
+            }
+          } finally {
+            setBusy(false)
+          }
+          return result
+        }
         if (notes.length) setError(notes.join(' '))
         return result
       }),
-    [mutate, requestRefresh],
+    [mutate, requestRefresh, endSession],
   )
   // #431 — the organizer's way out that keeps the household: hand it over, then
   // leave as an ordinary member. Two writes, and the first is safe alone — an
@@ -2269,12 +2457,14 @@ export default function App() {
   // down. Keyed on the household ID and the roster's ids (the member-scoped
   // tables are filtered by them), never on the objects `refresh()` replaces
   // every time — the same lesson the busy-week effect below records. Closed by
-  // the cleanup on sign-out (status leaves `joined`) and on a household switch
-  // (`householdId` changes), which is the whole of "opened on join and closed
-  // on sign-out or household switch".
+  // the cleanup when the session ends — since #440 a sign-out unmounts this
+  // instance rather than re-reading, so this cleanup runs with every other
+  // effect's — and on a household switch (`householdId` changes), which is the
+  // whole of "opened on join and closed on sign-out or household switch".
   useEffect(() => {
     // The household id alone decides it: `refresh()` sets it and `joined`
-    // together, and a sign-out clears it in the same read that leaves `joined`.
+    // together. A sign-out reads nothing at all (#440); the unmount's cleanup
+    // below is what closes the channel.
     if (!householdId) return undefined
     const live = subscribeToHousehold({
       householdId,
@@ -2669,7 +2859,9 @@ export default function App() {
           // #173 — a held code refused at boot is reported by `mutate` onto
           // this, and no form on that screen submitted it, so the screen has
           // to be handed it.
-          error={error}
+          // #440 review — a refused sign-out from this screen's own Sign out
+          // wins, for the reason the Who tab renders it beside its control.
+          error={signOutComplaint ?? error}
           signInNotice={signInNotice}
           // Non-null only when boot found a session, because the signed-out path
           // returns before refresh() runs. Signed in AND on this screen is
@@ -2782,6 +2974,7 @@ export default function App() {
           onSendReset={handleSendReset}
           onRefresh={handleRefresh}
           onSignOut={handleSignOut}
+          signOutComplaint={signOutComplaint}
           // #430 — the organizer's "Delete this household".
           onDeleteHousehold={handleDeleteHousehold}
           deletionGraceDays={GRACE_PERIOD_DAYS}

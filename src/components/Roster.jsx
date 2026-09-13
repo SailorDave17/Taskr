@@ -1253,6 +1253,8 @@ export default function Roster({
   onSendReset,
   onRefresh,
   onSignOut,
+  // #440 review — App's answer to a refused Sign out, shown beside the control.
+  signOutComplaint = null,
   overrides = [],
   periodStart = null,
   onSetCapacity,
@@ -1452,6 +1454,16 @@ export default function Roster({
             </div>
           ) : null}
         </div>
+        {/* #440 review — the answer to a refused Sign out, BESIDE the control.
+            This component's own strip is its last element, far below this
+            card, and a person who pressed Sign out and saw nothing change near
+            it reads the button as broken — cairn's
+            a-refusal-on-a-shared-strip-is-off-screen-from-the-control-that-caused-it. */}
+        {signOutComplaint ? (
+          <p className="error" role="alert" data-testid="sign-out-complaint">
+            {signOutComplaint}
+          </p>
+        ) : null}
         {/* The join code lived here, with a note conceding it was "deterrence,
             not a lock". #62 is what replaced it: everyone signs in as
             themselves, so a household is no longer only as private as the least
@@ -2092,6 +2104,7 @@ Roster.propTypes = {
   isOrganizer: PropTypes.bool,
   busy: PropTypes.bool,
   error: PropTypes.string,
+  signOutComplaint: PropTypes.string,
   onAdd: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,

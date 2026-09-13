@@ -1410,6 +1410,9 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out': 'a button label — the this-device-only sign-out control',
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
+    // #440 — the reason phrase of an HTTP 500, which is what the auth server's
+    // refusal of a Sign out everywhere carries in App.test.jsx's fixture.
+    'Internal Server Error': 'an HTTP 500 reason phrase — the refused logout in the #440 sign-out tests',
     // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
     // tests because they find the control by that name, which is the point:
     // the control's own text is the household's name, so the only stable way

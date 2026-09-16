@@ -272,8 +272,8 @@ persists anything.
      `{{ if .Data.invited_as }}Hi {{ .Data.invited_as }}, someone{{ else }}Someone{{ end }} has added
      you to their household on Taskr…`, guarded so an invitation carrying no name still reads as a
      sentence, plus the one-hour-link line from the measured `mailer_otp_exp` below. *Measured*: a
-     real invite from the test household to a plus-alias arrived in the inbox from
-     `Taskr <noreply@taskr.madcowhq.com>` reading *Hi Pat Tester, someone has added you…*, DKIM
+     real invite from the test household to a plus-alias arrived in the inbox from *Taskr* at the
+     no-reply address on `taskr.madcowhq.com`, reading *Hi Pat Tester, someone has added you…*, DKIM
      pass on `taskr.madcowhq.com`, SPF pass. Read the saved template back with
      `GET /v1/projects/{ref}/config/auth` (`mailer_subjects_invite`, `mailer_templates_invite_content`)
      rather than trusting the editor. **Before SMTP, this edit was locked on this project.** *Read 2026-09-15*
@@ -315,10 +315,12 @@ persists anything.
      the limit in place. Rejected for now: closing #191 with AC 1 externally gated, because the
      personalisation waits on SMTP for the rate-limit reason anyway.
 
-     **Attached the same day, session-driven through the dashboards.** The sender is
-     `Taskr <noreply@taskr.madcowhq.com>` — a Taskr subdomain of madcowhq.com (owner's choice over
-     madcowsailing.com), the same per-app-subdomain shape tender uses, so its DKIM and SPF bind that
-     subdomain alone. What holds it up, in the order it was built:
+     **Attached the same day, session-driven through the dashboards.** The sender name is *Taskr*
+     and the address is the no-reply local part on `taskr.madcowhq.com` — a Taskr subdomain of
+     madcowhq.com (owner's choice over madcowsailing.com), the same per-app-subdomain shape tender
+     uses, so its DKIM and SPF bind that subdomain alone. The address itself is deliberately not
+     written here: `gate.test.js`'s #409 block refuses an address-shaped string in `docs/`, and
+     it is one API read away (`smtp_admin_email`). What holds it up, in the order it was built:
      - **Resend**: domain `taskr.madcowhq.com`, region us-east-1, verified within two minutes of its
        records landing. The records went in through Resend's *Cloudflare Auto configure* button —
        a one-time Domain Connect authorisation at `dash.cloudflare.com` that writes exactly three

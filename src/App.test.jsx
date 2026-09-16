@@ -225,6 +225,19 @@ const authSettingsApi = {
 }
 vi.mock('./lib/authSettings.js', () => authSettingsApi)
 
+// #458 — who has accepted their invitation. Only the READ is stubbed; the pure
+// `signInStateFor` and `nextExpiry` stay real, because the roster calls them
+// and a stub could disagree with them. The default is an empty answer, which
+// reads every claimed fixture as signed in — what those fixtures meant before
+// #458 — so no other test changes.
+const signInStateApi = {
+  listSignInStates: vi.fn(),
+}
+vi.mock('./lib/signInState.js', async () => {
+  const actual = await vi.importActual('./lib/signInState.js')
+  return { ...actual, ...signInStateApi }
+})
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -393,6 +406,8 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   authSettingsApi.readGoogleSignIn.mockReset()
   authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+  signInStateApi.listSignInStates.mockReset()
+  signInStateApi.listSignInStates.mockResolvedValue([])
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
   Object.values(captureApi).forEach((fn) => fn.mockReset())
@@ -7336,6 +7351,79 @@ describe('#191 — adding somebody sends their invitation, from App', () => {
     const form = screen.getByRole('button', { name: /add to household/i }).closest('form')
     expect(await within(form).findByRole('alert')).toHaveTextContent(/no email was sent/i)
     expect(screen.queryByTestId('add-note')).not.toBeInTheDocument()
+  })
+})
+
+// #458 — the roster's invited state, at the level only App can answer: that
+// the sign-in read names the household on screen, reaches the roster, is taken
+// again after a re-send, and that its failure costs the label and not the tab.
+describe('#458 — an invited member reads as invited, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'UTC',
+    organizer_member_id: 'm1',
+  }
+  const organizer = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const invited = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 60,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const SENT = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizer, invited])
+    signInStateApi.listSignInStates.mockResolvedValue([
+      { member_id: 'm1', invited_at: null, confirmed_at: '2026-08-01T00:00:00Z' },
+      { member_id: 'm2', invited_at: SENT, confirmed_at: null },
+    ])
+    api.inviteMember.mockResolvedValue({
+      ok: true,
+      action: 'invite',
+      memberId: 'm2',
+      email: invited.email,
+      resent: true,
+    })
+  })
+
+  it('reads the sign-in states for the household on screen, and the roster shows the invited row', async () => {
+    await renderApp('Who')
+    expect(signInStateApi.listSignInStates).toHaveBeenCalledWith('h1')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Invited .* · not joined yet$/)
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Signed in$/)
+  })
+
+  it('re-sends through inviteMember, then reads the states again', async () => {
+    await renderApp('Who')
+    const before = signInStateApi.listSignInStates.mock.calls.length
+    await act(
+      async () =>
+        void fireEvent.click(await screen.findByRole('button', { name: /their invitation again/i })),
+    )
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm2' })
+    expect(api.sendPasswordReset).not.toHaveBeenCalled()
+    expect(signInStateApi.listSignInStates.mock.calls.length).toBeGreaterThan(before)
+    expect(await screen.findByTestId('invite-note-m2')).toHaveTextContent(
+      `Invitation sent again to ${invited.email}.`,
+    )
+  })
+
+  it('a refused sign-in read leaves the roster on screen with the pre-#458 label, and no error', async () => {
+    signInStateApi.listSignInStates.mockRejectedValue(new Error('Could not read who has joined: PGRST202'))
+    await renderApp('Who')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Signed in$/)
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    expect(screen.queryByText(/could not read who has joined/i)).not.toBeInTheDocument()
   })
 })
 

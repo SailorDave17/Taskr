@@ -289,7 +289,13 @@ describe('assigning a chore, run against a real Postgres', () => {
         -- The stub in support/pgliteSupabase.js carries it too; this one is a
         -- deliberate second copy because the point of these mutated databases is
         -- to apply migrations the shared helper would not.
-        create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+        -- invited_at and email_confirmed_at since 0045 (#458), which reads both.
+        create table auth.users (
+          id uuid primary key default gen_random_uuid(),
+          email text,
+          invited_at timestamptz,
+          email_confirmed_at timestamptz
+        );
         create or replace function auth.uid() returns uuid language sql stable as $stub$
           select nullif(current_setting('test.uid', true), '')::uuid
         $stub$;

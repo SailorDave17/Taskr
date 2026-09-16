@@ -2071,6 +2071,54 @@ The rules, in the order the client runs them:
   abort on an unreachable function, an organizer could not remove anybody with a sign-in until
   somebody redeployed it.
 
+### Invited is not signed in — #458, 2026-09-16
+
+**A claim is not an acceptance.** `provision-member` sets `members.claimed_by` the moment
+`inviteUserByEmail` returns, while the auth user is still unconfirmed, and until #458 the roster
+labelled every claimed row *Signed in* and offered *Email a reset link*. *Measured on production
+during #178*: a person who had opened nothing read exactly like one who had joined; one minute later
+`auth.users.email_confirmed_at` was set and the row read the same. The refused invite's row read
+correctly only because its rollback had deleted the account.
+
+- **`0045` adds `member_sign_in_states(household_id)`**, a definer read returning, per claimed
+  member of a household the caller belongs to, `invited_at` and `email_confirmed_at` off
+  `auth.users` — two fields and nothing else, and nothing for a household the caller is not in or
+  one pending deletion. Every member may call it (owner decision at pickup): the label renders on
+  every member's roster. A function rather than copied columns, so the answer cannot drift from the
+  account (owner decision at pickup; the alternative needed a trigger inside the `auth` schema).
+- **The roster says *Invited <when> · not joined yet*** for a claimed, unconfirmed account, and
+  ***Invitation expired · sent <when>*** once the link is an hour old (`mailer_otp_exp = 3600`,
+  `docs/deploy-runbook.md` §2; `INVITATION_LINK_LIFETIME_MS` is held to that sentence by a test). A
+  roster left open turns one into the other when the hour is up.
+- **The organizer's control on such a row is *Send the invitation again*.** `provision-member`'s
+  `invite` action no longer refuses every claimed row: it reads the account as `service_role` and
+  refuses only a confirmed one (the old 409, *reset it instead*). An unconfirmed one gets the
+  invitation again, to the **account's** address — the row's is editable after the claim and does
+  not move the account. The re-send **never deletes the account** on a refused send, unlike the
+  first send's rollback: the account is claimed, possibly by another household too. GoTrue stamps
+  `invited_at` only once the mail is accepted (read off `sendInvite` in `supabase/auth`), so a
+  refused re-send leaves the previous stamp, and the refusal says the earlier link still works
+  until its hour is up. The rate-limit refusal (`over_email_send_rate_limit`) is its own sentence
+  and a 429.
+- **While the read is unavailable** — before `0045` is applied, or refused — every claimed row reads
+  *Signed in*, which is the pre-#458 label, and nothing goes on the error strip. Chosen over the
+  opposite fallback, which would call every established member invited.
+- **Applied 2026-09-16** from #458's session at the owner's go-ahead: 4 statements, 4531
+  characters, md5 `ea228a2dcaf0e92ab5053848c5f29a53` read back matching the file. *Measured*
+  `check:live` **74 of 75** immediately before (the one red the new `member_sign_in_states` row,
+  `PGRST202`) and **75 of 75** immediately after, the denominator having moved from 74 on that
+  row; `probe:live-grants` **20 of 20** after, unmoved, since it has no row for a function. The
+  read-only catalog query read the function as `security definer`, `search_path=""`, executable
+  by `authenticated` and not by `anon`, one signature `(target_household uuid)`, its body scoped
+  through `current_household_ids`, and its comment present.
+- **Deployed 2026-09-16**, `provision-member`, from the same session: `check:live` **75 of 75**
+  after, and `npm run probe:provision-actions` read `provision` refused as unknown with `revoke`
+  past the action check, so the deployed function starts and answers. **The re-send branch itself
+  was not exercised against the live project** (owner's call at the question: it writes a member
+  row and an auth user and spends hourly sends); it is proven by `handler.test.js` against a fake,
+  and that GoTrue re-stamps `invited_at` is read off its source, not measured. The first organizer
+  to press *Send the invitation again* is the first live reading.
+
 ## Superseded: the PIN decision — 2026-08-06
 
 **Kept for the record. This is no longer what the app does — see *Read this first* above.** Retired

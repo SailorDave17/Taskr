@@ -120,6 +120,9 @@ describe('stored re-assignment, run against a real Postgres', () => {
         exclusions,
         overrides,
         periodStart: MONDAY,
+        // #471 — the planner refuses to run without a zone. Nothing in this
+        // suite is completed, so the week filter it enables drops no row here.
+        timeZone: 'UTC',
       })
       return { version, plan }
     })

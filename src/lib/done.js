@@ -88,6 +88,33 @@ export function countDoneInWeek(chores, timeZone, periodStart) {
 }
 
 /**
+ * The chores ONE capacity week is about — #471.
+ *
+ * Every outstanding chore, whatever its due date (work still to do is this
+ * week's work until somebody does it), plus every settled chore whose week —
+ * `doneWeekOf`, the same rule the Done tab groups by — is `periodStart`. A
+ * completion from an earlier week is history: it belongs to that week's
+ * record on the Done tab and to nothing that describes THIS week.
+ *
+ * This is the one filter the fairness arithmetic reads through. The split's
+ * bars, the re-balance announcement's snapshot and the re-balance itself all
+ * summed every completion the household had ever recorded, because #47 was
+ * written while `0004` still said "no week concept exists yet" and #302's
+ * week scoping reached the two tabs it rewrote and none of the three readers
+ * of the allocator sum. On the owner's household that was 1045 lifetime
+ * minutes shown as "done" against 150 this week, growing every week. One
+ * function, called by each reader, is what keeps a fourth reader from
+ * quietly inheriting the lifetime sum — and it refuses to run without a
+ * period or a zone rather than falling back to the unfiltered list, since
+ * that fallback IS the defect.
+ */
+export function choresInWeek(chores, timeZone, periodStart) {
+  if (!timeZone) throw new Error('A week needs the household timezone.')
+  if (!periodStart) throw new Error('This week’s chores are for a particular week.')
+  return chores.filter((c) => isOutstanding(c) || doneWeekOf(c, timeZone) === periodStart)
+}
+
+/**
  * A capacity week as people read it: "Aug 24 – Aug 30, 2026".
  *
  * `periodStart` is a pure calendar date (the Monday), so the formatter runs in

@@ -75,6 +75,7 @@ import {
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { extractCapacity, extractChores } from './lib/capture.js'
+import { choresInWeek } from './lib/done.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -758,9 +759,12 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       try {
         const me = findClaimedMember(roster, uid, found.id)
         if (me) {
+          // #471 — this week's chores, through the same filter the split
+          // draws from below, so the snapshot a member is compared against
+          // is the split they were shown and not a lifetime sum.
           const current = splitSnapshot({
             capacities: capacitiesFor(roster, overrideRows, period),
-            chores: choreRows,
+            chores: choresInWeek(choreRows, found.timezone, period),
           })
           const seen = await readSplitSeen(me.id)
           // #59 — one read serves both: the row that carries what this member
@@ -2725,6 +2729,18 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // week automatically, because they always went through `capacitiesFor`.
   const capacities = periodStart ? capacitiesFor(members, overrides, periodStart) : []
 
+  // #471 — the chores THIS WEEK is about: everything outstanding plus what
+  // was settled in the current capacity week, through `choresInWeek`, the one
+  // filter the fairness arithmetic reads. `chores` above is the household's
+  // whole record and stays that way — the Chores tab's outstanding list and
+  // the Done tab's history both want all of it. The split does not: handed
+  // the whole record it summed every completion since the household began as
+  // "done", so the bars never reset and the verdict was computed over history.
+  // Named so that a future surface reading `chores` for a fairness figure
+  // reads as a choice rather than a default.
+  const weekChores =
+    periodStart && household ? choresInWeek(chores, household.timezone, periodStart) : []
+
   // The organizer is a PERSON, not a session — an anonymous session expires
   // after 30 days idle and returns with a new auth id, so a device is the
   // organizer exactly while it is acting as the organizer's member row. The
@@ -2992,7 +3008,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       {status === 'joined' && household && view === 'split' ? (
         <Split
           members={members}
-          chores={chores}
+          chores={weekChores}
           capacities={capacities}
           exclusions={exclusions}
           lastRebalance={household?.last_rebalance ?? null}

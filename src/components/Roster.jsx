@@ -1289,6 +1289,51 @@ MemberRow.propTypes = {
 // is recorded here rather than deleted silently, in case a shareable invite ever
 // comes back.
 
+/**
+ * #180 AC 3 — what leaving costs, said BEFORE the confirm. One list for both
+ * confirms, because the organizer's hand-over ends in the same leave. Each
+ * item follows a foreign key as it stands — the five AC 3 named at filing
+ * (0006, 0004, 0005, 0010, 0011), plus the attribution edges that landed
+ * after it was filed (0032 shopping, 0038 calendar imports, 0040 invitations:
+ * `on delete set null`, the completions shape), which the #180 review found
+ * the list missing — and `leaveHousehold.pglite.test.js` reads each outcome
+ * back; the words are the tabs' own ("weekly minutes", "cannot do"). The
+ * Google half is #99's sentence and stays where it was. A migration that adds
+ * another edge onto `members` owes this list a line.
+ *
+ * A list, not a paragraph: design-bar at 360×800 (2026-09-16) read the same
+ * five facts as a 10-line, 72-word paragraph in the card's dimmest 13px ink —
+ * the grade of the routine hint above it — which is fine print on the way to
+ * the red button. Owner's call: one line per loss.
+ */
+const LEAVE_LOSSES = [
+  'The chores dealt to you go to the others; any placed on you by hand become unassigned.',
+  'Chores you finished stay finished, but no longer carry your name.',
+  'Your weekly minutes here are removed.',
+  'Chores marked as ones you cannot do forget that.',
+  'Your calendar connection here is disconnected.',
+  'Things you added to shopping lists, invitations you sent, and calendar imports you made stay, without your name.',
+]
+
+function LeaveLosses({ lead, testId }) {
+  return (
+    <div className="card__note" data-testid={testId}>
+      {lead}
+      <ul className="card__losses">
+        {LEAVE_LOSSES.map((loss) => (
+          <li key={loss}>{loss}</li>
+        ))}
+      </ul>
+      If this is the only household you are in, your sign-in is deleted too.
+    </div>
+  )
+}
+
+LeaveLosses.propTypes = {
+  lead: PropTypes.node.isRequired,
+  testId: PropTypes.string.isRequired,
+}
+
 export default function Roster({
   household,
   members,
@@ -2008,6 +2053,10 @@ export default function Roster({
               </p>
               {successors.length ? (
                 <>
+                  {/* #180 AC 3 — only where the hand-over is on offer: deleting
+                      it instead takes everything from everyone, so there is no
+                      list of losses to read first. */}
+                  <LeaveLosses testId="leave-household-losses" lead="Once it is handed on and you leave:" />
                   <label className="field">
                     <span className="field__label">Hand it to</span>
                     <select
@@ -2066,11 +2115,10 @@ export default function Roster({
             </div>
           ) : (
             <div className="row" ref={leaveConfirmRef}>
-              <p className="card__note" data-testid="leave-household-warning">
-                You stop getting {household.name}’s chores, and the ones you hold go to the
-                others. Your calendar connection here is disconnected. If this is the only
-                household you are in, your sign-in is deleted too.
-              </p>
+              <LeaveLosses
+                testId="leave-household-warning"
+                lead={<>You stop getting {household.name}’s chores. Once you leave:</>}
+              />
               <button
                 className="button button--danger"
                 type="button"

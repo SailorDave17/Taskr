@@ -2,7 +2,7 @@
 //
 // Its own file, beside RosterDeleteHousehold.test.jsx, with the same setup
 // narrowed to what this card needs. Values are synthetic — see #19.
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Roster from './Roster.jsx'
 
@@ -67,7 +67,16 @@ describe('leaving the household from the Who tab (#431)', () => {
     fireEvent.click(leaveButton())
     const warning = screen.getByTestId('leave-household-warning')
     expect(warning).toHaveTextContent(household.name)
-    expect(warning).toHaveTextContent(/the ones you hold go to the others/)
+    // #180 AC 3 — the five outcomes the foreign keys produce, each its own
+    // assertion, in the confirm's own words; the pglite suite reads each back.
+    // One list item per loss (design-bar, 2026-09-16), so a person can scan it.
+    expect(within(warning).getAllByRole('listitem')).toHaveLength(6)
+    expect(warning).toHaveTextContent(/chores dealt to you go to the others; any placed on you by hand become unassigned/)
+    // The sixth is the review's: attribution edges added after #180 was filed.
+    expect(warning).toHaveTextContent(/shopping lists, invitations you sent, and calendar imports you made stay, without your name/)
+    expect(warning).toHaveTextContent(/chores you finished stay finished, but no longer carry your name/i)
+    expect(warning).toHaveTextContent(/your weekly minutes here are removed/i)
+    expect(warning).toHaveTextContent(/marked as ones you cannot do forget that/)
     expect(warning).toHaveTextContent(/calendar connection here is disconnected/)
     expect(warning).toHaveTextContent(/your sign-in is deleted too/)
   })
@@ -127,6 +136,24 @@ describe('the organizer leaving: hand it over or delete it, in one confirm (#431
     expect(screen.getByText(/nobody else here has signed in yet/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /and leave$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /instead$/i })).toBeInTheDocument()
+  })
+
+  it('#180 AC 3 — says what the hand-over-and-leave costs, the same losses a member reads', () => {
+    asOrganizer()
+    fireEvent.click(leaveButton())
+    const losses = screen.getByTestId('leave-household-losses')
+    expect(losses).toHaveTextContent(/once it is handed on and you leave/i)
+    expect(within(losses).getAllByRole('listitem')).toHaveLength(6)
+    expect(losses).toHaveTextContent(/no longer carry your name/)
+    expect(losses).toHaveTextContent(/your weekly minutes here are removed/i)
+    expect(losses).toHaveTextContent(/calendar connection here is disconnected/)
+    expect(losses).toHaveTextContent(/your sign-in is deleted too/)
+  })
+
+  it('#180 AC 3 — with nobody to hand it to, lists no losses: deleting it takes everything anyway', () => {
+    asOrganizer({ members: [organizerRow, neverSignedIn] })
+    fireEvent.click(leaveButton())
+    expect(screen.queryByTestId('leave-household-losses')).toBeNull()
   })
 })
 

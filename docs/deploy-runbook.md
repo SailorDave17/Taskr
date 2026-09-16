@@ -267,7 +267,16 @@ persists anything.
      `{{ .Data.invited_as }}` ("*{{ .Data.invited_as }}, you have been added to a household on
      Taskr*"). That edit is yours — #191 AC 1's "personalised with the typed name" is delivered up
      to the template's edge and no further, because a template is dashboard state no session can
-     write. **And on this project it is locked until the SMTP step below lands.** *Read 2026-09-15*
+     write. **Done 2026-09-15, once custom SMTP was attached (next bullet)** — the template's subject
+     is *You've been invited to a household on Taskr* and its body reads
+     `{{ if .Data.invited_as }}Hi {{ .Data.invited_as }}, someone{{ else }}Someone{{ end }} has added
+     you to their household on Taskr…`, guarded so an invitation carrying no name still reads as a
+     sentence, plus the one-hour-link line from the measured `mailer_otp_exp` below. *Measured*: a
+     real invite from the test household to a plus-alias arrived in the inbox from
+     `Taskr <noreply@taskr.madcowhq.com>` reading *Hi Pat Tester, someone has added you…*, DKIM
+     pass on `taskr.madcowhq.com`, SPF pass. Read the saved template back with
+     `GET /v1/projects/{ref}/config/auth` (`mailer_subjects_invite`, `mailer_templates_invite_content`)
+     rather than trusting the editor. **Before SMTP, this edit was locked on this project.** *Read 2026-09-15*
      off Supabase's changelog (*Changes to Email Template Customisation on Free Tier*, 2026-06-03):
      a free-tier project **created on or after 2026-06-03** that sends through Supabase's default
      mailer cannot edit its auth email templates; projects created before that date were
@@ -304,10 +313,31 @@ persists anything.
      things at once — it lifts the two-per-hour limit AND unlocks the *Invite user* template edit
      that #191 AC 1 waits on (the previous bullet), where Pro would unlock the template and leave
      the limit in place. Rejected for now: closing #191 with AC 1 externally gated, because the
-     personalisation waits on SMTP for the rate-limit reason anyway. The setup is yours at the
-     dashboard: attach the provider under Authentication → SMTP Settings, then confirm with
-     `GET /v1/projects/{ref}/config/auth` that `smtp_host` is set, then make the template edit
-     above, then tick #191 AC 1.
+     personalisation waits on SMTP for the rate-limit reason anyway.
+
+     **Attached the same day, session-driven through the dashboards.** The sender is
+     `Taskr <noreply@taskr.madcowhq.com>` — a Taskr subdomain of madcowhq.com (owner's choice over
+     madcowsailing.com), the same per-app-subdomain shape tender uses, so its DKIM and SPF bind that
+     subdomain alone. What holds it up, in the order it was built:
+     - **Resend**: domain `taskr.madcowhq.com`, region us-east-1, verified within two minutes of its
+       records landing. The records went in through Resend's *Cloudflare Auto configure* button —
+       a one-time Domain Connect authorisation at `dash.cloudflare.com` that writes exactly three
+       records into the `madcowhq.com` zone (`send.taskr` and `rsend.taskr` CNAMEs to
+       `*.forge.rmta.net`, `resend._domainkey.taskr` TXT) and grants Resend nothing afterwards.
+       An API key `taskr-supabase-auth-smtp`, **sending access only**; it could not be scoped to
+       the domain at creation because Resend offers only *verified* domains in that picker and the
+       domain was still pending, so it is scoped to all domains on the account.
+     - **Supabase**, Authentication → SMTP Settings: host `smtp.resend.com`, port `465`, username
+       `resend`, password = that API key (Resend's contract, not a per-user secret). Saving it made
+       Supabase raise `rate_limit_email_sent` from **2 to 30 an hour on its own** — *measured* off
+       the same Management API call the paragraph above used — so the household-of-four wall is
+       gone without a separate rate-limit edit. `smtp_max_frequency` stayed at 60 s per address.
+     - Nothing in `Redirect URLs` changed. One reading from the test send: the function was passed
+       `https://taskr-khaki.vercel.app` as `redirectTo` and the link that arrived carried
+       `redirect_to=https://taskr.madcowhq.com` — GoTrue substitutes `Site URL` for a redirect not
+       on the allow-list, silently. The custom domain is the origin the app is served from, so this
+       is the right link; it is recorded because a session passing the `*.vercel.app` alias will
+       get the same substitution and should not read it as a bug in the function.
 
    **One more measured figure, because it changes what the organizer should say:**
    `mailer_otp_exp = 3600` — **an invitation link is good for one hour**. An organizer who sends

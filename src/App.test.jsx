@@ -216,6 +216,15 @@ vi.mock('./lib/announce.js', async () => {
   return { ...actual, ...announceApi }
 })
 
+// #339 — the provider-switch read. Stubbed because the real one fetches; the
+// default (set in beforeEach) is ON, the live project's answer since #330, so
+// every test that is not about the switch — #304's included — runs exactly as
+// it did before this story.
+const authSettingsApi = {
+  readGoogleSignIn: vi.fn(),
+}
+vi.mock('./lib/authSettings.js', () => authSettingsApi)
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -382,6 +391,8 @@ beforeEach(() => {
   // and the failures read as app bugs rather than as pollution.
   window.localStorage.clear()
   Object.values(api).forEach((fn) => fn.mockReset())
+  authSettingsApi.readGoogleSignIn.mockReset()
+  authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
   Object.values(captureApi).forEach((fn) => fn.mockReset())
@@ -3576,8 +3587,9 @@ describe('connecting a calendar (#95)', () => {
       // an account the organizer has not registered is refused by Google; the
       // sentence says who can fix that and does not blame a password nobody
       // typed. The SHAPE here is GoTrue's documented one, not a measured
-      // refusal — the provider is not enabled on the live project yet, so the
-      // live half of AC 5 is the confirmation story's.
+      // refusal — the provider was not enabled on the live project when this
+      // was written, so the live half of AC 5 was left to the confirmation
+      // story (#330, done 2026-09-16).
       api.currentSession.mockResolvedValue(null)
       atUrl('', '#error=access_denied&error_description=The+user+denied+access')
       await renderApp()
@@ -3618,6 +3630,77 @@ describe('connecting a calendar (#95)', () => {
       expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
       expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('#339 — the sign-in screen reads the provider switch before offering Google', () => {
+  const googleControl = () => screen.queryByRole('button', { name: /continue with google/i })
+
+  beforeEach(() => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+  })
+
+  it('AC 1: switched off → no control, the organizer named, and nothing starts the flow', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(false)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(await screen.findByTestId('google-sign-in-off')).toHaveTextContent(/organizer/i)
+    expect(googleControl()).not.toBeInTheDocument()
+    expect(authSettingsApi.readGoogleSignIn).toHaveBeenCalledTimes(1)
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: switched on → the control, and it starts the flow as #304 shipped it', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a failed read keeps the control — sign-in is not refused over a network blip', async () => {
+    // `readGoogleSignIn` answers null for every failure (authSettings.test.js).
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a press while the read is still in flight waits for it, and does not leave for an off switch', async () => {
+    // The control is on screen while the answer is unknown, so this is the
+    // one press the render gate cannot stop.
+    let answer
+    authSettingsApi.readGoogleSignIn.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+    )
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(googleControl()).toBeInTheDocument()
+
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    await act(async () => answer(false))
+
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    expect(await screen.findByTestId('google-sign-in-off')).toBeInTheDocument()
+    expect(googleControl()).not.toBeInTheDocument()
+    // And the screen is usable afterwards: the press released `busy`.
+    expect(screen.getByRole('button', { name: /start a household/i })).toBeEnabled()
+  })
+
+  it('an unconfigured build asks nothing', async () => {
+    backend.hasSupabaseConfig = false
+    await renderApp()
+    expect(authSettingsApi.readGoogleSignIn).not.toHaveBeenCalled()
   })
 })
 

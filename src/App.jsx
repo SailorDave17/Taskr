@@ -41,6 +41,7 @@ import {
   readActiveHouseholdChoice,
   writeActiveHouseholdChoice,
 } from './lib/activeHousehold.js'
+import { readGoogleSignIn } from './lib/authSettings.js'
 import {
   addChore,
   addChores,
@@ -420,6 +421,10 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // news that the session was ended somewhere else. `App` carries it across
   // the remount; boot overwrites it only with a complaint of its own.
   const [signInNotice, setSignInNotice] = useState(carriedNotice)
+  // #339 — whether the project's Google provider is on: `true`, `false`, or
+  // `null` while unknown. Only `false` hides Continue with Google; unknown
+  // keeps it, for the reason `authSettings.js` gives.
+  const [googleSignIn, setGoogleSignIn] = useState(null)
   // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
   // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
   // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
@@ -805,6 +810,11 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         if (!cancelled) setStatus('unconfigured')
         return
       }
+      // #339 — started, not awaited: nothing else at boot depends on it, and a
+      // slow read must not hold the sign-in screen back. It never rejects.
+      void readGoogleSignIn().then((on) => {
+        if (!cancelled) setGoogleSignIn(on)
+      })
       try {
         // No session is a normal state now, not one to repair. Under device auth
         // this called `ensureSession()`, which signed the phone in anonymously so
@@ -1301,6 +1311,15 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     setError(null)
     setSignInNotice(null)
     try {
+      // #339 — asked again at the press, which is the same cached promise
+      // boot started. The screen hides the control once the answer is `false`,
+      // but a press that lands while the read is still in flight would
+      // otherwise leave the page for Supabase's raw JSON 400.
+      const on = await readGoogleSignIn()
+      if (on === false) {
+        setGoogleSignIn(false)
+        return
+      }
       await signInWithGoogle()
     } catch (err) {
       setError(err.message)
@@ -2857,6 +2876,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           onSignUp={handleSignUp}
           onSignIn={handleSignIn}
           onSignInWithGoogle={handleSignInWithGoogle}
+          googleSignIn={googleSignIn}
           onSignOut={handleSignOut}
           // #173 — the invited person's two halves: hold a code while signed
           // out, redeem one while signed in with no household.

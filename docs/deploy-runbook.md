@@ -606,7 +606,13 @@ into every function, so a bare "not configured" would send you to check the wron
    The app builds its redirect address from `location.origin`, so whichever host the member opened
    is the one Google is asked about. A host that is not on this list is refused **by Google**, on a
    page naming the address, which is the loud failure worth having.
-4. Copy the two values, and keep them apart — this is the step the build guard exists for:
+4. Copy the two values, and keep them apart — this is the step the build guard exists for.
+   **Store the secret the moment it is created: it cannot be read back.** *Measured 2026-09-16*
+   (#330), the client page says *"Viewing and downloading client secrets is no longer available.
+   If you have lost the secret below, please add a new one."* — it shows only a masked tail and the
+   creation date, and a client holds **at most 2** secrets. The secret has two homes on the Supabase
+   side (the function secrets below and, since #304, the Auth provider in §3b), so a secret not
+   captured at creation can only be replaced, never copied into the second home.
 
    | Value | Looks like | Where it goes |
    |---|---|---|
@@ -654,11 +660,21 @@ to the person pressing Allow.
 
 Since #304 the sign-in screen carries **Continue with Google**, which runs Supabase Auth's own
 Google provider through the app's Supabase client — no second OAuth client, no ID-token exchange,
-nothing new in the bundle. It needs two dashboard steps, both owner-only, and until they are done
-the control sends a person to Supabase, which answers *"Unsupported provider: provider is not
-enabled"* and returns them to the sign-in screen with that sentence. Both steps are tracked as their
-own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330), by
-the same convention as #150.
+nothing new in the bundle. It needs two dashboard steps, both owner-only, and both were tracked as
+their own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330),
+by the same convention as #150 — **done 2026-09-16**.
+
+**Until they are done, the app hides the control** (since
+[#339](https://github.com/SailorDave17/Taskr/issues/339)): the sign-in screen reads
+`external.google` from the settings endpoint in step 2 once per page, and while it reports `false`
+shows a sentence naming the organizer in the control's place. A failed read keeps the control. What
+pressing it did before #339 is worth knowing, because the earlier wording here was wrong: this
+section said Supabase *"returns them to the sign-in screen with that sentence"*, and that was
+reasoned, not measured. *Measured 2026-09-04*: auth-js navigates straight to
+`/auth/v1/authorize?provider=google`, which answers **`HTTP 400`, `Content-Type:
+application/json`** — `{"code":400,"error_code":"validation_failed","msg":"Unsupported provider:
+provider is not enabled"}` — with no redirect, so the person was left on a raw JSON page with
+nothing but the browser's Back button.
 
 1. **Add Supabase's callback to the OAuth client from step 3** — one more entry under **Authorized
    redirect URIs**, exactly:
@@ -678,7 +694,12 @@ the same convention as #150.
    → "external": { … "google": true … }
    ```
 
-   *Measured 2026-09-04*: `false`.
+   *Measured 2026-09-04*: `false`. *Measured 2026-09-16*, after #330: `true`.
+
+   **The secret has to come from wherever you stored it at creation** — step 4's console will not
+   show it again (see the note there). If it was not stored, add a new secret to the client rather
+   than rotating the one the calendar functions already hold; #330 did exactly that and left the
+   original enabled, so `calendar-connect` and its sibling were untouched.
 3. **Nothing to add to Redirect URLs.** The app passes the origin it is running on as
    `redirectTo` (the same value as `emailRedirectTo`, §2 step 5), so the production origin and the
    dev origin already on the list cover it; a preview origin falls back to Site URL, deliberately.
@@ -690,10 +711,16 @@ the same convention as #150.
   consent-screen branding appears nowhere on it. This is not a misconfiguration and there is
   nothing on the Google side to fix; the only remedy is Supabase's paid Custom Domain, which is out
   of scope for a project chartered at $0.
-- **Testing mode gates sign-in exactly as it gates the calendar.** Only the test users registered
-  in step 2 above get past Google; anyone else is refused at Google with *"The developer hasn't
-  given you access to this app"*. The sign-in screen says who can fix that — the organizer — when
-  the refusal reaches it as `access_denied`.
+- **Testing mode gates the calendar, not sign-in.** The test-user list bites for the calendar's
+  sensitive scopes — an unregistered member is refused by Google with *"The developer hasn't given
+  you access to this app"* (#142). Sign-in asks only for `email profile`, which Google classes as
+  non-sensitive, so **any** Google account can sign in even while the app is in Testing (*measured
+  2026-09-16*, #330: an account not on the one-entry test-user list saw the ordinary consent screen
+  and signed in, landing as a new auth user in the no-household state). If sign-in should be
+  restricted to known people, the roster is what does it — an account matching nobody lands in the
+  no-household state, not inside a household. *This bullet said until 2026-09-16 that Testing mode
+  "gates sign-in exactly as it gates the calendar"; that was reasoned from #142, which measured the
+  calendar's scopes only.*
 - **The flow is implicit, not PKCE** — owner decision 2026-09-04, recorded on #304. The session
   comes back in the URL **fragment** and the client consumes it on boot; the app never exchanges a
   `?code=`. Switching the client to PKCE would switch the confirmation email (§2 step 5) to a

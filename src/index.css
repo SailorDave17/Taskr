@@ -237,6 +237,18 @@ body {
   color: var(--ink-dim);
 }
 
+/* #180 — the losses a person reads before leaving a household, one per line.
+   Inherits the note's size and ink; the list is the change (design-bar,
+   2026-09-16: the same facts as a paragraph read as fine print at 360). */
+.card__losses {
+  margin: 0.5rem 0;
+  padding-left: 1.1rem;
+}
+
+.card__losses li + li {
+  margin-top: 0.25rem;
+}
+
 /* #53 — the catch-up pass skipped occurrences older than the bound and the
    household is being told. Informational, not a fault: same dim ink and left
    rule as .chore__warning, and deliberately not the .error palette — nothing

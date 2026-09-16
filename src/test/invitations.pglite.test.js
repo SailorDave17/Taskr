@@ -763,13 +763,19 @@ describe('the invitation record, run against a real Postgres', () => {
       expect(refused.error).toMatch(/invitations_not_both_ends|check constraint/i)
     })
 
-    it('refuses a half-written redemption stamp', async () => {
+    it('refuses a redeemer without a stamp, and allows a stamp whose redeemer has since left (0044)', async () => {
+      // Until 0044 this test asserted the symmetric form — a stamp without a
+      // redeemer refused too — and that form refused every leave and removal
+      // of a member admitted by code, because 0040's own FK blanks the
+      // redeemer and keeps the stamp (#180, measured). One direction now.
       await mint(a, 'half-stamp')
       const refused = await attempt(() =>
-        db.query('update public.invitations set redeemed_at = now()'),
+        db.query('update public.invitations set redeemed_by_member_id = $1', [a.memberTwo]),
       )
       expect(refused.ok).toBe(false)
-      expect(refused.error).toMatch(/invitations_redeemed_whole|check constraint/i)
+      expect(refused.error).toMatch(/invitations_redeemer_implies_stamp|check constraint/i)
+      const allowed = await attempt(() => db.query('update public.invitations set redeemed_at = now()'))
+      expect(allowed.ok).toBe(true)
     })
 
     it('a removed organizer leaves the invitation standing, with no creator', async () => {

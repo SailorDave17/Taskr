@@ -955,12 +955,20 @@ function MemberRow({
   busyWeek,
   busyComplaint,
   timeZone,
+  // #179 — the organizer hands the role to this row's member and stays on as
+  // an ordinary member. Optional in the #166 shape: a roster with no handler
+  // wired renders exactly what it did.
+  onTransfer = null,
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
   const [minutes, setMinutes] = useState(String(member.weekly_minutes))
   const [email, setEmail] = useState(member.email ?? '')
   const [confirmingRemove, setConfirmingRemove] = useState(false)
+  // #179 — two taps, the Remove idiom below: the mistake it guards is one tap
+  // on the wrong row, and the organizer cannot take the role back afterwards
+  // without the new organizer handing it over.
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false)
 
   function cancel() {
     setName(member.display_name)
@@ -1160,6 +1168,48 @@ function MemberRow({
             so a Remove on your own row is a button the database will always
             turn down. Hiding it is the same decision as hiding it from a
             non-organizer, applied to the other clause of the same policy. */}
+        {/* #179 — Make organizer, on every OTHER row whose member has signed
+            in. The organizer's alone, like Remove; never on your own row (the
+            RPC refuses "you already organize this household"); and never on a
+            row with no sign-in, because `transfer_household` refuses a member
+            who could not organize anything (0016's dead end, 0043's check) —
+            #87's rule again: a control the database will always turn down is
+            worse than no control. The organizer stays on the roster as an
+            ordinary member; leaving as well is the Leave card's hand-over. */}
+        {!isOrganizer || isMe || !member.claimed_by || !onTransfer ? null : confirmingTransfer ? (
+          <>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setConfirmingTransfer(false)
+                // The error is already on screen — App's mutate put it there.
+                Promise.resolve(onTransfer(member.id)).catch(() => {})
+              }}
+              disabled={busy}
+            >
+              Make {member.display_name} the organizer?
+            </button>
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingTransfer(false)}
+              disabled={busy}
+            >
+              Not now
+            </button>
+          </>
+        ) : (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => setConfirmingTransfer(true)}
+            disabled={busy}
+            aria-label={`Make ${member.display_name} the organizer`}
+          >
+            Make organizer
+          </button>
+        )}
         {!isOrganizer || isMe ? null : confirmingRemove ? (
           <>
             <button
@@ -1224,6 +1274,7 @@ MemberRow.propTypes = {
   busyWeek: PropTypes.object,
   busyComplaint: PropTypes.string,
   timeZone: PropTypes.string,
+  onTransfer: PropTypes.func,
 }
 
 // `ShareCode` stood here until #62 — a button that copied or sent the household's
@@ -1237,6 +1288,51 @@ MemberRow.propTypes = {
 // long-press on a phone is exactly the interaction that produces a typo — so it
 // is recorded here rather than deleted silently, in case a shareable invite ever
 // comes back.
+
+/**
+ * #180 AC 3 — what leaving costs, said BEFORE the confirm. One list for both
+ * confirms, because the organizer's hand-over ends in the same leave. Each
+ * item follows a foreign key as it stands — the five AC 3 named at filing
+ * (0006, 0004, 0005, 0010, 0011), plus the attribution edges that landed
+ * after it was filed (0032 shopping, 0038 calendar imports, 0040 invitations:
+ * `on delete set null`, the completions shape), which the #180 review found
+ * the list missing — and `leaveHousehold.pglite.test.js` reads each outcome
+ * back; the words are the tabs' own ("weekly minutes", "cannot do"). The
+ * Google half is #99's sentence and stays where it was. A migration that adds
+ * another edge onto `members` owes this list a line.
+ *
+ * A list, not a paragraph: design-bar at 360×800 (2026-09-16) read the same
+ * five facts as a 10-line, 72-word paragraph in the card's dimmest 13px ink —
+ * the grade of the routine hint above it — which is fine print on the way to
+ * the red button. Owner's call: one line per loss.
+ */
+const LEAVE_LOSSES = [
+  'The chores dealt to you go to the others; any placed on you by hand become unassigned.',
+  'Chores you finished stay finished, but no longer carry your name.',
+  'Your weekly minutes here are removed.',
+  'Chores marked as ones you cannot do forget that.',
+  'Your calendar connection here is disconnected.',
+  'Things you added to shopping lists, invitations you sent, and calendar imports you made stay, without your name.',
+]
+
+function LeaveLosses({ lead, testId }) {
+  return (
+    <div className="card__note" data-testid={testId}>
+      {lead}
+      <ul className="card__losses">
+        {LEAVE_LOSSES.map((loss) => (
+          <li key={loss}>{loss}</li>
+        ))}
+      </ul>
+      If this is the only household you are in, your sign-in is deleted too.
+    </div>
+  )
+}
+
+LeaveLosses.propTypes = {
+  lead: PropTypes.node.isRequired,
+  testId: PropTypes.string.isRequired,
+}
 
 export default function Roster({
   household,
@@ -1289,6 +1385,9 @@ export default function Roster({
   // #431 — leaving, and the organizer's hand-over. Optional in the #166 shape.
   onLeaveHousehold = null,
   onHandOverAndLeave = null,
+  // #179 — the organizer hands the role over and STAYS. Optional in the #166
+  // shape; drawn on each other signed-in row (MemberRow).
+  onTransferHousehold = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -1553,6 +1652,11 @@ export default function Roster({
                 onResetPin={onResetPin}
                 onInvite={onInvite}
                 onSendReset={onSendReset}
+                // #179 — bound to the household here, so the row's handler
+                // takes only the member it is drawn on.
+                onTransfer={
+                  onTransferHousehold ? (memberId) => onTransferHousehold(household.id, memberId) : null
+                }
                 override={overrideFor(member.id)}
                 onSetCapacity={onSetCapacity}
                 onClearCapacity={onClearCapacity}
@@ -1949,6 +2053,10 @@ export default function Roster({
               </p>
               {successors.length ? (
                 <>
+                  {/* #180 AC 3 — only where the hand-over is on offer: deleting
+                      it instead takes everything from everyone, so there is no
+                      list of losses to read first. */}
+                  <LeaveLosses testId="leave-household-losses" lead="Once it is handed on and you leave:" />
                   <label className="field">
                     <span className="field__label">Hand it to</span>
                     <select
@@ -2007,11 +2115,10 @@ export default function Roster({
             </div>
           ) : (
             <div className="row" ref={leaveConfirmRef}>
-              <p className="card__note" data-testid="leave-household-warning">
-                You stop getting {household.name}’s chores, and the ones you hold go to the
-                others. Your calendar connection here is disconnected. If this is the only
-                household you are in, your sign-in is deleted too.
-              </p>
+              <LeaveLosses
+                testId="leave-household-warning"
+                lead={<>You stop getting {household.name}’s chores. Once you leave:</>}
+              />
               <button
                 className="button button--danger"
                 type="button"
@@ -2133,6 +2240,7 @@ Roster.propTypes = {
   onDismissMintedCode: PropTypes.func,
   onDeleteHousehold: PropTypes.func,
   deletionGraceDays: PropTypes.number,
+  onTransferHousehold: PropTypes.func,
   onLeaveHousehold: PropTypes.func,
   onHandOverAndLeave: PropTypes.func,
 }

@@ -19,6 +19,7 @@
     "deploy:function": "node scripts/deploy-function.mjs",
     "migrate:live": "node scripts/migrate-live.mjs",
     "probe:live-grants": "node scripts/probe-live-grants.mjs",
+    "probe:provision-actions": "node scripts/probe-provision-actions.mjs",
     "prove:finish-race": "node scripts/prove-finish-race.mjs",
     "scan:tracker": "node scripts/scan-tracker.mjs",
     "icons": "node scripts/generate-icons.mjs",

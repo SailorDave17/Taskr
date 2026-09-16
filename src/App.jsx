@@ -1582,6 +1582,15 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       ),
     [mutate, handleLeaveHousehold],
   )
+  // #179 — the same first write on its own: hand the role over and stay. Routed
+  // through mutate() so the roster re-reads the household, and `isOrganizer`
+  // (derived at render from `households.organizer_member_id`) moves with it:
+  // the organizer controls leave this screen on the re-read and appear on the
+  // new organizer's next load.
+  const handleTransferHousehold = useCallback(
+    (householdId, toMemberId) => mutate(() => transferHousehold(householdId, toMemberId)),
+    [mutate],
+  )
   // #87 - replace the PIN of an account minted before #191. This handler used
   // to give a sign-in as well (`isReset ? reset : provision`); #191 AC 3
   // removed the create-a-sign-in action from the Edge Function and this is
@@ -2981,6 +2990,8 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           // #431 — leaving, and the organizer's hand-over.
           onLeaveHousehold={handleLeaveHousehold}
           onHandOverAndLeave={handleHandOverAndLeave}
+          // #179 — the organizer hands the role over and stays.
+          onTransferHousehold={handleTransferHousehold}
           // #166 — the affordance that did not exist. Owner decision at pickup:
           // its own card on this surface rather than an entry inside the
           // switcher or a second control on the shell row, because the shell

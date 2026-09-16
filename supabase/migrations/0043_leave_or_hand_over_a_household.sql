@@ -12,6 +12,14 @@
 --   2. `transfer_household(household_id, to_member_id)` — the organizer hands
 --      the household to a member who has signed in. Until now nothing could
 --      change `households.organizer_member_id` after `create_household`.
+--      It is `security definer` and the `households` UPDATE grant is NOT
+--      widened to carry the column (#179): 0005 revokes update on `households`
+--      and re-grants only `(name, timezone)`, because with the column in the
+--      grant the members' update policy would let any member reassign
+--      `organizer_member_id` to themselves — 0002's measured hole. The definer
+--      is how the role changes hands without reopening it, and
+--      leaveHousehold.pglite.test.js reddens naming the column if the grant
+--      is ever widened.
 --   3. `member_tokens_to_revoke(member_id)` — service_role only: the Google
 --      grants the `leave-household` Edge Function revokes before the member row
 --      (and with it the token row) goes. #430's rule, applied to one person: a

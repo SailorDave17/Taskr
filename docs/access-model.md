@@ -2459,12 +2459,57 @@ A member can leave from the Who tab. An organizer first hands the household over
 - **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
   a member of the same household who has signed in. An organizer who cannot sign in could provision
   nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
-  besides `create_household`.
+  besides `create_household`. It is a definer because the alternative — widening `0005`'s
+  `update (name, timezone)` grant on `households` to carry the column — would let any member reassign
+  the role to themselves through the members' update policy (`0002`'s measured hole); `0043`'s header
+  cites that, and `leaveHousehold.pglite.test.js` reddens naming the column if the grant is ever
+  widened (#179). Since #179 the roster offers **Make organizer** on each other signed-in row, so the
+  organizer can hand the role over and stay; #431's *Hand it to … and leave* is the same RPC followed
+  by the leave.
 - **The re-deal.** It runs in the browser before the leave, with the leaver left out
   (`reassignHousehold({ householdId, leavingMemberId })`). Their hand-placed chores are released by
   the leave itself and dealt at the next capacity change. A removal now re-deals afterwards too; a
   re-deal that fails there is its own warning, and the removal is still reported as done (#247).
 - **Leaving now revokes Google.** `docs/refresh-charter.md:647-655` carries a dated amendment.
+- **What the confirm says, and what the suite reads back (#180, 2026-09-16).** #180 was mostly
+  #431's: the route, the refusals, the two-household rule and the Google sentence had all shipped.
+  What it added: the member's confirm, and the organizer's hand-over confirm, now list what a
+  leave costs, one line each (a paragraph read as fine print at 360 wide, the design pass found):
+  the five losses AC 3 named at filing — dealt chores go to the others and hand-placed ones become
+  unassigned (`0006`), completions keep their row and lose their name (`0004`), weekly minutes
+  (`0005`), exclusions (`0010`) and the calendar connection (`0011`) go — plus a sixth the review
+  found missing: nine foreign-key edges onto `members` landed after 2026-08-26, and three of them
+  are attribution losses of the completions kind (`0032` shopping runs and items, `0038` calendar
+  imports, `0040` invitations, all `on delete set null`), so the confirm says those rows stay
+  without the leaver's name. The other six (`0020`, `0030`, `0036` cascades) are invisible to the
+  person or subsumed by the calendar line. `leaveHousehold.pglite.test.js` reads each of the six
+  back on its own row, with the organizer's rows in the same tables as the control. A migration
+  that adds another edge onto `members` owes that list a line, and the `LEAVE_LOSSES` comment says
+  so.
+  - **`0044` (#180) — a redeemed invitation survives its redeemer leaving.** The sixth read-back
+    found a live defect: `0040`'s `invitations_redeemed_whole` requires `redeemed_at` and
+    `redeemed_by_member_id` to be null together, while `0040`'s own foreign key sets the redeemer
+    to null when the member row goes — so the delete is refused, and **a member admitted by
+    invitation code could neither leave (`0043`) nor be removed (`0016`)**, live since 2026-09-11.
+    *Measured* in pglite: both the owning-role delete and `leave_household()` failed on the check
+    and the row survived. `0040`'s header had cited `0032`'s "whole-stamp form"; `0032` in fact
+    wrote both of its checks one-directional after measuring this exact failure. `0044` replaces
+    the check with `invitations_redeemer_implies_stamp` (`redeemed_by_member_id is null or
+    redeemed_at is not null`), the `0032` shape. `check:live` and `probe:live-grants` are blind to
+    it on both sides by construction (no table, column, signature or grant moves); the instrument is
+    the read-only catalog query, taken on both sides of `npm run migrate:live`:
+    `pg_get_constraintdef` for the `invitations_redee%` constraints read
+    `invitations_redeemed_whole CHECK ((redeemed_at IS NULL) = (redeemed_by_member_id IS NULL))`
+    beside the FK before, and `invitations_redeemer_implies_stamp CHECK ((redeemed_by_member_id IS
+    NULL) OR (redeemed_at IS NOT NULL))` beside the same FK after, the old name gone and the
+    constraint's comment naming #180; `check:live` **74 of 74** on both sides. Applied 2026-09-16
+    from #180's session at the owner's go-ahead (4 statements, md5 `b71fac53…` read back matching
+    the file); one live redeemed invitation carried a member at the time, so exactly one member was
+    stuck, and no row was changed by the apply. Two more tests there: the last member is the organizer
+  and is refused (AC 6 — nothing a client holds can leave members with no organizer), and a member
+  of two households leaving one still reads exactly the other (AC 8). `App.test.jsx` asserts the
+  remembered household (#165) is forgotten on a leave while the list still names it — the gap
+  PR #435 recorded as untestable is testable once the list is held still.
 - **Excused reds.** `check:live` reads `transfer_household` red until `0043` is applied, and
   `leave-household` NOT DEPLOYED until it ships. `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.

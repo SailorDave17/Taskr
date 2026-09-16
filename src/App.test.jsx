@@ -8535,6 +8535,159 @@ describe('leaving a household, from App (#431)', () => {
   })
 })
 
+describe('leaving one of two households, from App (#180 AC 8)', () => {
+  // Real-shaped ids, because the remembered choice (#165) discards anything
+  // else as it is read. person-a is an ordinary member of both households.
+  const LEFT = {
+    id: '18018018-0180-4180-8180-180180180180',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const KEPT = {
+    id: '18018018-0180-4180-8180-180180180181',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm8',
+  }
+  const here = [
+    { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' },
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const there = [
+    { id: 'm8', display_name: 'Placeholder Other Organizer', weekly_minutes: 60, claimed_by: 'person-y' },
+    { id: 'm7', display_name: 'Placeholder One', weekly_minutes: 30, claimed_by: 'person-a' },
+  ]
+  const KEY = 'taskr.activeHousehold'
+
+  beforeEach(() => {
+    // KEPT first, so the deterministic default is NOT the household being
+    // left: the combobox reading LEFT below then proves the remembered choice
+    // was read (review-fanout, 2026-09-16 — with LEFT first the guard could
+    // not tell the seed from the default).
+    api.listHouseholds.mockResolvedValue([KEPT, LEFT])
+    api.listMembers.mockImplementation(async (id) => (id === KEPT.id ? there : here))
+    // #165 — this device had chosen the household about to be left.
+    window.localStorage.setItem(KEY, LEFT.id)
+  })
+
+  const leave = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () => void fireEvent.click(screen.getByRole('button', { name: /^leave placeholder household\?$/i })),
+    )
+  }
+
+  it('forgets the remembered choice of the household just left, even while the list still names it', async () => {
+    // The list is held still on purpose. App's refresh discards a remembered
+    // household only once the read stops returning it (#165 AC 2), so here the
+    // leave's own clear is the only thing that can empty the key — which is
+    // what lets this test tell the two apart (PR #435 recorded the gap).
+    await renderApp('Who')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveValue(LEFT.id)
+    // Still remembered on the way in, so the null below is the leave's doing
+    // and not a load-time discard's.
+    expect(window.localStorage.getItem(KEY)).toBe(LEFT.id)
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledWith(LEFT.id)
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+
+  it('lands on the other household once the re-read stops returning the one left, with no error and no stored choice', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([KEPT])
+      return { accountDeleted: false, warning: null, revokeFailed: false }
+    })
+    await renderApp('Who')
+    await leave()
+    expect((await screen.findAllByText('Placeholder Other Household')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('combobox', { name: 'Household' })).toBeNull()
+    expect(api.listMembers).toHaveBeenLastCalledWith(KEPT.id)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+})
+
+describe('handing the organizer role over and staying, from App (#179)', () => {
+  // person-a (the suite's default session) is m1 and organizes; m2 has signed
+  // in, so the row carries the control. Nobody leaves here — that is #431's
+  // hand-over, one card down.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const signedInOther = { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: 'person-b' }
+  const makeOrganizer = () => screen.queryByRole('button', { name: /^make placeholder two the organizer$/i })
+  const removeOther = () => screen.queryByRole('button', { name: /^remove placeholder two$/i })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, signedInOther])
+  })
+
+  it('AC 2 — hands the household over through the RPC, and the organizer controls leave this screen on the re-read', async () => {
+    // The transfer lands on the server, so the re-read App makes after the
+    // write comes back with the new organizer — the way the live project
+    // answers it.
+    api.transferHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+      return { ...household, organizer_member_id: 'm2' }
+    })
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeInTheDocument()
+    expect(removeOther()).toBeInTheDocument()
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(api.transferHousehold).toHaveBeenCalledWith('h1', 'm2')
+    expect(api.transferHousehold).toHaveBeenCalledTimes(1)
+    // Stays: no leave, and this person is still on the roster.
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    // The previous organizer no longer holds the organizer controls.
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+  })
+
+  it('AC 2 — the new organizer sees the organizer controls on their next load', async () => {
+    // The same device, loading a household the server now says it organizes:
+    // `isOrganizer` is derived at render from `organizer_member_id`, so a load
+    // is all it takes. The load above, where m2 organized, is the other side.
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+    expect(screen.queryByRole('button', { name: /^make placeholder one the organizer$/i })).toBeNull()
+  })
+
+  it('hands nothing over on the first tap, and Not now backs out', async () => {
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^not now$/i })))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+
+  it('puts a refused hand-over on screen and keeps the organizer where they were', async () => {
+    api.transferHousehold.mockRejectedValue(new Error('hand the household to somebody who has signed in'))
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/somebody who has signed in/)
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+})
+
 describe('#440 — a session that ends here lands on the sign-in form, and nothing is read after it', () => {
   // #431's fixture: person-a is m1, an ordinary member; m9 organizes.
   const household = {

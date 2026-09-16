@@ -607,9 +607,13 @@ describe('signing in with Google — #304', () => {
   })
 
   it('names Google when the start is refused, since nothing about a password was wrong', async () => {
-    // The live project's answer until the provider is enabled: "Unsupported
-    // provider: provider is not enabled". Collapsing that into "did not match"
-    // would send somebody to reset a password they never typed.
+    // A start auth-js refuses before leaving the page. NOT the provider-off
+    // case, despite the wording borrowed from it: with the provider off auth-js
+    // still builds the URL and navigates, and Supabase answers the authorize
+    // request with a raw JSON 400 that never comes back here (measured
+    // 2026-09-04; #339 reads the switch first instead). Collapsing a refusal
+    // into "did not match" would send somebody to reset a password they never
+    // typed.
     authState.oauthError = 'Unsupported provider: provider is not enabled'
     await expect(signInWithGoogle()).rejects.toThrow(/signing in with Google.*provider is not enabled/)
   })

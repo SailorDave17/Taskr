@@ -156,3 +156,31 @@ describe('the suite reads the environment it states, not the machine it runs on'
     expect(offAgain.hasSupabaseConfig).toBe(false)
   })
 })
+
+// #339 — the endpoint the provider-switch read asks. Built from the same two
+// values the client is, so a project URL change moves both.
+describe('the auth settings request', () => {
+  it('names the public settings endpoint and carries the anon key', async () => {
+    const { authSettingsRequest } = await loadSupabase({
+      url: 'https://project-ref.supabase.co/',
+      anonKey: PUBLISHABLE,
+    })
+    expect(authSettingsRequest()).toEqual({
+      url: 'https://project-ref.supabase.co/auth/v1/settings',
+      headers: { apikey: PUBLISHABLE },
+    })
+  })
+
+  it('is null without a backend, rather than a request to `undefined`', async () => {
+    const { authSettingsRequest } = await loadSupabase({ url: undefined, anonKey: undefined })
+    expect(authSettingsRequest()).toBeNull()
+  })
+
+  it('refuses a secret key, like the client does', async () => {
+    const { authSettingsRequest } = await loadSupabase({
+      url: 'https://project-ref.supabase.co',
+      anonKey: SECRET,
+    })
+    expect(() => authSettingsRequest()).toThrow(/SECRET key/)
+  })
+})

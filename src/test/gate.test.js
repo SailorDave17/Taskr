@@ -76,6 +76,11 @@ describe('the credential flow is reachable from the app, not just exported', () 
     expect(app).toMatch(/onSignIn=\{/)
     expect(app).toMatch(/onCreate=\{/)
     expect(app).toMatch(/onSignInWithGoogle=\{/)
+    // #339 — the provider switch. Optional on the screen and defaulting to
+    // "keep the control", so an unwired prop is the pre-#339 raw-JSON failure
+    // with nothing red anywhere.
+    expect(app).toMatch(/googleSignIn=\{/)
+    expect(app).toMatch(/\breadGoogleSignIn\b/)
     // #155 — the reset request. The prop is optional on the screen (so #154's
     // tests render unchanged) and the control renders only when it is wired,
     // so an unwired prop is a sign-in screen with no way back in and nothing

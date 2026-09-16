@@ -42,6 +42,7 @@ import {
   writeActiveHouseholdChoice,
 } from './lib/activeHousehold.js'
 import { readGoogleSignIn } from './lib/authSettings.js'
+import { listSignInStates } from './lib/signInState.js'
 import {
   addChore,
   addChores,
@@ -313,6 +314,8 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // choices inside one clock tick must be two epochs.
   const choiceEpochRef = useRef(0)
   const [members, setMembers] = useState([])
+  // #458 — who has accepted their invitation; null until the read answers.
+  const [signInStates, setSignInStates] = useState(null)
   const [chores, setChores] = useState([])
   // #46 — this week's capacity overrides, and the period they belong to. Both
   // come from refresh() rather than being derived in render: the period depends
@@ -579,6 +582,20 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     setHouseholds(all)
     setHousehold(found)
     setMembers(roster)
+    // #458 — whether each claimed member has ACCEPTED, read on every refresh
+    // like the roster, so a person who follows their link shows as joined on
+    // the next read rather than on the next reload. Its own try/catch for #96's
+    // reason: until `0045` is applied the function does not exist, and a
+    // missing read must not take the roster down with it. Null on failure,
+    // which `signInStateFor` reads as today's label — not surfaced on the
+    // strip, because what it costs is one word's precision on rows that
+    // already render, and an error there would sit over every roster until the
+    // migration lands.
+    try {
+      setSignInStates(found ? await listSignInStates(found.id) : [])
+    } catch {
+      setSignInStates(null)
+    }
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
@@ -2991,6 +3008,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         <Roster
           household={household}
           members={members}
+          signInStates={signInStates}
           me={me}
           isOrganizer={isOrganizer}
           busy={busy}

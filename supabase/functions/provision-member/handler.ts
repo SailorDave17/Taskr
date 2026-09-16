@@ -171,6 +171,12 @@ export interface SupabaseLike {
         email: string,
         options?: { redirectTo?: string; data?: Record<string, unknown> },
       ): Promise<{ data: { user: { id: string } | null } | null; error: any }>
+      // #458 — read to tell an invited-and-unaccepted account from a joined
+      // one before re-sending an invitation to it.
+      getUserById(id: string): Promise<{
+        data: { user: { id: string; email?: string | null; email_confirmed_at?: string | null } | null } | null
+        error: any
+      }>
       updateUserById(id: string, attrs: { password?: string }): Promise<{ error: any }>
       deleteUser(id: string): Promise<{ error: any }>
     }
@@ -468,10 +474,93 @@ export function createHandler(deps: ProvisionMemberDeps) {
       // unconfirmed, and confirms them when they follow the link; the link lands
       // on `redirectTo` with a session in the fragment and `type=invite`, and the
       // app asks them for a password once.
+
+      // #458 AC 2 — the invitation again, to an account that exists and has
+      // not been accepted.
+      //
+      // Sent to the ACCOUNT's address, not the row's: the row's address is
+      // editable after the claim and does not move the account (the roster's
+      // edit form says so), and an invitation to the row's new address would
+      // create a SECOND account there while this one stays claimed.
+      //
+      // GoTrue re-sends to an unconfirmed user and returns the same user
+      // (measured 2026-09-09, `provisioning.functions.test.js`), and stamps
+      // `invited_at` only once the mail is accepted (read off `sendInvite`,
+      // 2026-09-16) — which is what the roster's "sent when" reads.
+      //
+      // NEVER rolls back. The first-send branch below deletes the account on a
+      // refused send, because nothing had claimed it yet. This account is
+      // claimed by this row — and possibly by a row in another household that
+      // invited the same pending address (`revoke`'s `otherClaims` case) — so a
+      // refused re-send must leave it exactly as it was, and the earlier
+      // invitation, if its hour is not up, still works.
+      const resendInvitation = async (account: { id: string; email?: string | null }) => {
+        if (!redirectTo) return refuse('redirectTo is required.', 400)
+        const address = String(account.email ?? '')
+        if (!hasRealAddress({ email: address })) {
+          return refuse(
+            `${member.display_name}'s sign-in has no address an invitation can reach.`,
+            409,
+          )
+        }
+        const { data: resent, error: resendError } = await asService.auth.admin.inviteUserByEmail(
+          address,
+          { redirectTo, data: { invited_as: member.display_name } },
+        )
+        if (resendError || !resent?.user) {
+          if (isAddressTakenError(resendError)) {
+            // Accepted between the read above and this send. The state the
+            // organizer was looking at is gone; say what it is now.
+            return refuse(`${member.display_name} has just accepted — there is nothing to re-send.`, 409)
+          }
+          if (resendError?.code === 'over_email_send_rate_limit' || resendError?.status === 429) {
+            return refuse(
+              `No email was sent to ${address} — too many emails have gone out in the last hour. ` +
+                'Try again later; the earlier invitation still works until its hour is up.',
+              429,
+            )
+          }
+          return refuse(
+            `No email was sent to ${address} — the mail service refused it. ` +
+              'Try again in a little while; the earlier invitation still works until its hour is up.',
+            502,
+          )
+        }
+        if (resent.user.id !== account.id) {
+          // Cannot happen while an address names one account. Refused rather
+          // than trusted, because the claim below would otherwise be wrong in
+          // a way nothing on screen would show.
+          return refuse('That invitation went to a different sign-in than this person\'s.', 409)
+        }
+        return json({
+          ok: true,
+          action: 'invite',
+          memberId: member.id,
+          email: address,
+          claimedBy: account.id,
+          resent: true,
+        })
+      }
+
       if (member.claimed_by) {
-        // Same shape as provision's 409 and for the same reason: name the state,
-        // so the organizer knows the answer is "reset it" and not "try again".
-        return refuse('That person already has a sign-in — reset it instead.', 409)
+        // #458 — a claim is not an acceptance. The branch below sets
+        // `claimed_by` the moment the invitation is SENT, so a claimed row is
+        // either somebody who has joined or somebody sitting on an unopened
+        // (or expired) link, and only the account can say which. The second
+        // one's repair is the invitation again, never a reset.
+        const { data: account, error: accountError } = await asService.auth.admin.getUserById(
+          member.claimed_by,
+        )
+        if (accountError || !account?.user) {
+          return refuse('Could not read that person\'s sign-in.', 400)
+        }
+        if (account.user.email_confirmed_at) {
+          // Same shape as provision's 409 and for the same reason: name the
+          // state, so the organizer knows the answer is "reset it" and not
+          // "try again".
+          return refuse('That person already has a sign-in — reset it instead.', 409)
+        }
+        return resendInvitation(account.user)
       }
       if (!hasRealAddress(member)) {
         // A synthetic `<id>@taskr.invalid` address has no mailbox by

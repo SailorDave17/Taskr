@@ -265,9 +265,19 @@ persists anything.
      **Since #191 (2026-09-11) the function passes the name the organizer typed as
      `invited_as` in the invitation's `data`**, so the template MAY read it as
      `{{ .Data.invited_as }}` ("*{{ .Data.invited_as }}, you have been added to a household on
-     Taskr*"). That edit is yours and optional — #191 AC 1's "personalised with the typed name" is
-     delivered up to the template's edge and no further, because a template is dashboard state no
-     session can write. The value lands in `auth.users.raw_user_meta_data` **when the invite creates
+     Taskr*"). That edit is yours — #191 AC 1's "personalised with the typed name" is delivered up
+     to the template's edge and no further, because a template is dashboard state no session can
+     write. **And on this project it is locked until the SMTP step below lands.** *Read 2026-09-15*
+     off Supabase's changelog (*Changes to Email Template Customisation on Free Tier*, 2026-06-03):
+     a free-tier project **created on or after 2026-06-03** that sends through Supabase's default
+     mailer cannot edit its auth email templates; projects created before that date were
+     grandfathered, paid plans are unaffected, and **a free-tier project with its own SMTP provider
+     configured can edit them freely**. This project was created 2026-08-05 on the free plan with
+     `smtp_host` unset, so it is on the locked side. *(This paragraph called the edit "optional"
+     from 2026-09-11 to 2026-09-15, while it was in fact unreachable — the restriction is stated in
+     the changelog and nowhere this repo had read, which is why it went unnoticed across two
+     sessions that named it as the one remaining step. What the dashboard shows for a locked
+     template has not been looked at here.)* The value lands in `auth.users.raw_user_meta_data` **when the invite creates
      the account**; a re-invite of a PENDING address (invited by another household, never accepted)
      returns the same user unchanged, so that email renders the FIRST household's typed name
      (GoTrue applies `data` on its create branch only — read off `internal/api/invite.go`, not
@@ -289,6 +299,15 @@ persists anything.
      is raisable only by attaching your own sender under Authentication → SMTP Settings. Filed as a
      finding rather than actioned here — it needs a mail provider and a domain, neither of which is
      a code change.
+
+     **Decided 2026-09-15: custom SMTP is the route**, chosen over upgrading to Pro. It pays for two
+     things at once — it lifts the two-per-hour limit AND unlocks the *Invite user* template edit
+     that #191 AC 1 waits on (the previous bullet), where Pro would unlock the template and leave
+     the limit in place. Rejected for now: closing #191 with AC 1 externally gated, because the
+     personalisation waits on SMTP for the rate-limit reason anyway. The setup is yours at the
+     dashboard: attach the provider under Authentication → SMTP Settings, then confirm with
+     `GET /v1/projects/{ref}/config/auth` that `smtp_host` is set, then make the template edit
+     above, then tick #191 AC 1.
 
    **One more measured figure, because it changes what the organizer should say:**
    `mailer_otp_exp = 3600` — **an invitation link is good for one hour**. An organizer who sends

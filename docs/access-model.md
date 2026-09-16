@@ -2413,6 +2413,20 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   Every run is recorded in `household_purge_runs`: counts only, and no role holds a grant on it.
   Vercel Hobby keeps logs for one hour and alerts on nothing, so this table is how a stopped purge is
   told apart from a quiet week.
+- **The last member's way out — #181, 2026-09-16.** Filed 2026-08-26 as "close a household nobody
+  is left in"; this path delivered it. The last member of a household is its organizer, because
+  nothing a client holds can leave members with no organizer (`0016`'s delete policy refuses the
+  organizer's own row, `leave_household` refuses the organizer, `transfer_household` hands to a
+  member who exists), so their way out is `request_household_deletion`, and the row waits for the
+  purge rather than becoming a household nobody can reach. `0001`'s "deliberately absent: any
+  DELETE policy on `households`" still holds — closure is definer functions, not a policy — and
+  `householdDeletion.pglite.test.js` (`#181`) asserts the property that survives it: no client
+  deletes the row directly, pending or not; the three client RPCs are executable by `authenticated`
+  and revoked from `public, anon` by name; and a member of two households closing one still reads
+  exactly the other, its rows untouched. `App.test.jsx` (`#181`) pins where the person lands: their
+  other household, or signed in with no household. #181's "a member who is not the last one is
+  refused" was superseded by #430's decision that an organizer may delete a household that still
+  has members; only a non-organizer is refused.
 - **Why functions and not grants.** `households_due_for_purge`, `household_tokens_to_revoke`,
   `purge_household` and `record_household_purge_run` are executable by `service_role` alone. The exact list of tables
   `service_role` may touch (`grants.pglite.test.js`) did not grow, and "delete a household whose

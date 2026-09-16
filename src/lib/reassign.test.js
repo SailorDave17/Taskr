@@ -37,8 +37,11 @@ function row(
 
 const monday = '2026-08-24'
 
+// The zone is UTC so the fixture rows' `completed_at` (Aug 26–27, mid-day
+// UTC) fall inside `monday`'s week however the machine is pinned — #471 made
+// the planner refuse to run without one.
 function plan({ members, chores, exclusions = [], overrides = [] }) {
-  return planReassignment({ members, chores, exclusions, overrides, periodStart: monday })
+  return planReassignment({ members, chores, exclusions, overrides, periodStart: monday, timeZone: 'UTC' })
 }
 
 function placementMap(placements) {
@@ -118,6 +121,41 @@ describe('planReassignment — input mapping', () => {
         ['c-f2', 'm-robin'],
       ]),
     )
+  })
+
+  it('pins only THIS WEEK’s completions — an earlier week’s is history, not held work (#471)', () => {
+    const members = [
+      { id: 'm-alex', weekly_minutes: 300 },
+      { id: 'm-robin', weekly_minutes: 300 },
+    ]
+    // 200 real minutes alex did in the week of Aug 10, two weeks before
+    // `monday`. Pinned, it would push BOTH open chores onto robin — the case
+    // above, which is this one's positive control. Dropped, the two split:
+    // c-f1 ties at 100/300 each and the lowest id takes it, then c-f2 goes to
+    // robin at 100/300 against alex's 200/300.
+    const chores = [
+      {
+        ...row('c-old', 50, { holder: 'm-alex', source: 'auto', done: true, actual: 200 }),
+        completed_at: '2026-08-12T12:00:00Z',
+      },
+      row('c-f1', 100),
+      row('c-f2', 100),
+    ]
+
+    const { placements } = plan({ members, chores })
+
+    expect(placementMap(placements)).toEqual(
+      new Map([
+        ['c-f1', 'm-alex'],
+        ['c-f2', 'm-robin'],
+      ]),
+    )
+  })
+
+  it('refuses to plan without a zone — unfiltered is the defect, not a default (#471)', () => {
+    expect(() =>
+      planReassignment({ members: [], chores: [], exclusions: [], overrides: [], periodStart: monday }),
+    ).toThrow(/timezone/)
   })
 
   it('drops a MISSED chore whoever holds it — neither pinned as done nor freed as open (#306)', () => {

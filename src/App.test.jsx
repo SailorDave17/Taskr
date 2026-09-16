@@ -2917,6 +2917,82 @@ describe('capacity — this week, set by hand (#46)', () => {
     expect(screen.getByTestId('split-m1')).toHaveTextContent('300 min left')
   })
 
+  // -------------------------------------------------------------------------
+  // #471 — the split's done minutes are THIS WEEK's, not the household's
+  // whole history.
+  //
+  // At the App level rather than in Split.test.jsx, because the week filter
+  // lives where the period and the zone live: App hands the split
+  // `choresInWeek(chores, …)` and the component draws what it is given. A
+  // component test could only prove the component sums what it is handed —
+  // which it did, correctly, for three weeks while the owner's phone read
+  // 1045 min done against 150 this week. The dates are relative to NOW for the
+  // same reason `overrideThisWeek` refuses a literal: the period is computed
+  // from today.
+  // -------------------------------------------------------------------------
+
+  const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString()
+
+  it('#471: a completion from an earlier capacity week contributes nothing to the split', async () => {
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      // Still to do — counts as open whatever its due date.
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done this week — the only completion the bar may count.
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done two weeks ago — history. Before #471 this was "done" every week
+      // for ever, and its 200 min is what turns "50 of 300" into "250 of 300".
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    const row = screen.getByTestId('split-m1')
+    expect(row).toHaveTextContent('30 min done')
+    expect(row).toHaveTextContent('20 min still to do')
+    expect(row).toHaveTextContent('50 of 300 min')
+    expect(row, 'the lifetime sum must not reach the bar').not.toHaveTextContent('230 min done')
+  })
+
+  it('#471: the seen-marker snapshot is the split this member was shown — this week only', async () => {
+    // The announcement compares what a member last saw with what they see
+    // now (#50). Both must be built from the same week-scoped list, or a
+    // completion from July would sit in the snapshot for ever and every
+    // "since you last looked" delta would carry it.
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    ])
+    capacityApi.listCapacity.mockResolvedValue([])
+    announceApi.readSplitSeen.mockResolvedValue(null)
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    expect(announceApi.writeSplitSeen).toHaveBeenCalledWith({
+      memberId: 'm1',
+      snapshot: { members: [{ id: 'm1', minutes: 50, capacityMinutes: 300 }] },
+      seenRebalanceAt: null,
+    })
+  })
+
+  it('#471 POSITIVE CONTROL: the same completion dated THIS week is counted', async () => {
+    // Without this, the assertion above passes identically if completions
+    // stopped counting altogether — the opposite defect, and #47 criterion 7's
+    // own test only covers the component.
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('split-m1')).toHaveTextContent('200 min done')
+  })
+
   it('AC 6: POSITIVE CONTROL — the import scan sees the imports that are there', () => {
     // Without this the assertion above passes identically if the regex stops
     // matching, which is how an empty result reads as a clean bill of health.

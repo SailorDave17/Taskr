@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { countDoneInWeek, doneWeekOf, groupDoneByWeek, settledAt, weekRangeLabel } from './done.js'
+import {
+  choresInWeek,
+  countDoneInWeek,
+  doneWeekOf,
+  groupDoneByWeek,
+  settledAt,
+  weekRangeLabel,
+} from './done.js'
 
 // #302 — completed chores by capacity week. Chore names are synthetic (#19).
 //
@@ -163,5 +170,62 @@ describe('#305 — a missed chore on the Done surface', () => {
     const rows = [missed('m', '2026-08-25T09:00:00Z'), done('d', '2026-08-25T10:00:00Z'), outstanding]
     expect(countDoneInWeek(rows, tz, '2026-08-24')).toBe(1)
     expect(countDoneInWeek(rows, tz, '2026-08-24')).not.toBe(2)
+  })
+})
+
+// #471 — the one filter the fairness arithmetic reads through: the split, the
+// re-balance and its announcement all summed every completion the household
+// had ever recorded until this existed.
+describe('#471 — choresInWeek: what one capacity week is about', () => {
+  const week = '2026-08-24'
+  const ids = (rows) => rows.map((c) => c.id)
+  const missed = (id, missedAt) => ({ ...outstanding, id, missed_at: missedAt })
+
+  it('keeps every outstanding chore, whatever its due date', () => {
+    // Due in the week of Aug 10, still not done in the week of Aug 24: it is
+    // this week's work until somebody does it.
+    expect(ids(choresInWeek([outstanding], tz, week))).toEqual(['o1'])
+  })
+
+  it('keeps a completion from this week and drops one from an earlier week', () => {
+    const rows = [
+      done('this', '2026-08-25T14:00:00Z'),
+      done('last', '2026-08-18T14:00:00Z'),
+      done('ages', '2026-07-01T14:00:00Z'),
+      outstanding,
+    ]
+    expect(ids(choresInWeek(rows, tz, week))).toEqual(['this', 'o1'])
+  })
+
+  it('decides the boundary in the HOUSEHOLD zone, never UTC (AC 3)', () => {
+    // 2026-08-31T03:30Z is Monday in UTC and Sunday 23:30 in New York, so it
+    // is the week of Aug 24's completion in New York and next week's in UTC.
+    const sunday = done('sun', '2026-08-31T03:30:00Z')
+    expect(ids(choresInWeek([sunday], tz, week))).toEqual(['sun'])
+    expect(ids(choresInWeek([sunday], tz, '2026-08-31'))).toEqual([])
+    expect(ids(choresInWeek([sunday], 'UTC', week))).toEqual([])
+    expect(ids(choresInWeek([sunday], 'UTC', '2026-08-31'))).toEqual(['sun'])
+  })
+
+  it('files a MISSED chore by its week too, and drops an earlier one (#305)', () => {
+    // A missed row contributes nothing to the arithmetic either way
+    // (`toAllocatorChores` drops it); the claim here is only that "settled in
+    // this week" means the same thing for both stamps.
+    const rows = [missed('m-this', '2026-08-26T09:00:00Z'), missed('m-last', '2026-08-19T09:00:00Z')]
+    expect(ids(choresInWeek(rows, tz, week))).toEqual(['m-this'])
+  })
+
+  it('does not mutate the list it was handed', () => {
+    const rows = [done('this', '2026-08-25T14:00:00Z'), done('last', '2026-08-18T14:00:00Z')]
+    const before = [...rows]
+    choresInWeek(rows, tz, week)
+    expect(rows).toEqual(before)
+  })
+
+  it('refuses to run without a zone or a period rather than falling back to everything', () => {
+    // The fallback IS the defect: an unfiltered list is exactly what every
+    // reader had before this function existed.
+    expect(() => choresInWeek([outstanding], null, week)).toThrow(/timezone/)
+    expect(() => choresInWeek([outstanding], tz, null)).toThrow(/particular week/)
   })
 })

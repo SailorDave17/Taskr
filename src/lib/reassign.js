@@ -27,6 +27,7 @@
 import { reallocate, minutesOf } from './allocation.js'
 import { capacitiesFor, listCapacity, periodStartFor } from './capacity.js'
 import { isMissed, isOutstanding, listChores } from './chores.js'
+import { choresInWeek } from './done.js'
 import { isExcluded, listExclusions } from './exclusions.js'
 import { listMembers } from './household.js'
 import { getSupabase } from './supabase.js'
@@ -57,6 +58,15 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  *
  * The input mapping is the whole job, and each line is a contract with a story:
  *
+ * - Only THIS WEEK's rows reach the mapping — #471. `choresInWeek` (the Done
+ *   tab's own definition of which week a completion belongs to, in the
+ *   household's zone) keeps every outstanding chore and drops every completion
+ *   from an earlier capacity week before anything below sees it. Until #471
+ *   every completion the household had ever recorded was pinned here as this
+ *   week's held work, so the fair share and the change budget were computed
+ *   over the household's whole history. `timeZone` is required for that
+ *   reason: a planner that could run without one would run unfiltered, and
+ *   unfiltered is the defect.
  * - A DONE chore with a holder is pinned where it is, contributing `minutesOf`
  *   (the actual when recorded, #12) — finished work cannot move, and its
  *   minutes are why someone who already did 200 min gets less open work. Same
@@ -109,6 +119,7 @@ export function planReassignment({
   exclusions,
   overrides,
   periodStart,
+  timeZone,
   leavingMemberId = null,
 }) {
   // #431 — see the docblock.
@@ -119,7 +130,8 @@ export function planReassignment({
   const previous = []
   const freed = new Set()
 
-  for (const chore of chores) {
+  // #471 — see the docblock. Throws without a zone or a period.
+  for (const chore of choresInWeek(chores, timeZone, periodStart)) {
     // #306 — before the done branch, because a missed row is not outstanding
     // and would otherwise be pinned as finished work. See the docblock.
     if (isMissed(chore)) continue
@@ -244,6 +256,7 @@ export async function reassignHousehold({ householdId, leavingMemberId = null })
       exclusions,
       overrides,
       periodStart,
+      timeZone: household.timezone,
       leavingMemberId,
     })
 

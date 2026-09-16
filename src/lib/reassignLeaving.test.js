@@ -29,7 +29,7 @@ const members = [
 ]
 
 function plan(chores, leavingMemberId) {
-  return planReassignment({ members, chores, exclusions: [], overrides: [], periodStart: monday, leavingMemberId })
+  return planReassignment({ members, chores, exclusions: [], overrides: [], periodStart: monday, timeZone: 'UTC', leavingMemberId })
 }
 
 const holders = (placements) => new Map(placements.map((p) => [p.chore_id, p.member_id]))

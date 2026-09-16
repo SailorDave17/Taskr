@@ -8392,6 +8392,87 @@ describe('deleting and restoring a household, from App (#430)', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// #181 — closing a household nobody is left in, from App. #430 delivered the
+// route (the last member is the organizer, and their way out is Delete); these
+// pin where the person LANDS, which is #181 AC 1 and AC 8. `mutate` re-reads
+// the list after the request and the shell follows it — asserted here as a
+// re-read, since a version that merely dropped the household from local state
+// would put the right thing on screen and read stale rows under it.
+// ---------------------------------------------------------------------------
+
+describe('closing the household you are the last one in, from App (#181)', () => {
+  const closing = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+    created_at: '2026-01-01T00:00:00Z',
+  }
+  const other = {
+    id: 'h2',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+    created_at: '2026-02-01T00:00:00Z',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const inOther = [
+    { id: 'm9', display_name: 'Placeholder Other Organizer', weekly_minutes: 60, claimed_by: 'person-z' },
+    { id: 'm2', display_name: 'Placeholder One', weekly_minutes: 30, claimed_by: 'person-a' },
+  ]
+
+  const close = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
+    )
+  }
+
+  it('AC 1 — the last member closes their only household and lands signed in with no household', async () => {
+    api.listHouseholds.mockResolvedValue([closing])
+    api.listMembers.mockResolvedValue([me])
+    // The server's answer changes with the request, the way 0042's membership
+    // filter changes it: the re-read that follows finds nothing.
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([])
+      return {}
+    })
+    await renderApp('Who')
+    await close()
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    await screen.findByRole('button', { name: /create household/i })
+    expect(screen.getByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Who' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 8 — closing one of two households puts the other on screen and re-reads against it', async () => {
+    api.listHouseholds.mockResolvedValue([closing, other])
+    api.listMembers.mockImplementation(async (id) => (id === 'h2' ? inOther : [me]))
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([other])
+      return {}
+    })
+    await renderApp('Who')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveValue('h1')
+    expect(api.listMembers).not.toHaveBeenCalledWith('h2')
+
+    await close()
+
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    // One household left, so #163's name and no switcher (#164 AC 3).
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    expect(document.querySelector('.shell__household')).toHaveTextContent('Placeholder Other Household')
+    expect(api.listMembers).toHaveBeenCalledWith('h2')
+    // A plain member there, so the organizer's Delete card is gone with the
+    // household it belonged to (#164 AC 5: controls follow the household).
+    expect(screen.queryByRole('button', { name: /^delete this household$/i })).not.toBeInTheDocument()
+  })
+})
+
 describe('leaving a household, from App (#431)', () => {
   // The signed-in person is person-a (the suite's default session), on the
   // roster as m1; m9 organizes, so m1 is an ordinary member.

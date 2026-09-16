@@ -9,6 +9,8 @@ import {
   normalizeCapacityMinutes,
 } from '../lib/capacity.js'
 import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
+import { invitationDateLabel } from '../lib/invitations.js'
+import { nextExpiry, signInStateFor } from '../lib/signInState.js'
 import CaptureShell from './CaptureShell.jsx'
 import Invitations from './Invitations.jsx'
 import { CAPTURE_OUTCOMES, isFirstPerson } from '../lib/capture.js'
@@ -717,13 +719,78 @@ CalendarControl.propTypes = {
  * alternative it rejected is not the one #341 took: nothing displays a secret,
  * because nobody but the person ever knows one.
  */
-function SignInControl({ member, busy, onResetPin, onInvite, onSendReset }) {
+/**
+ * The row's sign-in sentence — #62's two states, and #458's two more.
+ *
+ * "Invited" names WHEN (AC 1), because an organizer deciding whether to chase
+ * somebody needs to know whether it was a minute ago or last week. "Expired"
+ * is its own sentence rather than an older date (AC 5): a link is good for an
+ * hour, and an organizer who cannot tell a live invitation from a dead one
+ * re-sends the wrong ones.
+ */
+function accessLabel(signIn, timeZone) {
+  const sent = signIn?.sentAt ? invitationDateLabel(signIn.sentAt, timeZone) : null
+  switch (signIn?.kind) {
+    case 'invited':
+      return sent ? `Invited ${sent} · not joined yet` : 'Invited · not joined yet'
+    case 'expired':
+      return sent
+        ? `Invitation expired · sent ${sent}`
+        : 'Invitation expired · not joined yet'
+    case 'joined':
+      return 'Signed in'
+    default:
+      return 'No sign-in yet'
+  }
+}
+
+function SignInControl({ member, signIn, busy, onResetPin, onInvite, onSendReset }) {
   const [editing, setEditing] = useState(false)
   const [secret, setSecret] = useState('')
   const [complaint, setComplaint] = useState(null)
 
   const hasSignIn = Boolean(member.claimed_by)
   const byEmail = isRealEmailMember(member)
+  // #458 — an account that exists and has not been accepted. `claimed_by` is
+  // set the moment an invitation goes, so `hasSignIn` alone called this
+  // person signed in and offered a reset link to an account that has never
+  // had a password. The repair for a lost or expired invitation is the
+  // invitation, sent again (AC 2).
+  const pending = signIn?.kind === 'invited' || signIn?.kind === 'expired'
+
+  // #458 AC 2 — ahead of the address check below, because the re-send goes to
+  // the address the ACCOUNT was invited at, which `provision-member` reads off
+  // the account; the row's address can have been edited since without moving
+  // the account (the edit form says so).
+  if (pending) {
+    return (
+      <div className="stack">
+        <button
+          className="button button--quiet"
+          type="button"
+          disabled={busy}
+          data-testid={`invite-${member.id}`}
+          aria-label={`Email ${member.display_name} their invitation again`}
+          onClick={() => {
+            setComplaint(null)
+            onInvite(member.id).then(
+              (result) =>
+                setComplaint(`Invitation sent again to ${result?.email ?? member.email}.`),
+              // Refusals are on the shell's error strip, as below.
+              () => {},
+            )
+          }}
+        >
+          Send the invitation again
+        </button>
+        {complaint ? (
+          <p className="card__note" role="status" data-testid={`invite-note-${member.id}`}>
+            {complaint}
+          </p>
+        ) : null}
+      </div>
+    )
+  }
 
   function open() {
     setSecret('')
@@ -928,6 +995,7 @@ function SignInControl({ member, busy, onResetPin, onInvite, onSendReset }) {
 
 SignInControl.propTypes = {
   member: PropTypes.object.isRequired,
+  signIn: PropTypes.shape({ kind: PropTypes.string.isRequired }),
   busy: PropTypes.bool,
   onResetPin: PropTypes.func.isRequired,
   onInvite: PropTypes.func.isRequired,
@@ -959,6 +1027,9 @@ function MemberRow({
   // an ordinary member. Optional in the #166 shape: a roster with no handler
   // wired renders exactly what it did.
   onTransfer = null,
+  // #458 — `signInStateFor`'s answer for this row. Defaulted from
+  // `claimed_by` alone, which is exactly what the row said before #458.
+  signIn = member.claimed_by ? { kind: 'joined' } : { kind: 'none' },
 }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(member.display_name)
@@ -1081,8 +1152,13 @@ function MemberRow({
             of a screen that used to offer a "Set PIN" button here; the button is
             gone because the thing behind it is gone, and hiding the state
             entirely would leave the organizer wondering why nothing happens. */}
+        {/* #458 — and `claimed_by` alone cannot say whether they have. It is set
+            when the invitation is SENT, so "Signed in" was shown for a person
+            who had opened nothing. The accepted-or-not fact comes from `0045`,
+            through `signIn`; when the invitation went is on the household's
+            clock, the same one the invitation-code card uses. */}
         <span className="member__access" data-testid={`access-${member.id}`}>
-          {member.claimed_by ? 'Signed in' : 'No sign-in yet'}
+          {accessLabel(signIn, timeZone)}
         </span>
         {/* #87 — the row stops merely REPORTING the gap and gains the thing
             that closes it. Organizer-only: the Edge Function refuses anybody
@@ -1091,6 +1167,7 @@ function MemberRow({
         {isOrganizer && onInvite ? (
           <SignInControl
             member={member}
+            signIn={signIn}
             busy={busy}
             onResetPin={onResetPin}
             onInvite={onInvite}
@@ -1275,6 +1352,7 @@ MemberRow.propTypes = {
   busyComplaint: PropTypes.string,
   timeZone: PropTypes.string,
   onTransfer: PropTypes.func,
+  signIn: PropTypes.shape({ kind: PropTypes.string.isRequired }),
 }
 
 // `ShareCode` stood here until #62 — a button that copied or sent the household's
@@ -1388,10 +1466,24 @@ export default function Roster({
   // #179 — the organizer hands the role over and STAYS. Optional in the #166
   // shape; drawn on each other signed-in row (MemberRow).
   onTransferHousehold = null,
+  // #458 — `member_sign_in_states`' rows, or null while that read has not
+  // answered; null reads every claimed row as signed in, which is what the
+  // roster said before #458 (`signInStateFor` says why).
+  signInStates = null,
 }) {
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState('')
   const [email, setEmail] = useState('')
+  // #458 AC 5 — the clock the invited/expired split is judged against. Moved
+  // forward when the soonest live link dies, so a roster left open turns
+  // "Invited" into "Invitation expired" without waiting for a re-read.
+  const [now, setNow] = useState(() => Date.now())
+  const expiry = nextExpiry(members, signInStates, now)
+  useEffect(() => {
+    if (expiry === null) return undefined
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, expiry - Date.now()) + 50)
+    return () => clearTimeout(timer)
+  }, [expiry])
   // #191 — the add form's confirmation that the invitation went, and the
   // refusal when it did not. Both cleared at the next submit, so neither
   // describes a send other than the last one.
@@ -1647,6 +1739,7 @@ export default function Roster({
                 // identity is reporting whether an account exists.
                 busy={busy}
                 isOrganizer={isOrganizer}
+                signIn={signInStateFor(member, signInStates, now)}
                 onSave={onSave}
                 onRemove={onRemove}
                 onResetPin={onResetPin}
@@ -2207,6 +2300,7 @@ export default function Roster({
 Roster.propTypes = {
   household: PropTypes.object.isRequired,
   members: PropTypes.array.isRequired,
+  signInStates: PropTypes.array,
   me: PropTypes.object,
   isOrganizer: PropTypes.bool,
   busy: PropTypes.bool,

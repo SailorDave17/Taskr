@@ -132,6 +132,7 @@ export const MIGRATIONS = [
   '0042_delete_a_household_with_a_grace_period.sql',
   '0043_leave_or_hand_over_a_household.sql',
   '0044_a_redeemed_invitation_survives_its_redeemer.sql',
+  '0045_member_sign_in_state.sql',
 ]
 
 export function migrationSql(name) {
@@ -223,9 +224,17 @@ const SUPABASE_ENV = `
   --
   -- No backticks in this comment on purpose: SUPABASE_ENV is a JS template
   -- literal, so a backtick here ends the string and the file stops parsing.
+  --
+  -- invited_at and email_confirmed_at are real columns too, and 0045 reads
+  -- both (#458): GoTrue stamps the first when an invitation is sent and the
+  -- second when the link is followed. Null by default here, which is an
+  -- invited-and-unaccepted account only when invited_at is also set; the
+  -- tests that care set them explicitly.
   create table auth.users (
     id uuid primary key default gen_random_uuid(),
-    email text
+    email text,
+    invited_at timestamptz,
+    email_confirmed_at timestamptz
   );
 
   -- Supabase reads the caller from a JWT claim. Here it comes from a session

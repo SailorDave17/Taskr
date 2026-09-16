@@ -402,6 +402,136 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
     })
   })
 
+  // -------------------------------------------------------------------------
+  // #181 — closing a household nobody is left in. Filed 2026-08-26 as its own
+  // story; #430 (0042) and #431 (0043) delivered the route before it was picked
+  // up. The last member of a household IS its organizer — nothing a client
+  // holds can leave members with no organizer (leaveHousehold.pglite.test.js,
+  // "#180 AC 6") — and the organizer's way out is request_household_deletion.
+  // These pin the half of #181 the #430 cases above did not: who may execute
+  // the three client RPCs, that no client deletes the row directly, where the
+  // last member's request leaves the row, and a member of two households
+  // closing one. #181 AC 3 ("a member who is not the last one is refused") is
+  // superseded by #430's owner decision that an organizer may delete a
+  // household that still has members; the non-organizer refusal is
+  // "refuses a member who is not the organizer" above.
+  // -------------------------------------------------------------------------
+  describe('#181 — closing a household nobody is left in', () => {
+    const CLIENT_RPCS = [
+      'request_household_deletion(uuid)',
+      'restore_household(uuid)',
+      'household_deletion_status()',
+    ]
+    const countHouseholdRows = async (id) =>
+      (await db.query('select count(*)::int as n from public.households where id = $1', [id])).rows[0].n
+
+    it('AC 1 — the last member, who is the organizer, closes it: the row is then readable by nobody, kept for the purge, and listed only in their status', async () => {
+      await db.query('delete from public.members where id = $1', [memberRowId])
+      const { rows: left } = await db.query(
+        'select count(*)::int as n from public.members where household_id = $1',
+        [household],
+      )
+      expect(left[0].n, 'the positive control: one member is left').toBe(1)
+
+      const [row] = await request(organizer)
+      expect(row.purge_after).not.toBeNull()
+
+      expect(await rpc(organizer, 'select id from public.households')).toEqual([])
+      expect(await rpc(organizer, 'select h as id from public.current_household_ids() as h')).toEqual([])
+      expect(await rpc(outsider, 'select id from public.households')).toEqual([])
+      expect((await status(organizer)).map((r) => r.household_id)).toEqual([household])
+      // Not gone: the row waits for the purge, which is the mechanism the owner
+      // chose (a grace period, #430). A row nobody can read AND nothing will
+      // purge is the invisible household this story exists to prevent, and
+      // "leaves no row of a due household" above is the other half of that.
+      expect(await countHouseholdRows(household)).toBe(1)
+    })
+
+    it('AC 2 — no client deletes the row directly, pending or not: the only routes are the request and the service-role purge', async () => {
+      // 0001 wrote "deliberately absent: any INSERT/UPDATE/DELETE policy on
+      // households" and 0019 revoked the DELETE grant. #430 added closure as
+      // definer functions rather than a policy, so the absence still holds,
+      // and this is the property that survives it — asserted rather than
+      // relied on. The refusal is the GRANT's (0019), which is why it is the
+      // same sentence for the organizer and a member, and why no policy runs.
+      for (const uid of [organizer, member]) {
+        const result = await attempt(() => rpc(uid, 'delete from public.households where id = $1', [household]))
+        expect(result.ok, `deleted directly as ${uid === organizer ? 'the organizer' : 'a member'}`).toBe(false)
+        expect(result.error).toMatch(/permission denied for table households/)
+      }
+      await request(organizer)
+      const pending = await attempt(() => rpc(organizer, 'delete from public.households where id = $1', [household]))
+      expect(pending.error).toMatch(/permission denied for table households/)
+      expect(await countHouseholdRows(household)).toBe(1)
+    })
+
+    it('AC 4 — the three client RPCs are executable by a signed-in member and not by anon', async () => {
+      // The harness's `anon` reads false either way once `from public` is
+      // revoked (#368's measurement), so the live half of this criterion is
+      // `npm run probe:live-grants`; `authenticated` is the positive control
+      // that the read can report a grant that is there, and the source-text
+      // case below is what catches a revoke that leaves `anon` out.
+      for (const fn of CLIENT_RPCS) {
+        const { rows } = await db.query(
+          `select has_function_privilege('anon', 'public.${fn}', 'execute') as anon,
+                  has_function_privilege('authenticated', 'public.${fn}', 'execute') as authenticated`,
+        )
+        expect(rows[0], fn).toEqual({ anon: false, authenticated: true })
+      }
+    })
+
+    it('AC 4 — revokes each of them from public and anon BY NAME in the source, which the hosted platform grants and this harness cannot see', () => {
+      const sql = blankSqlComments(migrationSql(FILE))
+      for (const fn of CLIENT_RPCS) {
+        const name = fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expect(sql, fn).toMatch(new RegExp(`^revoke all on function public\\.${name} from public, anon;`, 'm'))
+      }
+    })
+
+    it('AC 8 — closing one of two households leaves the other readable, its rows untouched, and the only membership', async () => {
+      const staying = await asDevice(db, outsider, async () => {
+        const { rows } = await db.query('select * from public.create_household($1, $2)', [
+          'Placeholder Other Household',
+          'Placeholder Other Organizer',
+        ])
+        return rows[0]
+      })
+      const { rows: elsewhere } = await db.query(
+        `insert into public.members (household_id, display_name, weekly_minutes, claimed_by)
+         values ($1, 'Placeholder One', 60, $2) returning id`,
+        [staying.id, organizer],
+      )
+      const { rows: otherChore } = await db.query(
+        `insert into public.chores (household_id, title, expected_minutes, due_on)
+         values ($1, 'Dishes', 20, '2026-08-10') returning id`,
+        [staying.id],
+      )
+      const readable = async () => (await rpc(organizer, 'select id from public.households')).map((h) => h.id).sort()
+      const memberships = async () =>
+        (await rpc(organizer, 'select h as id from public.current_household_ids() as h')).map((r) => r.id)
+      expect(await readable()).toEqual([household, staying.id].sort())
+
+      await request(organizer)
+
+      expect(await readable()).toEqual([staying.id])
+      expect(await memberships()).toEqual([staying.id])
+      expect((await rpc(organizer, 'select id from public.members')).map((m) => m.id).sort()).toEqual(
+        [staying.organizer_member_id, elsewhere[0].id].sort(),
+      )
+      expect((await rpc(organizer, 'select id from public.chores')).map((c) => c.id)).toEqual([otherChore[0].id])
+      expect((await status(organizer)).map((r) => r.household_id)).toEqual([household])
+      // The other household is untouched: not pending, every row still there.
+      const { rows: other } = await db.query(
+        `select h.deletion_requested_at,
+                (select count(*)::int from public.members m where m.household_id = h.id) as members,
+                (select count(*)::int from public.chores c where c.household_id = h.id) as chores
+           from public.households h where h.id = $1`,
+        [staying.id],
+      )
+      expect(other).toEqual([{ deletion_requested_at: null, members: 2, chores: 1 }])
+    })
+  })
+
   it('refuses a valid invitation to a pending household in the usual words, and honours it again after restore', async () => {
     // Behaviour, not the function's text: an outsider holding a good code is
     // exactly the "non-member write" the story says is refused. Minted as the

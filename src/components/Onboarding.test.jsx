@@ -204,6 +204,36 @@ describe('continuing with Google — #304', () => {
   })
 })
 
+describe('#339 — Continue with Google follows the provider switch', () => {
+  const googleControl = () => screen.queryByRole('button', { name: /continue with google/i })
+
+  it('AC 1: switched off → no control, and a sentence naming the organizer in its place', () => {
+    setup({ onSignInWithGoogle: vi.fn(), googleSignIn: false })
+    expect(googleControl()).not.toBeInTheDocument()
+    const note = screen.getByTestId('google-sign-in-off')
+    expect(note).toHaveTextContent(/not switched on yet/i)
+    expect(note).toHaveTextContent(/organizer/i)
+    // Not an alert: nothing the person did went wrong.
+    expect(note).not.toHaveAttribute('role', 'alert')
+    // The "or" belonged to the control and goes with it.
+    expect(screen.queryByText(/^or$/)).not.toBeInTheDocument()
+    // The password route is untouched.
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+  })
+
+  it('AC 2: switched on → the control, and no sentence', () => {
+    setup({ onSignInWithGoogle: vi.fn(), googleSignIn: true })
+    expect(googleControl()).toBeInTheDocument()
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+  })
+
+  it('AC 1: unknown (still reading, or the read failed) → the control stays', () => {
+    setup({ onSignInWithGoogle: vi.fn(), googleSignIn: null })
+    expect(googleControl()).toBeInTheDocument()
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+  })
+})
+
 describe('starting a household — the account comes first, on its own', () => {
   it('the link opens the account form, and the sign-in form steps aside', () => {
     setup()

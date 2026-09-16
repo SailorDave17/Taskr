@@ -233,6 +233,9 @@ export const LIVE_RPCS = Object.freeze([
   Object.freeze({ fn: 'household_deletion_status', args: Object.freeze({}) }),
   // #431 — the organizer hands the household over. `0043`; red until it is applied.
   Object.freeze({ fn: 'transfer_household', args: Object.freeze({ household_id: 'uuid', to_member_id: 'uuid' }) }),
+  // #458 — who has accepted their invitation. `0045`; red until it is applied,
+  // the same deliberate window. A plain read, so the GET resolves it outright.
+  Object.freeze({ fn: 'member_sign_in_states', args: Object.freeze({ target_household: 'uuid' }) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied
   // — the same deliberate window every migration-borne entry here has had — and
   // `0018` was applied on 2026-08-27 (#231), so this reads green now.

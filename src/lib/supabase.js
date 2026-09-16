@@ -17,6 +17,23 @@ const anonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY
  */
 export const hasSupabaseConfig = Boolean(url && anonKey)
 
+/**
+ * The project's public auth settings endpoint and the header it wants, or null
+ * when this build has no backend — #339.
+ *
+ * Not through the client: supabase-js has no public read of these settings, and
+ * the endpoint needs no session (it answers the anon key alone), so a plain
+ * GET is the whole of it. Built here so the URL and the key keep one copy.
+ */
+export function authSettingsRequest() {
+  if (!hasSupabaseConfig) return null
+  assertPublishableKey(anonKey, 'the auth settings read')
+  return {
+    url: `${String(url).replace(/\/+$/, '')}/auth/v1/settings`,
+    headers: { apikey: anonKey },
+  }
+}
+
 let client = null
 
 /**

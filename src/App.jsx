@@ -41,6 +41,8 @@ import {
   readActiveHouseholdChoice,
   writeActiveHouseholdChoice,
 } from './lib/activeHousehold.js'
+import { readGoogleSignIn } from './lib/authSettings.js'
+import { listSignInStates } from './lib/signInState.js'
 import {
   addChore,
   addChores,
@@ -73,6 +75,7 @@ import {
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { extractCapacity, extractChores } from './lib/capture.js'
+import { choresInWeek } from './lib/done.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -312,6 +315,8 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // choices inside one clock tick must be two epochs.
   const choiceEpochRef = useRef(0)
   const [members, setMembers] = useState([])
+  // #458 — who has accepted their invitation; null until the read answers.
+  const [signInStates, setSignInStates] = useState(null)
   const [chores, setChores] = useState([])
   // #46 — this week's capacity overrides, and the period they belong to. Both
   // come from refresh() rather than being derived in render: the period depends
@@ -420,6 +425,10 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // news that the session was ended somewhere else. `App` carries it across
   // the remount; boot overwrites it only with a complaint of its own.
   const [signInNotice, setSignInNotice] = useState(carriedNotice)
+  // #339 — whether the project's Google provider is on: `true`, `false`, or
+  // `null` while unknown. Only `false` hides Continue with Google; unknown
+  // keeps it, for the reason `authSettings.js` gives.
+  const [googleSignIn, setGoogleSignIn] = useState(null)
   // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
   // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
   // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
@@ -574,6 +583,20 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     setHouseholds(all)
     setHousehold(found)
     setMembers(roster)
+    // #458 — whether each claimed member has ACCEPTED, read on every refresh
+    // like the roster, so a person who follows their link shows as joined on
+    // the next read rather than on the next reload. Its own try/catch for #96's
+    // reason: until `0045` is applied the function does not exist, and a
+    // missing read must not take the roster down with it. Null on failure,
+    // which `signInStateFor` reads as today's label — not surfaced on the
+    // strip, because what it costs is one word's precision on rows that
+    // already render, and an error there would sit over every roster until the
+    // migration lands.
+    try {
+      setSignInStates(found ? await listSignInStates(found.id) : [])
+    } catch {
+      setSignInStates(null)
+    }
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
@@ -736,9 +759,12 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       try {
         const me = findClaimedMember(roster, uid, found.id)
         if (me) {
+          // #471 — this week's chores, through the same filter the split
+          // draws from below, so the snapshot a member is compared against
+          // is the split they were shown and not a lifetime sum.
           const current = splitSnapshot({
             capacities: capacitiesFor(roster, overrideRows, period),
-            chores: choreRows,
+            chores: choresInWeek(choreRows, found.timezone, period),
           })
           const seen = await readSplitSeen(me.id)
           // #59 — one read serves both: the row that carries what this member
@@ -805,6 +831,11 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         if (!cancelled) setStatus('unconfigured')
         return
       }
+      // #339 — started, not awaited: nothing else at boot depends on it, and a
+      // slow read must not hold the sign-in screen back. It never rejects.
+      void readGoogleSignIn().then((on) => {
+        if (!cancelled) setGoogleSignIn(on)
+      })
       try {
         // No session is a normal state now, not one to repair. Under device auth
         // this called `ensureSession()`, which signed the phone in anonymously so
@@ -1301,6 +1332,15 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     setError(null)
     setSignInNotice(null)
     try {
+      // #339 — asked again at the press, which is the same cached promise
+      // boot started. The screen hides the control once the answer is `false`,
+      // but a press that lands while the read is still in flight would
+      // otherwise leave the page for Supabase's raw JSON 400.
+      const on = await readGoogleSignIn()
+      if (on === false) {
+        setGoogleSignIn(false)
+        return
+      }
       await signInWithGoogle()
     } catch (err) {
       setError(err.message)
@@ -2689,6 +2729,18 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // week automatically, because they always went through `capacitiesFor`.
   const capacities = periodStart ? capacitiesFor(members, overrides, periodStart) : []
 
+  // #471 — the chores THIS WEEK is about: everything outstanding plus what
+  // was settled in the current capacity week, through `choresInWeek`, the one
+  // filter the fairness arithmetic reads. `chores` above is the household's
+  // whole record and stays that way — the Chores tab's outstanding list and
+  // the Done tab's history both want all of it. The split does not: handed
+  // the whole record it summed every completion since the household began as
+  // "done", so the bars never reset and the verdict was computed over history.
+  // Named so that a future surface reading `chores` for a fairness figure
+  // reads as a choice rather than a default.
+  const weekChores =
+    periodStart && household ? choresInWeek(chores, household.timezone, periodStart) : []
+
   // The organizer is a PERSON, not a session — an anonymous session expires
   // after 30 days idle and returns with a new auth id, so a device is the
   // organizer exactly while it is acting as the organizer's member row. The
@@ -2857,6 +2909,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           onSignUp={handleSignUp}
           onSignIn={handleSignIn}
           onSignInWithGoogle={handleSignInWithGoogle}
+          googleSignIn={googleSignIn}
           onSignOut={handleSignOut}
           // #173 — the invited person's two halves: hold a code while signed
           // out, redeem one while signed in with no household.
@@ -2955,7 +3008,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       {status === 'joined' && household && view === 'split' ? (
         <Split
           members={members}
-          chores={chores}
+          chores={weekChores}
           capacities={capacities}
           exclusions={exclusions}
           lastRebalance={household?.last_rebalance ?? null}
@@ -2971,6 +3024,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         <Roster
           household={household}
           members={members}
+          signInStates={signInStates}
           me={me}
           isOrganizer={isOrganizer}
           busy={busy}

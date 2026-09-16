@@ -2653,3 +2653,132 @@ describe('#173 — joining another household with a code', () => {
     expect(screen.getByRole('region', { name: /join another household/i })).toBeInTheDocument()
   })
 })
+
+// #458 — a claim is not an acceptance. `claimed_by` is set when the invitation
+// is SENT, so these fixtures carry the second fact, `signInStates`, which is
+// what tells the two apart. Measured on production during #178: the invited
+// row read "Signed in" and offered "Email a reset link".
+describe('#458 — an invited member reads as invited, not signed in', () => {
+  const SENT = '2026-09-16T02:44:12Z'
+  const SENT_MS = Date.parse(SENT)
+  const HOUR = 60 * 60 * 1000
+  const zoned = { ...household, timezone: 'UTC' }
+  const INVITED = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const JOINED = { ...INVITED, id: 'm2', display_name: 'Placeholder Two', claimed_by: 'person-b' }
+  const STATES = [
+    { member_id: 'm1', invited_at: SENT, confirmed_at: null },
+    { member_id: 'm2', invited_at: SENT, confirmed_at: '2026-09-16T02:45:12Z' },
+  ]
+  // vitest's default fake set covers the clock and setTimeout, which is what
+  // the invited/expired split and the expiry timer read.
+  const at = (ms) => vi.useFakeTimers({ now: SENT_MS + ms })
+
+  afterEach(() => vi.useRealTimers())
+
+  const render458 = (extra = {}) =>
+    setup({
+      household: zoned,
+      isOrganizer: true,
+      members: [INVITED, JOINED],
+      signInStates: STATES,
+      ...extra,
+    })
+
+  it('AC 1 — says invited, and when, not signed in', () => {
+    at(60_000)
+    render458()
+    const label = screen.getByTestId('access-m1')
+    expect(label).toHaveTextContent('Invited Sep 16, 2:44 AM · not joined yet')
+    expect(label).not.toHaveTextContent(/signed in/i)
+  })
+
+  it('AC 2 — offers the invitation again, not a reset link, and sends the invitation', async () => {
+    at(60_000)
+    // `setup` returns its own default spies; the override replaces that one on
+    // the component, so the assertion must be on this one.
+    const onInvite = vi.fn().mockResolvedValue({ email: 'placeholder.account@example.test' })
+    const handlers = { ...render458({ onInvite }), onInvite }
+    const row = rowFor('Placeholder One')
+    expect(within(row).queryByText(/reset link/i)).not.toBeInTheDocument()
+    const button = within(row).getByRole('button', { name: /their invitation again/i })
+    expect(button).toHaveTextContent('Send the invitation again')
+
+    await clickAndSettle(button)
+    expect(handlers.onInvite).toHaveBeenCalledWith('m1')
+    expect(handlers.onSendReset).not.toHaveBeenCalled()
+    // The address the server says it sent to — the account's, which can differ
+    // from an edited row's.
+    expect(screen.getByTestId('invite-note-m1')).toHaveTextContent(
+      'Invitation sent again to placeholder.account@example.test.',
+    )
+  })
+
+  it('AC 2 — offers it on an expired invitation too', () => {
+    at(2 * HOUR)
+    render458()
+    expect(within(rowFor('Placeholder One')).getByRole('button', { name: /their invitation again/i })).toBeInTheDocument()
+    expect(within(rowFor('Placeholder One')).queryByText(/reset link/i)).not.toBeInTheDocument()
+  })
+
+  it('AC 2 — offers it even when the row has lost its address, since the account kept one', () => {
+    at(60_000)
+    render458({ members: [{ ...INVITED, email: null }, JOINED] })
+    expect(within(rowFor('Placeholder One')).getByRole('button', { name: /their invitation again/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('provision-m1')).not.toBeInTheDocument()
+  })
+
+  it('AC 3 — a member who has accepted reads exactly as before', async () => {
+    at(60_000)
+    const handlers = render458()
+    expect(screen.getByTestId('access-m2')).toHaveTextContent(/^Signed in$/)
+    const button = within(rowFor('Placeholder Two')).getByRole('button', { name: /set a new password/i })
+    expect(button).toHaveTextContent('Email a reset link')
+    await clickAndSettle(button)
+    expect(handlers.onSendReset).toHaveBeenCalledWith(JOINED)
+    expect(handlers.onInvite).not.toHaveBeenCalled()
+  })
+
+  it('AC 3 — with no sign-in read, every claimed row reads as it did before #458', () => {
+    at(60_000)
+    render458({ signInStates: null })
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Signed in$/)
+    expect(screen.getByTestId('access-m2')).toHaveTextContent(/^Signed in$/)
+  })
+
+  it('AC 5 — an invitation older than its hour says it has expired', () => {
+    at(HOUR)
+    render458()
+    const label = screen.getByTestId('access-m1')
+    expect(label).toHaveTextContent('Invitation expired · sent Sep 16, 2:44 AM')
+    expect(label).not.toHaveTextContent(/not joined yet/)
+  })
+
+  it('AC 5 — a roster left open turns invited into expired when the hour is up', () => {
+    at(HOUR - 1000)
+    render458()
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Invited /)
+    act(() => {
+      vi.advanceTimersByTime(1000 + 100)
+    })
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Invitation expired /)
+  })
+
+  it('shows the invited state to a member who is not the organizer, with no control', () => {
+    at(60_000)
+    render458({ isOrganizer: false })
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Invited /)
+    expect(screen.queryByTestId('invite-m1')).not.toBeInTheDocument()
+  })
+
+  it('still says "No sign-in yet" for a row with no account', () => {
+    at(60_000)
+    render458({ members: [{ ...INVITED, claimed_by: null }] })
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^No sign-in yet$/)
+  })
+})

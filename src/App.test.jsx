@@ -216,6 +216,28 @@ vi.mock('./lib/announce.js', async () => {
   return { ...actual, ...announceApi }
 })
 
+// #339 — the provider-switch read. Stubbed because the real one fetches; the
+// default (set in beforeEach) is ON, the live project's answer since #330, so
+// every test that is not about the switch — #304's included — runs exactly as
+// it did before this story.
+const authSettingsApi = {
+  readGoogleSignIn: vi.fn(),
+}
+vi.mock('./lib/authSettings.js', () => authSettingsApi)
+
+// #458 — who has accepted their invitation. Only the READ is stubbed; the pure
+// `signInStateFor` and `nextExpiry` stay real, because the roster calls them
+// and a stub could disagree with them. The default is an empty answer, which
+// reads every claimed fixture as signed in — what those fixtures meant before
+// #458 — so no other test changes.
+const signInStateApi = {
+  listSignInStates: vi.fn(),
+}
+vi.mock('./lib/signInState.js', async () => {
+  const actual = await vi.importActual('./lib/signInState.js')
+  return { ...actual, ...signInStateApi }
+})
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -382,6 +404,10 @@ beforeEach(() => {
   // and the failures read as app bugs rather than as pollution.
   window.localStorage.clear()
   Object.values(api).forEach((fn) => fn.mockReset())
+  authSettingsApi.readGoogleSignIn.mockReset()
+  authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+  signInStateApi.listSignInStates.mockReset()
+  signInStateApi.listSignInStates.mockResolvedValue([])
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
   Object.values(captureApi).forEach((fn) => fn.mockReset())
@@ -2891,6 +2917,82 @@ describe('capacity — this week, set by hand (#46)', () => {
     expect(screen.getByTestId('split-m1')).toHaveTextContent('300 min left')
   })
 
+  // -------------------------------------------------------------------------
+  // #471 — the split's done minutes are THIS WEEK's, not the household's
+  // whole history.
+  //
+  // At the App level rather than in Split.test.jsx, because the week filter
+  // lives where the period and the zone live: App hands the split
+  // `choresInWeek(chores, …)` and the component draws what it is given. A
+  // component test could only prove the component sums what it is handed —
+  // which it did, correctly, for three weeks while the owner's phone read
+  // 1045 min done against 150 this week. The dates are relative to NOW for the
+  // same reason `overrideThisWeek` refuses a literal: the period is computed
+  // from today.
+  // -------------------------------------------------------------------------
+
+  const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString()
+
+  it('#471: a completion from an earlier capacity week contributes nothing to the split', async () => {
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      // Still to do — counts as open whatever its due date.
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done this week — the only completion the bar may count.
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done two weeks ago — history. Before #471 this was "done" every week
+      // for ever, and its 200 min is what turns "50 of 300" into "250 of 300".
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    const row = screen.getByTestId('split-m1')
+    expect(row).toHaveTextContent('30 min done')
+    expect(row).toHaveTextContent('20 min still to do')
+    expect(row).toHaveTextContent('50 of 300 min')
+    expect(row, 'the lifetime sum must not reach the bar').not.toHaveTextContent('230 min done')
+  })
+
+  it('#471: the seen-marker snapshot is the split this member was shown — this week only', async () => {
+    // The announcement compares what a member last saw with what they see
+    // now (#50). Both must be built from the same week-scoped list, or a
+    // completion from July would sit in the snapshot for ever and every
+    // "since you last looked" delta would carry it.
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    ])
+    capacityApi.listCapacity.mockResolvedValue([])
+    announceApi.readSplitSeen.mockResolvedValue(null)
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    expect(announceApi.writeSplitSeen).toHaveBeenCalledWith({
+      memberId: 'm1',
+      snapshot: { members: [{ id: 'm1', minutes: 50, capacityMinutes: 300 }] },
+      seenRebalanceAt: null,
+    })
+  })
+
+  it('#471 POSITIVE CONTROL: the same completion dated THIS week is counted', async () => {
+    // Without this, the assertion above passes identically if completions
+    // stopped counting altogether — the opposite defect, and #47 criterion 7's
+    // own test only covers the component.
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('split-m1')).toHaveTextContent('200 min done')
+  })
+
   it('AC 6: POSITIVE CONTROL — the import scan sees the imports that are there', () => {
     // Without this the assertion above passes identically if the regex stops
     // matching, which is how an empty result reads as a clean bill of health.
@@ -3576,8 +3678,9 @@ describe('connecting a calendar (#95)', () => {
       // an account the organizer has not registered is refused by Google; the
       // sentence says who can fix that and does not blame a password nobody
       // typed. The SHAPE here is GoTrue's documented one, not a measured
-      // refusal — the provider is not enabled on the live project yet, so the
-      // live half of AC 5 is the confirmation story's.
+      // refusal — the provider was not enabled on the live project when this
+      // was written, so the live half of AC 5 was left to the confirmation
+      // story (#330, done 2026-09-16).
       api.currentSession.mockResolvedValue(null)
       atUrl('', '#error=access_denied&error_description=The+user+denied+access')
       await renderApp()
@@ -3618,6 +3721,77 @@ describe('connecting a calendar (#95)', () => {
       expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
       expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('#339 — the sign-in screen reads the provider switch before offering Google', () => {
+  const googleControl = () => screen.queryByRole('button', { name: /continue with google/i })
+
+  beforeEach(() => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+  })
+
+  it('AC 1: switched off → no control, the organizer named, and nothing starts the flow', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(false)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(await screen.findByTestId('google-sign-in-off')).toHaveTextContent(/organizer/i)
+    expect(googleControl()).not.toBeInTheDocument()
+    expect(authSettingsApi.readGoogleSignIn).toHaveBeenCalledTimes(1)
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: switched on → the control, and it starts the flow as #304 shipped it', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a failed read keeps the control — sign-in is not refused over a network blip', async () => {
+    // `readGoogleSignIn` answers null for every failure (authSettings.test.js).
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a press while the read is still in flight waits for it, and does not leave for an off switch', async () => {
+    // The control is on screen while the answer is unknown, so this is the
+    // one press the render gate cannot stop.
+    let answer
+    authSettingsApi.readGoogleSignIn.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+    )
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(googleControl()).toBeInTheDocument()
+
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    await act(async () => answer(false))
+
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    expect(await screen.findByTestId('google-sign-in-off')).toBeInTheDocument()
+    expect(googleControl()).not.toBeInTheDocument()
+    // And the screen is usable afterwards: the press released `busy`.
+    expect(screen.getByRole('button', { name: /start a household/i })).toBeEnabled()
+  })
+
+  it('an unconfigured build asks nothing', async () => {
+    backend.hasSupabaseConfig = false
+    await renderApp()
+    expect(authSettingsApi.readGoogleSignIn).not.toHaveBeenCalled()
   })
 })
 
@@ -7256,6 +7430,79 @@ describe('#191 — adding somebody sends their invitation, from App', () => {
   })
 })
 
+// #458 — the roster's invited state, at the level only App can answer: that
+// the sign-in read names the household on screen, reaches the roster, is taken
+// again after a re-send, and that its failure costs the label and not the tab.
+describe('#458 — an invited member reads as invited, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'UTC',
+    organizer_member_id: 'm1',
+  }
+  const organizer = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const invited = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 60,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const SENT = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizer, invited])
+    signInStateApi.listSignInStates.mockResolvedValue([
+      { member_id: 'm1', invited_at: null, confirmed_at: '2026-08-01T00:00:00Z' },
+      { member_id: 'm2', invited_at: SENT, confirmed_at: null },
+    ])
+    api.inviteMember.mockResolvedValue({
+      ok: true,
+      action: 'invite',
+      memberId: 'm2',
+      email: invited.email,
+      resent: true,
+    })
+  })
+
+  it('reads the sign-in states for the household on screen, and the roster shows the invited row', async () => {
+    await renderApp('Who')
+    expect(signInStateApi.listSignInStates).toHaveBeenCalledWith('h1')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Invited .* · not joined yet$/)
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Signed in$/)
+  })
+
+  it('re-sends through inviteMember, then reads the states again', async () => {
+    await renderApp('Who')
+    const before = signInStateApi.listSignInStates.mock.calls.length
+    await act(
+      async () =>
+        void fireEvent.click(await screen.findByRole('button', { name: /their invitation again/i })),
+    )
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm2' })
+    expect(api.sendPasswordReset).not.toHaveBeenCalled()
+    expect(signInStateApi.listSignInStates.mock.calls.length).toBeGreaterThan(before)
+    expect(await screen.findByTestId('invite-note-m2')).toHaveTextContent(
+      `Invitation sent again to ${invited.email}.`,
+    )
+  })
+
+  it('a refused sign-in read leaves the roster on screen with the pre-#458 label, and no error', async () => {
+    signInStateApi.listSignInStates.mockRejectedValue(new Error('Could not read who has joined: PGRST202'))
+    await renderApp('Who')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Signed in$/)
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    expect(screen.queryByText(/could not read who has joined/i)).not.toBeInTheDocument()
+  })
+})
+
 // #341 — following an invitation, at the level only App can answer.
 //
 // The component test covers what `ChoosePassword` DRAWS. These cover the three
@@ -8389,6 +8636,87 @@ describe('deleting and restoring a household, from App (#430)', () => {
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
 
     expect(await screen.findByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #181 — closing a household nobody is left in, from App. #430 delivered the
+// route (the last member is the organizer, and their way out is Delete); these
+// pin where the person LANDS, which is #181 AC 1 and AC 8. `mutate` re-reads
+// the list after the request and the shell follows it — asserted here as a
+// re-read, since a version that merely dropped the household from local state
+// would put the right thing on screen and read stale rows under it.
+// ---------------------------------------------------------------------------
+
+describe('closing the household you are the last one in, from App (#181)', () => {
+  const closing = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+    created_at: '2026-01-01T00:00:00Z',
+  }
+  const other = {
+    id: 'h2',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+    created_at: '2026-02-01T00:00:00Z',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const inOther = [
+    { id: 'm9', display_name: 'Placeholder Other Organizer', weekly_minutes: 60, claimed_by: 'person-z' },
+    { id: 'm2', display_name: 'Placeholder One', weekly_minutes: 30, claimed_by: 'person-a' },
+  ]
+
+  const close = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
+    )
+  }
+
+  it('AC 1 — the last member closes their only household and lands signed in with no household', async () => {
+    api.listHouseholds.mockResolvedValue([closing])
+    api.listMembers.mockResolvedValue([me])
+    // The server's answer changes with the request, the way 0042's membership
+    // filter changes it: the re-read that follows finds nothing.
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([])
+      return {}
+    })
+    await renderApp('Who')
+    await close()
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    await screen.findByRole('button', { name: /create household/i })
+    expect(screen.getByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Who' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 8 — closing one of two households puts the other on screen and re-reads against it', async () => {
+    api.listHouseholds.mockResolvedValue([closing, other])
+    api.listMembers.mockImplementation(async (id) => (id === 'h2' ? inOther : [me]))
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([other])
+      return {}
+    })
+    await renderApp('Who')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveValue('h1')
+    expect(api.listMembers).not.toHaveBeenCalledWith('h2')
+
+    await close()
+
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    // One household left, so #163's name and no switcher (#164 AC 3).
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    expect(document.querySelector('.shell__household')).toHaveTextContent('Placeholder Other Household')
+    expect(api.listMembers).toHaveBeenCalledWith('h2')
+    // A plain member there, so the organizer's Delete card is gone with the
+    // household it belonged to (#164 AC 5: controls follow the household).
+    expect(screen.queryByRole('button', { name: /^delete this household$/i })).not.toBeInTheDocument()
   })
 })
 

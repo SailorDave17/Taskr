@@ -90,6 +90,11 @@ function makeWorld(overrides = {}) {
     inviteResult: { data: { user: { id: 'auth-new' } }, error: null },
     createUserResult: { data: { user: { id: 'auth-new' } }, error: null },
     claimError: null,
+    /**
+     * #458 — the auth accounts `getUserById` can find, by id. Empty by
+     * default, so a claimed row with no account here reads as unreadable.
+     */
+    accounts: {},
     /** Every operation, tagged with the key that performed it. */
     ops: [],
     ...overrides,
@@ -122,6 +127,13 @@ function makeWorld(overrides = {}) {
               data: opts?.data,
             })
             return world.inviteResult
+          },
+          getUserById: async (id) => {
+            record(role, { op: 'getUserById', id })
+            const user = world.accounts[id] ?? null
+            return user
+              ? { data: { user }, error: null }
+              : { data: { user: null }, error: { status: 404, message: 'User not found' } }
           },
           updateUserById: async (id, attrs) => {
             record(role, { op: 'updateUserById', id, password: attrs.password })
@@ -277,7 +289,16 @@ describe('#341 — provision-member, the invitation path', () => {
   })
 
   it('refuses a member who already has a sign-in, and names reset as the way out', async () => {
-    const world = makeWorld({ members: [{ ...MEMBER, claimed_by: 'auth-existing' }] })
+    const world = makeWorld({
+      members: [{ ...MEMBER, claimed_by: 'auth-existing' }],
+      accounts: {
+        'auth-existing': {
+          id: 'auth-existing',
+          email: MEMBER.email,
+          email_confirmed_at: '2026-09-16T02:45:12Z',
+        },
+      },
+    })
     const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
 
     expect(res.status).toBe(409)
@@ -285,6 +306,139 @@ describe('#341 — provision-member, the invitation path', () => {
       error: 'That person already has a sign-in — reset it instead.',
     })
     expect(opsOf(world, 'inviteUserByEmail')).toHaveLength(0)
+    // Decided on the ACCOUNT, read as service_role — `auth.users` is nothing
+    // the caller can see.
+    expect(opsOf(world, 'getUserById')).toEqual([
+      { key: 'service', op: 'getUserById', id: 'auth-existing' },
+    ])
+  })
+
+  describe('#458 AC 2 — a claimed account that has not been accepted gets its invitation again', () => {
+    const PENDING = {
+      id: 'auth-pending',
+      email: 'placeholder.account@example.test',
+      email_confirmed_at: null,
+    }
+    const pendingWorld = (overrides = {}) =>
+      makeWorld({
+        // The row's address was edited after the invite; the account's was not.
+        members: [{ ...MEMBER, claimed_by: PENDING.id }],
+        accounts: { [PENDING.id]: PENDING },
+        inviteResult: { data: { user: { id: PENDING.id } }, error: null },
+        ...overrides,
+      })
+
+    it('re-sends to the ACCOUNT’s address, with the origin, and says it was a re-send', async () => {
+      const world = pendingWorld()
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+      expect(res.status).toBe(200)
+      await expect(res.json()).resolves.toEqual({
+        ok: true,
+        action: 'invite',
+        memberId: MEMBER.id,
+        email: PENDING.email,
+        claimedBy: PENDING.id,
+        resent: true,
+      })
+      expect(opsOf(world, 'inviteUserByEmail')).toEqual([
+        {
+          key: 'service',
+          op: 'inviteUserByEmail',
+          email: PENDING.email,
+          redirectTo: ORIGIN,
+          data: { invited_as: MEMBER.display_name },
+        },
+      ])
+    })
+
+    it('writes nothing and deletes nothing — the claim is already right', async () => {
+      const world = pendingWorld()
+      await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+      expect(opsOf(world, 'update')).toHaveLength(0)
+      expect(opsOf(world, 'deleteUser')).toHaveLength(0)
+      expect(opsOf(world, 'createUser')).toHaveLength(0)
+    })
+
+    it('never rolls the account back when the re-send is refused, and says the old link still works', async () => {
+      // The first-send branch deletes a stranded account. This one must not:
+      // the account is claimed by this row, and perhaps by another household's.
+      const world = pendingWorld({
+        inviteResult: {
+          data: { user: { id: PENDING.id } },
+          error: { code: 'error_sending_email', status: 500, message: 'Error sending invite email' },
+        },
+      })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+      expect(res.status).toBe(502)
+      const { error } = await res.json()
+      expect(error).toContain(`No email was sent to ${PENDING.email}`)
+      expect(error).toMatch(/earlier invitation still works/)
+      expect(error).not.toMatch(/not created/i)
+      expect(opsOf(world, 'deleteUser')).toHaveLength(0)
+      expect(opsOf(world, 'update')).toHaveLength(0)
+    })
+
+    it('names the rate limit as its own fact, with its own status', async () => {
+      const world = pendingWorld({
+        inviteResult: {
+          data: { user: null },
+          error: { code: 'over_email_send_rate_limit', status: 429, message: 'email rate limit exceeded' },
+        },
+      })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+      expect(res.status).toBe(429)
+      await expect(res.json()).resolves.toMatchObject({ error: expect.stringMatching(/too many emails/) })
+      expect(opsOf(world, 'deleteUser')).toHaveLength(0)
+    })
+
+    it('says the person has just accepted when GoTrue refuses the address as taken', async () => {
+      const world = pendingWorld({
+        inviteResult: {
+          data: { user: null },
+          error: { code: 'email_exists', status: 422, message: 'already registered' },
+        },
+      })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+
+      expect(res.status).toBe(409)
+      await expect(res.json()).resolves.toEqual({
+        error: `${MEMBER.display_name} has just accepted — there is nothing to re-send.`,
+      })
+      expect(opsOf(world, 'deleteUser')).toHaveLength(0)
+    })
+
+    it('refuses when GoTrue answers with a different account than the one claimed', async () => {
+      const world = pendingWorld({ inviteResult: { data: { user: { id: 'auth-other' } }, error: null } })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+      expect(res.status).toBe(409)
+      expect(opsOf(world, 'update')).toHaveLength(0)
+      expect(opsOf(world, 'deleteUser')).toHaveLength(0)
+    })
+
+    it('refuses a re-send with no redirectTo, sending nothing', async () => {
+      const world = pendingWorld()
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id })
+      expect(res.status).toBe(400)
+      expect(opsOf(world, 'inviteUserByEmail')).toHaveLength(0)
+    })
+
+    it('refuses when the account cannot be read, rather than guessing which state it is in', async () => {
+      const world = pendingWorld({ accounts: {} })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+      expect(res.status).toBe(400)
+      expect(opsOf(world, 'inviteUserByEmail')).toHaveLength(0)
+    })
+
+    it('still settles authority with the caller before reading the account', async () => {
+      const world = pendingWorld({ organizerOf: new Set() })
+      const res = await call(world, { action: 'invite', memberId: MEMBER.id, redirectTo: ORIGIN })
+      expect(res.status).toBe(403)
+      expect(opsOf(world, 'getUserById')).toHaveLength(0)
+      expect(opsOf(world, 'inviteUserByEmail')).toHaveLength(0)
+    })
   })
 
   it('refuses a member with no email, because a synthetic address has no mailbox', async () => {

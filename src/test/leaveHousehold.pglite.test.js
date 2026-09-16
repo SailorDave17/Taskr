@@ -172,6 +172,42 @@ describe('leaving and handing over a household, run against a real Postgres (#43
       const result = await attempt(() => transfer(organizer, memberRowId))
       expect(result.error).toMatch(/only the household's organizer can hand it over/)
     })
+
+    it('#179 AC 6 — is executable by a signed-in member and not by anon', async () => {
+      // The harness's `anon` reads false either way once `from public` is
+      // revoked (#368's measurement), so the live half of this criterion is
+      // `npm run probe:live-grants` and the read-only catalog query recorded in
+      // docs/access-model.md; the source-text assertion below is what catches a
+      // revoke that leaves `anon` out. This asserts the ACL the file leaves
+      // behind, with `authenticated` as the positive control that the read can
+      // report a grant that is there.
+      const { rows } = await db.query(
+        `select has_function_privilege('anon', 'public.transfer_household(uuid, uuid)', 'execute') as anon,
+                has_function_privilege('authenticated', 'public.transfer_household(uuid, uuid)', 'execute') as authenticated`,
+      )
+      expect(rows[0]).toEqual({ anon: false, authenticated: true })
+    })
+
+    it('#179 AC 3 — is a definer, and the households UPDATE grant is NOT widened to organizer_member_id', async () => {
+      // 0005's reason: with `organizer_member_id` in the column grant, the
+      // update policy would let any member make themselves organizer. The
+      // definer is how the role changes hands WITHOUT that grant, so the two
+      // are asserted together — widen the grant and this reddens naming the
+      // column, which is AC 7's mutation.
+      const { rows: fn } = await db.query(
+        `select prosecdef from pg_proc where oid = 'public.transfer_household(uuid, uuid)'::regprocedure`,
+      )
+      expect(fn[0].prosecdef).toBe(true)
+      const { rows } = await db.query(
+        `select column_name from information_schema.column_privileges
+          where table_schema = 'public' and table_name = 'households'
+            and grantee = 'authenticated' and privilege_type = 'UPDATE'
+          order by column_name`,
+      )
+      expect(rows.map((r) => r.column_name)).not.toContain('organizer_member_id')
+      // POSITIVE CONTROL: the same read finds the two columns 0005 does grant.
+      expect(rows.map((r) => r.column_name)).toEqual(['name', 'timezone'])
+    })
   })
 
   describe('the grants the leave function may revoke', () => {

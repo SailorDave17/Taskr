@@ -8535,6 +8535,85 @@ describe('leaving a household, from App (#431)', () => {
   })
 })
 
+describe('handing the organizer role over and staying, from App (#179)', () => {
+  // person-a (the suite's default session) is m1 and organizes; m2 has signed
+  // in, so the row carries the control. Nobody leaves here — that is #431's
+  // hand-over, one card down.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const signedInOther = { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: 'person-b' }
+  const makeOrganizer = () => screen.queryByRole('button', { name: /^make placeholder two the organizer$/i })
+  const removeOther = () => screen.queryByRole('button', { name: /^remove placeholder two$/i })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, signedInOther])
+  })
+
+  it('AC 2 — hands the household over through the RPC, and the organizer controls leave this screen on the re-read', async () => {
+    // The transfer lands on the server, so the re-read App makes after the
+    // write comes back with the new organizer — the way the live project
+    // answers it.
+    api.transferHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+      return { ...household, organizer_member_id: 'm2' }
+    })
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeInTheDocument()
+    expect(removeOther()).toBeInTheDocument()
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(api.transferHousehold).toHaveBeenCalledWith('h1', 'm2')
+    expect(api.transferHousehold).toHaveBeenCalledTimes(1)
+    // Stays: no leave, and this person is still on the roster.
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    // The previous organizer no longer holds the organizer controls.
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+  })
+
+  it('AC 2 — the new organizer sees the organizer controls on their next load', async () => {
+    // The same device, loading a household the server now says it organizes:
+    // `isOrganizer` is derived at render from `organizer_member_id`, so a load
+    // is all it takes. The load above, where m2 organized, is the other side.
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+    expect(screen.queryByRole('button', { name: /^make placeholder one the organizer$/i })).toBeNull()
+  })
+
+  it('hands nothing over on the first tap, and Not now backs out', async () => {
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^not now$/i })))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+
+  it('puts a refused hand-over on screen and keeps the organizer where they were', async () => {
+    api.transferHousehold.mockRejectedValue(new Error('hand the household to somebody who has signed in'))
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/somebody who has signed in/)
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+})
+
 describe('#440 — a session that ends here lands on the sign-in form, and nothing is read after it', () => {
   // #431's fixture: person-a is m1, an ordinary member; m9 organizes.
   const household = {

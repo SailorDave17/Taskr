@@ -2459,7 +2459,13 @@ A member can leave from the Who tab. An organizer first hands the household over
 - **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
   a member of the same household who has signed in. An organizer who cannot sign in could provision
   nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
-  besides `create_household`.
+  besides `create_household`. It is a definer because the alternative — widening `0005`'s
+  `update (name, timezone)` grant on `households` to carry the column — would let any member reassign
+  the role to themselves through the members' update policy (`0002`'s measured hole); `0043`'s header
+  cites that, and `leaveHousehold.pglite.test.js` reddens naming the column if the grant is ever
+  widened (#179). Since #179 the roster offers **Make organizer** on each other signed-in row, so the
+  organizer can hand the role over and stay; #431's *Hand it to … and leave* is the same RPC followed
+  by the leave.
 - **The re-deal.** It runs in the browser before the leave, with the leaver left out
   (`reassignHousehold({ householdId, leavingMemberId })`). Their hand-placed chores are released by
   the leave itself and dealt at the next capacity change. A removal now re-deals afterwards too; a

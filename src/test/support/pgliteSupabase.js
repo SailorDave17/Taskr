@@ -82,6 +82,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { isProbeFile } from './probeFiles.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(here, '..', '..', '..', 'supabase', 'migrations')
@@ -126,6 +127,12 @@ export const MIGRATIONS = [
   '0037_realtime_publication.sql',
   '0038_calendar_event_import.sql',
   '0039_calendar_auto_apply.sql',
+  '0040_invitation_record.sql',
+  '0041_invitation_code_whitespace.sql',
+  '0042_delete_a_household_with_a_grace_period.sql',
+  '0043_leave_or_hand_over_a_household.sql',
+  '0044_a_redeemed_invitation_survives_its_redeemer.sql',
+  '0045_member_sign_in_state.sql',
 ]
 
 export function migrationSql(name) {
@@ -143,7 +150,11 @@ export function migrationSql(name) {
  */
 export function migrationFilesOnDisk() {
   return readdirSync(migrationsDir)
-    .filter((name) => name.endsWith('.sql'))
+    // #192 — a probe planted by `retiredVocabulary.test.js` is a real `.sql`
+    // file under this directory for the length of one test. Here the hazard is
+    // not a race but a REFUSAL: two pglite suites assert this list is a subset
+    // of `MIGRATIONS` above, and a probe would fail that outright.
+    .filter((name) => !isProbeFile(name) && name.endsWith('.sql'))
     .sort()
 }
 
@@ -213,9 +224,17 @@ const SUPABASE_ENV = `
   --
   -- No backticks in this comment on purpose: SUPABASE_ENV is a JS template
   -- literal, so a backtick here ends the string and the file stops parsing.
+  --
+  -- invited_at and email_confirmed_at are real columns too, and 0045 reads
+  -- both (#458): GoTrue stamps the first when an invitation is sent and the
+  -- second when the link is followed. Null by default here, which is an
+  -- invited-and-unaccepted account only when invited_at is also set; the
+  -- tests that care set them explicitly.
   create table auth.users (
     id uuid primary key default gen_random_uuid(),
-    email text
+    email text,
+    invited_at timestamptz,
+    email_confirmed_at timestamptz
   );
 
   -- Supabase reads the caller from a JWT claim. Here it comes from a session

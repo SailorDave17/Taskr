@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import * as fsForSource from 'node:fs'
 import { resolve } from 'node:path'
+import { isProbeFile } from '../test/support/probeFiles.js'
 import Chores from './Chores.jsx'
 
 // #213 AC 3 — the single-implementation scan reads component SOURCE, so it
@@ -12,7 +13,9 @@ const resolveDir = (dir) => resolve(process.cwd(), dir)
 const listSource = (dir) =>
   fsForSource
     .readdirSync(dir)
-    .filter((f) => /\.jsx?$/.test(f) && !/\.test\.jsx?$/.test(f))
+    // #192 — a probe planted by `retiredVocabulary.test.js` in a parallel worker
+    // matches the extension filter and is gone before the read below.
+    .filter((f) => !isProbeFile(f) && /\.jsx?$/.test(f) && !/\.test\.jsx?$/.test(f))
     .map((f) => `${dir}/${f}`)
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 

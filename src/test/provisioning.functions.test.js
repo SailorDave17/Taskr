@@ -195,79 +195,94 @@ async function makeHousehold() {
   }
 }
 
-describe('#87 — provisioning a member, against a real stack', () => {
-  it('AC 2 — provisions a member WITHOUT signing the organizer out', async () => {
+/**
+ * An account minted the way `provision` used to mint it — #191 keeps these.
+ *
+ * `provision` is gone from the function (#191 AC 3), but the accounts it created
+ * are not: an email-less member with a sign-in at `<id>@taskr.invalid` and a PIN
+ * the organizer chose. `reset` and `revoke` still have to work for them, and
+ * nothing in the app can create the state any more, so the fixture builds it
+ * with the service key — the same two writes the retired branch made,
+ * `createUser` with `email_confirm: true` and then the `claimed_by` update. A
+ * fixture the database cannot produce is the failure #36 paid for; this one the
+ * database DID produce, for every such account that exists on the live project.
+ */
+async function mintLegacyPin(member, password) {
+  const svc = serviceClient()
+  const address = `${member.id}@taskr.invalid`
+  const { data: created, error: createError } = await svc.auth.admin.createUser({
+    email: address,
+    password,
+    email_confirm: true,
+  })
+  expect(createError, `minting the legacy account failed: ${createError?.message}`).toBeNull()
+  const { error: claimError } = await svc
+    .from('members')
+    .update({ claimed_by: created.user.id })
+    .eq('id', member.id)
+  expect(claimError, `claiming the row failed: ${claimError?.message}`).toBeNull()
+  return { authId: created.user.id, address }
+}
+
+describe('#87 — the PIN path, against a real stack, after #191', () => {
+  it('#191 AC 3 — provision is refused as an unknown action, and mints nothing', async () => {
     const h = await makeHousehold()
-
-    // Pin the identity before the call, so "unchanged" is a comparison and not
-    // an assumption. This is the exact failure signUp() would cause and the
-    // whole reason the function exists.
-    const { data: before } = await h.organizer.auth.getUser()
-    expect(before.user.email).toBe(h.organizerEmail)
-
     const result = await callFunction(h.organizerToken, {
       action: 'provision',
       memberId: h.member.id,
       password: 'kid-secret-1',
     })
-    expect(result.status, `provision failed: ${JSON.stringify(result.body)}`).toBe(200)
-    expect(result.body.ok).toBe(true)
+    expect(result.status, `expected 400, got ${JSON.stringify(result.body)}`).toBe(400)
+    expect(result.body.error).toMatch(/action must be/i)
+    expect(result.body.error).not.toMatch(/provision/)
 
-    const { data: after } = await h.organizer.auth.getUser()
-    expect(after.user.id, 'the organizer was signed out or swapped').toBe(before.user.id)
-    expect(after.user.email).toBe(h.organizerEmail)
+    const { data: row } = await h.organizer
+      .from('members')
+      .select('claimed_by')
+      .eq('id', h.member.id)
+      .single()
+    expect(row.claimed_by, 'a refused provision minted an account anyway').toBeNull()
+    // And no account exists at the address it would have minted — the door,
+    // not only the row.
+    const attempt = await freshClient().auth.signInWithPassword({
+      email: `${h.member.id}@taskr.invalid`,
+      password: 'kid-secret-1',
+    })
+    expect(attempt.error, 'an account was minted at the synthetic address').toBeTruthy()
   })
 
-  it('AC 4 — members.email stays NULL and the address is derived from members.id', async () => {
+  it('a legacy account still signs in — the fixture is real before anything is asserted on it', async () => {
+    // POSITIVE CONTROL for `mintLegacyPin`: without it, every reset and revoke
+    // below could pass against a fixture that never produced a working account.
     const h = await makeHousehold()
+    const { address } = await mintLegacyPin(h.member, 'kid-secret-1')
 
-    const result = await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
+    const { data, error } = await freshClient().auth.signInWithPassword({
+      email: address,
       password: 'kid-secret-1',
     })
-    expect(result.status).toBe(200)
+    expect(error, `the legacy account could not sign in: ${error?.message}`).toBeNull()
+    expect(data.session).toBeTruthy()
 
-    // Derived, not stored. The null is the discriminator 0007 established
-    // between "has a real inbox" and "does not", and storing the synthetic
-    // address would destroy it.
-    expect(result.body.email).toBe(`${h.member.id}@taskr.invalid`)
-
+    // Derived, not stored — the discriminator 0007 established survives #191.
     const { data: row } = await h.organizer
       .from('members')
       .select('email, claimed_by')
       .eq('id', h.member.id)
       .single()
     expect(row.email, 'a synthetic address was written into members.email').toBeNull()
-    expect(row.claimed_by, 'claimed_by was not set').toBe(result.body.claimedBy)
+    expect(row.claimed_by, 'claimed_by was not set').toBe(data.user.id)
   })
 
-  it('the provisioned member can actually sign in with that address', async () => {
+  it('AC 3 — an organizer resets a legacy credential with no inbox involved, WITHOUT being signed out', async () => {
     const h = await makeHousehold()
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
+    const { address } = await mintLegacyPin(h.member, 'kid-secret-1')
 
-    // The claim the other assertions cannot make: a row saying `claimed_by` is
-    // set is not the same as a person being able to get in.
-    const kid = freshClient()
-    const { data, error } = await kid.auth.signInWithPassword({
-      email: `${h.member.id}@taskr.invalid`,
-      password: 'kid-secret-1',
-    })
-    expect(error, `the provisioned member could not sign in: ${error?.message}`).toBeNull()
-    expect(data.session).toBeTruthy()
-  })
-
-  it('AC 3 — an organizer resets a credential with no inbox involved', async () => {
-    const h = await makeHousehold()
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
+    // Pin the identity before the call, so "unchanged" is a comparison and not
+    // an assumption — #87 AC 2's claim, now made on the one action that still
+    // takes a credential.
+    const { data: before } = await h.organizer.auth.getUser()
+    expect(before.user.email).toBe(h.organizerEmail)
 
     const reset = await callFunction(h.organizerToken, {
       action: 'reset',
@@ -276,7 +291,9 @@ describe('#87 — provisioning a member, against a real stack', () => {
     })
     expect(reset.status, `reset failed: ${JSON.stringify(reset.body)}`).toBe(200)
 
-    const address = `${h.member.id}@taskr.invalid`
+    const { data: after } = await h.organizer.auth.getUser()
+    expect(after.user.id, 'the organizer was signed out or swapped').toBe(before.user.id)
+
     const withNew = await freshClient().auth.signInWithPassword({
       email: address,
       password: 'kid-secret-2',
@@ -318,29 +335,27 @@ describe('#87 — provisioning a member, against a real stack', () => {
 
   it('refuses a caller who is not the organizer', async () => {
     const h = await makeHousehold()
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
+    const { address } = await mintLegacyPin(h.member, 'kid-secret-1')
 
     const kid = freshClient()
     const { data: kidSession } = await kid.auth.signInWithPassword({
-      email: `${h.member.id}@taskr.invalid`,
+      email: address,
       password: 'kid-secret-1',
     })
 
-    // A second member for the kid to try to provision — the kid is in the
+    // A second member for the kid to try to reset — the kid is in the
     // household, so RLS lets them SEE this row. Only the organizer check stands
-    // between them and creating an account for somebody else.
+    // between them and choosing somebody else's credential. The check runs
+    // before the action branches, so it does not matter that the sibling has
+    // no sign-in yet: 403, not 409.
     const sibling = await h.addMember('Sibling', 30)
 
     const result = await callFunction(kidSession.session.access_token, {
-      action: 'provision',
+      action: 'reset',
       memberId: sibling.id,
       password: 'sibling-secret-1',
     })
-    expect(result.status, 'a non-organizer provisioned an account').toBe(403)
+    expect(result.status, "a non-organizer reset somebody's credential").toBe(403)
   })
 
   it('refuses a member of ANOTHER household, without revealing they exist', async () => {
@@ -348,7 +363,7 @@ describe('#87 — provisioning a member, against a real stack', () => {
     const theirs = await makeHousehold()
 
     const result = await callFunction(mine.organizerToken, {
-      action: 'provision',
+      action: 'reset',
       memberId: theirs.member.id,
       password: 'stranger-secret-1',
     })
@@ -363,7 +378,7 @@ describe('#87 — provisioning a member, against a real stack', () => {
       .select('claimed_by')
       .eq('id', theirs.member.id)
       .single()
-    expect(untouched.claimed_by, 'a stranger provisioned into another household').toBeNull()
+    expect(untouched.claimed_by, 'a stranger reached into another household').toBeNull()
   })
 
   it('#161 — refuses a member of a household the caller is IN but does not ORGANISE', async () => {
@@ -380,11 +395,22 @@ describe('#87 — provisioning a member, against a real stack', () => {
     const theirs = await makeHousehold()
 
     // Putting the caller on the other roster needs `service_role`, and that is
-    // not a shortcut: there is NO public path that attaches an EXISTING auth
-    // user to a second member row. `provision-member` mints a new one, which is
-    // the gap #191 and #168 both record. So this state is unreachable through
-    // the app today — which is exactly why #161 lands before the affordance
-    // that makes it reachable, rather than after.
+    // not a shortcut — but the reason it is not changed under #341 and the old
+    // one is worth not re-deriving. This used to read "there is NO public path
+    // that attaches an EXISTING auth user to a second member row". Since #341
+    // there is one, and it is measured in this file: *re-inviting a PENDING
+    // address returns the same account rather than a second one* claims an
+    // existing auth user onto a member row in another household, 200.
+    //
+    // It stays out of reach HERE because the caller's account is ESTABLISHED —
+    // `makeHousehold` signs up with a password — and `inviteUserByEmail` refuses
+    // an address in that state, measured in the test above this one. So the
+    // fixture still needs `service_role` to reach the state, which is why #161
+    // lands before the affordance that makes it reachable rather than after.
+    // #168 recorded the gap and was retired superseded; #173 then shipped the
+    // public path (a code, redeemed AS the existing account), and this fixture
+    // keeps the service-role attach anyway because its subject is this
+    // function's organizer check, not the redemption.
     const { data: identity } = await mine.organizer.auth.getUser()
     const housemate = await theirs.addMember('Housemate', 60)
     const svc = serviceClient()
@@ -406,8 +432,10 @@ describe('#87 — provisioning a member, against a real stack', () => {
       'fixture no longer reproduces the escalation ordering — re-derive it before trusting this test',
     ).toBe(mine.household.id)
 
+    // `reset` since #191 (`provision` until then): the organizer check runs
+    // before either branch, so the escalation is asked of the same line.
     const result = await callFunction(mine.organizerToken, {
-      action: 'provision',
+      action: 'reset',
       memberId: theirs.member.id,
       password: 'escalation-secret-1',
     })
@@ -429,22 +457,6 @@ describe('#87 — provisioning a member, against a real stack', () => {
     ).toBeNull()
   })
 
-  it('refuses provisioning twice, and says to reset instead', async () => {
-    const h = await makeHousehold()
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
-    const again = await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-9',
-    })
-    expect(again.status).toBe(409)
-    expect(again.body.error).toMatch(/reset/i)
-  })
-
   it('refuses a reset for somebody who has no sign-in yet', async () => {
     const h = await makeHousehold()
     const result = await callFunction(h.organizerToken, {
@@ -460,14 +472,7 @@ describe('#87 — provisioning a member, against a real stack', () => {
 describe('#247 — revoking a sign-in when a member is removed', () => {
   it('AC 1 — the whole removal, end to end: the account is deleted and cannot sign in', async () => {
     const h = await makeHousehold()
-    const provisioned = await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
-    expect(provisioned.status, `provision failed: ${JSON.stringify(provisioned.body)}`).toBe(200)
-    const authId = provisioned.body.claimedBy
-    const address = `${h.member.id}@taskr.invalid`
+    const { authId, address } = await mintLegacyPin(h.member, 'kid-secret-1')
 
     // POSITIVE CONTROL, inside this test rather than borrowed from a sibling:
     // the credential works BEFORE the revoke, so the refusal below is the
@@ -522,13 +527,7 @@ describe('#247 — revoking a sign-in when a member is removed', () => {
   it('#262 — keeps the account when another household still claims it', async () => {
     const mine = await makeHousehold()
     const theirs = await makeHousehold()
-    const provisioned = await callFunction(mine.organizerToken, {
-      action: 'provision',
-      memberId: mine.member.id,
-      password: 'kid-secret-1',
-    })
-    expect(provisioned.status).toBe(200)
-    const authId = provisioned.body.claimedBy
+    const { authId } = await mintLegacyPin(mine.member, 'kid-secret-1')
 
     // The same service-role attach the #161 fixture uses: no public path
     // creates the one-person-two-households claim today, which is exactly why
@@ -581,17 +580,9 @@ describe('#247 — revoking a sign-in when a member is removed', () => {
 
   it('refuses a revoke from a non-organizer, and the account survives', async () => {
     const h = await makeHousehold()
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: h.member.id,
-      password: 'kid-secret-1',
-    })
+    await mintLegacyPin(h.member, 'kid-secret-1')
     const sibling = await h.addMember('Sibling', 30)
-    await callFunction(h.organizerToken, {
-      action: 'provision',
-      memberId: sibling.id,
-      password: 'sibling-secret-1',
-    })
+    await mintLegacyPin(sibling, 'sibling-secret-1')
 
     const kid = freshClient()
     const { data: kidSession } = await kid.auth.signInWithPassword({
@@ -615,17 +606,13 @@ describe('#247 — revoking a sign-in when a member is removed', () => {
   it("refuses a revoke aimed at another household's member, without revealing they exist", async () => {
     const mine = await makeHousehold()
     const theirs = await makeHousehold()
-    await callFunction(theirs.organizerToken, {
-      action: 'provision',
-      memberId: theirs.member.id,
-      password: 'kid-secret-1',
-    })
+    await mintLegacyPin(theirs.member, 'kid-secret-1')
 
     const result = await callFunction(mine.organizerToken, {
       action: 'revoke',
       memberId: theirs.member.id,
     })
-    // 404, same as provision's shape: the caller-scoped read never found the
+    // 404, same as reset's shape: the caller-scoped read never found the
     // row, so "not yours" and "does not exist" stay indistinguishable.
     expect(result.status).toBe(404)
 
@@ -634,5 +621,253 @@ describe('#247 — revoking a sign-in when a member is removed', () => {
       password: 'kid-secret-1',
     })
     expect(still.error, "a stranger revoked another household's sign-in").toBeNull()
+  })
+})
+
+// #341 — the invitation path, against the REAL stack.
+//
+// `handler.test.js` covers every branch of this action with no network, and is
+// where the mailer-refusal and address-taken branches are proven, because no
+// local GoTrue will produce either on demand. This file exists for the two
+// things that fake cannot answer:
+//
+//   1. **Whether GoTrue really refuses an address that already holds an account.**
+//      AC 3's entire refusal branch rests on that, and until this suite ran it
+//      was a claim read out of Supabase's documentation. `handler.test.js` says
+//      so in its own header. Here it is exercised against a real GoTrue.
+//   2. **Whether the function still works at all after #341 split it.** The
+//      authorization shape moved from `index.ts` to `handler.ts` — 346 lines,
+//      on the one function in this repo holding a key that bypasses row-level
+//      security. A move is supposed to change nothing, and nothing is exactly
+//      what a unit test with a fake client cannot check: the fake answers
+//      whatever this file tells it to, and RLS is what the move must not have
+//      lost. Every test in this suite passing IS that evidence.
+describe('#341 — inviting a member, against a real stack', () => {
+  /**
+   * A member row carrying a REAL address, which is what the invite path needs.
+   *
+   * `makeHousehold`'s own `addMember` deliberately inserts none — every #87
+   * fixture is the email-less member the PIN path is for — so this adds the
+   * column here rather than widening a helper six other tests depend on.
+   */
+  async function addMemberWithEmail(h, displayName, email) {
+    const { data, error } = await h.organizer
+      .from('members')
+      .insert({
+        household_id: h.household.id,
+        display_name: displayName,
+        weekly_minutes: 60,
+        email,
+      })
+      .select('id, display_name, claimed_by, email')
+      .single()
+    expect(error, `adding ${displayName} failed: ${error?.message}`).toBeNull()
+    expect(data.email, 'the address did not land on the row').toBe(email)
+    return data
+  }
+
+  it('AC 1 — invites a member with an address, and claims their row', async () => {
+    const h = await makeHousehold()
+    const address = uniqueEmail('invited')
+    const member = await addMemberWithEmail(h, 'Placeholder One', address)
+
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status, `invite failed: ${JSON.stringify(body)}`).toBe(200)
+    expect(body).toMatchObject({ ok: true, action: 'invite', memberId: member.id, email: address })
+    expect(body.claimedBy, 'no auth user was attached').toBeTruthy()
+
+    // Read the row back through the ORGANIZER, so this is the state the app
+    // would see rather than the payload the function chose to report.
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by).toBe(body.claimedBy)
+  })
+
+  it('AC 3 MEASURED — a real GoTrue refuses an address that already has an ESTABLISHED account', async () => {
+    // THE POINT OF THIS FILE, and the word ESTABLISHED is load-bearing.
+    // Everything downstream of AC 3 assumes `inviteUserByEmail` refuses rather
+    // than returning the existing user, and until this ran it was a claim read
+    // out of Supabase's documentation.
+    //
+    // *Measured 2026-09-09 against a local GoTrue*, and it turns on the state of
+    // the existing account, which the criterion does not distinguish and which
+    // the first draft of this test got wrong:
+    //
+    //   - an account somebody has REGISTERED (signed up with a password) is
+    //     REFUSED — 409, this branch, what AC 3 describes;
+    //   - an account still INVITED-BUT-NEVER-ACCEPTED is re-invited: 200, and
+    //     the SAME auth user comes back. The case below covers that.
+    //
+    // The first draft invited a never-accepted address twice and expected a
+    // refusal, so it failed on the app being right. AC 3's own examples — "a
+    // member removed and re-added, or a Google sign-in from #304 that matched
+    // nobody" — are both established accounts, so the criterion is about this
+    // case and the fixture has to build it: a real signup, with a password.
+    const h = await makeHousehold()
+    const address = uniqueEmail('established')
+
+    // A person who already uses Taskr, in a household of their own.
+    const theirs = freshClient()
+    const { error: signUpError } = await theirs.auth.signUp({
+      email: address,
+      password: 'their-own-password-1',
+    })
+    expect(signUpError, `the established signup failed: ${signUpError?.message}`).toBeNull()
+
+    const member = await addMemberWithEmail(h, 'Placeholder One', address)
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status).toBe(409)
+    expect(body.error).toMatch(/already has a Taskr sign-in/i)
+    expect(body.error).toMatch(/Reset sign-in/i)
+
+    // The half a status code does not prove, and the one that matters most:
+    // nothing was attached. An organizer who merely knows an address cannot put
+    // that person's existing account into their household.
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by, 'a refused invite claimed the row anyway').toBeNull()
+  })
+
+  it('MEASURED — re-inviting a PENDING address returns the same account rather than a second one', async () => {
+    // The other half of the measurement above, recorded because it falsifies a
+    // sentence this repo used to carry. `revoke`'s blast-radius argument said
+    // invite "always attaches a FRESHLY created auth user, never an existing
+    // one". That is true of an established account (refused, above) and FALSE
+    // here: a second invitation to an address whose user has never accepted
+    // returns the SAME user, and it can be claimed onto a member row in another
+    // household.
+    //
+    // Which is why `revoke`'s `otherClaims` check is load-bearing rather than
+    // belt-and-braces: two member rows really can share one auth user by this
+    // route, and deleting the account on the first revoke would end the other
+    // household's access. The check already handles it; what was wrong was the
+    // comment saying it could not arise.
+    const a = await makeHousehold()
+    const address = uniqueEmail('pending')
+    const first = await addMemberWithEmail(a, 'Placeholder One', address)
+    const firstCall = await callFunction(a.organizerToken, {
+      action: 'invite',
+      memberId: first.id,
+      redirectTo: 'http://localhost:5173',
+    })
+    expect(firstCall.status, `the first invite must succeed: ${JSON.stringify(firstCall.body)}`).toBe(200)
+
+    // A second household, because `members_household_email_key` forbids two
+    // rows at one address inside one household — itself worth knowing, and
+    // measured: `23505` on the insert, before the function is reached.
+    const b = await makeHousehold()
+    const second = await addMemberWithEmail(b, 'Placeholder Two', address)
+    const secondCall = await callFunction(b.organizerToken, {
+      action: 'invite',
+      memberId: second.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(secondCall.status).toBe(200)
+    expect(
+      secondCall.body.claimedBy,
+      'a pending re-invite minted a SECOND account at one address',
+    ).toBe(firstCall.body.claimedBy)
+  })
+
+  it('#191 AC 3 — provision is refused for everybody now, with and without an address', async () => {
+    // Until #191 this was two tests: a member with an address was refused with
+    // "send them an invitation instead", and the email-less member was the
+    // CONTROL that still minted, "which is why that branch survives". The
+    // branch does not survive: the row it survived for cannot be created any
+    // more, so both are refused the same way, as an action that does not
+    // exist — and neither row gains a sign-in.
+    const h = await makeHousehold()
+    const withAddress = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('has-address'))
+
+    for (const member of [withAddress, h.member]) {
+      const { status, body } = await callFunction(h.organizerToken, {
+        action: 'provision',
+        memberId: member.id,
+        password: 'a-good-password',
+      })
+      expect(status, `expected 400 for ${member.display_name}, got ${JSON.stringify(body)}`).toBe(400)
+      expect(body.error).toMatch(/action must be/i)
+
+      const { data: after } = await h.organizer
+        .from('members')
+        .select('id, claimed_by')
+        .eq('id', member.id)
+        .single()
+      expect(after.claimed_by, 'a refused provision minted an account anyway').toBeNull()
+    }
+  })
+
+  it('refuses an invite to a member with no address', async () => {
+    const h = await makeHousehold()
+    const { status, body } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: h.member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    expect(status).toBe(409)
+    expect(body.error).toMatch(/no email address on their row/i)
+  })
+
+  it('refuses an invite with no redirectTo', async () => {
+    const h = await makeHousehold()
+    const member = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('no-redirect'))
+    const { status } = await callFunction(h.organizerToken, {
+      action: 'invite',
+      memberId: member.id,
+    })
+    expect(status).toBe(400)
+  })
+
+  it('the authorization shape survived the split — a non-organizer cannot invite', async () => {
+    // #161's escalation, re-asked of the NEW action against real row-level
+    // security. The caller here organises nothing in this household, so the
+    // caller-scoped member read is what must fail closed — and a fake client
+    // could not have shown that, because a fake enforces nothing.
+    const h = await makeHousehold()
+    const member = await addMemberWithEmail(h, 'Placeholder One', uniqueEmail('protected'))
+
+    const outsider = freshClient()
+    const { data: signUp, error } = await outsider.auth.signUp({
+      email: uniqueEmail('outsider'),
+      password: 'outsider-secret-1',
+    })
+    expect(error, `outsider signup failed: ${error?.message}`).toBeNull()
+
+    const { status, body } = await callFunction(signUp.session.access_token, {
+      action: 'invite',
+      memberId: member.id,
+      redirectTo: 'http://localhost:5173',
+    })
+
+    // 404, not 403: the caller-scoped read cannot SEE the member, so the
+    // function never reaches the organizer check. That is the shape failing
+    // closed, and it is deliberately indistinguishable from "no such member".
+    expect([403, 404]).toContain(status)
+    expect(body.ok).toBeFalsy()
+
+    const { data: after } = await h.organizer
+      .from('members')
+      .select('id, claimed_by')
+      .eq('id', member.id)
+      .single()
+    expect(after.claimed_by, 'an outsider got a sign-in attached').toBeNull()
   })
 })

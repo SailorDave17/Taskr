@@ -57,6 +57,14 @@ export const UNWATCHED_TABLES = Object.freeze({
     'self-scoped: the row is what THIS member was last shown and only they can read it, ' +
     'so no other phone has news here — and refresh() itself writes it, so watching it ' +
     'would make every read echo into one more read.',
+  // #172 — owner decision at pickup, 2026-09-10, over publishing it in a new
+  // migration. The cost is stated rather than hidden: a redemption on somebody
+  // else's phone reaches the organizer's list on their next refresh (focus,
+  // visibility, or any write), not the instant it happens.
+  invitations:
+    'organizer-only: the one device that may read a row is the one that minted or ' +
+    'withdraws it, and publishing would put token_hash on a channel for no other reader — ' +
+    'the column 0040 exists to keep scarce.',
 })
 
 /** The Realtime publication `0037` fills, by name — one string, asserted against pglite. */

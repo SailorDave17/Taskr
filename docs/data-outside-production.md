@@ -212,6 +212,16 @@ taps that control, which is one tap after a deploy. Annotated in place rather th
 file's own idiom: what was believed when the re-read was taken stays visible. The re-read this owes
 is **#401**.)*
 
+*(**Two more corrections to the same sentence, 2026-09-09, annotated in place for the same reason.**
+First, **#341 shipped a mechanism that reaches the membership side for one case**: re-inviting an
+address whose auth user is still PENDING returns that same user and claims it onto a member row in a
+second household — measured in `src/test/provisioning.functions.test.js`, *re-inviting a PENDING
+address returns the same account rather than a second one*. So the list of open issues above is no
+longer the whole answer to *what could create this state*; an ESTABLISHED account is still refused,
+which is the half that remains. Second, **#169 was not superseded — only #168 was.** #169's own
+routing comment of the same date says #341 cannot replace it, because #341 refuses precisely its
+subject. #168 is closed as not planned; #169 stands, behind `#171 → #172 → #173`.)*
+
 ### Revisit when
 
 - **Vercel changes what *Standard Protection* exempts.** This arrangement rests on a measured
@@ -267,17 +277,22 @@ the precise thing being prevented.
 
 ### What enforces it, and what it cannot see
 
-Three assertions in `src/test/gate.test.js`, deliberately with **different blind spots** — none is
+Four assertions in `src/test/gate.test.js`, deliberately with **different blind spots** — none is
 sufficient alone:
 
 | assertion | catches | blind to |
 |---|---|---|
-| **Shape scan** — every capitalised-word-shaped literal in the fixture corpus must be declared | a name in *any* position, including syntax the check was never taught | a name written in lower case |
+| **Shape scan** — every capitalised-word-shaped literal in the corpus must be declared | a name in *any* position, including syntax the check was never taught | a name written in lower case; anything not in straight quotes |
 | **Position scan** — every person-name-shaped literal in a name *position* (`create_household` arg 2, `organizerName`, `displayName`, `name:`, `h.name =`) must be declared, case-insensitively | `name: 'alex'` | a position not on the list |
+| **Prose scan** — no UUID- or address-shaped string in `README.md` or `docs/*.md` (#409, reusing #328's `classify`) | a live row id or a member address written into a document, quoted or not | a real *name* in a sentence, which has no shape |
 | **Asset scan** — no tracked image outside the manifest's icon set | a committed screenshot | an image outside the extension list |
 
-The corpus is discovered from `git ls-files`, not hard-coded, so a new test file is scanned the day
-it lands.
+The corpus is discovered from `git ls-files` plus untracked-not-ignored files, not hard-coded, so a
+new file is scanned the day it lands. It is **two corpora**: the fixture corpus
+(`src/**/*.test.jsx?`, `src/test/**`, `src/lib/*.corpus.js`, `supabase/{migrations,seed}/*.sql`),
+and — since #409 — the prose corpus (`README.md`, `docs/*.md`), which the first two assertions also
+read. Why the prose corpus needs a rule of its own, and what the pair still cannot reach, is in *The
+gap found by walking into it* below.
 
 **None of the three can tell a real name from a plausible one.** They enforce that the vocabulary is
 *declared*, which converts the failure from "somebody committed a real name" into "somebody added a
@@ -361,6 +376,42 @@ for a data-handling control. So it is stated as one:
 >
 > Revisit when: any client-role grant is proposed on `calendar_tokens`; a second provider is added;
 > or a credential of this class is stored anywhere but through this shape.
+
+#### Re-read 2026-09-10 — the third condition fired, at #171
+
+**The trigger was "a credential of that class stored any other way", and #171 stores one.** An
+invitation code is a bearer secret that admits its holder to household data — the same class as the
+Google refresh token control 6 was written for, arriving from the opposite direction: this one is
+minted by Taskr rather than issued by a third party, and it must be *given away on purpose*.
+
+**Verdict: control 6 holds, and it is met by a route control 6 did not contemplate — storing no
+credential at all.** `0040` holds `token_hash` (`extensions.digest(code, 'sha256')`, unique) and the
+plaintext exists in no column; it is shown once at mint and is unrecoverable afterwards. Owner
+decision at #171's pickup, taken at a clickable question against the alternative of storing the
+spendable string and withholding it by column grant.
+
+The distinction worth keeping, because it is what makes the two rows differ:
+
+| | `calendar_tokens` (`0011`) | `invitations` (`0040`) |
+|---|---|---|
+| what is stored | the credential itself — Google will not re-issue it | a DIGEST; the credential is not in the database |
+| who may read the row | nobody: no grant, no policy | the household's organizer, by policy |
+| what a reader gains | the calendar | nothing spendable — a test redeems with the digest and is refused |
+| why that shape | the token must be replayable to Google | the code need only be *recognised*, never replayed |
+
+**So the control gains a second referent rather than an exception.** Control 6's sentence — held in a
+table with no client grant and no policy — remains the rule for a credential that must be *kept*.
+Where a secret only has to be recognised, the stronger answer is to keep no secret, and this row
+records that as the preferred route when the choice exists. The cost is real and belongs to #172: an
+invitation code can be displayed exactly once, and a lost one is withdrawn and re-minted rather than
+looked up.
+
+What did NOT fire: **Decision 4 owes nothing here.** Its three conditions are a second invitation
+channel, household names ceasing to be family names, and anything added to a pre-redemption surface —
+#171 adds no surface at all. Its clauses 3 and 4 did constrain the schema (no invitee name column, no
+household id readable by a non-member) and clause 4 decided that the four unusable states share ONE
+refusal sentence, so a refusal cannot confirm a code exists. Those are recorded in `0040`'s header and
+in `docs/access-model.md`'s `0040` entry.
 
 #### A correction this re-read found, in this record's own words
 
@@ -458,12 +509,18 @@ So the operative change is not to any control. It is to **how much a Decision 2 
 a real name reaching the fixture corpus was exposed to whoever holds repository access; now it is
 published. The guard was already the load-bearing control and is now the only one.
 
-#### The surface control 5 was quietly covering, and no guard reaches
+#### The surface control 5 was quietly covering, and ~~no guard reaches~~ **only a detective one reaches (#328)**
+
+*The heading is struck rather than rewritten: it was true when it was written on 2026-09-04, and it is
+the sentence a reader would have believed. Decision 5 below is what changed it.*
 
 **The repository going public took the tracker with it, and the tracker is outside every check here.**
 Decision 2's corpus is `git ls-files` plus untracked-not-ignored files — issues, comments and pull
 request bodies are not files, so no scan in `gate.test.js` has ever been able to see them, and none
-was ever meant to.
+was ever meant to. *(Still true of `gate.test.js`, and no longer true of the repository: #328 added
+`scripts/scan-tracker.mjs` and a workflow that reads the tracker directly. It is detective rather
+than preventive, which is why the paragraph above is amended rather than deleted — the claim that
+nothing can **refuse** a live identifier before it is published survives intact.)*
 
 *Measured 2026-09-04*: **four issues name the real household**, and one of them additionally carries
 the owner's address, both live household ids and an organizer's auth and member ids — recorded there
@@ -474,17 +531,11 @@ because a different document made a different decision.
 The values are deliberately not repeated here — writing them into `docs/` would move them from a
 surface no guard watches into the one surface Decision 2 does, which is the wrong direction.
 
-**This is not settled by this re-read.** Whether to redact, and what a story is allowed to record
-about the live project now that the tracker is public, is **#328** — filed rather than decided in a
-paragraph at the end of a document re-read (owner decision, 2026-09-04). What this record settles is
-only that the gap is real, that it is structural rather than an oversight, and that the next person
-to write a live identifier into an issue should know the surface changed under them. #328's fourth
-criterion replaces this paragraph with whatever it decides, so this is a pointer with an expiry
-rather than a standing position.
-
-**Revisit when** the repository's visibility changes again in either direction, or when any check
-gains the ability to read the tracker — at which point the paragraph above stops being a description
-and becomes something enforceable.
+**Settled 2026-09-10 by #328 — see Decision 5 below.** The verdict in one line: the identifiers
+were **redacted in place across all four classes, with nothing deleted**, and the shape half of the
+search now runs as a workflow. What this paragraph described as an unwatched surface is watched
+after the fact and cannot be watched before it, for a reason that is GitHub’s rather than this
+repository’s.
 
 ---
 
@@ -554,6 +605,229 @@ clause 2 differ.
 - **Anything is added to a pre-redemption surface**, at all. Clause 3 is a closed list, and the way a
   closed list fails is one useful-looking addition at a time.
 
+---
+
+## Decision 5 — what the public tracker carries, and what it may carry
+
+**Decided 2026-09-10, story #328.** The pointer under Decision 3’s control-5 re-read said the gap
+was real and routed the decision here; this section is that decision. The re-read's *"four issues name the real
+household"* was **exactly right and exactly incomplete** — the four are #102, #162, #241 and #242,
+and the household name is one of four classes.
+
+### What was there, measured rather than remembered
+
+The set is produced by a **repeatable search**, `npm run scan:tracker`
+([`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs)), not by reading. It has two halves: a
+shape half for UUID- and address-shaped strings that needs no secret, and a term half whose search
+terms are the live project's own household names and member addresses, read from the database at run
+time and never written down. *Measured 2026-09-10 over 211 issues and 197 pull requests*: **13 items,
+15 places, 16 distinct values.**
+
+| Class | Items |
+|---|---|
+| Live row ids — household, member and `auth.users` | #162, #241, #246, #247, #262, #279, #349 |
+| The real household's name | #102, #162, #241, #242 |
+| The owner's address and its plus-aliases | #52, #140, #142, #241, #293 |
+| Test-household names naming live rows | #162, #241, #293, #349 |
+
+One **false positive** is worth recording because the next screenshot will produce another: #80's
+comment carried two UUIDs that were GitHub attachment ids, not rows. The scanner excludes them by the
+URL they sit in rather than by issue number, so the rule stays true for the next one.
+
+#### When each was written, and why that turned out to matter
+
+*Measured 2026-09-10 from each place's own `created_at`* — the date an identifier was **written**,
+not the date its issue was opened, which are eleven days apart on #162 and are the difference between
+the two halves of this table.
+
+| Written | Place | |
+|---|---|---|
+| 2026-08-26 | #140 comment 2, #142 comment 3 | |
+| 2026-08-28 | #241 body, #242 comment 3, #246 comment 2, #247 body, #247 comment 1, #262 body | |
+| 2026-08-29 | #279 body | |
+| 2026-08-30 | #52 comment 2 | |
+| 2026-08-31 | #162 comment 4, #241 comment 2, #293 body | **after** |
+| 2026-09-05 | #349 comment 2 | **after** |
+| 2026-09-08 | #102 comment 1 | **after** |
+
+**Five of the fifteen places were written after the repository went public**, across five issues, and
+#102's was written **2026-09-08 — nine days after, and two days before this decision**.
+
+That is worth stating plainly because the comfortable version of this story is false. The first draft
+of the rule in [`docs/access-model.md`](access-model.md) said all thirteen *"were written when it was
+not [public] … not one of them was a mistake at the time"*, and framed the whole thing as a correct
+habit overtaken by a surface change. **Ten of the fifteen places fit that description. Five do not.**
+Nobody had decided anything different for those five; the habit simply continued after the ground
+moved, which is exactly what a habit does and exactly why the rule below is a rule rather than a
+reminder.
+
+The AC that asked for this was AC 1's *"and when it was written"* clause. It was **not** answered in
+the first draft of this section — the enumeration above was the class table alone — and the false
+sentence is what the missing clause was hiding. The instrument requests `createdAt` now and prints a
+date beside every place, so the next reader gets the dates without asking for them.
+
+### The decision, and the cost of what was not chosen
+
+**Redact in place, across all four classes, deleting nothing.** Applied 2026-09-10 to 15 places
+across 13 issues; each edit was verified by re-reading the item from the API rather than from the
+edit's own success response, and the search was then re-run and came back **empty with its positive
+control passing on the same run** — which is what tells an instrument that found nothing apart from
+one that can no longer find anything.
+
+Each value became a stable label — `[redacted #328 — household 1 id]` — and the labels are
+**entity-scoped**, so a household's name and its id share an index and a table that read
+`| first | <name> | <id> |` still reads as one household. A first attempt lettered each class
+alphabetically by value and paired household name A with household id B: it protected the values
+perfectly and destroyed the record's meaning, which is the wrong trade in a repository whose whole
+argument is that a measurement without its reasoning is worthless.
+
+Two options were weighed and rejected, and both were defensible:
+
+- **Accept and leave.** Cheaper, and it has a real argument behind it — see the next subsection, where
+  two of the four classes turn out to be published by the repository itself regardless. Rejected
+  because the *linkage* is not: a real family's name joined to a live household id, its member count
+  and its roster's shape is a fact the tracker was publishing and nothing else was.
+- **Redact and delete the comments.** The only route to true removal, and it reaches 10 of the 15
+  places. Rejected because those comments are the evidence their own acceptance criteria were ticked
+  against — #162's and #241's especially — and deleting a measurement to protect a value it no longer
+  contains trades the wrong thing away.
+
+**Redaction is a reduction in exposure and not a removal, and this is measured rather than assumed.**
+*Measured 2026-09-10 on #158*: the GraphQL `userContentEdits` field returns the **full prior body
+text** of every edit, three revisions deep. So every value redacted above is still stored and still
+served. Choosing redaction is choosing to lower the odds a passer-by sees it, not to make it unseen.
+
+**The limit on that measurement, stated rather than glossed:** the query was authenticated as the
+repository's owner, and nothing here establishes what GitHub returns to a stranger. The safe reading
+is that edit history is as public as the issue it belongs to — which is what the decision above was
+taken against — but *"anyone can read it"* is an assumption and *"it is still stored and served"* is
+the measurement. Anyone re-pricing this decision should re-measure that from an unprivileged account
+rather than inherit this sentence.
+
+There is an asymmetry inside that, and it decides what the third option could ever have bought: a
+**comment** can be deleted outright, and a **body** can only be edited. Five of the thirteen carry
+their identifiers in the body (#241, #247, #262, #279, #293), so for those, nothing short of deleting
+the whole issue removes anything at all.
+
+### Two things that make the exposure smaller than it looks, and one that does not
+
+*Both measured 2026-09-10, and both cut against redacting at all — recorded because a decision whose
+counter-argument is missing reads as unconsidered.*
+
+- **The surname is published by the repository, on purpose.** `LICENSE` line 3 and
+  `docs/license-scope.md` carry it as tracked files. Redacting the household name from four issues
+  does not conceal it and was never going to.
+- **The owner's address is in every commit.** `git log --format='%an <%ae>'` prints it on the whole
+  history of a public repository, and commit author metadata cannot be edited without rewriting
+  history. Redacting it from five issues changes almost nothing about who can find it. *(The command
+  is given rather than its output, and the reason is worth a sentence: the first draft of this bullet
+  quoted the name and address verbatim — into the one surface Decision 2 is about, in the same commit
+  that adds a rule forbidding exactly that. It was caught by grepping the diff, not by a check.
+  See the note below.)*
+
+What is **not** covered by either is the class that motivated the decision: household ids, member ids
+and `auth.users` ids exist nowhere outside the live project and the tracker, and the join between
+them and a real family existed only here. That class is the reason the answer is redact rather than
+accept, and it is worth being clear that it is carrying the decision alone.
+
+None of those ids is a credential — row-level security gates on membership, never on knowing an id
+— so this is a privacy decision and not a security one. Recorded plainly because "identifiers were
+exposed" invites a reader to assume otherwise.
+
+### Can anything enforce this? Partly, and only after the fact
+
+**Yes for detection, never for prevention, and the second half is structural.** GitHub offers no
+write-time hook on an issue or a comment — there is no pre-receive equivalent a repository can
+install — so the earliest anything can fire is after the value is published. The honest claim is *a
+value that lands here is found*, never *a value cannot land here*.
+
+[`.github/workflows/tracker-scan.yml`](../.github/workflows/tracker-scan.yml) runs the shape half on
+every event that writes tracker text — the trigger list lives in the workflow and is deliberately
+not copied here, since copying it is how one wrong word landed in three files. **There is no
+schedule**: `gate.test.js`’s `#98 AC 5` refuses `schedule:`/`cron:` under `.github/workflows` with no
+exemption, and the daily run was weighed at the owner’s gate and dropped rather than putting the
+first door into that guard. `main()` is event-blind and re-paginates the whole tracker on any
+trigger, so what the schedule would have bought is a bounded-latency guarantee, not coverage. It
+needs no secret and
+fails the run on a finding. **It prints item numbers and match classes only**: this repository is
+public, so its Actions logs are public, and a check that printed the identifier it caught would
+publish it a second time on a surface with no edit history to redact. `assertReportCarriesNoValues`
+holds that mechanically rather than by care.
+
+The **term half does not run in CI**, and that is a decision rather than a limitation. Its search
+terms are the live household names and member addresses; putting them into an Actions secret to
+detect their publication would create a third home for values Decision 2 spends an entire guard
+keeping out of version control. It runs locally with `--names-file`, and the script states which
+halves ran on every invocation — a run that quietly skipped the term half and reported clean would be
+the failure this whole section is about.
+
+So: the shape half is enforced, the term half is a convention with a local instrument, and neither is
+preventive. What a story may record in the first place is in
+[`docs/access-model.md`](access-model.md) under *What a story may record about the live project* —
+linked rather than copied, so there is one copy to correct.
+
+#### The gap found by walking into it, and what closed it: `docs/` is inside the guard now
+
+This subsection recorded an open gap until #409 closed it on 2026-09-10. What follows is what was
+decided, and the estimate that turned out to be wrong is kept rather than quietly dropped, because it
+is the reason the work was deferred at all.
+
+**How it was found.** A first draft of the bullet above quoted the owner's real name and address
+verbatim, three paragraphs after this record says *"the values are deliberately not repeated here"*,
+and in the same commit as a new rule forbidding it. Nothing went red — `README.md` and `docs/*.md`
+were in no corpus, so the document that *records* Decision 2 was covered by it as a convention and by
+no check. It was caught by grepping the diff, which is a thing a person has to remember to do.
+
+**The estimate that deferred it was wrong by two orders of magnitude, and that is the finding worth
+carrying.** #328 predicted a flood — the docs quote fixture names and `PLACEHOLDER_NAMES` entries by
+the hundred, and this repository already records #170, where a source-text corpus widened from 2
+files to 47 produced 118 findings and not one was a defect. *Measured 2026-09-10 with the real guard,
+before anything was changed*: **15 files, 4 shape findings, 0 position findings.** All four were
+declared, and **not one was a person or a household** — a rebalance scenario name, a button label, a
+value inside a quoted third-party API response, and a product name from press coverage. The estimate
+was expensive and the measurement cost one run.
+
+**Why it was so small, which is the same reason it was not sufficient.** Both of Decision 2's literal
+scans match *straight-quoted* strings, and prose does not quote that way. *Measured on a five-case
+probe planted in `docs/`*: a name in bare prose, a name in typographic quotes, and a name in
+backticks were **all missed**; only the two straight-quoted cases were caught. The bare-prose case is
+the shape the incident above actually took. So widening the corpus alone would have given `docs/` a
+check that could not catch the defect it was written for, while reading as coverage.
+
+**So the documents are covered by two rules, not one:**
+
+| rule | catches | blind to |
+|---|---|---|
+| The **literal scans** above, corpus widened to `README.md` and `docs/*.md` | a fixture-style quoted literal pasted into a document | anything not in straight quotes, which is most of prose |
+| A **prose scan** — `classify` from [`scripts/scan-tracker.mjs`](../scripts/scan-tracker.mjs), the #328 tracker matcher, reading the same files for UUID- and address-shaped strings | the *address* half of the incident above, and any live row id | a real name in a sentence |
+
+The prose scan is reused rather than reimplemented: a second copy of a matcher is a second thing to
+correct, and that one already carries its placeholder-domain list, its nil-UUID skip and its
+attachment-URL exclusion, each with a measured reason. Markdown is stripped of **nothing** before
+either scan — comment-stripping exists because a comment quoting a name is prose *about* a fixture,
+and in a document every line is prose, so stripping could only ever hide a name.
+
+**What no check here reaches, stated plainly.** A real household or member **name written in bare
+prose**. No shape distinguishes it from any other capitalised phrase, and a matcher for that would
+flag every proper noun in every document — #170's flood, arriving for a reason nobody could triage
+away. This is Decision 2's founding argument unchanged: no check can recognise a name it has not been
+shown. That case belongs to `npm run scan:tracker -- --names-file <path>`, whose term half searches
+for the live project's actual names and is deliberately local, and to a human reading the diff. The
+pair narrows the gap; it does not close it, and a reader should not take a green suite as saying
+otherwise.
+
+One exemption exists, declared in band with its reason and asserted still needed the way `NOT_NAMES`
+entries are: a UUID that trails a Claude artifact URL names an artifact rather than a row here. It is
+keyed on the URL **prefix** rather than on the id, so it stays true for the next such link — and so
+that the file whose subject is keeping identifiers out of documents does not itself carry one.
+
+**Revisit when** the repository's visibility changes again in either direction; when GitHub gains a
+write-time hook on issue content, which would move the term half from convention to gate; or when a
+household organised by somebody who is not the owner appears on the live project, at which point
+*accept and leave* stops being available as an option for anything.
+
+---
+
 ## What this record does not decide
 
 - **Row-level security.** #5's AC 6, `docs/access-model.md`. One criterion with two owners is one
@@ -617,5 +891,5 @@ happened:
 | Decision 2 | **none, deliberately.** Its enforcement is executable and reddens on its own in CI, so it needs no date-based trigger; the two things that would change it — a name being added to the vocabulary, or the corpus being narrowed — are both diffs a reader sees. Stated rather than left blank, so an empty cell is not read as an oversight |
 | Decision 3, control 3 | a third scope; anything proposing to STORE a field the `calendar-events` response carries (re-read at #101's pickup, 2026-09-08 — the widening itself is settled there) |
 | Decision 3, control 5 | visibility changing again, in either direction; or a check gaining the ability to read the tracker |
-| Decision 3, control 6 | a client-role grant proposed on `calendar_tokens`; a second provider; a credential of that class stored any other way |
+| Decision 3, control 6 | a client-role grant proposed on `calendar_tokens`; a second provider; a credential of that class stored any other way — **the third fired at #171 (2026-09-10) and was answered by storing a DIGEST, so the control now has a second referent; see control 6's own *Re-read 2026-09-10* under Decision 3** |
 | Decision 4 | a second invitation channel; household names ceasing to be family names; anything added to a pre-redemption surface |

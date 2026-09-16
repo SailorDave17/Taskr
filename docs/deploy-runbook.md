@@ -21,6 +21,16 @@ wrong.
 
 ## 1. Vercel — the front end
 
+**The purge cron (#430).** `vercel.json` declares one daily cron that calls `api/purge.js`, which
+calls the `purge-deleted-households` Edge Function (section 3). Crons run **only on the production
+deployment**, which builds from `release`. Set three **Production** environment variables:
+`CRON_SECRET` (at least 16 characters, letters and digits only; Vercel sends it as a Bearer
+header), `PURGE_FUNCTION_URL` (`https://<project-ref>.supabase.co/functions/v1/purge-deleted-households`)
+and `PURGE_SHARED_SECRET` (the same value as the Supabase function secret). Check **Settings →
+Functions → Fluid compute** is on: a project created before 2025-04-23 without it caps functions at
+60s. Vercel keeps Hobby logs for an hour and never retries a failed cron, so read the purge's own
+record in the SQL editor: `select * from public.household_purge_runs order by ran_at desc limit 7;`
+
 1. Sign in at [vercel.com](https://vercel.com) with the GitHub account that owns `SailorDave17/Taskr`.
    Hobby plan; no card required.
 2. **Add New → Project**, import `SailorDave17/Taskr`. Private repos are supported on Hobby. (Repos
@@ -242,6 +252,100 @@ persists anything.
    pass a value for still falls back to `Site URL`.
 6. Free projects **pause after 1 week of inactivity**. See `docs/hosting-decision.md` for what that
    does to scheduled instantiation in #11.
+7. **The invitation email — #341.** Adding a member no longer sets a credential; it sends them an
+   invitation they choose their own password from, and a member who already has a sign-in can be sent
+   a reset link the same way. Three facts about the mail path, all read off the live project rather
+   than off Supabase's documentation, because every one of them is a project setting whose default is
+   not necessarily what this project holds.
+
+   - **The template is *Invite user***, under Authentication → Email Templates. That is the one
+     `auth.admin.inviteUserByEmail` sends, and it is a **different template from *Confirm signup***
+     (#129's) — editing one does not touch the other. The reset link uses **Reset password**. Nothing
+     needs changing for the path to work; this is here so an edit lands on the right one.
+     **Since #191 (2026-09-11) the function passes the name the organizer typed as
+     `invited_as` in the invitation's `data`**, so the template MAY read it as
+     `{{ .Data.invited_as }}` ("*{{ .Data.invited_as }}, you have been added to a household on
+     Taskr*"). That edit is yours — #191 AC 1's "personalised with the typed name" is delivered up
+     to the template's edge and no further, because a template is dashboard state no session can
+     write. **Done 2026-09-15, once custom SMTP was attached (next bullet)** — the template's subject
+     is *You've been invited to a household on Taskr* and its body reads
+     `{{ if .Data.invited_as }}Hi {{ .Data.invited_as }}, someone{{ else }}Someone{{ end }} has added
+     you to their household on Taskr…`, guarded so an invitation carrying no name still reads as a
+     sentence, plus the one-hour-link line from the measured `mailer_otp_exp` below. *Measured*: a
+     real invite from the test household to a plus-alias arrived in the inbox from *Taskr* at the
+     no-reply address on `taskr.madcowhq.com`, reading *Hi Pat Tester, someone has added you…*, DKIM
+     pass on `taskr.madcowhq.com`, SPF pass. Read the saved template back with
+     `GET /v1/projects/{ref}/config/auth` (`mailer_subjects_invite`, `mailer_templates_invite_content`)
+     rather than trusting the editor. **Before SMTP, this edit was locked on this project.** *Read 2026-09-15*
+     off Supabase's changelog (*Changes to Email Template Customisation on Free Tier*, 2026-06-03):
+     a free-tier project **created on or after 2026-06-03** that sends through Supabase's default
+     mailer cannot edit its auth email templates; projects created before that date were
+     grandfathered, paid plans are unaffected, and **a free-tier project with its own SMTP provider
+     configured can edit them freely**. This project was created 2026-08-05 on the free plan with
+     `smtp_host` unset, so it is on the locked side. *(This paragraph called the edit "optional"
+     from 2026-09-11 to 2026-09-15, while it was in fact unreachable — the restriction is stated in
+     the changelog and nowhere this repo had read, which is why it went unnoticed across two
+     sessions that named it as the one remaining step. What the dashboard shows for a locked
+     template has not been looked at here.)* The value lands in `auth.users.raw_user_meta_data` **when the invite creates
+     the account**; a re-invite of a PENDING address (invited by another household, never accepted)
+     returns the same user unchanged, so that email renders the FIRST household's typed name
+     (GoTrue applies `data` on its create branch only — read off `internal/api/invite.go`, not
+     measured here). The app never reads it back, and the person names themselves on the password
+     screen.
+   - **The redirect lands on the app root**, because `provision-member` is passed the origin the
+     organizer was on, by the same `confirmationRedirectTo` rule as step 5. **Nothing to add to
+     `Redirect URLs`** — the production origin and `http://localhost:5173` are already there, and the
+     invitation link needs no path of its own. That is the whole reason this path does not need
+     #175's router.
+   - **The built-in mailer allows TWO emails per hour, and that is not enough for a household.**
+     *Measured 2026-09-09* against this project via the Management API
+     (`GET /v1/projects/{ref}/config/auth`): `rate_limit_email_sent = 2`, with `smtp_host` unset —
+     so the built-in service, not custom SMTP. A household of four cannot be invited in one sitting:
+     the third send is refused, and the app says the sign-in was not created and to try later
+     (#341 AC 4), which is honest but is a wall the organizer meets on their first afternoon.
+
+     **So custom SMTP is the owner's next step**, and it is a decision rather than a task: the limit
+     is raisable only by attaching your own sender under Authentication → SMTP Settings. Filed as a
+     finding rather than actioned here — it needs a mail provider and a domain, neither of which is
+     a code change.
+
+     **Decided 2026-09-15: custom SMTP is the route**, chosen over upgrading to Pro. It pays for two
+     things at once — it lifts the two-per-hour limit AND unlocks the *Invite user* template edit
+     that #191 AC 1 waits on (the previous bullet), where Pro would unlock the template and leave
+     the limit in place. Rejected for now: closing #191 with AC 1 externally gated, because the
+     personalisation waits on SMTP for the rate-limit reason anyway.
+
+     **Attached the same day, session-driven through the dashboards.** The sender name is *Taskr*
+     and the address is the no-reply local part on `taskr.madcowhq.com` — a Taskr subdomain of
+     madcowhq.com (owner's choice over madcowsailing.com), the same per-app-subdomain shape tender
+     uses, so its DKIM and SPF bind that subdomain alone. The address itself is deliberately not
+     written here: `gate.test.js`'s #409 block refuses an address-shaped string in `docs/`, and
+     it is one API read away (`smtp_admin_email`). What holds it up, in the order it was built:
+     - **Resend**: domain `taskr.madcowhq.com`, region us-east-1, verified within two minutes of its
+       records landing. The records went in through Resend's *Cloudflare Auto configure* button —
+       a one-time Domain Connect authorisation at `dash.cloudflare.com` that writes exactly three
+       records into the `madcowhq.com` zone (`send.taskr` and `rsend.taskr` CNAMEs to
+       `*.forge.rmta.net`, `resend._domainkey.taskr` TXT) and grants Resend nothing afterwards.
+       An API key `taskr-supabase-auth-smtp`, **sending access only**; it could not be scoped to
+       the domain at creation because Resend offers only *verified* domains in that picker and the
+       domain was still pending, so it is scoped to all domains on the account.
+     - **Supabase**, Authentication → SMTP Settings: host `smtp.resend.com`, port `465`, username
+       `resend`, password = that API key (Resend's contract, not a per-user secret). Saving it made
+       Supabase raise `rate_limit_email_sent` from **2 to 30 an hour on its own** — *measured* off
+       the same Management API call the paragraph above used — so the household-of-four wall is
+       gone without a separate rate-limit edit. `smtp_max_frequency` stayed at 60 s per address.
+     - Nothing in `Redirect URLs` changed. One reading from the test send: the function was passed
+       `https://taskr-khaki.vercel.app` as `redirectTo` and the link that arrived carried
+       `redirect_to=https://taskr.madcowhq.com` — GoTrue substitutes `Site URL` for a redirect not
+       on the allow-list, silently. The custom domain is the origin the app is served from, so this
+       is the right link; it is recorded because a session passing the `*.vercel.app` alias will
+       get the same substitution and should not read it as a bug in the function.
+
+   **One more measured figure, because it changes what the organizer should say:**
+   `mailer_otp_exp = 3600` — **an invitation link is good for one hour**. An organizer who sends
+   invitations on Sunday for people who open their mail on Monday has sent nothing that works, and
+   the recipient sees the expired-link sentence rather than a password screen. Re-sending is the
+   repair and costs one of the two hourly sends.
 
 ## 3. The Edge Functions
 
@@ -251,6 +355,30 @@ for part of 2026-09-08, "four since #208" before that, and
 "three since #96" until 2026-09-07 — the count lives in
 `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
+
+**And one server-only function since #430: `purge-deleted-households`.** It is listed in
+`SERVER_ONLY_FUNCTIONS`, not `FUNCTION_NAMES`, because the app never invokes it; the same bare
+`npm run deploy:function` deploys it, adding `--no-verify-jwt`, since its caller is Vercel's cron,
+which holds no session. It refuses every call without its own secret, so set `PURGE_SHARED_SECRET`
+first. The value exists nowhere yet, so make one — letters and digits only, which also suits
+`CRON_SECRET` (make that one separately, the same way) — and set it from the clipboard, as in 3c:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | Set-Clipboard
+$s = Get-Clipboard; npx supabase secrets set PURGE_SHARED_SECRET=$s --project-ref <project ref>
+```
+
+Paste the same value into Vercel's `PURGE_SHARED_SECRET` (section 1) before clearing the clipboard.
+`npx supabase secrets list --project-ref <project ref>` then shows the name with a digest, never the
+value; an empty or unset secret makes the function answer "This function is not configured." and the
+cron log shows it for the hour Vercel keeps it.
+
+**And `leave-household` since #431**, the first function a member (not only the organizer) calls
+about their own membership. It is in `FUNCTION_NAMES`, so the bare `npm run deploy:function` ships
+it, and it needs no secret beyond the three Supabase injects: Google's revocation endpoint takes the
+token alone. Deploy it with `0043` applied. Until then `check:live` reads it NOT DEPLOYED and
+`transfer_household` red, both excused in the README.
+
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you
@@ -259,8 +387,13 @@ in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy 
 disagree, the script is right.)*
 
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
-and touches nothing here. Until `provision-member` has run, an organizer who tries to give somebody a
-sign-in gets a failure, and nobody but the organizer can sign in at all. Until `calendar-connect` has,
+and touches nothing here. Until `provision-member` has run, an organizer who adds somebody gets the
+row and a failed invitation (the row's *Email an invitation* button is the retry), and nobody but the
+organizer can sign in at all. **#191 (2026-09-11) changed this function without adding one**: its
+`provision` action is gone, so production keeps serving the old code — `provision` included — until
+this step is run again. That is harmless in the meantime (no client calls the action any more, and
+`check:live` probes the function by name, so it reads green either way), but `check:deployed` reads
+`provision-member` STALE from the merge until the redeploy, and the retirement is not live until then. Until `calendar-connect` has,
 the Connect Google Calendar button on the capacity screen fails when it is pressed. Until
 `calendar-busy` has, a connected member's roster row shows a sentence under this week's minutes —
 the function's own refusal, or the SDK's "Failed to send a request to the Edge Function" — and no
@@ -473,7 +606,13 @@ into every function, so a bare "not configured" would send you to check the wron
    The app builds its redirect address from `location.origin`, so whichever host the member opened
    is the one Google is asked about. A host that is not on this list is refused **by Google**, on a
    page naming the address, which is the loud failure worth having.
-4. Copy the two values, and keep them apart — this is the step the build guard exists for:
+4. Copy the two values, and keep them apart — this is the step the build guard exists for.
+   **Store the secret the moment it is created: it cannot be read back.** *Measured 2026-09-16*
+   (#330), the client page says *"Viewing and downloading client secrets is no longer available.
+   If you have lost the secret below, please add a new one."* — it shows only a masked tail and the
+   creation date, and a client holds **at most 2** secrets. The secret has two homes on the Supabase
+   side (the function secrets below and, since #304, the Auth provider in §3b), so a secret not
+   captured at creation can only be replaced, never copied into the second home.
 
    | Value | Looks like | Where it goes |
    |---|---|---|
@@ -521,11 +660,21 @@ to the person pressing Allow.
 
 Since #304 the sign-in screen carries **Continue with Google**, which runs Supabase Auth's own
 Google provider through the app's Supabase client — no second OAuth client, no ID-token exchange,
-nothing new in the bundle. It needs two dashboard steps, both owner-only, and until they are done
-the control sends a person to Supabase, which answers *"Unsupported provider: provider is not
-enabled"* and returns them to the sign-in screen with that sentence. Both steps are tracked as their
-own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330), by
-the same convention as #150.
+nothing new in the bundle. It needs two dashboard steps, both owner-only, and both were tracked as
+their own confirmation story under #257 — [#330](https://github.com/SailorDave17/Taskr/issues/330),
+by the same convention as #150 — **done 2026-09-16**.
+
+**Until they are done, the app hides the control** (since
+[#339](https://github.com/SailorDave17/Taskr/issues/339)): the sign-in screen reads
+`external.google` from the settings endpoint in step 2 once per page, and while it reports `false`
+shows a sentence naming the organizer in the control's place. A failed read keeps the control. What
+pressing it did before #339 is worth knowing, because the earlier wording here was wrong: this
+section said Supabase *"returns them to the sign-in screen with that sentence"*, and that was
+reasoned, not measured. *Measured 2026-09-04*: auth-js navigates straight to
+`/auth/v1/authorize?provider=google`, which answers **`HTTP 400`, `Content-Type:
+application/json`** — `{"code":400,"error_code":"validation_failed","msg":"Unsupported provider:
+provider is not enabled"}` — with no redirect, so the person was left on a raw JSON page with
+nothing but the browser's Back button.
 
 1. **Add Supabase's callback to the OAuth client from step 3** — one more entry under **Authorized
    redirect URIs**, exactly:
@@ -545,7 +694,12 @@ the same convention as #150.
    → "external": { … "google": true … }
    ```
 
-   *Measured 2026-09-04*: `false`.
+   *Measured 2026-09-04*: `false`. *Measured 2026-09-16*, after #330: `true`.
+
+   **The secret has to come from wherever you stored it at creation** — step 4's console will not
+   show it again (see the note there). If it was not stored, add a new secret to the client rather
+   than rotating the one the calendar functions already hold; #330 did exactly that and left the
+   original enabled, so `calendar-connect` and its sibling were untouched.
 3. **Nothing to add to Redirect URLs.** The app passes the origin it is running on as
    `redirectTo` (the same value as `emailRedirectTo`, §2 step 5), so the production origin and the
    dev origin already on the list cover it; a preview origin falls back to Site URL, deliberately.
@@ -557,10 +711,16 @@ the same convention as #150.
   consent-screen branding appears nowhere on it. This is not a misconfiguration and there is
   nothing on the Google side to fix; the only remedy is Supabase's paid Custom Domain, which is out
   of scope for a project chartered at $0.
-- **Testing mode gates sign-in exactly as it gates the calendar.** Only the test users registered
-  in step 2 above get past Google; anyone else is refused at Google with *"The developer hasn't
-  given you access to this app"*. The sign-in screen says who can fix that — the organizer — when
-  the refusal reaches it as `access_denied`.
+- **Testing mode gates the calendar, not sign-in.** The test-user list bites for the calendar's
+  sensitive scopes — an unregistered member is refused by Google with *"The developer hasn't given
+  you access to this app"* (#142). Sign-in asks only for `email profile`, which Google classes as
+  non-sensitive, so **any** Google account can sign in even while the app is in Testing (*measured
+  2026-09-16*, #330: an account not on the one-entry test-user list saw the ordinary consent screen
+  and signed in, landing as a new auth user in the no-household state). If sign-in should be
+  restricted to known people, the roster is what does it — an account matching nobody lands in the
+  no-household state, not inside a household. *This bullet said until 2026-09-16 that Testing mode
+  "gates sign-in exactly as it gates the calendar"; that was reasoned from #142, which measured the
+  calendar's scopes only.*
 - **The flow is implicit, not PKCE** — owner decision 2026-09-04, recorded on #304. The session
   comes back in the URL **fragment** and the client consumes it on boot; the app never exchanges a
   `?code=`. Switching the client to PKCE would switch the confirmation email (§2 step 5) to a
@@ -704,9 +864,67 @@ than against a status code (an auth-walled platform answers `200` from its login
 `<title>Taskr</title>`, `theme-color #1f6f5c`, `/assets/index-*.js`, `manifest.webmanifest` with
 `display: standalone` and all three icons resolving, and `sw.js` served as JavaScript.
 
-One thing that looks like a defect and is not: grepping the main bundle for `serviceWorker` or
-`registerSW` finds **nothing**. Registration is injected by `vite-plugin-pwa` as a separate
-`<script id="vite-plugin-pwa:register-sw" src="/registerSW.js">` tag in `index.html`. Check there.
+Where registration lives changed with #347. **Since #347** the registration is in the main bundle
+(`registerSW` from `virtual:pwa-register`, called by `src/lib/appUpdate.js`, which pulls
+`workbox-window` in with it), and `index.html` carries **no** `vite-plugin-pwa:register-sw` script and
+there is no `registerSW.js`. `src/test/pwaBuild.test.js` builds the app and refuses either. *(Until
+2026-09-13 this paragraph said grepping the bundle for `registerSW` finds nothing because the plugin
+injected a separate one-line `<script id="vite-plugin-pwa:register-sw" src="/registerSW.js">` —
+true of every build before #347, which is why an older build still greps clean.)*
+
+### What a member with the app open sees after a deploy (#347)
+
+**The new build, without doing anything.** The app looks for a new worker when it opens, every time
+it becomes visible again, and every `UPDATE_CHECK_INTERVAL_MS` — **one hour** — while it stays
+open (`src/lib/appUpdate.js`). When one is found:
+
+- **Nothing is being edited** → the page takes the new worker and reloads onto the new build at
+  once. The footer's `build <sha>` changes; that is how to see which build a device runs.
+- **Something typed that is still in its field** → the reload waits until the field is cleared or
+  closed. A save that clears or closes its form releases it; **a submit on its own does not**,
+  because its save may still be in flight or be refused (owner decision at the #347 review). While
+  an update waits on an edit, the page looks again every `DEFERRED_RECHECK_MS` — one second. A
+  select or checkbox counts only inside a form: the form-less ones (a chore's assignee, skip and
+  exclusion pickers, the household switcher) save the moment they change, so there is nothing to
+  protect. Coming back to the app does **not** override an unfinished edit (owner decision,
+  2026-09-13), so nothing typed is lost to an update.
+- **Offline** → the check is skipped rather than queued, and runs again at the next return or
+  interval.
+
+So the longest an idle member waits for a deploy is **one hour**, and in practice it is the next
+time they come back to the app. Two limits, stated: an edit form that keeps its text after a
+successful save holds the update until it is closed; and a second open tab that is mid-edit
+reloads too, because the new worker takes over every tab at once.
+
+**A deploy whose app fails on load is replaced by the next good deploy, or by a rollback, within
+about a minute.** The updater starts before the app and loads separately from it (`src/main.jsx`).
+When the app fails to load, the updater looks for a new build every `RECOVERY_CHECK_INTERVAL_MS` —
+**one minute** — instead of every hour (owner decision, 2026-09-13), because a blank page has
+nothing on it to protect and nobody comes back to it on purpose. So the remedy for a broken
+production deploy is the ordinary one: ship the fix or put the previous deployment back in
+production, and open phones move off the broken build by themselves. *Measured on #347 with the
+recovery check, nothing touched after the good build went up*: a first-visit page left blank by a
+broken build moved to the good one 33.6 s after it was served. A page already on a good build took
+a broken deploy, went blank, and moved to the fix 50.2 s after the fix was served — 61 s after the
+broken page loaded, which is the one-minute tick. *Measured on #347 before that order*: a build that threw on load left the page blank, and two reloads after a good deploy stayed
+blank — only closing every Taskr window recovered it. What is still not covered is a breakage
+inside the updater's own small chunk, and a render-time crash (the app loads, then throws while
+drawing), which falls back to the hourly check.
+
+**Once, on the #347 deploy itself.** A device still running a build from before #347 has none of
+this code, so it cannot pick the new build up by itself. A reload does not move it either: the old
+worker stays in charge and serves the old build until **every** Taskr window on the device is
+closed — on Android, swipe the installed app away from recents and close any Taskr browser tab,
+then open it again. After that one full close, the footer shows the #347 build, and every later
+deploy behaves as described above. It is also why #347's live observation is taken on the deploy
+**after** that one, not on #347's own.
+
+**`registerType: 'autoUpdate'` alone did not deliver this, and re-reading the config will suggest it
+did.** Until #347 the config said `autoUpdate`, and the generated worker did take control of an open
+page — but nothing imported the plugin's client module, so the page went on running the old
+JavaScript until its next navigation, which an installed PWA never makes (measured 2026-09-05; cairn
+note `vite-plugin-pwa-autoupdate-ships-no-reload`). The config is now `registerType: 'prompt'` with
+`injectRegister: false`, and the reasons are in `vite.config.js`.
 
 If iOS ever joins the household, `apple-touch-icon` and `apple-mobile-web-app-*` meta tags are the
 addition needed; they were deliberately left out rather than added speculatively for a platform

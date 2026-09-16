@@ -9,6 +9,7 @@ import { CAPACITY_COLUMNS } from './capacity.js'
 import { CHORE_COLUMNS, REPEAT_EXCEPTION_COLUMNS } from './chores.js'
 import { EXCLUSION_COLUMNS } from './exclusions.js'
 import { MEMBER_COLUMNS } from './household.js'
+import { INVITATION_COLUMNS } from './invitations.js'
 import {
   SHOPPING_ITEM_COLUMNS,
   SHOPPING_LIST_COLUMNS,
@@ -116,6 +117,20 @@ export const LIVE_SCHEMA = Object.freeze([
   // member row — which `grants.pglite.test.js` exercises and this list, being
   // what the client reads, does not.
   Object.freeze({ table: 'calendar_imports', columns: CALENDAR_IMPORT_COLUMNS }),
+  // #172, and the first entry here for a migration that was ALREADY applied when
+  // it arrived. `0040` reached the live project in #171's own session, while
+  // this list deliberately did not name its table — #171 shipped no client code,
+  // and an entry ahead of its reader reddens `liveSchema.test.js` in the "no
+  // entry for a table the app does not read" direction (measured 1 of 54 on
+  // #171's branch). So this entry is expected GREEN on its first run rather than
+  // red-until-pasted, which inverts the reading every entry above records.
+  //
+  // Read by the organizer alone, and the column list is not the table's:
+  // `token_hash` is granted and deliberately not asked for (see
+  // `INVITATION_COLUMNS`). The probe asks exactly what the app asks, so a
+  // project that had revoked that one column would still read green here —
+  // correctly, since nothing the client does would notice.
+  Object.freeze({ table: 'invitations', columns: INVITATION_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -209,6 +224,18 @@ export const LIVE_RPCS = Object.freeze([
     args: Object.freeze({ chore_id: 'uuid', member_id: 'uuid' }),
   }),
   Object.freeze({ fn: 'unassign_chore', args: Object.freeze({ chore_id: 'uuid' }) }),
+  // #430, arriving with `0042` — red on purpose until that file is applied, the
+  // same deliberate window every migration-borne entry here has had. The two
+  // writers answer the read-only GET with `25006` once they resolve (PRESENT);
+  // the status read has no arguments and resolves as a plain read.
+  Object.freeze({ fn: 'request_household_deletion', args: Object.freeze({ household_id: 'uuid' }) }),
+  Object.freeze({ fn: 'restore_household', args: Object.freeze({ household_id: 'uuid' }) }),
+  Object.freeze({ fn: 'household_deletion_status', args: Object.freeze({}) }),
+  // #431 — the organizer hands the household over. `0043`; red until it is applied.
+  Object.freeze({ fn: 'transfer_household', args: Object.freeze({ household_id: 'uuid', to_member_id: 'uuid' }) }),
+  // #458 — who has accepted their invitation. `0045`; red until it is applied,
+  // the same deliberate window. A plain read, so the GET resolves it outright.
+  Object.freeze({ fn: 'member_sign_in_states', args: Object.freeze({ target_household: 'uuid' }) }),
   // #49, arriving with `0018`. It was red on purpose until that file was applied
   // — the same deliberate window every migration-borne entry here has had — and
   // `0018` was applied on 2026-08-27 (#231), so this reads green now.
@@ -293,6 +320,33 @@ export const LIVE_RPCS = Object.freeze([
   // both. Predicted from the bodies, not measured, until the apply.
   Object.freeze({ fn: 'archive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
   Object.freeze({ fn: 'unarchive_shopping_list', args: Object.freeze({ list: 'uuid' }) }),
+  // #173, arriving with its CALL SITE (`invitations.js redeemInvitation`) and
+  // not with its migration: `0040` (#171) created the function and deliberately
+  // left it out of this list, because this list is what the CLIENT calls and
+  // #171 shipped no caller — an entry then reddened the both-directions test
+  // below (*measured 1 of 54* on #171's branch), and a probe for a function
+  // nothing calls reports a missing grant on a project that is entirely
+  // correct. Owner decision at #171's pickup, 2026-09-10; #416 tracked the
+  // obligation. So this is the first RPC entry here to arrive GREEN rather
+  // than red-until-pasted — `0040` was applied on 2026-09-10 — and the reading
+  // on the story's branch is in `docs/access-model.md`'s `0040` entry.
+  //
+  // The read-only GET sends the nil UUID as the `text` placeholder; the body's
+  // first act after the auth check is an unlocked digest lookup that matches
+  // no row, so `authenticated` is answered by the function's own raise
+  // (`P0001`, before any lock or write) and `anon` by `42501` — the two roles
+  // differ, so the row is evidence about the grant (#268's reason). What this
+  // probe CANNOT see is `0041`'s widened normalisation, a body replace with the
+  // same name and argument set: the read-only catalog query in that file's
+  // access-model entry is the instrument for that half (`0028`'s shape).
+  //
+  // The call form is deliberately NOT spelled out in this comment. The test
+  // below scrapes `src/` for RPC call sites with a regex, and a comment quoting
+  // one is indistinguishable from the real thing — *measured on #171's branch*,
+  // an earlier draft of these lines made the scraper report the function as
+  // "called but absent from LIVE_RPCS", which is the exact inverse of the truth
+  // (cairn: a-guard-that-reads-source-must-survive-its-own-docs).
+  Object.freeze({ fn: 'redeem_invitation', args: Object.freeze({ code: 'text' }) }),
 ])
 
 /** The function names alone, for callers that do not need the signatures. */
@@ -514,6 +568,10 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // and neither clears the other. RED on purpose until `npm run
   // deploy:function` ships it.
   'calendar-events',
+  // #431. Invoked by `leaveHousehold` (src/lib/household.js): revokes the
+  // leaver's Google grant, leaves as them, deletes a last-claim sign-in. Reads
+  // NOT DEPLOYED until `npm run deploy:function` ships it.
+  'leave-household',
 ])
 
 /**

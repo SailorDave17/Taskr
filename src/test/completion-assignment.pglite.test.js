@@ -317,7 +317,13 @@ describe('completion sets the holder, run against a real Postgres', () => {
         create role service_role nologin;
         grant usage on schema public, extensions to anon, authenticated, service_role;
         alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-        create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+        -- invited_at and email_confirmed_at since 0045 (#458), which reads both.
+        create table auth.users (
+          id uuid primary key default gen_random_uuid(),
+          email text,
+          invited_at timestamptz,
+          email_confirmed_at timestamptz
+        );
         create or replace function auth.uid() returns uuid language sql stable as $stub$
           select nullif(current_setting('test.uid', true), '')::uuid
         $stub$;

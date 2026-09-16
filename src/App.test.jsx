@@ -28,7 +28,33 @@ const api = {
   addMember: vi.fn(),
   updateMember: vi.fn(),
   removeMember: vi.fn(),
+  // #341 — the three impure halves of the invitation path. `readAuthCallback`
+  // is NOT here: it is pure, it reads the location this file already controls,
+  // and stubbing it would make the ordering test below assert a stub's call
+  // order instead of the app's behaviour.
+  inviteMember: vi.fn(),
+  sendPasswordReset: vi.fn(),
+  setOwnPassword: vi.fn(),
+  // #430 — deleting a household. Defaults that change nothing, so every test
+  // that is not about deletion renders exactly what it did before: nobody has
+  // a household pending deletion.
+  householdDeletionStatus: vi.fn(async () => []),
+  requestHouseholdDeletion: vi.fn(async () => ({})),
+  // #431
+  leaveHousehold: vi.fn(async () => ({ accountDeleted: false, warning: null })),
+  transferHousehold: vi.fn(async () => ({})),
+  restoreHousehold: vi.fn(async () => ({})),
+  // #440 — whether the local session is gone (a null session AND no error),
+  // and the SIGNED_OUT listener. Stubbed: both talk to the auth client.
+  sessionIsGone: vi.fn(),
+  onSignedOut: vi.fn(),
 }
+
+// #440 — the SIGNED_OUT listeners App subscribed, one per mounted instance,
+// so a test can fire the event the way auth-js would; and the unsubscribe each
+// subscription hands back, which a remount's cleanup must call.
+let signedOutListeners = []
+const unsubscribeSignedOut = vi.fn()
 
 // #34. Mocked separately from household.js because it is a separate module, and
 // the pure validators are kept real (importActual below) so a test cannot pass
@@ -190,6 +216,28 @@ vi.mock('./lib/announce.js', async () => {
   return { ...actual, ...announceApi }
 })
 
+// #339 — the provider-switch read. Stubbed because the real one fetches; the
+// default (set in beforeEach) is ON, the live project's answer since #330, so
+// every test that is not about the switch — #304's included — runs exactly as
+// it did before this story.
+const authSettingsApi = {
+  readGoogleSignIn: vi.fn(),
+}
+vi.mock('./lib/authSettings.js', () => authSettingsApi)
+
+// #458 — who has accepted their invitation. Only the READ is stubbed; the pure
+// `signInStateFor` and `nextExpiry` stay real, because the roster calls them
+// and a stub could disagree with them. The default is an empty answer, which
+// reads every claimed fixture as signed in — what those fixtures meant before
+// #458 — so no other test changes.
+const signInStateApi = {
+  listSignInStates: vi.fn(),
+}
+vi.mock('./lib/signInState.js', async () => {
+  const actual = await vi.importActual('./lib/signInState.js')
+  return { ...actual, ...signInStateApi }
+})
+
 vi.mock('./lib/household.js', async () => {
   // findClaimedMember is pure and has its own tests, so the real one is used
   // rather than a stub that could disagree with it.
@@ -274,6 +322,41 @@ vi.mock('./lib/realtime.js', async () => {
   return { ...actual, ...realtimeApi }
 })
 
+// #172 — the three IMPURE invitation functions. `outstandingInvitations`,
+// `normalizeInvitationCode` and the code generator stay REAL for the standing
+// reason: pure, own tests, and the list a person reads should be filtered by the
+// rule the data layer uses. The fakes RECORD THEIR ARGUMENTS (cairn's
+// `a-fake-that-drops-an-argument-makes-two-behaviours-one`): a mint must name
+// the household on screen AND the organizer's own member row in it, and a fake
+// that recorded only the call could not tell that from a mint naming the first
+// household by name or somebody else's row.
+const invitationsApi = {
+  listInvitations: vi.fn(),
+  mintInvitation: vi.fn(),
+  withdrawInvitation: vi.fn(),
+  // #173 — the redeemer's half. Its fake carries the CODE for the argument
+  // reason above: what proves the held code was applied is this being called
+  // with the code that was held, and a fake that only recorded the call could
+  // not tell that from a redemption of whatever was in the field.
+  redeemInvitation: vi.fn(),
+}
+// The redeemable flag ships TRUE since #173 (it was FALSE from #172 until then,
+// so that a promotion between the two stories could not put an unspendable
+// code in front of organizers). A getter, the idiom the `supabase.js` mock uses
+// for `hasSupabaseConfig`: on by default in the shared beforeEach, and the one
+// test about the flag turns it OFF to prove the gate still holds.
+const invitationFlags = { redeemable: true }
+vi.mock('./lib/invitations.js', async () => {
+  const actual = await vi.importActual('./lib/invitations.js')
+  return {
+    ...actual,
+    ...invitationsApi,
+    get INVITATIONS_REDEEMABLE() {
+      return invitationFlags.redeemable
+    },
+  }
+})
+
 const { default: App } = await import('./App.jsx')
 
 // The REAL pure halves, for building #50's expected snapshot the same way
@@ -321,6 +404,10 @@ beforeEach(() => {
   // and the failures read as app bugs rather than as pollution.
   window.localStorage.clear()
   Object.values(api).forEach((fn) => fn.mockReset())
+  authSettingsApi.readGoogleSignIn.mockReset()
+  authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+  signInStateApi.listSignInStates.mockReset()
+  signInStateApi.listSignInStates.mockResolvedValue([])
   Object.values(choresApi).forEach((fn) => fn.mockReset())
   Object.values(capacityApi).forEach((fn) => fn.mockReset())
   Object.values(captureApi).forEach((fn) => fn.mockReset())
@@ -387,11 +474,45 @@ beforeEach(() => {
     session: { user: { id: 'person-a' } },
     needsConfirmation: false,
   })
-  api.signOut.mockResolvedValue(undefined)
+  // #440 — a sign-out ENDS the session, the way auth-js does: the next
+  // `getSession()` finds none. It used to resolve and leave the session in
+  // place, which was harmless while a sign-out re-read the household and is
+  // not now that it remounts the app: the fresh boot asks `currentSession()`,
+  // and a fake that still answers with a session boots the last person back in.
+  api.signOut.mockImplementation(async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+  })
+  // #440 — gone exactly when the fake holds no session, the ordinary answer.
+  // The offline-past-expiry case (a null session AND an error) is set by the
+  // tests about it.
+  api.sessionIsGone.mockImplementation(async () => (await api.currentSession()) == null)
+  signedOutListeners = []
+  api.onSignedOut.mockImplementation((listener) => {
+    signedOutListeners.push(listener)
+    return unsubscribeSignedOut
+  })
+  // #430 — nobody has a household pending deletion unless a test says so.
+  api.householdDeletionStatus.mockResolvedValue([])
+  api.requestHouseholdDeletion.mockResolvedValue({})
+  api.restoreHousehold.mockResolvedValue({})
+  api.leaveHousehold.mockResolvedValue({ accountDeleted: false, warning: null })
+  api.transferHousehold.mockResolvedValue({})
   // #342 — a channel that opens and can be closed, and nothing arrives on it
   // unless a test pushes something through the handlers it recorded.
   realtimeApi.subscribeToHousehold.mockReset()
   realtimeApi.subscribeToHousehold.mockImplementation(() => ({ close: vi.fn() }))
+  // #172 — no invitation outstanding, which is the ordinary state. The mint
+  // hands back a code from the real alphabet so a test reading it off the screen
+  // reads a string the app could actually have produced.
+  Object.values(invitationsApi).forEach((fn) => fn.mockReset())
+  invitationsApi.listInvitations.mockResolvedValue([])
+  invitationsApi.mintInvitation.mockResolvedValue({
+    code: 'k7m3qp4rwn',
+    invitation: { id: 'inv-1', household_id: 'h1' },
+  })
+  invitationsApi.withdrawInvitation.mockResolvedValue(undefined)
+  invitationFlags.redeemable = true
 })
 
 afterEach(() => {
@@ -414,6 +535,55 @@ describe('the shell, unchanged from #4', () => {
     const stamp = screen.getByTestId('build-commit')
     expect(stamp).toBeInTheDocument()
     expect(stamp.textContent.replace(/^build\s+/, '')).not.toBe('')
+  })
+
+  it('offers "Report a problem" above the build stamp, as a message naming the build and the screen (#425)', async () => {
+    await renderApp()
+    const link = screen.getByRole('link', { name: /report a problem/i })
+    const url = new URL(link.getAttribute('href'))
+    expect(url.protocol).toBe('mailto:')
+    const body = url.searchParams.get('body')
+    const stamp = screen.getByTestId('build-commit')
+    expect(body).toContain(`Build: ${stamp.textContent.replace(/^build\s+/, '')}`)
+    // A session and no household: the onboarding screen, and the report says so.
+    expect(body).toContain('Screen: Onboarding screen')
+    // README tells a reader the footer ENDS with the build stamp, so the link
+    // sits above it rather than after it.
+    const footer = stamp.closest('footer')
+    expect(footer.firstElementChild).toBe(link)
+    expect(footer.lastElementChild).toBe(stamp)
+  })
+
+  it('names the tab the person is on, inside a household, and nothing about the household (#425)', async () => {
+    // The fixture of 'when the signed-in person belongs to a household' below.
+    api.listHouseholds.mockResolvedValue([
+      { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' },
+    ])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+    await renderApp('Chores')
+    const body = () =>
+      new URL(screen.getByRole('link', { name: /report a problem/i }).getAttribute('href'))
+        .searchParams.get('body')
+    expect(body()).toContain('Screen: Chores')
+    // The allowlist, proven through the real shell: the household and the
+    // person are on the screen and are not in the message.
+    expect(body()).not.toContain('Placeholder Household')
+    expect(body()).not.toContain('Placeholder One')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Split' })))
+    expect(body()).toContain('Screen: Split')
+  })
+
+  it('offers the same link to somebody signed out, on the sign-in screen (#425)', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    // The sign-in form is what is showing, not the start-or-join screen.
+    expect(screen.getByLabelText(/password or pin/i)).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /report a problem/i })
+    expect(new URL(link.getAttribute('href')).searchParams.get('body')).toContain(
+      'Screen: Onboarding screen',
+    )
   })
 })
 
@@ -1006,6 +1176,392 @@ describe('#160 — identity and organizer within the active household', () => {
     const expectedRow = lastScoped === householdA.id ? 'Placeholder One' : 'Placeholder Three'
     const badge = await screen.findByText(/· you/)
     expect(badge.closest('li')).toHaveTextContent(expectedRow)
+  })
+})
+
+describe('#172 — the invitation card, through App', () => {
+  // `person-a` ORGANISES one household and merely BELONGS to the other — #160's
+  // shape, and AC 6's whole subject: the control must follow the organizer
+  // role in the ACTIVE household, not the person. Reusing #160's names so the
+  // #19 vocabulary needs nothing new.
+  const HOME = {
+    id: 'household-a',
+    name: 'Placeholder Household',
+    organizer_member_id: 'm-a1',
+    timezone: 'America/New_York',
+  }
+  const AWAY = {
+    id: 'household-b',
+    name: 'Placeholder Other Household',
+    organizer_member_id: 'm-b1',
+    timezone: 'America/New_York',
+  }
+  const rosterHome = [
+    { id: 'm-a1', household_id: HOME.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm-a2', household_id: HOME.id, display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' },
+  ]
+  const rosterAway = [
+    { id: 'm-b2', household_id: AWAY.id, display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm-b1', household_id: AWAY.id, display_name: 'Placeholder Other Organizer', weekly_minutes: 200, claimed_by: 'person-b' },
+  ]
+  const invitationRow = (id) => ({
+    id,
+    household_id: HOME.id,
+    created_by_member_id: 'm-a1',
+    created_at: '2026-09-10T19:04:00.000Z',
+    expires_at: '2099-09-17T19:04:00.000Z',
+    withdrawn_at: null,
+    redeemed_at: null,
+    redeemed_by_member_id: null,
+  })
+
+  const switcher = () => screen.getByRole('combobox', { name: /^household$/i })
+  const switchTo = async (id) =>
+    act(async () => void fireEvent.change(switcher(), { target: { value: id } }))
+  const click = async (element) => act(async () => void fireEvent.click(element))
+
+  beforeEach(() => {
+    api.listMembers.mockImplementation(async (id) =>
+      id === HOME.id ? rosterHome : id === AWAY.id ? rosterAway : [],
+    )
+    invitationsApi.mintInvitation.mockResolvedValue({
+      code: 'k7m3qp4rwn',
+      invitation: { id: 'inv-1', household_id: HOME.id },
+    })
+  })
+
+  it('AC 1 / AC 3 — reads the organizer’s invitations for the household on screen, and offers the card', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-9')])
+    await renderApp('Who')
+
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(invitationsApi.listInvitations).toHaveBeenCalledWith(HOME.id)
+    expect(screen.getByTestId('invitation-inv-9')).toBeInTheDocument()
+  })
+
+  it('AC 5 — a plain member of the active household gets no card, and App never asks for the rows', async () => {
+    api.listHouseholds.mockResolvedValue([AWAY])
+    await renderApp('Who')
+    // The identity RESOLVED — they are somebody here — so the absence below is
+    // "not the organizer" and not "nobody", which is a different state.
+    const badge = await screen.findByText(/· you/)
+    expect(badge.closest('li')).toHaveTextContent('Placeholder Three')
+
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+    // The read is not made at all. The policy would answer it with nothing, so
+    // this is the round trip #351 priced, not the guard — the guard is proven
+    // in invitationMint.pglite.test.js through the exact statement.
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalled()
+  })
+
+  it('AC 6 — the card follows the organizer role in the ACTIVE household, not the person', async () => {
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+
+    await switchTo(AWAY.id)
+    // Same person, same session — and in the household they merely belong to,
+    // no card and no read on its behalf.
+    await waitFor(() => expect(api.listMembers).toHaveBeenCalledWith(AWAY.id))
+    await waitFor(() => expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument())
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalledWith(AWAY.id)
+
+    await switchTo(HOME.id)
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+  })
+
+  it('AC 2 — minting names the household on screen and the organizer’s own row in it, then shows the code', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    // The ARGUMENTS, not the call: a mint naming the first household by name, or
+    // somebody else's member row, is the fault #159 measured on `addMember`.
+    expect(invitationsApi.mintInvitation).toHaveBeenCalledWith({
+      householdId: HOME.id,
+      createdByMemberId: 'm-a1',
+    })
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+    // Both are on screen once the mint has settled. That is ALL this pair can
+    // see: `act` has flushed the re-read and the set before either assertion
+    // runs, so the order between them is the next test's (#420 — this comment
+    // used to claim the ordering, and the mutation that set the code a round
+    // trip early left this test green).
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('#420 — the code waits for the re-read: nothing is shown until its row has been read back', async () => {
+    // The ORDER `handleMintInvitation` states — the code is set after its own
+    // re-read — observed from inside the window rather than after it. The
+    // refresh reconciles the shown code against the rows it just read and
+    // clears one whose row is missing, so a code set a round trip early is
+    // wiped by the very re-read that would have carried its row. Three
+    // sibling tests here redden on that only because their fixtures never
+    // return the row; this one holds the list read open and looks.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    let release = null
+    invitationsApi.listInvitations.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    // The mint has committed and the refresh is parked on the invitation read.
+    await waitFor(() => expect(invitationsApi.mintInvitation).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(release).not.toBeNull())
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+
+    await act(async () => release([invitationRow('inv-1')]))
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+    expect(screen.getByTestId('invitation-inv-1')).toBeInTheDocument()
+  })
+
+  it('AC 2 — a refused mint shows the refusal and no code', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+
+    invitationsApi.mintInvitation.mockRejectedValue(new Error('creating the invitation: permission denied'))
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission denied/i)
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — withdrawing the invitation whose code is on screen takes the code away with it', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    invitationsApi.listInvitations.mockResolvedValue([])
+    const item = screen.getByTestId('invitation-inv-1')
+    await click(within(item).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(item).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-1')
+    // A withdrawn code is dead; leaving it on screen would invite somebody to
+    // read out a code the server now refuses.
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('invitation-inv-1')).not.toBeInTheDocument()
+  })
+
+  it('AC 4 — withdrawing a DIFFERENT invitation leaves the shown code where it is', async () => {
+    // The other direction of the same condition. Without it, a version that
+    // cleared the code on ANY withdrawal would pass the test above.
+    api.listHouseholds.mockResolvedValue([HOME])
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-2')])
+    await renderApp('Who')
+    await screen.findByTestId('invitation-inv-2')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1'), invitationRow('inv-2')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    const older = screen.getByTestId('invitation-inv-2')
+    await click(within(older).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(older).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-2')
+    await waitFor(() => expect(screen.queryByTestId('invitation-inv-2')).not.toBeInTheDocument())
+    expect(screen.getByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+  })
+
+  it('AC 2 — a code minted for one household does not survive a switch, even back to it', async () => {
+    // "Even back to it" is the discriminating half. Leaving the other household
+    // hides the card by the ROLE gate whatever the state holds, so only coming
+    // back shows whether the code was CLEARED or merely out of sight.
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument())
+    await switchTo(HOME.id)
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('AC 2 — the code can be hidden once it has been passed on', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    // Create is hidden while the code is up (design-bar re-measure), so the
+    // only route to a second code runs through this button.
+    expect(screen.queryByRole('button', { name: /create an invitation code/i })).not.toBeInTheDocument()
+    await click(screen.getByRole('button', { name: /hide the code/i }))
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create an invitation code/i })).toBeInTheDocument()
+  })
+
+  it('AC 2 — the shown code does not survive signing out and back in on the same device', async () => {
+    // #165 AC 7's reason: on a shared tablet the next person to sign in must
+    // not find somebody else's invitation code on their screen. The harder case
+    // is the one tested — the SAME organizer back into the SAME household — so
+    // the role gate would show the card again either way, and only a CLEARED
+    // code is absent rather than merely out of sight while signed out.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    api.signOut.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue(null)
+      api.currentUserId.mockResolvedValue(null)
+      api.listHouseholds.mockResolvedValue([])
+    })
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      api.listHouseholds.mockResolvedValue([HOME])
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // #440 — a sign-out remounts the app, so signing back in opens on the
+    // default tab the way a fresh boot does, not on the tab the last session
+    // was showing. Walk to the card.
+    await click(await screen.findByRole('button', { name: 'Who' }))
+    expect(await screen.findByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument()
+  })
+
+  it('the flag — no card and no read while an invitation cannot yet be redeemed', async () => {
+    // Owner decision at the review escalation, 2026-09-10: the card is wired
+    // only while this is true. It WAS false from #172 until #173 shipped
+    // redemption, so a promotion of develop between them could not put an
+    // unspendable code in front of real organizers; the gate stays as the
+    // record of that coupling, and this test forces it off to prove it holds.
+    invitationFlags.redeemable = false
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    // Positive control: this person IS the organizer here (the note is
+    // organizer-only), so the absence below is the flag's and not the role's.
+    expect(await screen.findByTestId('provisioning-note')).toBeInTheDocument()
+    expect(screen.queryByTestId('invitations-card')).not.toBeInTheDocument()
+    expect(invitationsApi.listInvitations).not.toHaveBeenCalled()
+  })
+
+  it('review — a mint that commits but whose re-read fails still shows the code', async () => {
+    // review-fanout's headline, three lenses: the code used to be read off
+    // `mutate`'s return, which a failed re-read never produces, so the only
+    // copy was thrown away while its row stayed live.
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    let committed = false
+    invitationsApi.mintInvitation.mockImplementation(async () => {
+      committed = true
+      return { code: 'k7m3qp4rwn', invitation: { id: 'inv-1', household_id: HOME.id } }
+    })
+    api.listMembers.mockImplementation(async (id) => {
+      if (committed) throw new Error('loading the roster: the network went away')
+      return id === HOME.id ? rosterHome : []
+    })
+
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+
+    expect(await screen.findByTestId('minted-code-value')).toHaveTextContent('k7m3qp4rwn')
+    // Beside the read's error, which is the honest pair: the code worked, the
+    // re-read did not.
+    expect(screen.getByRole('alert')).toHaveTextContent(/network went away/i)
+  })
+
+  it('review — a withdrawal that commits but whose re-read fails still takes the code away', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    let withdrawn = false
+    invitationsApi.withdrawInvitation.mockImplementation(async () => {
+      withdrawn = true
+    })
+    api.listMembers.mockImplementation(async (id) => {
+      if (withdrawn) throw new Error('loading the roster: the network went away')
+      return id === HOME.id ? rosterHome : []
+    })
+    const item = screen.getByTestId('invitation-inv-1')
+    await click(within(item).getByRole('button', { name: /withdraw the code created/i }))
+    await click(within(item).getByRole('button', { name: /withdraw this code\?/i }))
+
+    expect(invitationsApi.withdrawInvitation).toHaveBeenCalledWith('inv-1')
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent(/network went away/i)
+  })
+
+  it('review — a code withdrawn from another device leaves this screen on the next refresh', async () => {
+    api.listHouseholds.mockResolvedValue([HOME])
+    await renderApp('Who')
+    await screen.findByTestId('invitations-card')
+    invitationsApi.listInvitations.mockResolvedValue([invitationRow('inv-1')])
+    await click(screen.getByRole('button', { name: /create an invitation code/i }))
+    await screen.findByTestId('minted-code-value')
+
+    // The organizer's tablet withdrew it; this phone learns on its next read.
+    invitationsApi.listInvitations.mockResolvedValue([])
+    const roster = screen.getByRole('region', { name: /who is in the household/i })
+    await click(within(roster).getByRole('button', { name: /^refresh$/i }))
+
+    await waitFor(() => expect(screen.queryByTestId('minted-code')).not.toBeInTheDocument())
+    // Nothing on THIS device withdrew anything.
+    expect(invitationsApi.withdrawInvitation).not.toHaveBeenCalled()
+  })
+
+  it('review — switching between two households you organise never shows the first one’s codes under the second', async () => {
+    const OTHER = {
+      id: 'household-c',
+      name: 'Placeholder Other Household',
+      organizer_member_id: 'm-c1',
+      timezone: 'America/New_York',
+    }
+    const rosterOther = [
+      { id: 'm-c1', household_id: OTHER.id, display_name: 'Placeholder One', weekly_minutes: 90, claimed_by: 'person-a' },
+      { id: 'm-c2', household_id: OTHER.id, display_name: 'Placeholder Two', weekly_minutes: 30, claimed_by: null },
+    ]
+    api.listHouseholds.mockResolvedValue([HOME, OTHER])
+    api.listMembers.mockImplementation(async (id) =>
+      id === HOME.id ? rosterHome : id === OTHER.id ? rosterOther : [],
+    )
+    // OTHER's invitation read never settles — the window the finding is about,
+    // held open so the test can look inside it.
+    invitationsApi.listInvitations.mockImplementation((id) =>
+      id === HOME.id ? Promise.resolve([invitationRow('inv-9')]) : new Promise(() => {}),
+    )
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitation-inv-9')).toBeInTheDocument()
+
+    await switchTo(OTHER.id)
+    await waitFor(() => expect(invitationsApi.listInvitations).toHaveBeenCalledWith(OTHER.id))
+
+    // OTHER's card, because this person organises OTHER too — and none of
+    // HOME's codes under it.
+    expect(screen.getByTestId('invitations-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('invitation-inv-9')).not.toBeInTheDocument()
   })
 })
 
@@ -2361,6 +2917,82 @@ describe('capacity — this week, set by hand (#46)', () => {
     expect(screen.getByTestId('split-m1')).toHaveTextContent('300 min left')
   })
 
+  // -------------------------------------------------------------------------
+  // #471 — the split's done minutes are THIS WEEK's, not the household's
+  // whole history.
+  //
+  // At the App level rather than in Split.test.jsx, because the week filter
+  // lives where the period and the zone live: App hands the split
+  // `choresInWeek(chores, …)` and the component draws what it is given. A
+  // component test could only prove the component sums what it is handed —
+  // which it did, correctly, for three weeks while the owner's phone read
+  // 1045 min done against 150 this week. The dates are relative to NOW for the
+  // same reason `overrideThisWeek` refuses a literal: the period is computed
+  // from today.
+  // -------------------------------------------------------------------------
+
+  const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString()
+
+  it('#471: a completion from an earlier capacity week contributes nothing to the split', async () => {
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      // Still to do — counts as open whatever its due date.
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done this week — the only completion the bar may count.
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      // Done two weeks ago — history. Before #471 this was "done" every week
+      // for ever, and its 200 min is what turns "50 of 300" into "250 of 300".
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    const row = screen.getByTestId('split-m1')
+    expect(row).toHaveTextContent('30 min done')
+    expect(row).toHaveTextContent('20 min still to do')
+    expect(row).toHaveTextContent('50 of 300 min')
+    expect(row, 'the lifetime sum must not reach the bar').not.toHaveTextContent('230 min done')
+  })
+
+  it('#471: the seen-marker snapshot is the split this member was shown — this week only', async () => {
+    // The announcement compares what a member last saw with what they see
+    // now (#50). Both must be built from the same week-scoped list, or a
+    // completion from July would sit in the snapshot for ever and every
+    // "since you last looked" delta would carry it.
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    ])
+    capacityApi.listCapacity.mockResolvedValue([])
+    announceApi.readSplitSeen.mockResolvedValue(null)
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-now', title: 'Placeholder Other Chore', expected_minutes: 30, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(14), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+
+    expect(announceApi.writeSplitSeen).toHaveBeenCalledWith({
+      memberId: 'm1',
+      snapshot: { members: [{ id: 'm1', minutes: 50, capacityMinutes: 300 }] },
+      seenRebalanceAt: null,
+    })
+  })
+
+  it('#471 POSITIVE CONTROL: the same completion dated THIS week is counted', async () => {
+    // Without this, the assertion above passes identically if completions
+    // stopped counting altogether — the opposite defect, and #47 criterion 7's
+    // own test only covers the component.
+    capacityApi.listCapacity.mockResolvedValue([])
+    choresApi.listChores.mockResolvedValue([
+      { id: 'c-open', title: 'Placeholder Chore', expected_minutes: 20, due_on: '2026-08-10', completed_at: null, missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+      { id: 'c-then', title: 'Placeholder Done Chore', expected_minutes: 200, due_on: null, completed_at: daysAgo(0), missed_at: null, assigned_member_id: 'm1', actual_minutes: null },
+    ])
+    await renderApp()
+    await screen.findByRole('region', { name: /the split/i })
+    expect(screen.getByTestId('split-m1')).toHaveTextContent('200 min done')
+  })
+
   it('AC 6: POSITIVE CONTROL — the import scan sees the imports that are there', () => {
     // Without this the assertion above passes identically if the regex stops
     // matching, which is how an empty result reads as a clean bill of health.
@@ -3046,8 +3678,9 @@ describe('connecting a calendar (#95)', () => {
       // an account the organizer has not registered is refused by Google; the
       // sentence says who can fix that and does not blame a password nobody
       // typed. The SHAPE here is GoTrue's documented one, not a measured
-      // refusal — the provider is not enabled on the live project yet, so the
-      // live half of AC 5 is the confirmation story's.
+      // refusal — the provider was not enabled on the live project when this
+      // was written, so the live half of AC 5 was left to the confirmation
+      // story (#330, done 2026-09-16).
       api.currentSession.mockResolvedValue(null)
       atUrl('', '#error=access_denied&error_description=The+user+denied+access')
       await renderApp()
@@ -3088,6 +3721,77 @@ describe('connecting a calendar (#95)', () => {
       expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
       expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('#339 — the sign-in screen reads the provider switch before offering Google', () => {
+  const googleControl = () => screen.queryByRole('button', { name: /continue with google/i })
+
+  beforeEach(() => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+  })
+
+  it('AC 1: switched off → no control, the organizer named, and nothing starts the flow', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(false)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(await screen.findByTestId('google-sign-in-off')).toHaveTextContent(/organizer/i)
+    expect(googleControl()).not.toBeInTheDocument()
+    expect(authSettingsApi.readGoogleSignIn).toHaveBeenCalledTimes(1)
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+  })
+
+  it('AC 2: switched on → the control, and it starts the flow as #304 shipped it', async () => {
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(true)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a failed read keeps the control — sign-in is not refused over a network blip', async () => {
+    // `readGoogleSignIn` answers null for every failure (authSettings.test.js).
+    authSettingsApi.readGoogleSignIn.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(screen.queryByTestId('google-sign-in-off')).not.toBeInTheDocument()
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 1: a press while the read is still in flight waits for it, and does not leave for an off switch', async () => {
+    // The control is on screen while the answer is unknown, so this is the
+    // one press the render gate cannot stop.
+    let answer
+    authSettingsApi.readGoogleSignIn.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+    )
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(googleControl()).toBeInTheDocument()
+
+    await act(async () => void fireEvent.click(googleControl()))
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    await act(async () => answer(false))
+
+    expect(api.signInWithGoogle).not.toHaveBeenCalled()
+    expect(await screen.findByTestId('google-sign-in-off')).toBeInTheDocument()
+    expect(googleControl()).not.toBeInTheDocument()
+    // And the screen is usable afterwards: the press released `busy`.
+    expect(screen.getByRole('button', { name: /start a household/i })).toBeEnabled()
+  })
+
+  it('an unconfigured build asks nothing', async () => {
+    backend.hasSupabaseConfig = false
+    await renderApp()
+    expect(authSettingsApi.readGoogleSignIn).not.toHaveBeenCalled()
   })
 })
 
@@ -6631,5 +7335,2090 @@ describe('#164/#166 — the review fan-out’s three, held in place', () => {
     })
 
     expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(created.id)
+  })
+})
+
+// #191 AC 1 — adding somebody sends their invitation, at the level only App can
+// answer: the roster's Add form calls `onAdd` and then `onInvite` with the id
+// the add returned, and it is App that wires both to the data layer. The
+// component test proves the ORDER and the id on the props; this proves the
+// props reach `addMember` and `inviteMember`, with the household on screen.
+describe('#191 — adding somebody sends their invitation, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+  const organizer = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const NEW_ADDRESS = 'placeholder.three@example.com'
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizer])
+    api.addMember.mockResolvedValue({
+      id: 'm9',
+      display_name: 'Placeholder Three',
+      weekly_minutes: 0,
+      claimed_by: null,
+      email: NEW_ADDRESS,
+    })
+    api.inviteMember.mockResolvedValue({ ok: true, action: 'invite', memberId: 'm9' })
+  })
+
+  const addSomeone = async () => {
+    await renderApp('Who')
+    const form = (await screen.findByRole('button', { name: /add to household/i })).closest('form')
+    fireEvent.change(within(form).getByLabelText(/^name$/i), {
+      target: { value: 'Placeholder Three' },
+    })
+    fireEvent.change(within(form).getByLabelText(/email address/i), {
+      target: { value: NEW_ADDRESS },
+    })
+    await act(
+      async () =>
+        void fireEvent.click(within(form).getByRole('button', { name: /add to household/i })),
+    )
+    return form
+  }
+
+  it('adds with the household on screen, then invites the row the add returned', async () => {
+    await addSomeone()
+
+    expect(api.addMember).toHaveBeenCalledWith({
+      displayName: 'Placeholder Three',
+      weeklyMinutes: 0,
+      email: NEW_ADDRESS,
+      householdId: 'h1',
+    })
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm9' })
+    // The row first, then the invitation FOR that row — never the other way,
+    // and never both at once.
+    expect(api.addMember.mock.invocationCallOrder[0]).toBeLessThan(
+      api.inviteMember.mock.invocationCallOrder[0],
+    )
+    expect(await screen.findByTestId('add-note')).toHaveTextContent(
+      `Invitation sent to ${NEW_ADDRESS}`,
+    )
+  })
+
+  it("a refused send puts the function's sentence on the strip and claims no send", async () => {
+    // The mailer's refusal (#341 AC 4's one fact) reaches the shell through
+    // `mutate`, and the form must not say "sent" beside it. The row exists.
+    api.inviteMember.mockRejectedValueOnce(
+      new Error(
+        `The sign-in was not created and no email was sent to ${NEW_ADDRESS} — ` +
+          'the mail service refused it. Try again in a little while.',
+      ),
+    )
+    await addSomeone()
+
+    expect(api.addMember).toHaveBeenCalledTimes(1)
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm9' })
+    // The function's own sentence reaches the form's alert (design-bar,
+    // 2026-09-12) — asserted INSIDE the form, because the shell's strip carries
+    // it too and a page-wide query would pass with the local one missing.
+    const form = screen.getByRole('button', { name: /add to household/i }).closest('form')
+    expect(await within(form).findByRole('alert')).toHaveTextContent(/no email was sent/i)
+    expect(screen.queryByTestId('add-note')).not.toBeInTheDocument()
+  })
+})
+
+// #458 — the roster's invited state, at the level only App can answer: that
+// the sign-in read names the household on screen, reaches the roster, is taken
+// again after a re-send, and that its failure costs the label and not the tab.
+describe('#458 — an invited member reads as invited, from App', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'UTC',
+    organizer_member_id: 'm1',
+  }
+  const organizer = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+  const invited = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 60,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+  }
+  const SENT = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizer, invited])
+    signInStateApi.listSignInStates.mockResolvedValue([
+      { member_id: 'm1', invited_at: null, confirmed_at: '2026-08-01T00:00:00Z' },
+      { member_id: 'm2', invited_at: SENT, confirmed_at: null },
+    ])
+    api.inviteMember.mockResolvedValue({
+      ok: true,
+      action: 'invite',
+      memberId: 'm2',
+      email: invited.email,
+      resent: true,
+    })
+  })
+
+  it('reads the sign-in states for the household on screen, and the roster shows the invited row', async () => {
+    await renderApp('Who')
+    expect(signInStateApi.listSignInStates).toHaveBeenCalledWith('h1')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Invited .* · not joined yet$/)
+    expect(screen.getByTestId('access-m1')).toHaveTextContent(/^Signed in$/)
+  })
+
+  it('re-sends through inviteMember, then reads the states again', async () => {
+    await renderApp('Who')
+    const before = signInStateApi.listSignInStates.mock.calls.length
+    await act(
+      async () =>
+        void fireEvent.click(await screen.findByRole('button', { name: /their invitation again/i })),
+    )
+    expect(api.inviteMember).toHaveBeenCalledWith({ memberId: 'm2' })
+    expect(api.sendPasswordReset).not.toHaveBeenCalled()
+    expect(signInStateApi.listSignInStates.mock.calls.length).toBeGreaterThan(before)
+    expect(await screen.findByTestId('invite-note-m2')).toHaveTextContent(
+      `Invitation sent again to ${invited.email}.`,
+    )
+  })
+
+  it('a refused sign-in read leaves the roster on screen with the pre-#458 label, and no error', async () => {
+    signInStateApi.listSignInStates.mockRejectedValue(new Error('Could not read who has joined: PGRST202'))
+    await renderApp('Who')
+    expect(await screen.findByTestId('access-m2')).toHaveTextContent(/^Signed in$/)
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    expect(screen.queryByText(/could not read who has joined/i)).not.toBeInTheDocument()
+  })
+})
+
+// #341 — following an invitation, at the level only App can answer.
+//
+// The component test covers what `ChoosePassword` DRAWS. These cover the three
+// things that belong to App and that a component test structurally cannot see:
+// that the fragment is read at all, that it is read EARLY ENOUGH, and that the
+// household shell does not render behind the screen.
+//
+// THE SECOND ONE IS THE WHOLE REASON THIS BLOCK EXISTS, and it needs a word
+// about the fake. `createClient` runs with `detectSessionInUrl` at its default
+// of true, so supabase-js reads the URL once, at construction, and CLEARS the
+// fragment — and `currentSession()` is the call that constructs it. A read
+// placed after that line finds an empty hash, the password screen never appears,
+// and the person lands in the app signed in with no password of their own.
+// Silent, plausible, and indistinguishable from success.
+//
+// A test that merely rendered with a fragment would pass either way here,
+// because `currentSession` is a stub and a stub constructs nothing. So the stub
+// REPRODUCES THE PLATFORM'S BEHAVIOUR: it clears the hash when it is called.
+// That is the difference between asserting the app's ordering and asserting the
+// fake's (cairn's `a-fake-cannot-disagree-with-its-author`).
+describe('#341 — following an invitation, from App', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 120,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+  }
+
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /** A completed auth link: a token in the fragment, and the type that says why. */
+  const TOKEN = 'access_token=t&refresh_token=r&expires_in=3600&token_type=bearer'
+
+  const atFragment = (hash) => {
+    replaceState = vi.fn()
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: 'https://taskr.example.test', pathname: '/', search: '', hash },
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    api.setOwnPassword.mockResolvedValue(undefined)
+    atFragment('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  it('POSITIVE CONTROL: with no fragment the ordinary shell renders', async () => {
+    // Without this, every "the password screen is shown" assertion below passes
+    // just as well against an app that shows it always — and every "the shell is
+    // not rendered" assertion passes against an app that renders nothing at all.
+    await renderApp()
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('shows Choose your password when an invitation link is followed', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose your password/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('choose-password-input')).toBeInTheDocument()
+  })
+
+  it('renders nothing of the household behind it — one screen, one job', async () => {
+    // AC 2 asks for "one field, one button". Asserted as the ABSENCE of the
+    // shell rather than the presence of the field, because the failure this
+    // guards is a household's data rendering to somebody who has not finished
+    // setting up their account — and that failure is invisible to any assertion
+    // about the field.
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    expect(screen.queryByRole('button', { name: 'Who' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Chores' })).not.toBeInTheDocument()
+    expect(screen.queryByText(household.name)).not.toBeInTheDocument()
+  })
+
+  it('reads the fragment BEFORE the client can consume it', async () => {
+    // The hazard, reproduced. See this block's docblock: the stub clears the
+    // hash exactly as supabase-js does at construction, so moving the read below
+    // `currentSession()` makes this test — and only this test — go red.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.currentSession.mockImplementation(async () => {
+      globalThis.location.hash = ''
+      return { user: { id: 'person-a' } }
+    })
+
+    await renderApp()
+    expect(
+      await screen.findByRole('heading', { name: /choose your password/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('strips the token off the URL, so a reload does not replay it', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  /** #191 — an invite arrival asks for a name too, so every submit below types one. */
+  const typeName = (name = 'Placeholder Three') =>
+    fireEvent.change(screen.getByTestId('choose-name-input'), { target: { value: name } })
+
+  it('sets the password and lands them in their household', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    // The screen goes, and what is underneath is their household — not a second
+    // loading pass, because boot loaded it while this screen was up.
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // #191 AC 2 — the recipient names themselves, on the EMAIL path
+  // -------------------------------------------------------------------------
+
+  it('#191 AC 2: writes the name the person chose to THEIR row, after the password', async () => {
+    // The organizer's typed name is on the row when the invitation goes out;
+    // the person's own word replaces it here. Their row is the one the invite
+    // action claimed to this session's user — `me` — and the write goes AFTER
+    // the password, because a password that failed to set strands them and a
+    // name that failed to save does not.
+    atFragment(`#${TOKEN}&type=invite`)
+    // review-fanout on #191: with ONE row in the fixture, `members[0]` passes
+    // this test as well as `findClaimedMember` does. An unclaimed row listed
+    // FIRST is what makes the claimed-by match the only way to reach 'm1'.
+    api.listMembers.mockResolvedValue([
+      { id: 'm0', display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: null, email: null },
+      me,
+    ])
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName(' Placeholder Three ')
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.updateMember).toHaveBeenCalledTimes(1)
+    expect(api.updateMember).toHaveBeenCalledWith('m1', { displayName: 'Placeholder Three' })
+    expect(api.setOwnPassword.mock.invocationCallOrder[0]).toBeLessThan(
+      api.updateMember.mock.invocationCallOrder[0],
+    )
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+  })
+
+  it('#191 AC 2: when no row is theirs, the password is still set and the strip says so', async () => {
+    // The `!mine` branch had no test (review-fanout). The password write is
+    // the thing that lets them back in and goes first regardless; the name is
+    // the recoverable half, and the sentence names where.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.listMembers.mockResolvedValue([])
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your row was not found/i)
+  })
+
+  it('#191 AC 2: the submit waits for the household to load, so the row is there to rename', async () => {
+    // review-fanout on #191: boot renders this screen BEFORE `requestRefresh`
+    // has populated `members`/`userId` (~6–7 s on Slow 4G), and a submit in
+    // that window used to set the password and drop the name. The button is
+    // disabled until the load settles; asserted by holding the household read
+    // open, then releasing it.
+    let release
+    api.listHouseholds.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve([household])
+        }),
+    )
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+    expect(screen.getByRole('button', { name: /set my password/i })).toBeDisabled()
+
+    await act(async () => {
+      release()
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /set my password/i })).toBeEnabled(),
+    )
+  })
+
+  it('#191 AC 2: refuses to submit with no name, before any write', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).not.toHaveBeenCalled()
+    expect(api.updateMember).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/what the household should call you/i)
+  })
+
+  it('#191 AC 2: a refused rename keeps the password set and says so, in the household', async () => {
+    // #173's shape on the code path, repeated here: the person is IN, with the
+    // organizer's word still on their row and a sentence saying how to fix it.
+    // The password write is not undone and the screen is not kept up — both
+    // would be worse than the name being wrong for a minute.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.updateMember.mockRejectedValueOnce(new Error('saving the change: permission denied'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your name could not be saved/i)
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('#191 AC 2: a RECOVERY asks for no name and writes none', async () => {
+    // The other arrival on the same screen: somebody replacing a lost password
+    // already has a name on their row, and asking again would be a second
+    // spelling to keep in step.
+    atFragment(`#${TOKEN}&type=recovery`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose a new password/i })
+
+    expect(screen.queryByTestId('choose-name-input')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /save my password/i })),
+    )
+
+    expect(api.setOwnPassword).toHaveBeenCalledWith('a-good-password')
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('keeps the screen up when the write fails, and says so', async () => {
+    // A password that was not set is a person who cannot sign in again once they
+    // leave. Dismissing the screen on a failure would strand them with no way
+    // back and nothing on screen to say why.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.setOwnPassword.mockRejectedValue(new Error('Could not set that password: nope'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), {
+      target: { value: 'a-good-password' },
+    })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(screen.getByRole('heading', { name: /choose your password/i })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not set that password/i)
+  })
+
+  it('refuses a short password before the round trip', async () => {
+    atFragment(`#${TOKEN}&type=invite`)
+    await renderApp()
+    await screen.findByRole('heading', { name: /choose your password/i })
+
+    typeName()
+    fireEvent.change(screen.getByTestId('choose-password-input'), { target: { value: 'abc' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /set my password/i })),
+    )
+
+    expect(api.setOwnPassword).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least 6 characters/i)
+  })
+
+  it('an EXPIRED invitation goes to the sign-in screen, not to the password screen', async () => {
+    // The trap this exists for: an expired link carries `type=invite` too,
+    // alongside an error and NO token. Reading `type` alone would show a
+    // password screen for a session that does not exist, and the write would
+    // then fail with a sentence about the write rather than about the link.
+    atFragment(
+      '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite',
+    )
+    api.currentSession.mockResolvedValue(null)
+
+    await renderApp()
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('does not show the password screen when the link left no session', async () => {
+    // The other half of the same rule, with a token that GoTrue rejected: there
+    // is nothing to set a password ON, so the sign-in screen is the honest state.
+    atFragment(`#${TOKEN}&type=invite`)
+    api.currentSession.mockResolvedValue(null)
+
+    await renderApp()
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('a recovery link lands on the same screen, in its own words', async () => {
+    // AC 2's "build it once and both types route to it", asserted as the two
+    // headings differing — if the copy were shared, this and the invite test
+    // above would both pass against a screen that could not tell them apart.
+    atFragment(`#${TOKEN}&type=recovery`)
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose a new password/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+
+  it('#155 AC 5: a recovery return and a calendar consent return on ONE URL do not consume each other', async () => {
+    // Measured, not asserted (the issue's own words): the recovery rides the
+    // FRAGMENT on the implicit flow and the consent rides the QUERY, keyed by
+    // `state`. Boot reads the fragment first, strips ONLY the fragment, then
+    // reads the query and strips that once the code is spent. The screen alone
+    // could not catch a strip that took the whole URL — the password screen
+    // renders either way — so the strip's own argument is the assertion.
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atFragment(`#${TOKEN}&type=recovery`)
+    globalThis.location.search = '?code=the-code&state=the-state'
+    await renderApp()
+
+    expect(
+      await screen.findByRole('heading', { name: /choose a new password/i }),
+    ).toBeInTheDocument()
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    // First strip: the fragment only, the query still on the URL for the read
+    // that follows. Second: the spent code.
+    expect(replaceState.mock.calls[0]).toEqual([null, '', '/?code=the-code&state=the-state'])
+    expect(replaceState.mock.calls[1]).toEqual([null, '', '/'])
+  })
+
+  it('#155 AC 5: a bad-flow-state return in the QUERY still strips whole — it carries no state and is nobody else’s', async () => {
+    // The one query the fragment-side strip does own. Without `state` the
+    // calendar reader refuses it, so there is nothing to keep it for, and a
+    // reload holding it would announce the same spent failure twice.
+    api.currentSession.mockResolvedValue(null)
+    atFragment('')
+    globalThis.location.search = '?error=invalid_request&error_code=bad_oauth_state'
+    await renderApp()
+
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+  })
+
+  it('#155: the sign-in screen asks GoTrue for the reset directly — no session, so no re-read', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.sendPasswordReset.mockResolvedValue(undefined)
+    atFragment('')
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    api.listHouseholds.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: /forgot your password/i }))
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /email me a reset link/i })),
+    )
+
+    expect(api.sendPasswordReset).toHaveBeenCalledWith('kid@example.com')
+    // Not through `mutate`: its re-read would run with no session, as `anon`,
+    // which 0017 stripped — and the refusal would land over the top of a mail
+    // that went (#440's shape). The fake would have answered that read with a
+    // household, so a re-read here is not merely wasteful, it is visible.
+    expect(api.listHouseholds).not.toHaveBeenCalled()
+    expect(screen.getByTestId('reset-note')).toHaveTextContent(/on its way/i)
+    expect(screen.queryByRole('navigation', { name: /household surfaces/i })).not.toBeInTheDocument()
+  })
+
+  it('ignores a fragment whose type is neither', async () => {
+    // A Google sign-in return carries a token and no `type` this screen owns.
+    // Treating any token as an arrival would put a password screen in front of
+    // every OAuth sign-in.
+    atFragment(`#${TOKEN}`)
+    await renderApp()
+
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /choose your password/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('#173 — redeeming an invitation code, from App', () => {
+  const PENDING_KEY = 'taskr.pendingInvitation'
+  const CHOICE_KEY = 'taskr.activeHousehold'
+  const alone = [
+    { id: 'm1', display_name: 'Placeholder Everywhere', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const joinedRow = { id: 'm9', household_id: HOUSEHOLD_TWO.id, display_name: 'New member' }
+  const inTwo = [
+    { id: 'm9', display_name: 'Placeholder Three', weekly_minutes: 0, claimed_by: 'person-a' },
+    { id: 'm10', display_name: 'Placeholder Other Organizer', weekly_minutes: 30, claimed_by: 'person-b' },
+  ]
+  const UNUSABLE =
+    'That code cannot be used — it may have expired, been withdrawn, or already been used. Ask whoever gave it to you for a fresh one.'
+
+  const click = async (element) => act(async () => void fireEvent.click(element))
+  const codeField = (scope = screen) => scope.getByLabelText(/invitation code/i)
+  const nameField = (scope = screen) => scope.getByLabelText(/join as/i)
+  const joinButton = (scope = screen) => scope.getByRole('button', { name: /join household/i })
+  const fillJoin = (scope = screen, code = 'k7m3qp4rwn', name = 'Placeholder Three') => {
+    fireEvent.change(codeField(scope), { target: { value: code } })
+    fireEvent.change(nameField(scope), { target: { value: name } })
+  }
+  /** What `pendingInvitation.js` writes — the shape the boot reads. */
+  const hold = (code = 'k7m3qp4rwn', name = 'Placeholder Three') =>
+    window.localStorage.setItem(PENDING_KEY, JSON.stringify({ code, name }))
+
+  /** The write succeeds and the read that follows sees the new household — `mutate()`'s shape. */
+  const redemptionJoins = (from = []) =>
+    invitationsApi.redeemInvitation.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([...from, HOUSEHOLD_TWO])
+      return joinedRow
+    })
+
+  let scrollTo
+
+  beforeEach(() => {
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : alone))
+    api.updateMember.mockResolvedValue({})
+    scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    scrollTo.mockRestore()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 1 — signed in, no household: the join card
+  // -------------------------------------------------------------------------
+
+  it('AC 1: a signed-in person with no household is offered the join card beside the household form', async () => {
+    await renderApp()
+    expect(await screen.findByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Start a household' })).toBeInTheDocument()
+  })
+
+  it('AC 1: entering a code creates the member row through the function and the app switches to that household', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    // The shell, on the household the code named — and no client insert.
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(api.addMember).not.toHaveBeenCalled()
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 1: the joined household is the one this device now remembers', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+    await screen.findByText('Placeholder Other Household')
+
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // The name — #191 AC 2's half that sits on this surface
+  // -------------------------------------------------------------------------
+
+  it('renames the row the function created to the name the person chose, after the join', async () => {
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin(screen, 'k7m3qp4rwn', ' Placeholder Three ')
+    await click(joinButton())
+    await screen.findByText('Placeholder Other Household')
+
+    expect(api.updateMember).toHaveBeenCalledTimes(1)
+    expect(api.updateMember).toHaveBeenCalledWith('m9', { displayName: 'Placeholder Three' })
+    // ORDER: the join first, then the rename — the row has to exist to be renamed.
+    expect(invitationsApi.redeemInvitation.mock.invocationCallOrder[0]).toBeLessThan(
+      api.updateMember.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('a refused rename does not undo the join — the person lands in the household and is told', async () => {
+    redemptionJoins()
+    api.updateMember.mockRejectedValue(new Error('saving the change: permission denied'))
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/your name could not be saved/i)
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 2 and AC 3 — refusals
+  // -------------------------------------------------------------------------
+
+  it('AC 2: an existing member is refused with a sentence saying the code was not spent, and stays where they were', async () => {
+    invitationsApi.redeemInvitation.mockRejectedValue(
+      new Error('You are already in that household, so the code was left unused.'),
+    )
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/left unused/)
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    // The code stays in the field beside the sentence that refused it, and
+    // nothing was renamed.
+    expect(codeField()).toHaveValue('k7m3qp4rwn')
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: an unusable code is refused with the one sentence, naming no household', async () => {
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    await screen.findByRole('heading', { name: /join with a code/i })
+    fillJoin()
+    await click(joinButton())
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/cannot be used/)
+    expect(alert).not.toHaveTextContent(/Placeholder/)
+    expect(alert).not.toHaveTextContent(HOUSEHOLD_TWO.id)
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 4 — the code survives the leave-for-inbox round trip, on this device
+  // -------------------------------------------------------------------------
+
+  it('AC 4: signed out, the join link takes the code and the name FIRST and keeps them on this device', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    await click(screen.getByRole('button', { name: /join a household/i }))
+
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    fireEvent.change(codeField(), { target: { value: '  K7M3QP4RWN\t' } })
+    fireEvent.change(nameField(), { target: { value: ' Placeholder Three ' } })
+    await click(screen.getByRole('button', { name: /keep this code/i }))
+
+    // Normalised into storage, and nothing redeemed — there is no session.
+    expect(JSON.parse(window.localStorage.getItem(PENDING_KEY))).toEqual({
+      code: 'k7m3qp4rwn',
+      name: 'Placeholder Three',
+    })
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // Back on the sign-in card, which says the code is held.
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.getByTestId('held-invitation-note')).toHaveTextContent(/saved on this device/i)
+  })
+
+  it('AC 4: a held code is applied on sign-in without being re-typed, under the held name, then forgotten', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    redemptionJoins()
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // ONE tap, naming the held name, and nothing typed again (AC 4's letter).
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    expect(api.updateMember).toHaveBeenCalledWith('m9', { displayName: 'Placeholder Three' })
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: the confirmation link opened in THIS browser offers the held code at boot, one tap applies it', async () => {
+    // Back from the inbox: the client picked the session up off the URL, the
+    // person has no household yet, and this device is still holding the code.
+    // The offer, not a silent apply — the account that signed in is not
+    // necessarily the one that held the code (review escalation, 2026-09-11).
+    hold()
+    redemptionJoins()
+    await renderApp()
+
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledWith('k7m3qp4rwn')
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByRole('heading', { name: /join with a code/i })).not.toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 5 — what the mechanism guarantees in a DIFFERENT browser
+  // -------------------------------------------------------------------------
+
+  it('AC 5: the confirmation link opened in a DIFFERENT browser finds no code — nothing is redeemed and the join form is shown', async () => {
+    // The mechanism is `localStorage` on the device that entered the code
+    // (pendingInvitation.js), so another browser holds nothing. The guarantee
+    // is that the person is shown the join form and types the code again —
+    // asserted here rather than left to the happy path above.
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    await renderApp()
+
+    expect(await screen.findByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // And typing it there works exactly as if it had been carried.
+    redemptionJoins()
+    fillJoin()
+    await click(joinButton())
+    expect(await screen.findByText('Placeholder Other Household')).toBeInTheDocument()
+  })
+
+  it('a held code that is refused is forgotten, so a boot cannot loop on it', async () => {
+    hold()
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot be used/)
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    // The join form is there for the next attempt, which is theirs to make.
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+  })
+
+  it('a held code does not outlive the session on a shared tablet — sign-out forgets it', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /join another household/i })
+    // Left behind by somebody else on this device, after this boot's read.
+    hold()
+
+    // #440 — the session goes too, as auth-js's does: the remounted boot
+    // then takes the signed-out branch rather than reading with a stale one.
+    api.signOut.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue(null)
+      api.currentUserId.mockResolvedValue(null)
+      api.listHouseholds.mockResolvedValue([])
+    })
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 7 — a second household, from inside the first
+  // -------------------------------------------------------------------------
+
+  it('AC 7: a person already in a household is offered a way to join another', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    expect(
+      await screen.findByRole('region', { name: /join another household/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('AC 7: after joining, the switcher lists both and the newly joined one is active', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+
+    const switcher = await screen.findByRole('combobox', { name: /^household$/i })
+    expect(within(switcher).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Placeholder Household',
+      'Placeholder Other Household',
+    ])
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+    expect(window.localStorage.getItem(CHOICE_KEY)).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  it('AC 7: the join scrolls to the top, where the switcher names the new household', async () => {
+    // Owner decision at the design pass, 2026-09-11: from the roster card the
+    // person was ~2,300px down and, after the re-read, still there — looking
+    // at the NEW household's "Start another household" card with nothing in
+    // view saying they had moved. jsdom has no layout, so the scroll is
+    // asserted as a request.
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    expect(scrollTo).not.toHaveBeenCalled()
+    await click(joinButton(card))
+    await screen.findByRole('combobox', { name: /^household$/i })
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+  })
+
+  it('a refused join scrolls nowhere — the sentence is beside the control', async () => {
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp('Who')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+    await screen.findByText(/cannot be used/)
+
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('AC 7: the first household’s notices do not come along — the switch path’s rule', async () => {
+    // A re-balance announcement about household ONE must not stand over TWO's
+    // surfaces after the join, for exactly `chooseHousehold`'s reason (#164's
+    // finding 6, whose fixture this is): a refresh never clears it, so only
+    // the join path can. The precondition below is what keeps this from
+    // passing on a page that never had one.
+    const rebalanced = {
+      ...HOUSEHOLD_ONE,
+      last_rebalance: {
+        contested: true,
+        level: true,
+        reason: null,
+        boundByBudget: false,
+        jobsMoved: 1,
+        minutesMoved: 90,
+        changeBudgetMinutes: 120,
+        applied_at: '2026-08-27T18:00:00+00:00',
+      },
+    }
+    const inOne = [
+      { id: 'm1', household_id: rebalanced.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+      { id: 'm2', household_id: rebalanced.id, display_name: 'Placeholder Two', weekly_minutes: 300, claimed_by: null },
+    ]
+    api.listHouseholds.mockResolvedValue([rebalanced])
+    api.listMembers.mockImplementation(async (id) => (id === HOUSEHOLD_TWO.id ? inTwo : inOne))
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOUSEHOLD_TWO.id
+        ? []
+        : [
+            { id: 'c1', title: 'Placeholder Chore', expected_minutes: 90, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+            { id: 'c2', title: 'Placeholder Other Chore', expected_minutes: 50, due_on: null, completed_at: null, completed_by_member_id: null, assigned_member_id: 'm2', actual_minutes: null },
+          ],
+    )
+    announceApi.readSplitSeen.mockResolvedValue({
+      member_id: 'm1',
+      snapshot: {
+        members: [
+          { id: 'm1', minutes: 90, capacityMinutes: 420 },
+          { id: 'm2', minutes: 50, capacityMinutes: 300 },
+        ],
+      },
+      seen_rebalance_at: '2026-08-27T09:00:00+00:00',
+    })
+    redemptionJoins([rebalanced])
+    await renderApp('Who')
+    // The precondition: the announcement really is on screen before the join.
+    await screen.findByTestId('rebalance-announcement')
+    const card = within(await screen.findByRole('region', { name: /join another household/i }))
+    fillJoin(card)
+    await click(joinButton(card))
+    await screen.findByRole('combobox', { name: /^household$/i })
+
+    expect(screen.queryByTestId('rebalance-announcement')).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // The review round's three behaviour findings
+  // -------------------------------------------------------------------------
+
+  it('a refusal on the strip is answered by the person’s next join attempt on the no-household screen', async () => {
+    // Review finding: App's error prop has no setter on the screen, so a
+    // refusal stayed under the form after the person moved on. What THIS test
+    // exercises: a signed-in join refused (the strip shows), then a second
+    // attempt submitted — the old sentence must be gone before the new call
+    // resolves. The signed-out move-between-views case, and a NEW App
+    // sentence showing after the old one was answered, are the Onboarding
+    // component tests' (`Onboarding.test.jsx`, the latch describe).
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    invitationsApi.redeemInvitation.mockRejectedValue(new Error(UNUSABLE))
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+    // The held code is offered, taken, and refused; the person is on the
+    // no-household screen with the strip.
+    await click(await screen.findByRole('button', { name: /^join as placeholder three$/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot be used/)
+
+    // Their next act — typing and trying again — answers the old sentence
+    // before the new call resolves.
+    invitationsApi.redeemInvitation.mockImplementation(() => new Promise(() => {}))
+    fillJoin()
+    await click(joinButton())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a held code is offered only after the sign-in’s own refresh has settled', async () => {
+    // Review finding: keyed on `userId` alone, the effect fired mid-refresh
+    // and the redemption ran while the sign-in's read of household ONE was
+    // still writing ONE's seen marker. The split-seen read is held open here;
+    // nothing may be offered, let alone redeemed, until it resolves.
+    let release
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    api.listHouseholds.mockResolvedValue([])
+    hold()
+    redemptionJoins([HOUSEHOLD_ONE])
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.currentUserId.mockResolvedValue('person-a')
+      api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE])
+      return { user: { id: 'person-a' } }
+    })
+    announceApi.readSplitSeen.mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve(null) }),
+    )
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // The sign-in's refresh is parked on the seen-marker read, with the id set.
+    expect(api.currentUserId).toHaveBeenCalled()
+    expect(release).toBeTypeOf('function')
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+
+    await act(async () => release())
+    // Settled: the member of ONE is now offered the code — above ONE's shell.
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(screen.getByText('Placeholder Household')).toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    await click(within(confirm).getByRole('button', { name: /^join as placeholder three$/i }))
+    await waitFor(() => expect(invitationsApi.redeemInvitation).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('combobox', { name: /^household$/i })).toHaveValue(HOUSEHOLD_TWO.id)
+  })
+
+  it('Not me forgets the held code without spending it, and leaves the join form', async () => {
+    // The shared-tablet ordering the sign-out clear does not cover (review
+    // escalation, owner decision 2026-09-11): B held a code and left for the
+    // inbox; A signs in first. A must be able to decline, and the code must
+    // not be redeemed on A's account.
+    hold()
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    await click(within(confirm).getByRole('button', { name: /^not me$/i }))
+
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull()
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /join with a code/i })).toBeInTheDocument()
+    expect(api.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('a boot that FAILED after setting the session offers nothing, and keeps its own reason', async () => {
+    // Review finding: the effect ran after a boot whose refresh threw past
+    // `setUserId` — an organizer whose invitations read alone refused — and a
+    // redemption's refusal replaced the boot's sentence. `listInvitations` is
+    // the one uncaught read after the id is set, and it runs only for the
+    // organizer of an existing household.
+    const organised = { ...HOUSEHOLD_ONE, organizer_member_id: 'm1' }
+    api.listHouseholds.mockResolvedValue([organised])
+    invitationsApi.listInvitations.mockRejectedValue(new Error('loading the invitations: the network went away'))
+    hold()
+    await renderApp()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/the network went away/)
+    expect(screen.queryByTestId('held-invitation-confirm')).not.toBeInTheDocument()
+    expect(invitationsApi.redeemInvitation).not.toHaveBeenCalled()
+    // The code is still held for a boot that succeeds.
+    expect(window.localStorage.getItem(PENDING_KEY)).not.toBeNull()
+  })
+
+  it('the held note follows the store when another tab changes it', async () => {
+    // Review finding: `heldInvitation` was a mount-time snapshot. Another tab
+    // redeeming, being refused on, or signing out clears the same key, and
+    // this tab kept promising a code that was gone.
+    api.currentSession.mockResolvedValue(null)
+    api.currentUserId.mockResolvedValue(null)
+    hold()
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+
+    window.localStorage.removeItem(PENDING_KEY)
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: PENDING_KEY, newValue: null }))
+    })
+    expect(screen.queryByTestId('held-invitation-note')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /join a household/i })).toBeInTheDocument()
+
+    // And the other direction: a code held in another tab shows here.
+    hold()
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: PENDING_KEY, newValue: 'x' }))
+    })
+    expect(screen.getByTestId('held-invitation-note')).toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // AC 10 — the organizer's card is back
+  // -------------------------------------------------------------------------
+
+  it('AC 10: with redemption shipped the organizer’s invitation card renders again', async () => {
+    // The flag is read through the module, not through the test's getter, so
+    // this is the real constant: TRUE since this story.
+    const real = await vi.importActual('./lib/invitations.js')
+    expect(real.INVITATIONS_REDEEMABLE).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #430 — deleting and restoring a household, WIRED. Roster's and the banner's
+// own tests prove each component; these prove App hands them the handlers that
+// reach the data layer, with the household on screen. "Exported is not
+// reachable" is this repo's recorded reason for the second half.
+// ---------------------------------------------------------------------------
+
+describe('deleting and restoring a household, from App (#430)', () => {
+  const organized = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+
+  // Relative to now: the banner hides a household past its purge_after, so a
+  // fixed date would turn these red on the day it passed.
+  const DAY = 86_400_000
+  const requestedAt = new Date(Date.now() - DAY).toISOString()
+  const purgeAfter = new Date(Date.now() + 6 * DAY).toISOString()
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([organized])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+  })
+
+  it('the organizer deletes the household on screen, and the banner is re-read afterwards', async () => {
+    const { GRACE_PERIOD_DAYS } = await vi.importActual('./lib/household.js')
+    await renderApp('Who')
+    const readsBefore = api.householdDeletionStatus.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    // #430 review: the confirm says the real grace period, which reaches Roster
+    // only through App's prop — the Roster suite deliberately uses another number.
+    expect(screen.getByTestId('delete-household-warning')).toHaveTextContent(
+      `restore it for ${GRACE_PERIOD_DAYS} days`,
+    )
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
+    )
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    expect(api.householdDeletionStatus.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('shows a pending household above the tabs at boot, and restores the one it names', async () => {
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp()
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^restore/i })))
+    expect(api.restoreHousehold).toHaveBeenCalledWith('h9')
+  })
+
+  it('shows the banner on the onboarding screen too, where deleting your only household lands you', async () => {
+    api.listHouseholds.mockResolvedValue([])
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp()
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+  })
+
+  it('still boots when the status read answers nothing at all, not only when it rejects', async () => {
+    // The hardening's own test: a plain `.catch` covers a rejection and not a
+    // read that returns no promise or no list, which is what took every boot
+    // down in this story's first run (the mock reset left it answering undefined).
+    api.householdDeletionStatus.mockReturnValue(undefined)
+    await renderApp('Who')
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^delete this household$/i })).toBeInTheDocument()
+  })
+
+  it('still boots when the status read fails, because it must never keep anybody out', async () => {
+    api.householdDeletionStatus.mockRejectedValue(new Error('status read failed'))
+    await renderApp('Who')
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^delete this household$/i })).toBeInTheDocument()
+  })
+
+  it('clears the restore banner at sign-out, so the next person on this device never sees it', async () => {
+    // #430 review, and the shared-tablet rule of #165 AC 7 / #172 / #173: the
+    // banner names the last person's household and the day it goes.
+    api.householdDeletionStatus.mockResolvedValue([
+      {
+        household_id: 'h9',
+        household_name: 'Placeholder Household',
+        deletion_requested_at: requestedAt,
+        purge_after: purgeAfter,
+      },
+    ])
+    await renderApp('Who')
+    expect(screen.getByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Sign out' })))
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+  })
+
+  it('reads the restore banner again after a sign-in, since it belongs to whoever is signed in', async () => {
+    // The fake sign-in flips the fixtures the way a real one flips the
+    // server's answers: signed out, nobody's banner; signed in, theirs.
+    api.currentSession.mockResolvedValue(null)
+    api.signIn.mockImplementation(async () => {
+      api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+      api.householdDeletionStatus.mockResolvedValue([
+        {
+          household_id: 'h9',
+          household_name: 'Placeholder Household',
+          deletion_requested_at: requestedAt,
+          purge_after: purgeAfter,
+        },
+      ])
+      return { user: { id: 'person-a' } }
+    })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    expect(screen.queryByRole('region', { name: /scheduled for deletion/i })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(await screen.findByRole('region', { name: /scheduled for deletion/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #181 — closing a household nobody is left in, from App. #430 delivered the
+// route (the last member is the organizer, and their way out is Delete); these
+// pin where the person LANDS, which is #181 AC 1 and AC 8. `mutate` re-reads
+// the list after the request and the shell follows it — asserted here as a
+// re-read, since a version that merely dropped the household from local state
+// would put the right thing on screen and read stale rows under it.
+// ---------------------------------------------------------------------------
+
+describe('closing the household you are the last one in, from App (#181)', () => {
+  const closing = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+    created_at: '2026-01-01T00:00:00Z',
+  }
+  const other = {
+    id: 'h2',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+    created_at: '2026-02-01T00:00:00Z',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const inOther = [
+    { id: 'm9', display_name: 'Placeholder Other Organizer', weekly_minutes: 60, claimed_by: 'person-z' },
+    { id: 'm2', display_name: 'Placeholder One', weekly_minutes: 30, claimed_by: 'person-a' },
+  ]
+
+  const close = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete this household$/i })))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^delete placeholder household\?$/i })),
+    )
+  }
+
+  it('AC 1 — the last member closes their only household and lands signed in with no household', async () => {
+    api.listHouseholds.mockResolvedValue([closing])
+    api.listMembers.mockResolvedValue([me])
+    // The server's answer changes with the request, the way 0042's membership
+    // filter changes it: the re-read that follows finds nothing.
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([])
+      return {}
+    })
+    await renderApp('Who')
+    await close()
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    await screen.findByRole('button', { name: /create household/i })
+    expect(screen.getByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Who' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it('AC 8 — closing one of two households puts the other on screen and re-reads against it', async () => {
+    api.listHouseholds.mockResolvedValue([closing, other])
+    api.listMembers.mockImplementation(async (id) => (id === 'h2' ? inOther : [me]))
+    api.requestHouseholdDeletion.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([other])
+      return {}
+    })
+    await renderApp('Who')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveValue('h1')
+    expect(api.listMembers).not.toHaveBeenCalledWith('h2')
+
+    await close()
+
+    expect(api.requestHouseholdDeletion).toHaveBeenCalledWith('h1')
+    // One household left, so #163's name and no switcher (#164 AC 3).
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    expect(document.querySelector('.shell__household')).toHaveTextContent('Placeholder Other Household')
+    expect(api.listMembers).toHaveBeenCalledWith('h2')
+    // A plain member there, so the organizer's Delete card is gone with the
+    // household it belonged to (#164 AC 5: controls follow the household).
+    expect(screen.queryByRole('button', { name: /^delete this household$/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('leaving a household, from App (#431)', () => {
+  // The signed-in person is person-a (the suite's default session), on the
+  // roster as m1; m9 organizes, so m1 is an ordinary member.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const organizerRow = { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' }
+  const signedInOther = { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: 'person-b' }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizerRow, me])
+  })
+
+  const leave = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () => void fireEvent.click(screen.getByRole('button', { name: /^leave placeholder household\?$/i })),
+    )
+  }
+  const callOrder = (mock, match) => mock.mock.invocationCallOrder[mock.mock.calls.findIndex(match)]
+
+  it('re-deals the chores without the leaver FIRST, then leaves through the function', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1', leavingMemberId: 'm1' })
+    expect(api.leaveHousehold).toHaveBeenCalledWith('h1')
+    const redeal = callOrder(reassignApi.reassignHousehold, ([args]) => args?.leavingMemberId === 'm1')
+    const left = callOrder(api.leaveHousehold, () => true)
+    expect(redeal).toBeLessThan(left)
+  })
+
+  it('leaves nothing when the re-deal fails: nothing has changed, and they can try again', async () => {
+    reassignApi.reassignHousehold.mockRejectedValue(new Error('re-deal refused'))
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/re-deal refused/)
+  })
+
+  it('shows a sign-in that survived as a warning, because they HAVE left', async () => {
+    api.leaveHousehold.mockResolvedValue({
+      accountDeleted: false,
+      warning: 'You have left the household, but your sign-in was not deleted. It can still sign in until it is.',
+    })
+    await renderApp('Who')
+    await leave()
+    expect(await screen.findByText(/your sign-in was not deleted/i)).toBeInTheDocument()
+  })
+
+  it('signs this device out when the leave took their last household, and the sign-in with it', async () => {
+    api.leaveHousehold.mockResolvedValue({ accountDeleted: true, warning: null })
+    await renderApp('Who')
+    await leave()
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  it('does not sign out when the sign-in is kept for another household', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
+    expect(api.signOut).not.toHaveBeenCalled()
+  })
+
+  it('the organizer hands it over and leaves the same way: transfer, then the re-deal without them, then the leave', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, signedInOther])
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^hand it to placeholder two and leave$/i })),
+    )
+    expect(api.transferHousehold).toHaveBeenCalledWith('h1', 'm2')
+    expect(reassignApi.reassignHousehold).toHaveBeenCalledWith({ householdId: 'h1', leavingMemberId: 'm1' })
+    expect(api.leaveHousehold).toHaveBeenCalledWith('h1')
+    const handed = callOrder(api.transferHousehold, () => true)
+    const redeal = callOrder(reassignApi.reassignHousehold, ([args]) => args?.leavingMemberId === 'm1')
+    const left = callOrder(api.leaveHousehold, () => true)
+    expect(handed).toBeLessThan(redeal)
+    expect(redeal).toBeLessThan(left)
+  })
+
+  it('re-deals after the organizer removes somebody (AC 4), which nothing did before', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, { ...signedInOther, claimed_by: null }])
+    api.removeMember.mockResolvedValue({ warning: null })
+    await renderApp('Who')
+    const before = reassignApi.reassignHousehold.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })))
+    expect(api.removeMember).toHaveBeenCalledWith('m2')
+    expect(reassignApi.reassignHousehold.mock.calls.slice(before)).toEqual([[{ householdId: 'h1' }]])
+    const removed = callOrder(api.removeMember, () => true)
+    expect(removed).toBeLessThan(reassignApi.reassignHousehold.mock.invocationCallOrder.at(-1))
+  })
+
+  // The four below are #431's review-fanout (2026-09-11).
+  it('reports a removal as done when only its re-deal fails, and keeps the sign-in warning (#247)', async () => {
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm1' }])
+    api.listMembers.mockResolvedValue([me, { ...signedInOther, claimed_by: null }])
+    api.removeMember.mockResolvedValue({ warning: 'Their sign-in was not deleted.' })
+    reassignApi.reassignHousehold.mockRejectedValue(new Error('re-deal refused'))
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^Remove Placeholder Two$/ })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Remove Placeholder Two\?/ })))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/sign-in was not deleted/)
+    expect(alert).toHaveTextContent(/They were removed, but their chores were not dealt to the others: re-deal refused/)
+    expect(api.removeMember).toHaveBeenCalledTimes(1)
+  })
+
+  it('says the chores already went when the leave fails after the re-deal, and re-reads', async () => {
+    api.leaveHousehold.mockRejectedValue(new Error('Could not reach the leave service, so you are still in the household.'))
+    await renderApp('Who')
+    const readsBefore = api.listMembers.mock.calls.length
+    await leave()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/your open chores went to the others, but you have not left yet/i)
+    expect(alert).not.toHaveTextContent(/nothing was changed/i)
+    expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('tells the leaver when Google did not confirm the revoke, signed out or not (#99)', async () => {
+    api.leaveHousehold.mockResolvedValue({ accountDeleted: true, warning: null, revokeFailed: true })
+    await renderApp('Who')
+    await leave()
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    expect(await screen.findByText(/Google may still list Taskr/)).toBeInTheDocument()
+  })
+
+  it('says nothing about Google when the revoke went through', async () => {
+    await renderApp('Who')
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Google may still list Taskr/)).toBeNull()
+  })
+})
+
+describe('leaving one of two households, from App (#180 AC 8)', () => {
+  // Real-shaped ids, because the remembered choice (#165) discards anything
+  // else as it is read. person-a is an ordinary member of both households.
+  const LEFT = {
+    id: '18018018-0180-4180-8180-180180180180',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const KEPT = {
+    id: '18018018-0180-4180-8180-180180180181',
+    name: 'Placeholder Other Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm8',
+  }
+  const here = [
+    { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' },
+    { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+  ]
+  const there = [
+    { id: 'm8', display_name: 'Placeholder Other Organizer', weekly_minutes: 60, claimed_by: 'person-y' },
+    { id: 'm7', display_name: 'Placeholder One', weekly_minutes: 30, claimed_by: 'person-a' },
+  ]
+  const KEY = 'taskr.activeHousehold'
+
+  beforeEach(() => {
+    // KEPT first, so the deterministic default is NOT the household being
+    // left: the combobox reading LEFT below then proves the remembered choice
+    // was read (review-fanout, 2026-09-16 — with LEFT first the guard could
+    // not tell the seed from the default).
+    api.listHouseholds.mockResolvedValue([KEPT, LEFT])
+    api.listMembers.mockImplementation(async (id) => (id === KEPT.id ? there : here))
+    // #165 — this device had chosen the household about to be left.
+    window.localStorage.setItem(KEY, LEFT.id)
+  })
+
+  const leave = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household$/i })))
+    await act(
+      async () => void fireEvent.click(screen.getByRole('button', { name: /^leave placeholder household\?$/i })),
+    )
+  }
+
+  it('forgets the remembered choice of the household just left, even while the list still names it', async () => {
+    // The list is held still on purpose. App's refresh discards a remembered
+    // household only once the read stops returning it (#165 AC 2), so here the
+    // leave's own clear is the only thing that can empty the key — which is
+    // what lets this test tell the two apart (PR #435 recorded the gap).
+    await renderApp('Who')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveValue(LEFT.id)
+    // Still remembered on the way in, so the null below is the leave's doing
+    // and not a load-time discard's.
+    expect(window.localStorage.getItem(KEY)).toBe(LEFT.id)
+    await leave()
+    expect(api.leaveHousehold).toHaveBeenCalledWith(LEFT.id)
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+
+  it('lands on the other household once the re-read stops returning the one left, with no error and no stored choice', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([KEPT])
+      return { accountDeleted: false, warning: null, revokeFailed: false }
+    })
+    await renderApp('Who')
+    await leave()
+    expect((await screen.findAllByText('Placeholder Other Household')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('combobox', { name: 'Household' })).toBeNull()
+    expect(api.listMembers).toHaveBeenLastCalledWith(KEPT.id)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+})
+
+describe('handing the organizer role over and staying, from App (#179)', () => {
+  // person-a (the suite's default session) is m1 and organizes; m2 has signed
+  // in, so the row carries the control. Nobody leaves here — that is #431's
+  // hand-over, one card down.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm1',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const signedInOther = { id: 'm2', display_name: 'Placeholder Two', weekly_minutes: 45, claimed_by: 'person-b' }
+  const makeOrganizer = () => screen.queryByRole('button', { name: /^make placeholder two the organizer$/i })
+  const removeOther = () => screen.queryByRole('button', { name: /^remove placeholder two$/i })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, signedInOther])
+  })
+
+  it('AC 2 — hands the household over through the RPC, and the organizer controls leave this screen on the re-read', async () => {
+    // The transfer lands on the server, so the re-read App makes after the
+    // write comes back with the new organizer — the way the live project
+    // answers it.
+    api.transferHousehold.mockImplementation(async () => {
+      api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+      return { ...household, organizer_member_id: 'm2' }
+    })
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeInTheDocument()
+    expect(removeOther()).toBeInTheDocument()
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(api.transferHousehold).toHaveBeenCalledWith('h1', 'm2')
+    expect(api.transferHousehold).toHaveBeenCalledTimes(1)
+    // Stays: no leave, and this person is still on the roster.
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+    // The previous organizer no longer holds the organizer controls.
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+  })
+
+  it('AC 2 — the new organizer sees the organizer controls on their next load', async () => {
+    // The same device, loading a household the server now says it organizes:
+    // `isOrganizer` is derived at render from `organizer_member_id`, so a load
+    // is all it takes. The load above, where m2 organized, is the other side.
+    api.listHouseholds.mockResolvedValue([{ ...household, organizer_member_id: 'm2' }])
+    await renderApp('Who')
+    expect(makeOrganizer()).toBeNull()
+    expect(removeOther()).toBeNull()
+    expect(screen.queryByRole('button', { name: /^make placeholder one the organizer$/i })).toBeNull()
+  })
+
+  it('hands nothing over on the first tap, and Not now backs out', async () => {
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^not now$/i })))
+    expect(api.transferHousehold).not.toHaveBeenCalled()
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+
+  it('puts a refused hand-over on screen and keeps the organizer where they were', async () => {
+    api.transferHousehold.mockRejectedValue(new Error('hand the household to somebody who has signed in'))
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(makeOrganizer()))
+    await act(
+      async () =>
+        void fireEvent.click(screen.getByRole('button', { name: /^make placeholder two the organizer\?$/i })),
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/somebody who has signed in/)
+    expect(makeOrganizer()).toBeInTheDocument()
+  })
+})
+
+describe('#440 — a session that ends here lands on the sign-in form, and nothing is read after it', () => {
+  // #431's fixture: person-a is m1, an ordinary member; m9 organizes.
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const organizerRow = { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' }
+
+  // THE GRANT LAYER, as the live project has had it since `0017` (#186): a
+  // household read with no session is REFUSED, not empty, in the words
+  // `unwrap` puts on PostgREST's 42501. The suite's default `listHouseholds`
+  // answers whoever asks — which is exactly why every sign-out test was green
+  // while production kept the household on screen behind this sentence.
+  const REFUSED = 'loading your households: permission denied for table households'
+  let session
+  let inHousehold
+  // auth-js's third state: offline past the access token's expiry, the refresh
+  // fails retryably, `getSession()` answers a null session WITH an error, and
+  // the refresh token is still stored. `currentSession()` reads it as null;
+  // `sessionIsGone()` must not read it as gone.
+  let sessionUnknown
+
+  beforeEach(() => {
+    session = { user: { id: 'person-a' } }
+    inHousehold = true
+    sessionUnknown = false
+    api.sessionIsGone.mockImplementation(async () => !session && !sessionUnknown)
+    api.currentSession.mockImplementation(async () => session)
+    api.currentUserId.mockImplementation(async () => session?.user.id ?? null)
+    api.listHouseholds.mockImplementation(async () => {
+      if (!session) throw new Error(REFUSED)
+      return inHousehold ? [household] : []
+    })
+    api.listMembers.mockResolvedValue([organizerRow, me])
+    // auth-js on success: the local session is gone.
+    api.signOut.mockImplementation(async () => {
+      session = null
+    })
+  })
+
+  const click = async (element) => act(async () => void fireEvent.click(element))
+  /**
+   * Every household read made after `mock`'s first call. Throws when `mock` was
+   * never called, so "no reads after it" cannot pass on an act that never ran.
+   */
+  const readsAfter = (mock) => {
+    const at = mock.mock.invocationCallOrder[0]
+    if (at === undefined) throw new Error('readsAfter: that call never happened')
+    return api.listHouseholds.mock.invocationCallOrder.filter((order) => order > at)
+  }
+  /** The reads #440 is about: any household read after the (first) sign-out. */
+  const readsAfterSignOut = () => readsAfter(api.signOut)
+  const expectSignedOutScreen = async () => {
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
+    // Nothing of the household the last person was looking at.
+    expect(screen.queryByRole('region', { name: /who is in the household/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder One')).not.toBeInTheDocument()
+    expect(screen.queryByText('Placeholder Organizer')).not.toBeInTheDocument()
+  }
+  const leave = async () => {
+    await click(screen.getByRole('button', { name: /^leave this household$/i }))
+    await click(screen.getByRole('button', { name: /^leave placeholder household\?$/i }))
+  }
+
+  it('the fixture refuses a signed-out household read the way the live grant layer does', async () => {
+    // The control every test below leans on: without it, "no refusal on screen"
+    // could mean the fake would never have refused anything.
+    await expect(api.listHouseholds()).resolves.toEqual([household])
+    session = null
+    await expect(api.listHouseholds()).rejects.toThrow('permission denied for table households')
+  })
+
+  it('AC 1 / AC 3: Sign out lands on the sign-in form with no refusal, no household, and no read after it', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getByText('Placeholder One')).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('AC 2: Sign out everywhere, once confirmed, lands the same way', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out everywhere$/i }))
+    expect(api.signOut).not.toHaveBeenCalled()
+    await click(screen.getByRole('button', { name: /^sign out on every device\?$/i }))
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: true })
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('the signed-in-but-no-household screen signs out to the sign-in form too', async () => {
+    inHousehold = false
+    await renderApp()
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a logout the server refused still lands, because auth-js ended the local session anyway — and lands clean', async () => {
+    // auth-js 2.112.1 `_signOut`: anything but a 401/403/404 still removes the
+    // local session, THEN returns the error. The fake does both, in that order.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      throw Object.assign(new Error('Could not sign out: Failed to fetch'), {
+        cause: { message: 'Failed to fetch' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    // The design pass's verdict (2026-09-13): the device IS signed out and
+    // nothing on it holds the token, so a sentence saying the server did not
+    // confirm it is an alarm with nothing to act on. It lands clean.
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a refused Sign out everywhere lands too, and names the devices that may still be signed in', async () => {
+    api.signOut.mockImplementation(async () => {
+      session = null
+      throw Object.assign(new Error('Could not sign out: Internal Server Error'), {
+        cause: { message: 'Internal Server Error' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out everywhere$/i }))
+    await click(screen.getByRole('button', { name: /^sign out on every device\?$/i }))
+
+    await expectSignedOutScreen()
+    const said = screen.getByTestId('sign-in-return')
+    expect(said).toHaveTextContent(/your other devices may still be signed in/i)
+    expect(said).toHaveTextContent(/choose sign out everywhere again/i)
+    // The library's own reason, not the data layer's wrapper around it: the
+    // wrapper begins "Could not sign out", which beside "This device is
+    // signed out" contradicts itself (review-fanout, 2026-09-13).
+    expect(said).toHaveTextContent('(Internal Server Error)')
+    expect(said).not.toHaveTextContent(/could not sign out/i)
+    expect(readsAfterSignOut()).toEqual([])
+  })
+
+  it('a refused logout that left the session in place changes nothing, and says why', async () => {
+    api.signOut.mockRejectedValue(new Error('Could not sign out: Failed to fetch'))
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    // Still signed in, still here. A remount would have taken this sentence
+    // with it — the fresh instance's state starts empty — so the complaint
+    // being here is also the proof that nothing was remounted.
+    const complaint = await screen.findByTestId('sign-out-complaint')
+    expect(complaint).toHaveTextContent('Could not sign out: Failed to fetch')
+    // BESIDE the control that was pressed, in the card that holds it — not on
+    // the shared strip at the foot of the tab (review-fanout, 2026-09-13).
+    expect(
+      within(screen.getByRole('region', { name: /^placeholder household$/i })).getByTestId('sign-out-complaint'),
+    ).toBe(complaint)
+    expect(screen.getByRole('region', { name: /who is in the household/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    // Nothing was carried either: the sentence that says "this device is
+    // signed out" would be false here.
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+  })
+
+  it('offline past the token expiry, a refused logout whose session is still stored lands nowhere, and says so beside the control', async () => {
+    // auth-js fails the refresh inside `_useSession` retryably, removes
+    // nothing, and `getSession()` answers a null session WITH an error. The
+    // first draft read that null as gone and said "signed out"; measured on
+    // #440, a reload once online came back signed in as the same person.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      sessionUnknown = true
+      throw Object.assign(new Error('Could not sign out: Failed to fetch'), {
+        cause: { message: 'Failed to fetch' },
+      })
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    expect(await screen.findByTestId('sign-out-complaint')).toHaveTextContent('Could not sign out: Failed to fetch')
+    expect(screen.getByRole('region', { name: /who is in the household/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it('the leave that deleted the account lands on the sign-in form, carrying what the leave owes them', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    await expectSignedOutScreen()
+    // #99's sentence, true of a leave that SUCCEEDED, on the screen they are
+    // now on rather than lost with the refused re-read.
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/Google may still list Taskr/)
+    expect(screen.queryByText(REFUSED)).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+    // Nor between the leave and the sign-out: the account is gone, so there is
+    // nothing this device may read, and `mutate` skips its re-read.
+    expect(readsAfter(api.leaveHousehold)).toEqual([])
+  })
+
+  it('the leave that deleted the account and owes nothing lands on a clean sign-in form', async () => {
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null }
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    await expectSignedOutScreen()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(readsAfterSignOut()).toEqual([])
+    expect(readsAfter(api.leaveHousehold)).toEqual([])
+  })
+
+  it('a leave whose sign-out left the session in place shows what the leave did, and says both', async () => {
+    // `revokeFailed` so the notes are not empty: with none, keeping or dropping
+    // them from the sentence is the same string and the test could not tell.
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    api.signOut.mockRejectedValue(new Error('Could not sign out: Failed to fetch'))
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    // The household they left is not left on screen: the read `mutate` skipped
+    // for a session that was meant to be over runs here instead.
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not sign out: Failed to fetch')
+    expect(alert).toHaveTextContent(/Google may still list Taskr/)
+    expect(screen.queryByRole('region', { name: /who is in the household/i })).not.toBeInTheDocument()
+    expect(readsAfterSignOut().length).toBeGreaterThan(0)
+  })
+
+  it('holds every control while the leave that deleted the account is signing out', async () => {
+    let finishSignOut
+    api.leaveHousehold.mockImplementation(async () => {
+      inHousehold = false
+      return { accountDeleted: true, warning: null, revokeFailed: true }
+    })
+    api.signOut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSignOut = () => {
+            session = null
+            resolve()
+          }
+        }),
+    )
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await leave()
+
+    // The sign-out is in flight over the household just left, and nothing on
+    // it may be pressed — Sign out above all, whose second `endSession` could
+    // land last and replace the Google note this one carries.
+    expect(api.signOut).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /^sign out$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^sign out everywhere$/i })).toBeDisabled()
+
+    await act(async () => finishSignOut())
+    await expectSignedOutScreen()
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/Google may still list Taskr/)
+  })
+
+  it('a session ended somewhere else lands on the sign-in form and says so, with nothing read after it', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(signedOutListeners).toHaveLength(1)
+    const readsBefore = api.listHouseholds.mock.calls.length
+    // A code held on this device, as #173 leaves one: the next person must not
+    // inherit it, however the session ended.
+    window.localStorage.setItem('taskr.pendingInvitation', JSON.stringify({ code: 'k7m3qp4rwn', name: 'Placeholder Three' }))
+
+    // What auth-js does when another device's Sign out everywhere revokes this
+    // one's refresh token: the stored session goes, and SIGNED_OUT is emitted.
+    await act(async () => {
+      session = null
+      signedOutListeners[0]()
+    })
+
+    await expectSignedOutScreen()
+    expect(screen.getByTestId('sign-in-return')).toHaveTextContent(/signed out from somewhere else/i)
+    expect(window.localStorage.getItem('taskr.pendingInvitation')).toBeNull()
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.listHouseholds.mock.calls.length).toBe(readsBefore)
+    expect(screen.queryByText(REFUSED)).not.toBeInTheDocument()
+  })
+
+  it("this device's own sign-out is not also read as a session ended somewhere else", async () => {
+    // auth-js emits SIGNED_OUT from INSIDE its own sign-out, and the fake does
+    // too — then lets a task pass before the sign-out resolves. In the same
+    // task React batches the listener's landing with `endSession`'s and the
+    // second simply wins, so no test could tell whether the listener stood
+    // aside (measured on #440: removing the guard reddened nothing). With a
+    // task between them the listener's landing RENDERS: a second remount, and a
+    // moment of "signed out from somewhere else" on the screen of the person
+    // who just pressed Sign out. One remount is what proves the guard held.
+    api.signOut.mockImplementation(async () => {
+      session = null
+      signedOutListeners.at(-1)()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+
+    await expectSignedOutScreen()
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    // One subscription per mounted instance: the first, and exactly one remount.
+    expect(signedOutListeners).toHaveLength(2)
+  })
+
+  it('a SIGNED_OUT while nobody is signed in changes nothing', async () => {
+    // A boot that finds a dead session emits the event on its way to the
+    // sign-in screen it is already showing; that must not remount it again.
+    session = null
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+    const bootsBefore = api.currentSession.mock.calls.length
+
+    await act(async () => signedOutListeners.at(-1)())
+
+    expect(screen.queryByTestId('sign-in-return')).not.toBeInTheDocument()
+    expect(api.currentSession.mock.calls.length).toBe(bootsBefore)
+  })
+
+  it('the remounted app lets go of the old subscription and holds one of its own', async () => {
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    // Counted as a DELTA: Testing Library unmounts the previous test's app
+    // after this file's afterEach clears the spy, so the absolute count
+    // carries one call over from whichever test ran before (measured: 2).
+    const unsubscribedBefore = unsubscribeSignedOut.mock.calls.length
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await expectSignedOutScreen()
+
+    expect(unsubscribeSignedOut.mock.calls.length - unsubscribedBefore).toBe(1)
+    expect(signedOutListeners).toHaveLength(2)
+  })
+
+  it('the next person to sign in on this device inherits nothing the last one left in memory', async () => {
+    // The skipped notice is set at boot and cleared by nothing but a new
+    // instance — the shape of the state a hand-kept reset list would forget.
+    choresApi.catchUpRepeats.mockResolvedValue({ created: 2, skipped: 3 })
+    const SKIPPED = '3 repeat occurrences older than the catch-up window were skipped rather than piled onto this week.'
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(screen.getByText(SKIPPED)).toBeInTheDocument()
+
+    await click(screen.getByRole('button', { name: /^sign out$/i }))
+    await expectSignedOutScreen()
+
+    api.signIn.mockImplementation(async () => {
+      session = { user: { id: 'person-a' } }
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    // Joined again — the control that the screen below is a household at all.
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(screen.queryByText(SKIPPED)).not.toBeInTheDocument()
   })
 })

@@ -5,6 +5,16 @@
   --ink: #e8eef2;
   --ink-dim: #9aa9b4;
   --accent: #1f6f5c;
+  /* #426 — the accent for TEXT on the dark surfaces. --accent is a fill and a
+     border colour: light ink sits on it at 5.72:1, so it is dark by design,
+     and as small text it is 2.70:1 on --surface and 2.99:1 on --bg — short
+     of WCAG AA's 4.5:1 (MEASURED in a real browser at 360×800 on every
+     signed-out screen, 2026-09-12). Lightening --accent itself was rejected:
+     the first value to clear 4.5:1 on --surface (#2f9a80) drops the filled
+     button's ink to 3.29:1, so one token cannot be both the fill and the
+     text. This is the same hue at l=46% instead of 28%: 6.50:1 on --surface,
+     7.21:1 on --bg. gate.test.js computes both from this file. */
+  --accent-ink: #33b798;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -165,6 +175,24 @@ body {
   color: var(--ink-dim);
 }
 
+/* #425 — "Report a problem", on its own line ABOVE the build stamp. Above, so
+   the footer still ends with `build <sha>`, which README tells a reader to look
+   for. Its own line, because it is the footer's one control, and a control here
+   is at least 44px tall however small its text.
+
+   Colour: the footer's own dim ink, underlined the way .button--link is. Not
+   --accent, which is 3:1 against --bg — short of 4.5:1 for text this small —
+   and not the browser's default link blue, which is off-palette. */
+.shell__report {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 /* ---------------------------------------------------------------------------
    Household roster — story #5.
 
@@ -207,6 +235,18 @@ body {
   font-size: 0.8125rem;
   line-height: 1.5;
   color: var(--ink-dim);
+}
+
+/* #180 — the losses a person reads before leaving a household, one per line.
+   Inherits the note's size and ink; the list is the change (design-bar,
+   2026-09-16: the same facts as a paragraph read as fine print at 360). */
+.card__losses {
+  margin: 0.5rem 0;
+  padding-left: 1.1rem;
+}
+
+.card__losses li + li {
+  margin-top: 0.25rem;
 }
 
 /* #53 — the catch-up pass skipped occurrences older than the bound and the
@@ -387,7 +427,9 @@ body {
   padding: 0.5rem 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  /* #426 — the text accent, not the fill accent: this is 13px text on a
+     card, and --accent measured 2.70:1 there. */
+  color: var(--accent-ink);
   font: inherit;
   text-decoration: underline;
   text-underline-offset: 0.15em;
@@ -434,6 +476,65 @@ body {
      in a message is the other one, and a code you cannot copy invites a typo. */
   user-select: all;
   word-break: break-all;
+}
+
+/* #172 — the one moment an invitation code exists anywhere. Large, monospace
+   and selectable as a unit: reading it aloud is the common path and sending it
+   in a message is the other, and a code you cannot copy invites a typo. The
+   letter-spacing is the grouping a reader needs — there is no separator
+   CHARACTER in the code, because `redeem_invitation` trims only the ends and a
+   hyphen would be part of the secret. Lower case, deliberately NOT
+   `text-transform: uppercase`: the string on screen has to be the string that
+   was hashed. */
+.invitation-minted {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+}
+
+.invitation-minted__code {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  /* Capped at 1.875rem, not 2.25rem — design-bar, 2026-09-10. At 768 the card
+     sits in a 263px column, and 2.25rem broke the code across two lines
+     (`987twvt2e` / `6`), which reads aloud as two things. Measured in the live
+     DOM before writing: this cap holds ONE line at 320 (25.6px), 360 (28.8px)
+     and 768 (30px); a fixed 1.75rem with nowrap overflowed at 320. */
+  font-size: clamp(1.5rem, 8vw, 1.875rem);
+  letter-spacing: 0.15em;
+  color: var(--ink);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+/* #172 — outstanding invitations, in the roster's row idiom so the card reads
+   as part of the same screen rather than as a bolted-on panel. */
+.invitation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.invitation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+}
+
+.invitation__dates {
+  font-size: 0.875rem;
+  color: var(--ink-dim);
 }
 
 .member-list {
@@ -713,6 +814,12 @@ body {
   background: rgba(127, 43, 43, 0.35);
   border: 1px solid #7f2b2b;
   border-radius: 0.5rem;
+  /* #191, measured at 360 wide: the mailer's refusal names the address it did
+     not send to, and an address cannot break — `placeholder.newcomer@example.test`
+     ran 263px into a 263px box (scrollWidth > clientWidth), touching the
+     border. Every sentence this strip carries from the Edge Function can
+     name one, so the wrap lives on the strip rather than on one caller. */
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------------------

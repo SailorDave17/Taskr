@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
+import { isProbeFile } from '../test/support/probeFiles.js'
 import {
   CAPACITY_COLUMNS,
   MAX_CAPACITY_MINUTES,
@@ -31,6 +32,9 @@ function codeOf(text) {
 function sourceFiles(dir = resolve(process.cwd(), 'src')) {
   const found = []
   for (const entry of readdirSync(dir)) {
+    // #192 — before the `statSync`, which is what throws when a probe planted by
+    // `retiredVocabulary.test.js` in a parallel worker is removed mid-walk.
+    if (isProbeFile(entry)) continue
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) found.push(...sourceFiles(path))
     else if (/\.(js|jsx)$/.test(entry)) found.push(path)

@@ -44,7 +44,7 @@ import { pathToFileURL } from 'node:url'
 // Imported, never restated — AC 2. The list of functions lives in
 // `deploy-function.mjs`, so a third function added there is checked here the
 // same day, and a copy here would be free to drift from it.
-import { FUNCTION_NAMES, resolveSupabaseUrl } from './deploy-function.mjs'
+import { FUNCTION_NAMES, SERVER_ONLY_FUNCTIONS, resolveSupabaseUrl } from './deploy-function.mjs'
 import {
   MANAGEMENT_API_ROOT,
   Refusal,
@@ -64,7 +64,9 @@ import {
  * list has to redden something the day the source list moves.
  */
 export function functionsToCheck() {
-  return [...FUNCTION_NAMES]
+  // #430: the server-only functions are deployed by the same script and go
+  // stale the same way, so they are checked the same way.
+  return [...FUNCTION_NAMES, ...SERVER_ONLY_FUNCTIONS]
 }
 
 /** Where the platform's record of deployed functions lives. */

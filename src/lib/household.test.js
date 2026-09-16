@@ -91,7 +91,24 @@ const fakeClient = {
     return Promise.resolve(results[name] ?? { data: null, error: null })
   },
   auth: {
-    getSession: () => Promise.resolve({ data: { session: authState.session ?? null } }),
+    // #440 — `sessionError` is auth-js's third state: a null session WITH an
+    // error, which is what an expired token and a failed refresh answer.
+    getSession: () =>
+      Promise.resolve({ data: { session: authState.session ?? null }, error: authState.sessionError ?? null }),
+    // #440 — the listener. Records the callback so a test can emit an event,
+    // and hands back the subscription shape supabase-js returns.
+    onAuthStateChange: (callback) => {
+      authState.listeners = [...(authState.listeners ?? []), callback]
+      return {
+        data: {
+          subscription: {
+            unsubscribe: () => {
+              calls.push({ op: 'unsubscribe' })
+            },
+          },
+        },
+      }
+    },
     getUser: () => Promise.resolve({ data: { user: authState.user ?? null } }),
     // `signInAnonymously` stood here until #62. It is gone rather than left
     // unused: a stub for a call the app must never make again would let a
@@ -135,6 +152,24 @@ const fakeClient = {
       calls.push({ op: 'signOut', options })
       return Promise.resolve({ error: authState.signOutError ? { message: authState.signOutError } : null })
     },
+    // #341 — the two client-side halves of the invitation path. Both record
+    // their ARGUMENTS for the reason `signOut` above does: `updateUser` called
+    // with the wrong field and `resetPasswordForEmail` sent to the wrong address
+    // both look identical to a fake that pushes only `{ op }`.
+    updateUser: (attrs) => {
+      calls.push({ op: 'updateUser', attrs })
+      return Promise.resolve(
+        authState.updateUserError
+          ? { data: null, error: { message: authState.updateUserError } }
+          : { data: { user: { id: 'person-1' } }, error: null },
+      )
+    },
+    resetPasswordForEmail: (email, options) => {
+      calls.push({ op: 'resetPasswordForEmail', email, options })
+      return Promise.resolve(
+        authState.resetError ? { error: { message: authState.resetError } } : { error: null },
+      )
+    },
   },
 }
 
@@ -157,9 +192,13 @@ const {
   listMembers,
   normalizeMemberEmail,
   normalizeMinutes,
-  provisionMember,
+  inviteMember,
+  leaveHousehold,
+  readAuthCallback,
   readSignInReturn,
   removeMember,
+  sendPasswordReset,
+  setOwnPassword,
   signInAddressFor,
   resetMemberCredential,
   signIn,
@@ -167,6 +206,9 @@ const {
   signOut,
   signUpOrganizer,
   updateMember,
+  // #440
+  onSignedOut,
+  sessionIsGone,
 } = await import('./household.js')
 
 beforeEach(() => {
@@ -485,6 +527,47 @@ describe('signing in as a person', () => {
   })
 })
 
+describe('whether the session is gone, and hearing when it ends — #440', () => {
+  // `getSession()` answers a null session in two states, and App's sign-out
+  // lands on only one of them. Measured on #440: offline an hour past the
+  // access token's expiry, auth-js answered null WITH an error while the
+  // refresh token was still stored, and reading that as gone let the same
+  // person back in on the next boot with a connection.
+  it('is gone when storage holds no session and nothing went wrong reading it', async () => {
+    expect(await sessionIsGone()).toBe(true)
+  })
+
+  it('is NOT gone when the session reads null because the refresh failed', async () => {
+    // auth-js's AuthRetryableFetchError; only its presence is read.
+    authState.sessionError = { message: 'Failed to fetch' }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('is not gone while a session is held', async () => {
+    authState.session = { user: { id: 'person-1' } }
+    expect(await sessionIsGone()).toBe(false)
+  })
+
+  it('hears SIGNED_OUT and nothing else', () => {
+    const ended = vi.fn()
+    onSignedOut(ended)
+    const [emit] = authState.listeners
+    for (const event of ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED', 'PASSWORD_RECOVERY']) {
+      emit(event, null)
+    }
+    expect(ended).not.toHaveBeenCalled()
+    emit('SIGNED_OUT', null)
+    expect(ended).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands back an unsubscribe that reaches the subscription', () => {
+    const unsubscribe = onSignedOut(() => {})
+    expect(calls).not.toContainEqual({ op: 'unsubscribe' })
+    unsubscribe()
+    expect(calls).toContainEqual({ op: 'unsubscribe' })
+  })
+})
+
 describe('signing in with Google — #304', () => {
   // The flow is Supabase's and the browser leaves the page, so what this layer
   // owns is the CALL: which provider, where the person comes back to, and that
@@ -524,9 +607,13 @@ describe('signing in with Google — #304', () => {
   })
 
   it('names Google when the start is refused, since nothing about a password was wrong', async () => {
-    // The live project's answer until the provider is enabled: "Unsupported
-    // provider: provider is not enabled". Collapsing that into "did not match"
-    // would send somebody to reset a password they never typed.
+    // A start auth-js refuses before leaving the page. NOT the provider-off
+    // case, despite the wording borrowed from it: with the provider off auth-js
+    // still builds the URL and navigates, and Supabase answers the authorize
+    // request with a raw JSON 400 that never comes back here (measured
+    // 2026-09-04; #339 reads the switch first instead). Collapsing a refusal
+    // into "did not match" would send somebody to reset a password they never
+    // typed.
     authState.oauthError = 'Unsupported provider: provider is not enabled'
     await expect(signInWithGoogle()).rejects.toThrow(/signing in with Google.*provider is not enabled/)
   })
@@ -796,6 +883,7 @@ describe('maintaining the roster', () => {
       weeklyMinutes: 120,
       householdId: 'h1',
       household_id: 'somewhere-else',
+      email: 'placeholder.one@example.com',
     })
 
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
@@ -807,22 +895,37 @@ describe('maintaining the roster', () => {
   // above passes just as well against a function that hard-codes the first
   // household it can find.
   it('writes into the household it was asked for, not the first one going', async () => {
-    await addMember({ displayName: 'Placeholder Two', weeklyMinutes: 60, householdId: 'h2' })
+    await addMember({
+      displayName: 'Placeholder Two',
+      weeklyMinutes: 60,
+      householdId: 'h2',
+      email: 'placeholder.two@example.com',
+    })
 
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.household_id).toBe('h2')
   })
 
   it('trims a name before storing it', async () => {
-    await addMember({ displayName: '  Placeholder One  ', weeklyMinutes: 0, householdId: 'h1' })
+    await addMember({
+      displayName: '  Placeholder One  ',
+      weeklyMinutes: 0,
+      householdId: 'h1',
+      email: 'placeholder.one@example.com',
+    })
     const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
     expect(insert.row.display_name).toBe('Placeholder One')
   })
 
   it('refuses a blank name before spending a round trip', async () => {
-    await expect(addMember({ displayName: '   ', weeklyMinutes: 60, householdId: 'h1' })).rejects.toThrow(
-      /needs a name/i,
-    )
+    await expect(
+      addMember({
+        displayName: '   ',
+        weeklyMinutes: 60,
+        householdId: 'h1',
+        email: 'placeholder.one@example.com',
+      }),
+    ).rejects.toThrow(/needs a name/i)
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
@@ -833,7 +936,12 @@ describe('maintaining the roster', () => {
   // property is restated against what the function actually reads.
   it('refuses to add anyone when no household is named', async () => {
     await expect(
-      addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: undefined }),
+      addMember({
+        displayName: 'Placeholder One',
+        weeklyMinutes: 60,
+        householdId: undefined,
+        email: 'placeholder.one@example.com',
+      }),
     ).rejects.toThrow(/which household/i)
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
@@ -866,14 +974,20 @@ describe('maintaining the roster', () => {
     expect(insert.row.email).toBe('placeholder.one@example.com')
   })
 
-  // The half that keeps the OLD insert byte for byte what it was: a caller that
-  // does not mention an address must not start writing nulls into the column.
-  // `0007`'s null means "no real inbox, so a synthetic address and a PIN", and a
-  // write is a different act from an omission even when the stored value agrees.
-  it('omits the column entirely when nobody typed an address', async () => {
-    await addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: 'h1' })
-    const insert = calls.find((c) => c.op === 'insert' && c.table === 'members')
-    expect(insert.row).not.toHaveProperty('email')
+  // #191 — INVERTED. Until then this test held the old insert byte for byte
+  // when nobody typed an address ("omits the column entirely"), because
+  // `0007`'s null meant "no real inbox, so a synthetic address and a PIN".
+  // There is no PIN to mint any more, so a row with no address is a person
+  // with no way in, and the data layer refuses it before the round trip — on
+  // every spelling of absent, since a blank and a null both used to reach the
+  // insert.
+  it('#191: refuses to add a person with no address, before the round trip', async () => {
+    for (const email of [undefined, null, '', '   ']) {
+      await expect(
+        addMember({ displayName: 'Placeholder One', weeklyMinutes: 60, householdId: 'h1', email }),
+      ).rejects.toThrow(/needs an email address/i)
+    }
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0)
   })
 
   it('clears the address when the field is emptied, rather than ignoring the edit', async () => {
@@ -1134,7 +1248,7 @@ function httpError(body) {
   return error
 }
 
-describe('provisioning a sign-in - #87, and how it fails - #112', () => {
+describe('the PIN reset - #87, how it fails - #112, and what #191 took away', () => {
 
   async function failureFrom(call) {
     let thrown = null
@@ -1150,6 +1264,26 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     return thrown
   }
 
+  // #191 AC 3 — "no client code path invokes provision-member's create-a-sign-in
+  // action". The retired-credential describe above asserts the #62 drops the
+  // same way, and for the same reason: a wrapper left behind turns a
+  // compile-time absence into a runtime refusal discovered on a phone.
+  it('#191 AC 3: exports no provisionMember, so nothing can call the retired action', async () => {
+    const household = await import('./household.js')
+    expect(household.provisionMember, 'provisionMember is still exported').toBeUndefined()
+  })
+
+  it('#191 AC 3: never sends "provision" to the function, whatever else it sends', async () => {
+    // The wrappers that survive, each exercised, and the body of every call
+    // read back: the action this story removed must not be among them.
+    invokeResult = { data: { ok: true }, error: null }
+    await resetMemberCredential({ memberId: 'm1', password: 'a good one' })
+    await inviteMember({ memberId: 'm1' })
+    const actions = calls.filter((c) => c.op === 'invoke').map((c) => c.body.action)
+    expect(actions).toEqual(['reset', 'invite'])
+    expect(actions).not.toContain('provision')
+  })
+
   it("passes the function's own refusal through verbatim", () => {
     // The function answers in sentences on purpose: "Only the household
     // organizer can do that" is something the person can act on, and replacing
@@ -1158,11 +1292,11 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
       data: null,
       error: httpError({ error: 'Only the household organizer can do that.' }),
     }
-    return failureFrom(() => provisionMember({ memberId: 'm1', password: 'a good one' })).then(
-      (thrown) => {
-        expect(thrown.message).toBe('Only the household organizer can do that.')
-      },
-    )
+    return failureFrom(() =>
+      resetMemberCredential({ memberId: 'm1', password: 'a good one' }),
+    ).then((thrown) => {
+      expect(thrown.message).toBe('Only the household organizer can do that.')
+    })
   })
 
   it('says what is wrong and what to do when the request never got an answer', async () => {
@@ -1174,7 +1308,7 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     // function that was never deployed.
     invokeResult = { data: null, error: fetchError() }
     const thrown = await failureFrom(() =>
-      provisionMember({ memberId: 'm1', password: 'a good one' }),
+      resetMemberCredential({ memberId: 'm1', password: 'a good one' }),
     )
 
     expect(thrown.message).not.toMatch(/Failed to send a request/)
@@ -1182,7 +1316,7 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     expect(thrown.message).toMatch(/provision-member/)
     expect(thrown.message).toMatch(/deployed/i)
     // The one thing that IS certain: a request that never left cannot have
-    // half-provisioned anybody, and saying so stops an organizer retrying into a
+    // half-reset anybody, and saying so stops an organizer retrying into a
     // state they are afraid of.
     expect(thrown.message).toMatch(/nothing was changed/i)
   })
@@ -1201,22 +1335,24 @@ describe('provisioning a sign-in - #87, and how it fails - #112', () => {
     // rather than a 400 from the admin API - and checked before the call, so a
     // typo costs nothing.
     invokeResult = { data: null, error: fetchError() }
-    const thrown = await failureFrom(() => provisionMember({ memberId: 'm1', password: 'abc' }))
+    const thrown = await failureFrom(() =>
+      resetMemberCredential({ memberId: 'm1', password: 'abc' }),
+    )
     expect(thrown.message).toMatch(/at least 6/)
     expect(calls.filter((call) => call.op === 'invoke')).toEqual([])
   })
 
-  it('POSITIVE CONTROL: a successful provision reaches the function and returns its answer', async () => {
+  it('POSITIVE CONTROL: a successful reset reaches the function and returns its answer', async () => {
     // Without this, every assertion above could be satisfied by a client that
     // always fails - and the fake would be proving nothing about the happy path
     // it is standing in for.
-    invokeResult = { data: { ok: true, action: 'provision', memberId: 'm1' }, error: null }
-    const result = await provisionMember({ memberId: 'm1', password: 'a good one' })
-    expect(result).toEqual({ ok: true, action: 'provision', memberId: 'm1' })
+    invokeResult = { data: { ok: true, action: 'reset', memberId: 'm1' }, error: null }
+    const result = await resetMemberCredential({ memberId: 'm1', password: 'a good one' })
+    expect(result).toEqual({ ok: true, action: 'reset', memberId: 'm1' })
     expect(calls).toContainEqual({
       op: 'invoke',
       name: 'provision-member',
-      body: { action: 'provision', memberId: 'm1', password: 'a good one' },
+      body: { action: 'reset', memberId: 'm1', password: 'a good one' },
     })
   })
 })
@@ -1300,5 +1436,269 @@ describe('removing a member takes their sign-in with it - #247', () => {
     results.members = [row(null), { data: null, error: { message: 'permission denied' } }]
 
     await expect(removeMember('m1')).rejects.toThrow(/removing the person: permission denied/)
+  })
+})
+
+describe('#341 — the invitation path, at the data layer', () => {
+  const invokes = () => calls.filter((c) => c.op === 'invoke')
+
+  describe('inviteMember', () => {
+    it('asks the Edge Function to invite, with the origin and NO password', () => {
+      invokeResult = { data: { ok: true, action: 'invite' }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()).toHaveLength(1)
+        const { name, body } = invokes()[0]
+        expect(name).toBe('provision-member')
+        expect(body.action).toBe('invite')
+        expect(body.memberId).toBe('m1')
+        // The story, asserted as an absence on a body the fake records whole:
+        // nothing this call carries is a credential.
+        expect(body).not.toHaveProperty('password')
+      })
+    })
+
+    it('carries the running origin, not a constant', () => {
+      // The same rule `confirmationRedirectTo` exists for — a dev server has to
+      // come back to the dev server. Asserted against that function's own answer
+      // rather than a literal, so the two cannot drift apart.
+      invokeResult = { data: { ok: true }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()[0].body.redirectTo).toBe(confirmationRedirectTo())
+        // ...and the positive half, or the assertion above is satisfied by both
+        // being undefined.
+        expect(invokes()[0].body.redirectTo).toBeTruthy()
+      })
+    })
+
+    it('does not apply the password floor — the organizer is never asked for one', () => {
+      // The regression this guards is a one-word one. The floor used to read
+      // `action !== 'revoke'`, which silently included `invite` the moment it
+      // existed: the call would have been refused locally, before any round
+      // trip, with a sentence about six characters — on the path built to stop
+      // asking for a credential at all.
+      invokeResult = { data: { ok: true }, error: null }
+      return inviteMember({ memberId: 'm1' }).then(() => {
+        expect(invokes()).toHaveLength(1)
+      })
+    })
+
+    it('refuses with no member, before any round trip', () => {
+      return inviteMember({ memberId: '' }).then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => {
+          expect(err.message).toMatch(/pick a person/i)
+          expect(invokes()).toHaveLength(0)
+        },
+      )
+    })
+
+    it('surfaces the function’s own sentence, because it is one to act on', () => {
+      // #87's rule, inherited: "already has a Taskr sign-in, use Reset sign-in"
+      // is something an organizer can do something about, and "Edge Function
+      // returned a non-2xx status code" is not.
+      invokeResult = {
+        data: null,
+        error: {
+          name: 'FunctionsHttpError',
+          message: 'Edge Function returned a non-2xx status code',
+          context: {
+            json: () =>
+              Promise.resolve({
+                error: 'placeholder.one@example.test already has a Taskr sign-in, so no invitation was sent. Use Reset sign-in instead.',
+              }),
+          },
+        },
+      }
+      return inviteMember({ memberId: 'm1' }).then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => {
+          expect(err.message).toMatch(/already has a Taskr sign-in/i)
+          expect(err.message).toMatch(/Reset sign-in/i)
+        },
+      )
+    })
+  })
+
+  describe('sendPasswordReset', () => {
+    it('asks GoTrue directly — no Edge Function, no service_role', () => {
+      // The distinction worth asserting: provisioning needs a privileged server
+      // because it acts on somebody who does not exist yet, and a reset mail is
+      // a request about an address that the anon key may make. A regression that
+      // routed this through the function would still "work" and would put a
+      // privileged path where none is needed.
+      return sendPasswordReset('placeholder.one@example.test').then(() => {
+        expect(invokes()).toHaveLength(0)
+        const sent = calls.filter((c) => c.op === 'resetPasswordForEmail')
+        expect(sent).toHaveLength(1)
+        expect(sent[0].email).toBe('placeholder.one@example.test')
+        expect(sent[0].options.redirectTo).toBe(confirmationRedirectTo())
+      })
+    })
+
+    it('reports a refusal as a sentence naming the mail', () => {
+      authState.resetError = 'over_email_send_rate_limit'
+      return sendPasswordReset('placeholder.one@example.test').then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => expect(err.message).toMatch(/could not send that reset email/i),
+      )
+    })
+  })
+
+  describe('setOwnPassword', () => {
+    it('updates the caller’s own account and nothing else', () => {
+      // `updateUser` acts on `auth.uid()` and can reach nobody else, which is
+      // exactly why this one credential write is allowed in the client at all.
+      return setOwnPassword('a-good-password').then(() => {
+        const updates = calls.filter((c) => c.op === 'updateUser')
+        expect(updates).toHaveLength(1)
+        expect(updates[0].attrs).toEqual({ password: 'a-good-password' })
+      })
+    })
+
+    it('reports a refusal rather than resolving quietly', () => {
+      authState.updateUserError = 'New password should be different from the old password.'
+      return setOwnPassword('a-good-password').then(
+        () => {
+          throw new Error('expected a refusal')
+        },
+        (err) => expect(err.message).toMatch(/could not set that password/i),
+      )
+    })
+  })
+
+  describe('readAuthCallback', () => {
+    const at = (hash) => ({ hash })
+    const TOKEN = 'access_token=t&refresh_token=r&expires_in=3600&token_type=bearer'
+
+    it('reads an invitation arrival', () => {
+      expect(readAuthCallback(at(`#${TOKEN}&type=invite`))).toEqual({ type: 'invite' })
+    })
+
+    it('reads a recovery arrival', () => {
+      expect(readAuthCallback(at(`#${TOKEN}&type=recovery`))).toEqual({ type: 'recovery' })
+    })
+
+    it('#155 AC 5: reads only the fragment, and the consent reader reads only the query — one URL, three readers, no overlap', async () => {
+      // The pure half of the measurement App.test.jsx makes on a boot: each
+      // reader sees exactly its own channel of a URL carrying a recovery in the
+      // fragment and a calendar consent in the query, and the sign-in-return
+      // reader, which reads both channels, sees nothing of either.
+      const { readConsentReturn } = await import('./calendar.js')
+      const location = { search: '?code=the-code&state=the-state', hash: `#${TOKEN}&type=recovery` }
+      expect(readAuthCallback(location)).toEqual({ type: 'recovery' })
+      expect(readConsentReturn(location.search)).toEqual({
+        code: 'the-code',
+        error: null,
+        state: 'the-state',
+      })
+      expect(readSignInReturn(location)).toBeNull()
+      // And a consent carries nothing this reader could mistake for an arrival.
+      expect(readAuthCallback({ search: location.search, hash: '' })).toBeNull()
+    })
+
+    it('refuses a type it does not own, so an OAuth return is left alone', () => {
+      // A Google sign-in comes back with a token and no type this screen owns.
+      // Treating any token as an arrival would put a password screen in front of
+      // every provider sign-in.
+      expect(readAuthCallback(at(`#${TOKEN}`))).toBeNull()
+      expect(readAuthCallback(at(`#${TOKEN}&type=magiclink`))).toBeNull()
+      expect(readAuthCallback(at(`#${TOKEN}&type=signup`))).toBeNull()
+    })
+
+    it('refuses an EXPIRED link, which carries the type and no token', () => {
+      // The trap. An expired invitation is `type=invite` alongside an error and
+      // no `access_token`; that return belongs to `readSignInReturn`, and
+      // mistaking it for an arrival shows a password screen for a session that
+      // does not exist.
+      expect(
+        readAuthCallback(
+          at('#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite'),
+        ),
+      ).toBeNull()
+    })
+
+    it('refuses an empty or absent hash without throwing', () => {
+      expect(readAuthCallback(at(''))).toBeNull()
+      expect(readAuthCallback({})).toBeNull()
+      expect(readAuthCallback(undefined)).toBeNull()
+    })
+
+    it('leaves the ERROR channel to readSignInReturn, and the two agree', () => {
+      // The two functions read the same few characters and must not both claim
+      // one return. Asserted as a pair rather than separately, because the
+      // failure is a DISAGREEMENT and neither function can show it alone.
+      const expired = at(
+        '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&type=invite',
+      )
+      expect(readAuthCallback(expired)).toBeNull()
+      expect(readSignInReturn({ ...expired, search: '' })).toMatchObject({
+        code: 'otp_expired',
+        source: 'fragment',
+      })
+
+      const arrived = at(`#${TOKEN}&type=invite`)
+      expect(readAuthCallback(arrived)).toEqual({ type: 'invite' })
+      expect(readSignInReturn({ ...arrived, search: '' })).toBeNull()
+    })
+  })
+})
+
+describe('leaveHousehold — the client half of #431', () => {
+  // Added at #431's review (2026-09-11): App mocked this function whole, so how
+  // a leave's answer is READ was tested nowhere — and reading `accountDeleted`
+  // wrong signs out somebody whose sign-in survived.
+  it('calls the leave function with the household, and nothing else', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: false }, error: null }
+    await leaveHousehold('h1')
+    // The function's name is asserted through `.name`, not as a `name:` key:
+    // #19's gate reads every literal under a `name` key as a person's name.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ op: 'invoke', body: { householdId: 'h1' } })
+    expect(Object.keys(calls[0].body)).toEqual(['householdId'])
+    expect(calls[0].name).toBe('leave-household')
+  })
+
+  it('reports the account deleted only when the function says so, exactly', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: true }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: true })
+    invokeResult = { data: { ok: true, accountDeleted: false, kept: 'claimed-elsewhere' }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: false })
+    invokeResult = { data: { ok: true, accountDeleted: 'yes' }, error: null }
+    expect(await leaveHousehold('h1')).toMatchObject({ accountDeleted: false })
+  })
+
+  it('passes the surviving-sign-in warning and a failed revoke through', async () => {
+    invokeResult = { data: { ok: true, accountDeleted: false, warning: 'kept', revokeFailed: true }, error: null }
+    expect(await leaveHousehold('h1')).toEqual({ accountDeleted: false, warning: 'kept', revokeFailed: true })
+    invokeResult = { data: { ok: true, accountDeleted: true }, error: null }
+    expect(await leaveHousehold('h1')).toEqual({ accountDeleted: true, warning: null, revokeFailed: false })
+  })
+
+  it("passes the leave function's own refusal through verbatim", async () => {
+    const refusal = 'The organizer cannot leave. Hand the household over or delete it first.'
+    invokeResult = { data: null, error: httpError({ error: refusal }) }
+    await expect(leaveHousehold('h1')).rejects.toThrow(refusal)
+  })
+
+  it('says they are still in the household when the request never got an answer — never "nothing was changed"', async () => {
+    // By the time this call is made the app has already re-dealt the leaver's
+    // chores, so the provisioning sentence would be false here.
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await leaveHousehold('h1').then(() => null, (err) => err)
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    expect(thrown.message).toMatch(/still in the household/)
+    expect(thrown.message).toMatch(/leave-household/)
+    expect(thrown.message).not.toMatch(/nothing was changed/i)
+  })
+
+  it('refuses to call the function without a household', async () => {
+    await expect(leaveHousehold('')).rejects.toThrow(/which household/i)
+    expect(calls).toEqual([])
   })
 })

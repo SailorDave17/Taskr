@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { isProbeFile } from '../test/support/probeFiles.js'
 
 // The capture layer — story #210.
 //
@@ -856,6 +857,9 @@ describe('#213 AC 4 — one due-date normaliser in the tree, and the chore layer
   function sourceFiles(dir) {
     const out = []
     for (const entry of readdirSync(dir)) {
+      // #192 — before the `statSync`, which is what throws when a probe planted
+      // by `retiredVocabulary.test.js` in a parallel worker is removed mid-walk.
+      if (isProbeFile(entry)) continue
       const path = `${dir}/${entry}`
       if (statSync(path).isDirectory()) out.push(...sourceFiles(path))
       else if (/\.jsx?$/.test(entry) && !/\.test\.jsx?$/.test(entry)) out.push(path)

@@ -7,7 +7,13 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0041` are ALL applied to the live project** (`0041` on 2026-09-11 in #173's own
+- Status: **`0001`–`0045` are ALL applied to the live project** (`0045` on 2026-09-16 in #458's own
+  session and `0044` the same day in #180's — see their sections below; `0042` on 2026-09-12 in
+  #169's session, at md5 `67f00c9276df384cf1c391d119a60b7b` (`23313 characters, 50 statements`),
+  read back identical, *measured* `check:live` **71 of 74 → 74 of 74** and `probe:live-grants`
+  **20 of 20** after — see the #430 section; `0043` on 2026-09-11 in #431's post-merge session
+  (`8274 characters, 12 statements`, read back identical), `check:live` **69 of 74 → 70 of 74** —
+  see the #431 section; `0041` on 2026-09-11 in #173's own
   session, at md5 `ecabaf99ff72dcf9d92ce7a57085151a` (`8824 characters, 4 statements`), read back
   identical — see its entry below; a BODY replace of `redeem_invitation` that **`npm run check:live`
   cannot see** — *measured* **69 of 69** on both sides — and that
@@ -43,11 +49,13 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds FIVE rows as of 2026-09-11 — #430's three
-  (`request_household_deletion`, `restore_household` and `household_deletion_status`, red until
-  `0042` is applied) and #431's two (`transfer_household` until `0043` is applied, and the
-  `leave-household` Edge Function until it is deployed); their whole history is the #430 and #431
-  bullet in the excused-red table below. Until #430 this sentence still read EMPTY, which is the
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-16 — *measured **75 of 75*** at #182's pickup.
+  From 2026-09-11 it held FIVE rows — #430's three (`request_household_deletion`,
+  `restore_household` and `household_deletion_status`, red until `0042` was applied on 2026-09-12)
+  and #431's two (`transfer_household` until `0043` was applied, and the `leave-household` Edge
+  Function until it was deployed, both on 2026-09-11); their whole history is the #430 and #431
+  bullet in the excused-red table below. This sentence went on saying FIVE for five days after the
+  last of them drained, until #182 (#441). Until #430 it still read EMPTY, which is the
   miss the paragraph at "grep this file" warns about. Before that it was
   EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
   opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
@@ -1239,8 +1247,8 @@
 - **#430 opened THREE rows and #431 TWO on 2026-09-11, and neither story drained its rows in its
   own session.** #430's are three RPC probes: `request_household_deletion`, `restore_household` and
   `household_deletion_status`, red until `npm run migrate:live` applies `0042`. #431's are two:
-  - the `transfer_household` RPC probe, red until `0043` is applied;
-  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` ships it.
+  - the `transfer_household` RPC probe, red until `0043` was applied;
+  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` shipped it.
 
   Both stories left the apply and the deploy to the owner's post-merge steps, because production is
   built from `release` and the migration must land before the client that calls it is promoted.
@@ -1249,6 +1257,14 @@
   not reach that cell, and #431's review-fanout found it still saying empty (2026-09-11).
   The RPCs that only Edge Functions call are deliberately unlisted: `leave_household`,
   `member_tokens_to_revoke` and #430's purge functions.
+
+  **All five drained, from sessions, after the merges.** #431's two on 2026-09-11, once #435 had
+  merged: *measured* **69 of 74** before anything, **70 of 74** after `npm run migrate:live`
+  applied `0043`, and **71 of 74** after `npm run deploy:function` (readings on #431). #430's three
+  on 2026-09-12, from #169's session: **71 of 74 → 74 of 74** across the `0042` apply (readings on
+  #430). `release` had been promoted with #430's client before that apply, so production's delete
+  card called three missing functions for most of a day. The set has been EMPTY since; *measured*
+  **75 of 75** on 2026-09-16 (#182), #458's one row having opened and drained in between.
 - **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
   One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
   as the seeded account and reading the `system` frame the server sends after the join — never
@@ -2482,8 +2498,12 @@ An organizer can delete their household from the Who tab. Owner decisions are on
 - **Re-paste hazard, measured.** Re-pasting `0041` after `0042` silently takes the pending-deletion
   refusal back out of `redeem_invitation`, and re-pasting `0042` restores it
   (`householdDeletion.pglite.test.js`). **The safe re-paste order now ends at `0042`.**
-- **Excused reds.** `check:live` reads the three client RPCs red until `0042` is applied. The purge's
-  functions are not in `LIVE_RPCS`, because the app never calls them.
+- **Applied, and the excused reds drained.** `check:live` read the three client RPCs red until
+  `0042` was applied — on 2026-09-12, from #169's session: `npm run migrate:live` ran 50
+  statements, and Postgres read back 23,313 characters at md5 `67f00c9276df384cf1c391d119a60b7b`,
+  identical to the file. *Measured* `check:live` **71 of 74 → 74 of 74** and `probe:live-grants`
+  **20 of 20** afterwards; a before/after catalog diff moved exactly this file's list (readings on
+  #430). The purge's functions are not in `LIVE_RPCS`, because the app never calls them.
 
 ## Leaving a household — #431, 2026-09-11
 
@@ -2572,8 +2592,10 @@ A member can leave from the Who tab. An organizer first hands the household over
   of two households leaving one still reads exactly the other (AC 8). `App.test.jsx` asserts the
   remembered household (#165) is forgotten on a leave while the list still names it — the gap
   PR #435 recorded as untestable is testable once the list is held still.
-- **Excused reds.** `check:live` reads `transfer_household` red until `0043` is applied, and
-  `leave-household` NOT DEPLOYED until it ships. `leave_household` and `member_tokens_to_revoke` are
+- **Applied, and the excused reds drained.** `check:live` read `transfer_household` red until
+  `0043` was applied, and `leave-household` NOT DEPLOYED until it shipped — both on 2026-09-11,
+  from a session after #435 merged: *measured* **69 of 74 → 70 of 74** across the apply and
+  **→ 71 of 74** across the deploy (readings on #431). `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.
 
 ## How the rules are enforced

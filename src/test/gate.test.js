@@ -1425,6 +1425,11 @@ describe('#19 — no real household name reaches version control', () => {
     // lower-cased for the tab labels' reason — an accessible name is
     // capitalised by design.
     Household: 'the accessible name of the household switcher (#164)',
+    // #478 — two control names the switch tests query by. Declared rather
+    // than lower-cased, for the tab labels' reason: an accessible name is
+    // capitalised by design, and the queries match it exactly.
+    Reload: 'the button on the render-failure card (#478)',
+    'Household surfaces': 'the accessible name of the tab strip (#47), queried by #478',
     // #166 — the button on BOTH create paths: the onboarding card and the
     // roster's "start another" card. Asserted by exact accessible name in the
     // tests that tell the two apart, which is why it is a literal.

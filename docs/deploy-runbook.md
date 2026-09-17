@@ -176,6 +176,41 @@ page, and each build gets a distinct `assets/index-*.js` filename, so `curl` alo
 builds. **Check a deploy landed by reading the stamp, not by trusting the dashboard** — a deployment
 record answers about the deployment you asked about, not about what the URL currently resolves to.
 
+### 1a. The link the website carries — start your household (#343)
+
+**The URL the owner's website links to is `https://taskr.madcowhq.com/?start`** — that value, and
+no other. It opens the app on the create-your-account card, framed as starting a household, with the
+sign-in form as the link underneath; the bare root still opens on sign-in (#154), because nearly
+everyone opening the app already belongs to a household. The flag is read once at boot and stripped
+from the address bar, so a reload, a bookmark of what the address bar then shows, or a later sign-out
+all land on sign-in as they should. A signed-in person who follows the link is unaffected: a member
+lands in their household, and a person with no household lands on *Name the household* — the flag
+never signs anybody out and never starts a second household (#166 is the path for that).
+
+**Why a query string on the root and not a path.** `/start` is a **404** on the deployed site —
+*measured 2026-09-04 and again 2026-09-16*, `GET https://taskr.madcowhq.com/start` answers `404
+text/plain`. There is no router in the app and no single-page rewrite in `vercel.json` (which carries
+only the purge cron), so the root is the only path that reaches the app. The router and the rewrite
+were #175 and #176; **both were closed as not planned on 2026-09-09** — the charter's one reopen
+condition for a router was discharged by #341's invitation landing on the bare root, so a `/start`
+path is not arriving on any current story. The query form is therefore the published URL for the
+foreseeable future, not a stopgap.
+
+**If a router ever does land**, the path form `/start` must 301 — or the client-side equivalent,
+a redirect that keeps working for a link already printed — to `/?start`, so that the website's link
+never breaks whichever form a later story prefers. That is a criterion for the router story, and it is
+written here rather than on #175 because #175 is closed and tracks nothing.
+
+**What the website should say.** The `href` is this section's value; the anchor text is the other
+repo's decision (`SailorDave17/madcowsailing.com`, the `hq` app). Worth preferring *Start your
+household* over *Open Taskr* — the verb is the thing the visitor is deciding.
+
+**The return leg needs no flag.** The confirmation email's link lands on the origin the signup came
+from (`confirmationRedirectTo`, #129 — the origin only, never the query), and a signed-in person with
+no household gets *Name the household* on the bare root. `App.test.jsx`'s #343 describe proves it on
+the bare root with a session and no household; a confirmation followed from a second device is the
+same boot.
+
 ## 2. Supabase — the backend
 
 Not needed for the shell to deploy. Do it before **#5** (the roster), which is the first story that

@@ -110,10 +110,17 @@ export default function Onboarding({
   error = null,
   signedIn = false,
   signInNotice = null,
+  // #343 — which signed-out card to open on. `'sign-in'` is #154's weighting
+  // and the default; App passes `'sign-up'` for the one arrival that came here
+  // to start a household — the website's `?start` link — so that visitor's
+  // first screen is the account card with sign-in as the link underneath, the
+  // inversion of the ordinary screen. Read at mount only: a person who moves
+  // between the cards is not thrown back by a re-render.
+  initialView = 'sign-in',
   busy,
 }) {
-  // Which of the three signed-out cards is showing. Irrelevant once signed in.
-  const [view, setView] = useState('sign-in')
+  // Which of the signed-out cards is showing. Irrelevant once signed in.
+  const [view, setView] = useState(initialView)
   // #173 — the code typed on the join card (signed out) or the join form
   // (signed in). One field serves both, since only one of them is ever on
   // screen.
@@ -780,5 +787,7 @@ Onboarding.propTypes = {
   error: PropTypes.string,
   signedIn: PropTypes.bool,
   signInNotice: PropTypes.string,
+  // #343. Optional so every earlier test renders unchanged on sign-in.
+  initialView: PropTypes.oneOf(['sign-in', 'sign-up']),
   busy: PropTypes.bool,
 }

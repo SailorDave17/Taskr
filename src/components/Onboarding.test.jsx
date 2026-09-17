@@ -326,6 +326,78 @@ describe('starting a household — the account comes first, on its own', () => {
   })
 })
 
+describe('#343 — arriving from the website: the account card first, sign-in as the link', () => {
+  // The website's `?start` link is read by App, which passes `initialView`.
+  // This screen's part is to open on the card asked for and to keep the way
+  // back to sign-in — the inversion of #154's weights, for this arrival only.
+
+  it('opens on the account card, framed as starting a household, with no sign-in form', () => {
+    // AC 1: a heading and a sentence about starting a household, the account
+    // form, and NOT the sign-in form — the thing the visitor did not come for.
+    setup({ initialView: 'sign-up' })
+    expect(screen.getByRole('heading', { name: /start a household/i })).toBeInTheDocument()
+    expect(screen.getByText(/first, your own account/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/your email/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/your password/i)).toBeInTheDocument()
+    expect(createAccountButton()).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^sign in$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    // Still no household fields: naming it is a later submit, signed in (#154).
+    expect(screen.queryByLabelText(/household name/i)).not.toBeInTheDocument()
+  })
+
+  it('and the sign-in form is one link away underneath', () => {
+    setup({ initialView: 'sign-up' })
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(signInButton()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+  })
+
+  it('POSITIVE CONTROL: without the prop the screen still opens on sign-in', () => {
+    // The default is #154's screen. Without this the test above passes just as
+    // well against a screen that ALWAYS opens on the account card.
+    setup()
+    expect(signInButton()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+  })
+
+  it('creates the account from that card exactly as the link route does', async () => {
+    // Same card, same submit. The link route's tests above cover the outcomes;
+    // this asserts the arrival did not wire up a second path.
+    const { onSignUp, onCreate } = setup({ initialView: 'sign-up' })
+    fireEvent.change(screen.getByLabelText(/your email/i), {
+      target: { value: 'organizer@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'longenough' } })
+    await clickAndSettle(createAccountButton())
+
+    expect(onSignUp).toHaveBeenCalledWith({ email: 'organizer@example.com', password: 'longenough' })
+    expect(onCreate).not.toHaveBeenCalled()
+    // And the ordinary confirmation outcome lands back on sign-in with the
+    // address filled, as the link route does.
+    expect(screen.getByTestId('confirmation-note')).toHaveTextContent('organizer@example.com')
+    expect(signInButton()).toBeInTheDocument()
+  })
+
+  it('is read at mount only — a re-render does not throw the person back', () => {
+    // A visitor who pressed "Sign in instead" and then triggered a re-render
+    // (busy flips on every request) stays where they went.
+    const props = {
+      onCreate: vi.fn(),
+      onSignIn: vi.fn(),
+      onSignUp: vi.fn(),
+      initialView: 'sign-up',
+    }
+    const { rerender } = render(<Onboarding {...props} busy={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(signInButton()).toBeInTheDocument()
+
+    rerender(<Onboarding {...props} busy />)
+    expect(signInButton()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+  })
+})
+
 describe('signed in, but not in a household yet — the state between confirming and naming', () => {
   // Since #154 this is the ORDINARY state every organizer passes through: the
   // account is made and confirmed, the household is not. Before, it was an

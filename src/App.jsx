@@ -43,6 +43,7 @@ import {
 } from './lib/activeHousehold.js'
 import { readGoogleSignIn } from './lib/authSettings.js'
 import { listSignInStates } from './lib/signInState.js'
+import { readStartFlag, withoutStartFlag } from './lib/startEntry.js'
 import {
   addChore,
   addChores,
@@ -455,6 +456,13 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // `null` while unknown. Only `false` hides Continue with Google; unknown
   // keeps it, for the reason `authSettings.js` gives.
   const [googleSignIn, setGoogleSignIn] = useState(null)
+  // #343 — did this boot arrive on the website's `?start` link, with nothing
+  // else on the URL? Then the sign-in screen opens on the create-your-account
+  // card instead of the sign-in form. Held in state for the reason
+  // `authCallback` below gives: the flag is stripped from the URL by the boot
+  // that read it, so the boot's reading is the only one there is. Decided at
+  // boot, never re-read, and false again on the remount a sign-out performs.
+  const [startHousehold, setStartHousehold] = useState(false)
   // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
   // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
   // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
@@ -890,6 +898,22 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         // construction, to pick up a SUCCESSFUL return's `#access_token` — so
         // the URL has to be intact when it looks. Stripped AFTER, for the same
         // reason, and so that a reload does not announce a spent failure twice.
+        //
+        // #343 — the website's link arrives as `?start` on this same root. Read
+        // HERE, in the same synchronous breath as the two readers below, and
+        // stripped AFTER `currentSession()` with them — the same shape, and
+        // not for the client's sake (it ignores this parameter) but for
+        // StrictMode's: in development React runs this effect twice, and a
+        // strip made before the first `await` is seen by the second run as a
+        // URL that never carried the flag. Measured 2026-09-16 on `npm run
+        // dev`: the flag stripped and the sign-in card opened. Reading before
+        // the await and stripping after it is why the readers below survive
+        // the same double run. Whether the flag is ACTED on is decided further
+        // down, after the returns are read: a return on the same URL is
+        // handled first and the flag is dropped, because a person coming back
+        // from Google or from a confirmation link is not a visitor from the
+        // website.
+        const startFlag = readStartFlag(globalThis.location?.search)
         const signInReturn = readSignInReturn(globalThis.location)
         // #341 — read in the SAME breath and for the same reason, which the
         // paragraph above spells out: the client reads the URL once, at
@@ -902,6 +926,19 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         // asserted by a test rather than left to this comment.
         const callback = readAuthCallback(globalThis.location)
         const session = await currentSession()
+        // #343 — the flag leaves the URL first and alone: whatever else the
+        // query carries stays for the read it belongs to (`readConsentReturn`
+        // runs below, and its `?code=&state=` must still be there), and the
+        // fragment stays for the strip that owns it. So a reload does not
+        // re-arm the flag, and the address bar a visitor bookmarks is the root.
+        if (startFlag) {
+          const { pathname, search, hash } = globalThis.location
+          globalThis.history?.replaceState?.(
+            null,
+            '',
+            `${pathname}${withoutStartFlag(search)}${hash ?? ''}`,
+          )
+        }
         if (signInReturn || callback) {
           // #155 AC 5 — strip the FRAGMENT and keep the QUERY. Two auth
           // returns land on this one root URL on different channels: an
@@ -928,6 +965,20 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
           if (!cancelled) {
             if (signInComplaint) setSignInNotice(signInComplaint)
+            // #343 — the flag opens the account card only when the URL carried
+            // nothing else the app reads. A sign-in return, an auth link or a
+            // calendar return on the same URL is handled first, and the flag
+            // is dropped rather than queued behind it (AC 4). Set BEFORE
+            // `setStatus`, so the screen mounts with its first view decided.
+            // Signed in, this state is never consulted: a member lands in
+            // their household and a person with no household lands on the
+            // household form, flag or no flag (AC 2).
+            setStartHousehold(
+              startFlag &&
+                !signInReturn &&
+                !callback &&
+                !readConsentReturn(globalThis.location?.search),
+            )
             setStatus('onboarding')
           }
           return
@@ -2960,6 +3011,9 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           // wins, for the reason the Who tab renders it beside its control.
           error={signOutComplaint ?? error}
           signInNotice={signInNotice}
+          // #343 — the website's `?start` arrival opens on the account card;
+          // every other boot opens on sign-in, #154's weighting.
+          initialView={startHousehold ? 'sign-up' : 'sign-in'}
           // Non-null only when boot found a session, because the signed-out path
           // returns before refresh() runs. Signed in AND on this screen is
           // precisely the half-finished state described above.

@@ -896,6 +896,23 @@ time they come back to the app. Two limits, stated: an edit form that keeps its 
 successful save holds the update until it is closed; and a second open tab that is mid-edit
 reloads too, because the new worker takes over every tab at once.
 
+**A cold open on a device whose precache holds an older build (#454).** The old worker answers the
+navigation from its precache, so the first paint is the build the device already had; the page
+then finds the new worker, takes it, and reloads onto it — the mechanism above, with nothing
+cleared by hand. *Measured on #454 against a real worker across two local builds, in three
+orderings*: at natural timing the new build was on screen **3.6 s** after the cold open (the
+reload at 2.3 s); with the new build's install slowed by 2.5 s, 6.5 s; with the page's CPU
+throttled 6×, 17.5 s, of which 10 s was the page's own first paint. That flash of the old build
+is the cost of precaching the shell, paid once per deploy per device. A network-first shell was
+weighed at #454 and not taken: every cold open would pay a round trip, and an offline open would
+stall on a timeout before falling back to the precache. One ordering the plugin cannot see — a
+worker already installing when the page registered, which workbox-window attaches its listener
+too late to report — is guarded by the app itself: it gives the plugin
+`UNSEEN_INSTALL_GRACE_MS` (half a second) to report the worker and then takes it and reloads on
+the takeover. Chromium did not produce that ordering in any of the three runs. **None of this
+reaches a device still on a build from before #347** — see *Once, on the #347 deploy itself*
+below.
+
 **A deploy whose app fails on load is replaced by the next good deploy, or by a rollback, within
 about a minute.** The updater starts before the app and loads separately from it (`src/main.jsx`).
 When the app fails to load, the updater looks for a new build every `RECOVERY_CHECK_INTERVAL_MS` —
@@ -917,7 +934,10 @@ worker stays in charge and serves the old build until **every** Taskr window on 
 closed — on Android, swipe the installed app away from recents and close any Taskr browser tab,
 then open it again. After that one full close, the footer shows the #347 build, and every later
 deploy behaves as described above. It is also why #347's live observation is taken on the deploy
-**after** that one, not on #347's own.
+**after** that one, not on #347's own. *This is what #454 measured on production on 2026-09-15: a
+browser on `c21af5d` (2026-09-09) with the origin's worker installed and `waiting: true`, six days
+and four promotions after that build — the page had no client module to send SKIP_WAITING, and a
+reload could not move it.*
 
 **`registerType: 'autoUpdate'` alone did not deliver this, and re-reading the config will suggest it
 did.** Until #347 the config said `autoUpdate`, and the generated worker did take control of an open

@@ -61,6 +61,22 @@ export const DEFERRED_RECHECK_MS = 1000
  */
 export const RECOVERY_CHECK_INTERVAL_MS = 60 * 1000
 
+/**
+ * How long a worker that was ALREADY INSTALLING when the page registered is
+ * left to the plugin before the app takes it as its own (#454). workbox-window
+ * attaches its `updatefound` listener only after `register()` resolves and has
+ * no branch for a worker already installing at that moment, so an install that
+ * began before the page's script ran would install, wait, and never be
+ * reported: no `onNeedRefresh`, no SKIP_WAITING, the old build on screen until
+ * every window closed. Measured on #454 in three orderings — natural, a slow
+ * install, a 6× CPU-throttled page — Chromium began the install only after the
+ * page had registered, so the plugin saw every one. This is the guard for the
+ * ordering it did not produce. Half a second is longer than workbox-window's
+ * own 200 ms "installed and still waiting" timer, so a worker the plugin CAN
+ * see is reported first and this never doubles it.
+ */
+export const UNSEEN_INSTALL_GRACE_MS = 500
+
 // Input types whose value is text a person typed. Everything else an <input>
 // can be (a checkbox, a date picker, a radio) is judged by whether it sits in
 // a form, because "empty" means nothing for it.
@@ -172,6 +188,7 @@ export function startAppUpdates({
   intervalMs = UPDATE_CHECK_INTERVAL_MS,
   recheckMs = DEFERRED_RECHECK_MS,
   recoveryMs = RECOVERY_CHECK_INTERVAL_MS,
+  unseenGraceMs = UNSEEN_INSTALL_GRACE_MS,
 } = {}) {
   const worker = target.navigator?.serviceWorker
   // Whether a worker controlled this page when it REGISTERED — the value the
@@ -186,10 +203,12 @@ export function startAppUpdates({
   let takenOver = false
   let watchingTakeover = false
   let reloading = false
+  let reportedByPlugin = false
   let registration = null
   let workerUrl = null
   let timer = null
   let recheckTimer = null
+  let unseenTimer = null
   let failed = false
 
   // The periodic check: hourly, or every `recoveryMs` once the app has failed
@@ -254,6 +273,38 @@ export function startAppUpdates({
     takenOver = true
     apply()
   }
+  const watchTakeover = () => {
+    if (!worker || watchingTakeover) return
+    watchingTakeover = true
+    worker.addEventListener('controllerchange', onTakeover)
+  }
+
+  // A worker that was already installing when the page registered, beside
+  // the active one that served the page — the cold open of a device whose
+  // precache holds a build older than the origin's (#454). The plugin may
+  // never hear of it (`UNSEEN_INSTALL_GRACE_MS` says why). Once its install
+  // has ended, the plugin gets the grace to report it; if it has not, and the
+  // worker is waiting, the app takes it like any other update — deferred the
+  // same way while something is being edited — and, because the plugin never
+  // armed its reload for a worker it did not see, this page reloads itself on
+  // the takeover. A first visit's own install is not this: it has no active
+  // worker beside it, and reloading that page would be the thing #347 refused.
+  // An install that failed, or a worker another tab already took, is not
+  // waiting when the grace ends, and nothing is done.
+  const watchUnseenInstall = (sw) => {
+    const onState = () => {
+      if (sw.state === 'installing') return
+      sw.removeEventListener('statechange', onState)
+      unseenTimer = target.setTimeout(() => {
+        unseenTimer = null
+        if (reportedByPlugin || registration.waiting !== sw) return
+        waiting = true
+        watchTakeover()
+        apply()
+      }, unseenGraceMs)
+    }
+    sw.addEventListener('statechange', onState)
+  }
 
   // The plugin's documented periodic-update recipe, and the same guard for the
   // check a return to the tab makes: offline, skip it rather than queue a
@@ -284,17 +335,19 @@ export function startAppUpdates({
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
+      reportedByPlugin = true
       waiting = true
-      if (worker && !controlledAtRegistration && !watchingTakeover) {
-        watchingTakeover = true
-        worker.addEventListener('controllerchange', onTakeover)
-      }
+      if (!controlledAtRegistration) watchTakeover()
       apply()
     },
     onRegisteredSW(url, reg) {
       workerUrl = url
       registration = reg ?? null
-      if (registration) startChecks()
+      if (!registration) return
+      startChecks()
+      // An active worker beside an installing one is an update in progress;
+      // an installing one alone is a first visit's own install.
+      if (registration.active && registration.installing) watchUnseenInstall(registration.installing)
     },
   })
 
@@ -326,6 +379,8 @@ export function startAppUpdates({
     stop() {
       if (timer) target.clearInterval(timer)
       timer = null
+      if (unseenTimer) target.clearTimeout(unseenTimer)
+      unseenTimer = null
       stopRecheck()
       if (watchingTakeover) worker.removeEventListener('controllerchange', onTakeover)
       stopClean()

@@ -17,8 +17,9 @@
 //      first; the RPC refuses too, and asking here first keeps a refusal from
 //      costing a Google revoke.
 //   2. Revoke the leaver's Google grant — `member_tokens_to_revoke`, which leaves
-//      out a grant still used by their membership of another household (#430's
-//      rule: one Google account holds one grant). BEFORE the leave, because the
+//      out a grant another connection still uses (#430's rule: one Google
+//      account holds one grant; keyed on that account, not the sign-in, since
+//      `0047`, #474). BEFORE the leave, because the
 //      member row's cascade takes the token row, and a grant nobody holds a
 //      token for can never be revoked. If the tokens cannot be READ, nothing
 //      happens and the person is told to try again: unlike the purge, which

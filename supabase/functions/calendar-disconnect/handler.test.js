@@ -159,6 +159,15 @@ function makeWorld(overrides = {}) {
      * cannot express the thing being removed cannot testify that it is there.
      */
     clientOptions: {},
+    /**
+     * What `member_tokens_to_revoke` (0047) answers — #474. `null` means "the
+     * stored token", so the ordinary case revokes; `[]` is a grant another
+     * connection uses, or one whose account is unknown. The RULE is proven
+     * against Postgres in src/test/revokeKeying.pglite.test.js; this only
+     * states what the handler does with each answer.
+     */
+    revocable: null,
+    ruleError: null,
     ...overrides,
   }
 
@@ -168,6 +177,15 @@ function makeWorld(overrides = {}) {
     return {
       auth: {
         getUser: async () => ({ data: { user: world.user } }),
+      },
+      rpc: async (fn, args) => {
+        world.reads.push({ role, rpc: fn, args })
+        world.events.push(`rpc:${fn}`)
+        if (fn !== 'member_tokens_to_revoke') return { data: null, error: { message: `no ${fn}` } }
+        if (world.ruleError) return { data: null, error: world.ruleError }
+        if (args?.member_id !== MEMBER.id) return { data: [], error: null }
+        const rows = world.revocable ?? (world.token ? [world.token] : [])
+        return { data: rows, error: null }
       },
       from: (table) => ({
         select: (columns) => {
@@ -610,6 +628,44 @@ describe('AC 4 — Google is asked to forget it too, best-effort', () => {
     expect(sent.get('client_id')).toBeNull()
     expect(sent.get('client_secret')).toBeNull()
     expect([...sent.keys()]).toEqual(['token'])
+  })
+})
+
+describe('#474 — a grant another connection uses is not revoked', () => {
+  it('asks the keying rule as service_role, for the member it resolved, before revoking', async () => {
+    await handler()(post())
+    const ask = world.reads.find((r) => r.rpc === 'member_tokens_to_revoke')
+    expect(ask).toEqual({ role: 'service', rpc: 'member_tokens_to_revoke', args: { member_id: MEMBER.id } })
+    expect(world.events.indexOf('rpc:member_tokens_to_revoke')).toBeLessThan(world.events.indexOf('revoke'))
+  })
+
+  it('does NOT revoke, and still forgets everything, when the rule keeps the grant', async () => {
+    // The same Google account is connected somewhere else — the same sign-in's
+    // other household included — or its account is unknown.
+    world.revocable = []
+    const response = await handler()(post())
+    expect(response.status).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(deletedTables()).toEqual([...DELETED_TABLES])
+    // `null`, so no sentence tells the member to remove Taskr at Google — which
+    // would break the other connection by hand.
+    expect((await response.json()).revoked).toBeNull()
+  })
+
+  it('does NOT revoke, reports `false`, and still forgets everything, when the rule cannot be read', async () => {
+    world.ruleError = { message: 'rule unreadable' }
+    const response = await handler()(post())
+    expect(response.status).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(deletedTables()).toEqual([...DELETED_TABLES])
+    expect((await response.json()).revoked).toBe(false)
+  })
+
+  it('revokes only the token the rule named — a different token in its answer is not this one', async () => {
+    world.revocable = [{ refresh_token: '1//someone-else' }]
+    const response = await handler()(post())
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect((await response.json()).revoked).toBeNull()
   })
 })
 

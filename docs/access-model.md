@@ -7,7 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0045` are ALL applied to the live project** (`0045` on 2026-09-16 in #458's own
+- Status: **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
+  session, at md5 `7d201b925939d32460a27146134d2006` (`6884 characters, 8 statements`), read back
+  identical — a constraint widening and a trigger body that **`npm run check:live` cannot see**,
+  *measured* **75 of 75** on both sides, confirmed by the read-only catalog query in the #480
+  section below; `0045` on 2026-09-16 in #458's own
   session and `0044` the same day in #180's — see their sections below; `0042` on 2026-09-12 in
   #169's session, at md5 `67f00c9276df384cf1c391d119a60b7b` (`23313 characters, 50 statements`),
   read back identical, *measured* `check:live` **71 of 74 → 74 of 74** and `probe:live-grants`
@@ -2134,6 +2138,37 @@ correctly only because its rollback had deleted the account.
   row and an auth user and spends hourly sends); it is proven by `handler.test.js` against a fake,
   and that GoTrue re-stamps `invited_at` is read off its source, not measured. The first organizer
   to press *Send the invitation again* is the first live reading.
+
+### A suggested week is a person's — #480, 2026-09-16
+
+`0046` widens one check constraint and one trigger body on `member_capacity`, and nothing else:
+`member_capacity_source_known` admits a fifth word, `suggested` (a figure built from the person's
+own last weeks' completions and this week's calendar, taken with one tap — the rule is in
+`docs/capacity-model.md`), and `member_capacity_automatic_never_overtypes` refuses `calendar_auto`
+over a `suggested` row as it already did over `manual` and `extraction`, because that figure is
+**offered and never auto-applied** and the client's refusal is a read followed by a write (`0039`'s
+reason for the trigger existing at all).
+
+- **`check:live` and `probe:live-grants` are blind to it in both directions**, `0031`'s and `0044`'s
+  reason: no table, column, signature or grant moves. The instrument is the read-only catalog query,
+  taken on both sides of `npm run migrate:live`: `pg_get_constraintdef` for
+  `member_capacity_source_known` reads four words before and five after, and `pg_get_functiondef`
+  for `member_capacity_automatic_never_overtypes` carries `'suggested'` in its `in (...)` only
+  after. The pglite suite (`suggestedCapacity.pglite.test.js`) proves the widening in both
+  directions on a database built through `0045` and through `0046`.
+- **Until it is applied**, a member who taps *Use this* on a suggested figure and saves is refused
+  by the constraint — loudly, naming it, on the error strip — and the manual, calendar and
+  description paths are untouched. Nothing else in the story needs the apply.
+- **Applied 2026-09-16** from #480's session at the owner's go-ahead (the #100 routing, taken at
+  review-fanout's escalation question), before the PR opened: 8 statements, 6884 characters, md5
+  `7d201b925939d32460a27146134d2006` read back matching the file. *Measured* by the read-only
+  catalog query on both sides: `member_capacity_source_known` at `manual, extraction, calendar,
+  calendar_auto` before and with `suggested` fifth after; the trigger's `old.source in (...)` at
+  `('manual', 'extraction')` before and `('manual', 'extraction', 'suggested')` after; the function
+  comment naming #106 alone before and "#106, widened by #480" after; the `source` column comment
+  naming #480 only after; zero `suggested` rows on either side, so no stored row was changed.
+  `check:live` **75 of 75** immediately before and immediately after, unmoved, which is the
+  blindness this entry predicted and not evidence of the apply.
 
 ## Superseded: the PIN decision — 2026-08-06
 

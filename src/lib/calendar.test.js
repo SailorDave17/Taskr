@@ -103,6 +103,7 @@ const {
   busyComputedLabel,
   busyWeekFor,
   fetchBusyWeek,
+  listBusyHistory,
   listBusyWeeks,
   listCalendarConnections,
   newConsentState,
@@ -625,6 +626,49 @@ describe('listBusyWeeks', () => {
   it('reports a failure in this app’s words, keeping the cause', async () => {
     selectResult = { data: null, error: { message: 'permission denied', code: '42501' } }
     await expect(listBusyWeeks(WEEK, MEMBER_IDS)).rejects.toThrow(/loading calendar busy minutes/)
+  })
+})
+
+// #480 — the prior weeks' figures, read once for the whole window.
+describe('listBusyHistory', () => {
+  const WINDOW = ['2026-08-17', '2026-08-24', '2026-08-31', '2026-09-07']
+
+  it('is ONE query for the window: the same columns, the member set, and an `in` on the Mondays', async () => {
+    // AC 5's "one query per household for the window (not one per member per
+    // week)", as the recorded statement: one select, one `in` on members,
+    // one `in` on periods. A read that looped would record four selects; a
+    // read that matched on the member alone would record no period filter
+    // and return every week the household ever had.
+    await listBusyHistory(WINDOW, MEMBER_IDS)
+    expect(calls).toEqual([
+      { op: 'select', table: 'calendar_busy', cols: CALENDAR_BUSY_COLUMNS },
+      { op: 'in', table: 'calendar_busy', column: 'member_id', value: MEMBER_IDS },
+      { op: 'in', table: 'calendar_busy', column: 'period_start', value: WINDOW },
+    ])
+  })
+
+  it('reads nothing at all when the household has no members, or the window is empty', async () => {
+    expect(await listBusyHistory(WINDOW, [])).toEqual([])
+    expect(await listBusyHistory([], MEMBER_IDS)).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a read that names no weeks', async () => {
+    await expect(listBusyHistory(null, MEMBER_IDS)).rejects.toThrow(/Which weeks/)
+  })
+
+  it('refuses a read that names no member set', async () => {
+    await expect(listBusyHistory(WINDOW, undefined)).rejects.toThrow(/Which household/)
+  })
+
+  it('returns an empty list when nobody has a figure, rather than null', async () => {
+    selectResult = { data: null, error: null }
+    expect(await listBusyHistory(WINDOW, MEMBER_IDS)).toEqual([])
+  })
+
+  it('reports a failure in this app’s words, keeping the cause', async () => {
+    selectResult = { data: null, error: { message: 'permission denied', code: '42501' } }
+    await expect(listBusyHistory(WINDOW, MEMBER_IDS)).rejects.toThrow(/loading calendar busy history/)
   })
 })
 

@@ -133,6 +133,7 @@ export const MIGRATIONS = [
   '0043_leave_or_hand_over_a_household.sql',
   '0044_a_redeemed_invitation_survives_its_redeemer.sql',
   '0045_member_sign_in_state.sql',
+  '0046_suggested_capacity_source.sql',
 ]
 
 export function migrationSql(name) {

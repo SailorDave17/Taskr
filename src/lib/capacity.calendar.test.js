@@ -83,10 +83,11 @@ describe('the words a capacity row may carry', () => {
   it('lists exactly what the LATEST constraint admits, read out of the migration that declares it', () => {
     // The same discipline as the minutes bounds against 0005: the list in the
     // module and the list in the constraint are two copies, and this is what
-    // holds them equal. A fifth word has to arrive in both — and in THIS
-    // path, which named 0031 until 0039 (#106) re-declared the constraint.
+    // holds them equal. A sixth word has to arrive in both — and in THIS
+    // path, which named 0031 until 0039 (#106) re-declared the constraint,
+    // and 0039 until 0046 (#480) did.
     const sql = readFileSync(
-      resolve(process.cwd(), 'supabase/migrations/0039_calendar_auto_apply.sql'),
+      resolve(process.cwd(), 'supabase/migrations/0046_suggested_capacity_source.sql'),
       'utf8',
     )
     const match = sql.match(/check \(source in \(([^)]*)\)\)/)

@@ -544,6 +544,40 @@ export async function listBusyWeeks(periodStart, memberIds) {
 }
 
 /**
+ * The derived busy figures ONE household has for a SET of weeks — #480's
+ * history read, the calendar half of `weeklyHistory`.
+ *
+ * ONE query for the whole window (AC 5): scoped by the member set exactly as
+ * `listBusyWeeks` is, with the same column list, and `.in` on the period
+ * rather than a range so what comes back is exactly the window the caller
+ * named and nothing older. App calls it once per refresh with
+ * `priorPeriodStarts`' Mondays and does NOT await it — the rows inform a
+ * suggestion, and a suggestion must not hold the roster back by a round trip.
+ *
+ * The rows carry nothing out of anybody's calendar, for `listBusyWeeks`'
+ * reason: `0030`'s column list is the whole minimization decision.
+ */
+export async function listBusyHistory(periodStarts, memberIds) {
+  if (!Array.isArray(periodStarts)) throw new Error('Which weeks? A busy history read must name them.')
+  if (!Array.isArray(memberIds)) {
+    throw new Error('Which household? A busy history read must name its members.')
+  }
+  if (memberIds.length === 0 || periodStarts.length === 0) return []
+  const { data, error } = await getSupabase()
+    .from('calendar_busy')
+    .select(CALENDAR_BUSY_COLUMNS)
+    .in('member_id', memberIds)
+    .in('period_start', periodStarts)
+
+  if (error) {
+    const err = new Error(`loading calendar busy history: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data ?? []
+}
+
+/**
  * Ask the Edge Function to read this week and store the derived figure — AC 1.
  *
  * The function acts on the CALLER's own member row (owner decision, 2026-09-04),

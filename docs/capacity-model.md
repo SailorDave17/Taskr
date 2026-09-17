@@ -102,7 +102,7 @@ family while pointing at a member they cannot see.
 ## Where a figure came from — `source`
 
 Every override row says how it was entered, so a later accuracy question is answerable from the
-data rather than from memory (#57 AC 5). `member_capacity_source_known` admits exactly four words,
+data rather than from memory (#57 AC 5). `member_capacity_source_known` admits exactly five words,
 and `CAPACITY_SOURCES` in `capacity.js` is held equal to the constraint by a test:
 
 | `source` | What it means | Since |
@@ -111,6 +111,7 @@ and `CAPACITY_SOURCES` in `capacity.js` is held equal to the constraint by a tes
 | `extraction` | A person described their week in a sentence and accepted the figure proposed from it, edited or not — a corrected interpretation is still derived from the description (#210 AC 6). | #210 |
 | `calendar` | A person tapped *Use this* on the calendar's suggestion and saved it **unedited**. The suggestion is `max(0, baseline − busy_minutes)` (owner decision, 2026-08-16); a figure they changed first is no longer the calendar's and saves as `manual` (#97 AC 2). | #97 (0031) |
 | `calendar_auto` | **Nobody tapped.** A calendar read landed, the suggestion was within the bound below, and the app wrote it. The row also carries `previous_minutes` — the figure the week resolved to a moment before — so the roster can show both (#106 AC 4). A person who re-opens the week and saves it unedited has now confirmed it, and it becomes `calendar`; edited, it becomes `manual`. | #106 (0039) |
+| `suggested` | A person tapped *Use this* on the figure built from **their own last weeks** (the section below) and saved it **unedited**. Edited first, it saves as `manual`, for `calendar`'s reason: the figure is arithmetic on numbers the person can see. **Never written by the automatic path**, and never overwritten by it — `0046` widens the trigger below to refuse `calendar_auto` over this word too. | #480 (0046) |
 
 Two rules that hold whatever the word:
 
@@ -229,6 +230,109 @@ which is 0002's hole reopened.
 `select('*')` moved with it — but the name had to, or this paragraph would point at nothing.)* #44 asks for per-column grants on *new* tables, which `households` is not, so
 narrowing the read surface there is a separate change with its own caller migration and does not ride
 in on this one. A test asserts that `select('*')` still works.
+
+## A week's budget suggested from the last weeks — #480, 2026-09-16
+
+- Story: #480 — suggest a week's time budget from the last weeks' completions and the calendar
+- Owner direction, 2026-09-16: *suggest weekly time budgets based on previous weeks completions
+  and the google calendar*
+- Migration: `supabase/migrations/0046_suggested_capacity_source.sql` (the fifth `source` word,
+  and the trigger widened)
+- Module: `suggestCapacity`, `median`, `priorPeriodStarts` and the two constants in
+  [`src/lib/capacity.js`](../src/lib/capacity.js); the fold that builds its input,
+  `weeklyHistory`, in [`src/lib/history.js`](../src/lib/history.js)
+- Corpus: [`src/lib/capacity.suggest.corpus.js`](../src/lib/capacity.suggest.corpus.js) — every
+  expectation worked by hand before the function ran, `docs/allocation-corpus.md`'s discipline,
+  because this figure will be argued about the same way the allocator's was
+
+**Until this story the budget was typed once.** `weekly_minutes` is a hand-set baseline and the
+only thing that moved it week to week was the calendar's `baseline − busy`. Neither reads what the
+person actually did. This offers a figure that does, beside the two proposers above, through the
+same editor and the same Save.
+
+### The rule, with its constants
+
+`suggestCapacity({ member, history, busyWeek, workMinutes })`, in the order it runs:
+
+1. **The window is the most recent `SUGGESTION_WINDOW_WEEKS = 4` completed prior weeks**, and the
+   floor is `SUGGESTION_MIN_WEEKS = 2`. Fewer than two → nothing is offered, and the roster falls
+   back to the calendar's suggestion **with no claim to be history-based**: no *Suggested* block, no
+   *over N weeks* line (AC 2). Four because a month outvotes one odd week without measuring August
+   against June; two because one week is an anecdote. **Nothing is offered either when no
+   completion exists anywhere in the window** — design-bar verdict on the prototype, 2026-09-16:
+   four blank weeks rendered *Suggested: 0 min · typically 0 min done over 4 weeks* with a live
+   tap, and no history is not a history of zero. A blank week *among* others still counts as zero.
+2. **Typical = the median of minutes completed** over those weeks — `actual_minutes` where recorded,
+   else the chore's estimate, the same fallback the split's done bars use — and **a week with zero
+   completions counts as zero, not skipped**. A blank week is a fact about the person; skipping it
+   would read a fortnight off as a steady month. **A median, not a mean**, because one heroic week
+   (or one sick one) must not set next week's bar; the corpus proves the rule is a median. For an
+   even count the median is the mean of the two middle values, rounded to a whole minute.
+3. **Minus how much busier this week's calendar is than those weeks'** — this week's
+   `busy_minutes` less the median busy minutes over the window's weeks that *had* a calendar read;
+   negative (quieter) adds back. With no read this week, or none in those weeks, the term is zero:
+   the completions already priced in whatever the calendar usually holds, and there is nothing to
+   compare against. A missing read is unknown, never zero (`calendarSuggestion`'s rule).
+4. **Minus this week's work minutes beyond those weeks' median.** `workMinutes` is #479's figure
+   when that story lands and `0` until then, on both sides; the history rows carry the field so
+   #479 fills a value rather than adding a parameter.
+5. **Clamped to `[MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES]`**, whole minutes.
+
+The result carries the figure and **two reason lines** — *typically 210 min done over 4 weeks* and
+*calendar 90 min busier this week* (or *quieter*, *about as busy as usual*, *no calendar read this
+week*, and the work term when it is non-zero) — which the roster shows under **Suggested: N min**
+with the one-tap *Use this*.
+
+### What a "completed prior week" is, and whose completion
+
+A week that has **fully elapsed** and that the member was **in the household for** — from the week
+their row was created, resolved in the household's zone, so the join week counts even for somebody
+who joined on its Friday (the median absorbs one low week). A completion is the **completer's**
+(`completed_by_member_id`, falling back to the holder for rows completed before `0004` stamped
+one) — owner decision at review-fanout's gate, 2026-09-16, because the story's words are *what they
+actually completed* and AC 6 compares the suggestion with what the member then completed. **This is
+not the split's attribution.** The split's done bars credit the *holder*, and `0029` keeps a held
+chore's holder whoever finishes it (`coalesce(chores.assigned_member_id, completer)`), so on a
+covered chore the split and this history name different people. The first draft of this paragraph
+claimed the two agreed since `0029`; they agree only in a household where nobody covers for anybody.
+
+### One tap per row, and the calendar's tap steps aside
+
+While the history-based figure is on offer it carries the row's *Use this*; the calendar readout
+keeps its busy figure and read date — the reason line names the comparison — but not its own
+button. Two taps under one number would offer two answers to one question, and this figure already
+contains the calendar's difference. Below the floor the calendar's tap returns exactly as #97
+shipped it. **Once the week already holds the suggested figure from a suggestion** (`source =
+suggested`, same minutes) the block keeps its figure and reasons and drops the tap — design-bar
+verdict 2026-09-16: offering to use the number already in use is a control whose only position is
+the current one.
+
+### Offered, never applied
+
+The automatic path (#106, above) is handed `calendarSuggestion` and nothing else — a test reads
+App's calendar seam to hold that — and a `suggested` row is a **person's**: `isCalendarSourced`
+says no to it, so `autoApplyDecision` refuses over it as person-set, and `0046` widens the trigger
+`member_capacity_automatic_never_overtypes` to refuse `calendar_auto` over `suggested` server-side,
+for `0039`'s reason (the client's check is a read followed by a write). #106's bound was argued
+for a figure the calendar computed, not one that reads a person's own past back at them.
+
+### How it is read
+
+**One query per household for the window, in the background.** The prior weeks' `calendar_busy`
+rows come from `listBusyHistory(priorPeriodStarts(period, 4), memberIds)` — one `.in` on the
+Mondays, scoped by the member set like every read of that table — and `refresh()` starts it
+**without awaiting it**, so the first paint is not held on it (AC 5). Completions need no read of
+their own: the chores every refresh already loads carry every completion, and `weeklyHistory`
+folds the two at render. A failure of that one read is quiet, deliberately and at a stated cost:
+it is the same table `listBusyWeeks` just read, whose own complaint names a table that will not
+answer, and the suggestion then runs on completions alone.
+
+### What is not yet known — the kill condition
+
+AC 6 is a **two-week observation on the real household**: per member, the suggestion against what
+they then completed. If it misses by more than 50% for most members in both weeks, **the rule is
+wrong and the story is reopened** rather than tuned in a comment. Until that reading exists this
+section describes a rule, not a validated one.
 
 ## Both halves of this shipped on 2026-08-09
 

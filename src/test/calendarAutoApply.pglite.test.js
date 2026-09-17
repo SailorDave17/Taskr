@@ -165,7 +165,11 @@ describe('an automatic calendar write, run against a real Postgres', () => {
     })
 
     it('AFTER: a database built through 0039 accepts the automatic row with its previous figure', async () => {
-      expect(await admittedSources(db)).toEqual(['calendar', 'calendar_auto', 'extraction', 'manual'])
+      // `db` is built through EVERY migration, so the set is the module's
+      // current list (five words since 0046, #480), not 0039's four; what
+      // this test holds is that the fourth word is among them.
+      expect(await admittedSources(db)).toEqual([...CAPACITY_SOURCES].sort())
+      expect(await admittedSources(db)).toContain('calendar_auto')
       expect(await hasPreviousColumn(db)).toBe(true)
       const row = await asDevice(db, device, async () => {
         const { rows } = await upsert(db, {
@@ -511,6 +515,11 @@ describe('an automatic calendar write, run against a real Postgres', () => {
       )
       const second = await attempt(() => db.exec(migrationSql(AFTER)))
       expect(second.error).toBeNull()
+      // FOUR words, not the module's five: re-pasting 0039 on a database that
+      // has 0046 narrows the constraint back to 0039's list — the same hazard
+      // 0031 poses to this file, one migration on, and 0046's header records
+      // it. suggestedCapacity.pglite.test.js proves the loud half (a standing
+      // `suggested` row makes this re-paste fail).
       expect(await admittedSources(db)).toEqual(['calendar', 'calendar_auto', 'extraction', 'manual'])
       expect(await columnGrants(db)).toEqual(await columnGrants(await databaseThrough(AFTER)))
       const { rows } = await db.query(
@@ -531,6 +540,8 @@ describe('an automatic calendar write, run against a real Postgres', () => {
       expect(await hasPreviousColumn(db)).toBe(true)
       const restore = await attempt(() => db.exec(migrationSql(AFTER)))
       expect(restore.error).toBeNull()
+      // 0039's own four — restoring with 0039 restores 0039's list, and 0046
+      // would have to be re-pasted after it for the fifth word (its header).
       expect(await admittedSources(db)).toEqual(['calendar', 'calendar_auto', 'extraction', 'manual'])
     })
 
@@ -547,8 +558,8 @@ describe('an automatic calendar write, run against a real Postgres', () => {
       const paste = await attempt(() => db.exec(migrationSql(NARROWER)))
       expect(paste.ok).toBe(false)
       expect(paste.error).toMatch(/member_capacity_source_known/)
-      // PGlite's single exec rolls the batch back, so the four words stand.
-      expect(await admittedSources(db)).toEqual(['calendar', 'calendar_auto', 'extraction', 'manual'])
+      // PGlite's single exec rolls the batch back, so the current words stand.
+      expect(await admittedSources(db)).toEqual([...CAPACITY_SOURCES].sort())
     })
 
     it('re-pasting 0005’s create-table on top leaves everything in place — the inline constraint is skipped with its table', async () => {
@@ -557,7 +568,7 @@ describe('an automatic calendar write, run against a real Postgres', () => {
       expect(matches, 'expected the create-table statement exactly once').toHaveLength(1)
       const paste = await attempt(() => db.exec(matches[0]))
       expect(paste.error).toBeNull()
-      expect(await admittedSources(db)).toEqual(['calendar', 'calendar_auto', 'extraction', 'manual'])
+      expect(await admittedSources(db)).toEqual([...CAPACITY_SOURCES].sort())
       expect(await hasPreviousColumn(db)).toBe(true)
     })
   })

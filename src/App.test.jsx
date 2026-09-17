@@ -150,6 +150,11 @@ const calendarApi = {
   // rule AC 1's trigger is built out of.
   listBusyWeeks: vi.fn(),
   fetchBusyWeek: vi.fn(),
+  // #480 — the prior weeks' read. `weeklyHistory` and `suggestCapacity` stay
+  // REAL for the standing reason: pure, own tests, and a stub could disagree
+  // with the figure the roster draws. What App owes is ONE read per refresh
+  // and a first paint that does not wait for it.
+  listBusyHistory: vi.fn(),
   // #99 — the impure one. `revokeNoteFor` stays REAL (importActual below) for
   // the standing reason: it is pure, it has its own tests, and the sentence a
   // member reads about Google should be the one the app words rather than a
@@ -416,6 +421,9 @@ beforeEach(() => {
   calendarApi.listCalendarConnections.mockResolvedValue([])
   calendarApi.completeConnect.mockResolvedValue({ ok: true })
   calendarApi.listBusyWeeks.mockResolvedValue([])
+  // #480 — no prior weeks read, which with the fixtures' undated members is
+  // no history at all; the #480 tests give their members a `created_at`.
+  calendarApi.listBusyHistory.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
   calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
   // #101 — nothing imported yet, which is the ordinary state; the import tests
@@ -9786,5 +9794,148 @@ describe('#483 — the install offer, in the shell', () => {
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(line()).not.toBeInTheDocument()
     expect(window.localStorage.length).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #480 — a week's budget suggested from the last weeks' completions. The
+// arithmetic is capacity.suggest.test.js and the block is Roster.test.jsx;
+// what App owes is the READ (once per refresh, for the whole household, not
+// waited for) and the FOLD reaching the roster, and that the automatic path
+// is never handed the figure.
+// ---------------------------------------------------------------------------
+describe('#480 — a week suggested from the last weeks', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const mondays = () => actualCapacity.priorPeriodStarts(week(), 4)
+  // Joined at the start of the second-to-last prior week, so exactly two
+  // completed prior weeks exist — the floor, and a median that is easy to
+  // read off the fixture.
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 300,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+    created_at: `${mondays()[2]}T12:00:00Z`,
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+    created_at: `${mondays()[2]}T12:00:00Z`,
+  }
+  const doneOn = (id, monday, minutes, holder = 'm1') => ({
+    id,
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: minutes,
+    actual_minutes: null,
+    due_on: monday,
+    completed_at: `${monday}T16:00:00Z`,
+    completed_by_member_id: holder,
+    assigned_member_id: holder,
+    missed_at: null,
+    repeat_kind: 'none',
+  })
+  const twoWeeks = () => [doneOn('c1', mondays()[2], 100), doneOn('c2', mondays()[3], 120)]
+  const region = () => screen.findByRole('region', { name: /who is in the household/i })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+  })
+
+  it('AC 5: reads the prior weeks’ busy figures ONCE per refresh, for the whole household and the whole window', async () => {
+    await renderApp('Who')
+    await region()
+    await waitFor(() => expect(calendarApi.listBusyHistory).toHaveBeenCalled())
+    // One per refresh — the roster read is once per refresh too, so the two
+    // counts agree; a read per member or per week would be 2× or 4× it.
+    expect(calendarApi.listBusyHistory.mock.calls.length).toBe(api.listMembers.mock.calls.length)
+    const [periods, memberIds] = calendarApi.listBusyHistory.mock.calls.at(-1)
+    expect(periods).toEqual(mondays())
+    expect(memberIds).toEqual(['m1', 'm2'])
+  })
+
+  it('AC 5: the roster paints — suggestion included — while the history read is still in flight', async () => {
+    // A read that never settles. The roster, this week's figure and the
+    // suggestion (from the chores the foreground read carries) must all be
+    // on screen regardless; the calendar half of the reason says it is
+    // missing rather than the block waiting for it.
+    calendarApi.listBusyHistory.mockImplementation(() => new Promise(() => {}))
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    await renderApp('Who')
+    await region()
+    expect(screen.getByTestId('week-m1')).toHaveTextContent(/This week: 300 min/)
+    expect(calendarApi.listBusyHistory).toHaveBeenCalled()
+    const block = await screen.findByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 110 min/i)
+    expect(block).toHaveTextContent(/typically 110 min done over 2 weeks/)
+  })
+
+  it('the fold reaches the roster: completions and the prior weeks’ busy rows become the figure', async () => {
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    calendarApi.listBusyHistory.mockResolvedValue([
+      { id: 'h1', member_id: 'm1', period_start: mondays()[2], busy_minutes: 60, event_count: 1, computed_at: '2026-09-01T00:00:00Z' },
+      { id: 'h2', member_id: 'm1', period_start: mondays()[3], busy_minutes: 60, event_count: 1, computed_at: '2026-09-08T00:00:00Z' },
+    ])
+    calendarApi.listBusyWeeks.mockResolvedValue([
+      { id: 'b1', member_id: 'm1', period_start: week(), busy_minutes: 90, event_count: 2, computed_at: new Date().toISOString() },
+    ])
+    await renderApp('Who')
+    await region()
+    // Median of 100 and 120 is 110; this week is 30 busier than the usual 60.
+    const block = await screen.findByTestId('suggested-m1')
+    await waitFor(() => expect(block).toHaveTextContent(/calendar 30 min busier this week/))
+    expect(block).toHaveTextContent(/suggested: 80 min/i)
+    // The housemate did nothing in EITHER week — no history, not a history of
+    // zero (design-bar verdict, 2026-09-16), so their row offers nothing.
+    expect(screen.queryByTestId('suggested-m2')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: history alone writes nothing — the automatic path is handed the calendar, never the suggestion', async () => {
+    // #106's seam, fired the way its own tests fire it: a connection, a stale
+    // row, the fetch lands. The calendar says 0 busy, so its suggestion is the
+    // baseline and the decision is no-change. The HISTORY says 200 — inside
+    // the bound of 300 — and if it reached the decision the week would be
+    // written. It must not be.
+    const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+    const HOUR = 60 * 60 * 1000
+    const rowReadAgo = (msAgo, busy) => ({
+      id: 'b1',
+      member_id: 'm1',
+      period_start: week(),
+      busy_minutes: busy,
+      event_count: 0,
+      computed_at: new Date(Date.now() - msAgo).toISOString(),
+    })
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    choresApi.listChores.mockResolvedValue([doneOn('c1', mondays()[2], 200), doneOn('c2', mondays()[3], 200)])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(13 * HOUR, 0)])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(0, 0)])
+    await act(async () => finish({ ok: true }))
+    await act(async () => {})
+    // POSITIVE CONTROL: the suggestion exists and differs from the week.
+    expect(await screen.findByTestId('suggested-m1')).toHaveTextContent(/suggested: 200 min/i)
+    expect(screen.getByTestId('week-m1')).toHaveTextContent(/This week: 300 min/)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a failed history read costs the calendar half of the reason and nothing else', async () => {
+    calendarApi.listBusyHistory.mockRejectedValue(new Error('permission denied'))
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    await renderApp('Who')
+    await region()
+    const block = await screen.findByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 110 min/i)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

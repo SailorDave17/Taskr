@@ -777,7 +777,7 @@ describe('when nobody is signed in', () => {
     fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
 
-    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821' })
+    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: true })
     // The household's surfaces are up, and nothing onboarding-shaped remains.
     expect(await screen.findByRole('navigation', { name: /household surfaces/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
@@ -10278,5 +10278,81 @@ describe('#480 — a week suggested from the last weeks', () => {
     const block = await screen.findByTestId('suggested-m1')
     expect(block).toHaveTextContent(/suggested: 110 min/i)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('#482 — Trust this device, from App', () => {
+  const FLAG = 'taskr.untrustedSession'
+  const trustBox = () => screen.getByRole('checkbox', { name: /trust this device/i })
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('AC 2: unticked, the data layer is asked for an untrusted password sign-in', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signIn.mockResolvedValue({ user: { id: 'person-a' } })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    fireEvent.click(trustBox())
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: false })
+  })
+
+  it('AC 3: unticked, Continue with Google reaches the data layer with the same choice', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    fireEvent.click(trustBox())
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+    expect(api.signInWithGoogle).toHaveBeenCalledWith({ trusted: false })
+  })
+
+  it('AC 1: ticked by default, Google is asked for a trusted sign-in', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(trustBox()).toBeChecked()
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+    expect(api.signInWithGoogle).toHaveBeenCalledWith({ trusted: true })
+  })
+
+  it('AC 5: booting an untrusted session still opens the household this device last chose', async () => {
+    sessionStorage.setItem(FLAG, '1')
+    window.localStorage.setItem('taskr.activeHousehold', HOUSEHOLD_TWO.id)
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE, HOUSEHOLD_TWO])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+
+    await renderApp()
+    const switcher = await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  it('AC 5: booting an untrusted session still offers the invitation this device is holding', async () => {
+    sessionStorage.setItem(FLAG, '1')
+    window.localStorage.setItem(
+      'taskr.pendingInvitation',
+      JSON.stringify({ code: 'k7m3qp4rwn', name: 'Placeholder Three' }),
+    )
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(window.localStorage.getItem('taskr.pendingInvitation')).not.toBeNull()
   })
 })

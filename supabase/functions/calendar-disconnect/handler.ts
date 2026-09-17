@@ -114,6 +114,7 @@ export interface Filterable {
  */
 export interface SupabaseLike {
   auth: { getUser(): Promise<{ data: { user: { id: string } | null } | null }> }
+  rpc(fn: string, args: Record<string, unknown>): Promise<{ data: any; error: any }>
   from(table: string): {
     select(columns: string): Filterable
     delete(): { eq(column: string, value: unknown): Promise<{ error: any }> }
@@ -331,9 +332,29 @@ export function createHandler(deps: CalendarDisconnectDeps) {
     // Taskr" on a screen where it is untrue — the opposite of what this story is
     // for. `revokeNoteFor` in src/lib/calendar.js owns which of the three
     // speaks.
+    //
+    // #474 adds a fourth way to reach `null`: the credential exists and is
+    // deliberately NOT revoked, because `member_tokens_to_revoke` (0047) says
+    // another connection uses the same Google account — or the account is
+    // unknown, and might be. Google revokes a whole account's grant, so
+    // revoking here would disconnect a calendar in another household, the
+    // same sign-in's included. `null` and not `false`, because `false` tells
+    // the member to remove Taskr in their Google account, which is the same
+    // harm done by hand. If the rule cannot be READ, nothing is revoked and
+    // the answer is `false`: Taskr is forgetting a credential it could not
+    // vouch for, which is `false`'s meaning above.
     let revoked: boolean | null
     if (storedToken) {
-      revoked = await revokeAtGoogle(deps, storedToken)
+      const { data: revocable, error: ruleError } = await asService.rpc('member_tokens_to_revoke', {
+        member_id: member.id,
+      })
+      if (ruleError) {
+        revoked = false
+      } else if ((revocable ?? []).some((row: any) => row?.refresh_token === storedToken)) {
+        revoked = await revokeAtGoogle(deps, storedToken)
+      } else {
+        revoked = null
+      }
     } else if (tokenError || strandedConnection) {
       // Taskr cannot vouch for the grant: it either could not read the
       // credential, or a previous attempt spent it and did not finish.

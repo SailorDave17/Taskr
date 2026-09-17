@@ -7,7 +7,8 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
+- Status: **`0047` (#474) is NOT yet applied** — see the #474 section below for what applies it and
+  how it is read. **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
   session, at md5 `7d201b925939d32460a27146134d2006` (`6884 characters, 8 statements`), read back
   identical — a constraint widening and a trigger body that **`npm run check:live` cannot see**,
   *measured* **75 of 75** on both sides, confirmed by the read-only catalog query in the #480
@@ -2498,10 +2499,11 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   `purge-deleted-households` Edge Function with `PURGE_SHARED_SECRET`. This is the recorded exception
   in `docs/hosting-decision.md`. For each due household the function:
   1. revokes the Google grants first, because the cascade takes the tokens. It revokes what
-     `household_tokens_to_revoke` returns, which leaves out a person still connected in another
-     household: one Google account holds one grant with Taskr's single OAuth client, so revoking it
-     would break that household's calendar (owner decision at #430's review). Their token row still
-     goes with the cascade;
+     `household_tokens_to_revoke` returns, which leaves out a grant another household still uses:
+     one Google account holds one grant with Taskr's single OAuth client, so revoking it would
+     break that household's calendar (owner decision at #430's review). Since `0047` (#474) "still
+     uses" is keyed on the **Google account**, and a token whose account is unknown is never
+     revoked — see the #474 section. Their token row still goes with the cascade;
   2. deletes each sign-in that claims nothing outside this household (#262's rule), **before** the
      household. `members_claimed_by_fkey` is ON DELETE SET NULL, so this is #247's recoverable order:
      a failed account step leaves the household due, and tomorrow's run retries it with the claimants
@@ -2562,8 +2564,8 @@ A member can leave from the Who tab. An organizer first hands the household over
   Google grant is readable only by `service_role`, and deleting an auth user needs `auth.admin`. In
   order, it:
   1. refuses the organizer;
-  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant still
-     used in another household (#430's rule);
+  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant another
+     connection still uses (#430's rule, keyed on the Google account since `0047`, #474);
   3. calls `leave_household` as the caller;
   4. deletes the sign-in if that household was its last claim (#262).
 
@@ -2632,6 +2634,48 @@ A member can leave from the Who tab. An organizer first hands the household over
   from a session after #435 merged: *measured* **69 of 74 → 70 of 74** across the apply and
   **→ 71 of 74** across the deploy (readings on #431). `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.
+
+## A grant is kept while its Google account is used elsewhere — #474, 2026-09-17
+
+#430 and #431 kept a Google grant when the **same Taskr sign-in** held a token in another
+household, and gave the reason as "one Google account holds one grant". The reason was right and
+the key was wrong: two different sign-ins can consent the same Google account. Google's own
+documentation settles which one a grant belongs to — *"Revocation removes all OAuth 2.0 scopes
+previously granted to a project, invalidating any issued access or refresh tokens for all clients
+registered under that project"* (Google Identity, *OAuth 2.0 for Client-side Web Applications*,
+read 2026-09-17). So revoking any one refresh token for an account revokes them all, and #474's
+alternative ending ("grants are per refresh token, close it moot") is false.
+
+- **The account is recorded.** The consent now asks for `openid` beside the calendar scope
+  (`GOOGLE_ACCOUNT_SCOPE` in `src/lib/calendar.js`). That scope reads no calendar, no address and
+  no name; it makes Google return an ID token, and `calendar-connect` stores its `sub` in
+  `calendar_tokens.google_sub`. The column is on the table no client can read. The ID token's
+  signature is not checked, which OpenID Connect allows for a token taken straight from the token
+  endpoint over TLS; `aud` and `iss` are compared, and anything that does not check out is stored
+  as null.
+- **The rule (`0047`).** `member_tokens_to_revoke` and `household_tokens_to_revoke` offer a token
+  only when its account is **known**, and no other connection holds a token for the **same
+  account**. Where the other row's account is unknown, they fall back to the old sign-in
+  comparison. "Other" means another member row for a leave, so two members of one household sharing
+  an account are covered too, and another household for a purge.
+- **A token with no account is never revoked** (owner decision at #474's pickup). Every token stored
+  before `0047` is one. Its row still goes; the grant stays listed in that person's Google account
+  until they reconnect or remove it there. **The residual**: a legacy row held by a *different*
+  sign-in that consented the same account is invisible to both clauses, and closes as such rows
+  reconnect. On 2026-09-17 the live project held one connection, in the owner's household.
+- **`calendar-disconnect` asks the same rule** (folded into #474 at the owner's choice). Until now it
+  revoked unconditionally, so disconnecting in one household revoked the grant a second household
+  used, even for the same sign-in. A kept grant answers `revoked: null`, so the app shows no
+  "remove Taskr in your Google account" sentence, which would do the same harm by hand. An
+  unreadable rule revokes nothing and answers `false`.
+- **Instruments.** `src/test/revokeKeying.pglite.test.js` reads the old answer on a database built
+  through `0046` (the shared account's token offered) and the new answer after `0047`.
+  `check:live` is blind to `0047` in both directions (a column on a table no client names, and two
+  bodies under unchanged signatures, `0028`'s reason). The live instrument is a read-only catalog
+  query taken on both sides of `npm run migrate:live`: `information_schema.columns` for
+  `calendar_tokens.google_sub`, and `pg_get_functiondef` for both functions, where `google_sub`
+  is absent before and present after. **Re-pasting `0042` or `0043` after `0047` restores the
+  sign-in-keyed body** of the function that file declares; re-paste `0047` after either.
 
 ## How the rules are enforced
 

@@ -3792,7 +3792,8 @@ describe('connecting a calendar (#95)', () => {
     expect(assign).toHaveBeenCalledTimes(1)
     const url = new URL(assign.mock.calls[0][0])
     expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
-    expect(url.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.freebusy')
+    // `openid` names the consenting Google account, and reads nothing (#474).
+    expect(url.searchParams.get('scope')).toBe('openid https://www.googleapis.com/auth/calendar.freebusy')
     // Built from where the app is running, so a preview and the custom domain
     // each ask for themselves rather than for a hard-coded host.
     expect(url.searchParams.get('redirect_uri')).toBe('https://taskr.example.test/')
@@ -6794,7 +6795,7 @@ describe('importing a calendar event as a chore (#101)', () => {
     expect(assign).toHaveBeenCalledTimes(1)
     const url = new URL(assign.mock.calls[0][0])
     // `startConnect` is REAL here, so this is the URL the app would send.
-    expect(url.searchParams.get('scope')).toBe(READONLY)
+    expect(url.searchParams.get('scope')).toBe(`openid ${READONLY}`)
     expect(url.searchParams.get('include_granted_scopes')).toBe('true')
     expect(url.searchParams.get('prompt')).toBe('consent')
     // The household on screen travels with the state, so the widened token

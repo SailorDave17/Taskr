@@ -23,6 +23,7 @@
 //      what makes this column the sole input to every policy in the schema.
 
 import { getSupabase } from './supabase.js'
+import { setSessionTrust } from './sessionTrust.js'
 
 /**
  * Unwrap a Supabase `{ data, error }` result.
@@ -302,7 +303,11 @@ export async function sessionIsGone() {
  * see, and their PIN is the password — so from this function's point of view
  * there is one flow, and `members.email` is the only thing that differs.
  */
-export async function signIn({ email, password }) {
+export async function signIn({ email, password, trusted = true }) {
+  // #482 — before the call, because the call is what saves the session and
+  // the storage adapter decides where from this flag. Trusted by default, so a
+  // caller that says nothing keeps the session exactly as it always did.
+  setSessionTrust(trusted)
   const { data, error } = await getSupabase().auth.signInWithPassword({
     email: String(email ?? '').trim(),
     password: String(password ?? ''),
@@ -396,7 +401,11 @@ export async function signIn({ email, password }) {
  * google-consent-screen-names-the-callback-domain). Recorded so nobody hunts
  * a misconfiguration.
  */
-export async function signInWithGoogle() {
+export async function signInWithGoogle({ trusted = true } = {}) {
+  // #482 — written before the page leaves. The session comes back in the URL
+  // fragment and is saved at the next boot, in this same tab, whose
+  // `sessionStorage` still carries the flag (sessionTrust.js).
+  setSessionTrust(trusted)
   const { error } = await getSupabase().auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: confirmationRedirectTo() },

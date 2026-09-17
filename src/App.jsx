@@ -1548,7 +1548,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // as `anon` — refused since 0017 (#186) — with the refusal painted over a
   // sign-in that is working. Busy is released in `finally` for the failure
   // case; on success the page is gone before anybody reads the flag.
-  const handleSignInWithGoogle = useCallback(async () => {
+  const handleSignInWithGoogle = useCallback(async (choice) => {
     setBusy(true)
     setError(null)
     setSignInNotice(null)
@@ -1562,7 +1562,8 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         setGoogleSignIn(false)
         return
       }
-      await signInWithGoogle()
+      // #482 — the screen's "Trust this device" choice, passed through.
+      await signInWithGoogle(choice)
     } catch (err) {
       setError(err.message)
       throw err

@@ -65,6 +65,7 @@ import {
 } from './lib/chores.js'
 import {
   AUTO_APPLY_REFUSED_CODE,
+  SUGGESTION_WINDOW_WEEKS,
   autoApplyDecision,
   baselineMoved,
   calendarSuggestion,
@@ -72,11 +73,13 @@ import {
   clearCapacity,
   listCapacity,
   periodStartFor,
+  priorPeriodStarts,
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { extractCapacity, extractChores } from './lib/capture.js'
 import { choresInWeek } from './lib/done.js'
+import { weeklyHistory } from './lib/history.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -96,6 +99,7 @@ import {
   fetchCalendarEvents,
   isBusyWeekStale,
   isRealEmailMember,
+  listBusyHistory,
   listBusyWeeks,
   listCalendarConnections,
   listCalendarImports,
@@ -408,6 +412,13 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // whole minimization decision, so the most this state could ever hold is an
   // integer, a count and a timestamp.
   const [busyWeeks, setBusyWeeks] = useState([])
+  // #480 — the PRIOR weeks' busy figures, the calendar half of the history a
+  // suggestion reads. Same rows as above for earlier Mondays, landed by a
+  // background read that `refresh()` starts and does not wait for; the
+  // counter is what stops a slow read from an earlier refresh landing over a
+  // later one's rows.
+  const [busyHistory, setBusyHistory] = useState([])
+  const busyHistoryReadRef = useRef(0)
   // #96 AC 5 — why the figure on screen is the one it is. Separate from `error`
   // because a calendar Google would not answer must not read as the app being
   // broken: the manual capacity path is untouched, the last derived figure is
@@ -719,6 +730,44 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
       setBusyReadComplaint(null)
       setBusyFetchComplaint(null)
     }
+    // #480 — the prior weeks' calendar figures: ONE query for the window, and
+    // NOT awaited (AC 5). The rows feed a suggestion, and a suggestion must
+    // not hold the roster or the split back by a round trip — #351 priced one
+    // at 562 ms on Slow 4G — so this is the one read in `refresh()` the first
+    // paint does not wait for. Started here rather than at the end so it
+    // overlaps the reads below; sequenced so a slow read from an earlier
+    // refresh cannot land over a later one's. Completions need no read of
+    // their own: `choreRows` already carries every completion the household
+    // recorded (the Done tab groups them), and `weeklyHistory` folds the two
+    // at render.
+    //
+    // A failure is deliberately QUIET here, and that is a choice with a
+    // stated cost (owner decision at review-fanout's gate, 2026-09-16). The
+    // realistic failure is a TRANSIENT one — this is its own round trip,
+    // started after `listBusyWeeks` was awaited, so on the Slow 4G #351
+    // priced a request can fail while the one before it succeeded, and the
+    // busy read's complaint says nothing about it (and is shown only on the
+    // viewer's own row, only with a calendar connected). When that happens
+    // the roster reads "Suggested: N min … no calendar read in those weeks"
+    // and no red anywhere: a failed read and an empty one render the same
+    // (cairn: an-absent-result-reads-as-a-clean-one). Accepted because the
+    // figure is still an honest one — completions alone, with the calendar
+    // term zero — and the next refresh re-reads; a sentence under every
+    // member's suggestion for a request that usually succeeds a moment later
+    // was judged the worse trade.
+    if (found && period) {
+      const seq = ++busyHistoryReadRef.current
+      void listBusyHistory(priorPeriodStarts(period, SUGGESTION_WINDOW_WEEKS), memberIds).then(
+        (rows) => {
+          if (busyHistoryReadRef.current === seq) setBusyHistory(rows)
+        },
+        () => {
+          if (busyHistoryReadRef.current === seq) setBusyHistory([])
+        },
+      )
+    } else {
+      setBusyHistory([])
+    }
     const uid = await currentUserId()
     setUserId(uid)
     // #172 — the organizer's invitations, and ONLY the organizer's. Resolved
@@ -853,6 +902,24 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // is the only place it is called.
   const reads = useMemo(() => createReadQueue(refresh), [refresh])
   const requestRefresh = useCallback(() => reads.request(), [reads])
+
+  // #480 — one row per member per completed prior week, folded at render from
+  // the chores every refresh already reads and the busy rows the background
+  // read above lands. Pure and memoised on its inputs, so the roster is handed
+  // rows and a test can hand it the same rows directly.
+  const history = useMemo(
+    () =>
+      household && periodStart
+        ? weeklyHistory({
+            members,
+            chores,
+            busyWeeks: busyHistory,
+            timeZone: household.timezone,
+            periodStart,
+          })
+        : [],
+    [household, members, chores, busyHistory, periodStart],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -3175,6 +3242,8 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           // do with calendars. The FETCH complaint is about this member's own
           // calendar by construction, so it needs no such gate.
           busyComplaint={busyFetchComplaint ?? (isConnected ? busyReadComplaint : null)}
+          // #480 — the completed prior weeks the suggestion reads.
+          history={history}
         />
       ) : null}
 

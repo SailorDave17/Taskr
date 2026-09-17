@@ -7,6 +7,7 @@ import {
   calendarSuggestion,
   effectiveCapacity,
   normalizeCapacityMinutes,
+  suggestCapacity,
 } from '../lib/capacity.js'
 import { busyComputedLabel, busyWeekFor, connectionFor, isRealEmailMember } from '../lib/calendar.js'
 import { invitationDateLabel } from '../lib/invitations.js'
@@ -122,6 +123,10 @@ function CapacityControl({
   busyWeek,
   busyComplaint,
   timeZone,
+  // #480 — the member's completed prior weeks, `weeklyHistory`'s rows for the
+  // whole household (this control filters to its own member). Empty renders
+  // exactly what #106 shipped: the calendar's readout and its tap.
+  history = [],
 }) {
   const [editing, setEditing] = useState(false)
   const [minutes, setMinutes] = useState('')
@@ -151,6 +156,18 @@ function CapacityControl({
   const effective = effectiveCapacity(member, override)
   const isOverridden = Boolean(override)
   const suggestion = calendarSuggestion(member, busyWeek)
+  // #480 — the figure built from what this person got done lately. Null with
+  // fewer than SUGGESTION_MIN_WEEKS of history, and then the calendar's
+  // suggestion above is the only one on offer (AC 2). `workMinutes` is 0
+  // until #479 records hours at work; that story hands the figure in here.
+  const suggested = suggestCapacity({ member, history, busyWeek, workMinutes: 0 })
+  // #480 — the week already holds this figure FROM the suggestion: keep the
+  // block (the reason is still worth reading) and drop its tap, since a
+  // control whose only position is the current one is not a control
+  // (design-bar verdict, 2026-09-16). A typed week that happens to equal the
+  // figure keeps the tap — taking it would change the row's word.
+  const suggestedHeld =
+    Boolean(suggested) && override?.source === 'suggested' && suggested.minutes === effective
 
   // The source the SAVE carries, which for a calendar figure depends on
   // whether the field still holds what the calendar put there (#97 AC 2).
@@ -159,8 +176,12 @@ function CapacityControl({
   // legal suggestion, and without the first clause clearing the field over a
   // zero prefill kept "From your calendar" on over nothing (review-fanout,
   // 2026-09-05). Any other non-number is refused by the normalizer first.
+  // #480's `suggested` takes the same rule for the same reason: both are
+  // arithmetic on numbers the person can see, so a figure they changed is no
+  // longer the suggestion's. A description's figure keeps its word (#210).
   const sourceToSave =
-    source === 'calendar' && (String(minutes).trim() === '' || Number(minutes) !== proposed)
+    (source === 'calendar' || source === 'suggested') &&
+    (String(minutes).trim() === '' || Number(minutes) !== proposed)
       ? 'manual'
       : source
 
@@ -244,18 +265,47 @@ function CapacityControl({
     setScrollRequest((n) => n + 1)
   }
 
+  /**
+   * "Use this" on the history-based suggestion — #480 AC 3. The calendar
+   * tap's seam exactly, with its own word: a prefill the editor's Save
+   * writes, never a write of its own.
+   */
+  function takeSuggestedFigure() {
+    if (!suggested) return
+    takeProposal({ minutes: suggested.minutes, source: 'suggested' })
+    setShellKey((k) => k + 1)
+    setEditing(true)
+    setScrollRequest((n) => n + 1)
+  }
+
   // Rendered in BOTH states, at the same place under this week's figure, so
   // the suggestion is readable while the member is deciding whether to take
   // it and while they are reviewing what taking it produced.
+  //
+  // ONE "Use this" per row (#480). While the history-based figure is on offer
+  // it carries the tap, and the calendar readout keeps its busy figure and
+  // date — the reason line names the comparison — but loses its own button:
+  // two taps under one number would offer two answers to one question, and
+  // this figure already contains the calendar's difference. With fewer than
+  // SUGGESTION_MIN_WEEKS of history there is no suggested block, the
+  // calendar's tap returns, and nothing on the row claims history (AC 2).
   const readout = (
-    <BusyReadout
-      member={member}
-      busyWeek={busyWeek}
-      complaint={busyComplaint}
-      timeZone={timeZone}
-      onUse={suggestion == null ? null : takeCalendarFigure}
-      busy={busy}
-    />
+    <>
+      <SuggestionReadout
+        member={member}
+        suggested={suggested}
+        onUse={suggestedHeld ? null : takeSuggestedFigure}
+        busy={busy}
+      />
+      <BusyReadout
+        member={member}
+        busyWeek={busyWeek}
+        complaint={busyComplaint}
+        timeZone={timeZone}
+        onUse={suggestion == null || suggested ? null : takeCalendarFigure}
+        busy={busy}
+      />
+    </>
   )
 
   if (!editing) {
@@ -285,6 +335,12 @@ function CapacityControl({
                 </span>
               ) : override.source === 'calendar' ? (
                 <span className="member__week-mark"> · set from calendar</span>
+              ) : override.source === 'suggested' ? (
+                // #480 AC 3 — the row names its source the way a calendar
+                // week does, so a housemate reading the roster can tell a
+                // figure the person took from their own past from one they
+                // typed.
+                <span className="member__week-mark"> · set from suggestion</span>
               ) : (
                 <span className="member__week-mark"> · set for this week</span>
               )
@@ -443,13 +499,14 @@ CapacityControl.propTypes = {
   busyWeek: PropTypes.object,
   busyComplaint: PropTypes.string,
   timeZone: PropTypes.string,
+  history: PropTypes.array,
 }
 
 /**
  * The source, named on screen — #210 AC 9. One sentence per proposer, so a
  * member reads where the number in the field came from before they save it.
- * `calendar` is #97's; it is here so that story adds a proposer and not a
- * second confirm surface.
+ * `calendar` is #97's and `suggested` is #480's; each is here so that story
+ * adds a proposer and not a second confirm surface.
  */
 function sourceLabel(source, member, isMe) {
   if (source === 'extraction') return 'From your description.'
@@ -460,7 +517,64 @@ function sourceLabel(source, member, isMe) {
   if (source === 'calendar') {
     return isMe ? 'From your calendar.' : `From ${member.display_name}’s calendar.`
   }
+  // Whose weeks, for the calendar's reason: the suggestion is offered on
+  // every row and reads THAT person's completions.
+  if (source === 'suggested') {
+    return isMe ? 'From your recent weeks.' : `From ${member.display_name}’s recent weeks.`
+  }
   return `From ${source}.`
+}
+
+/**
+ * The week's budget suggested from the person's own recent weeks — #480.
+ *
+ * Above the calendar's readout, in its register and for its reason: an OFFER
+ * beside a number the person owns, drawn quieter than the figure it informs.
+ * The figure is shown as *Suggested* with its two reason lines — what the
+ * person typically got done, and what this week changes about it — and the
+ * one tap, which PREFILLS the editor exactly as the calendar's tap does. The
+ * only write on this row is still the editor's Save; `0046`'s trigger and
+ * `autoApplyDecision` keep the automatic path off a row it writes.
+ *
+ * Nothing when there is nothing to offer, rather than a block that says so:
+ * a row with fewer than SUGGESTION_MIN_WEEKS of history must not claim to be
+ * history-based (AC 2), and the calendar's readout underneath is the fallback.
+ */
+function SuggestionReadout({ member, suggested, onUse, busy }) {
+  if (!suggested) return null
+  return (
+    <div className="member__suggested" data-testid={`suggested-${member.id}`}>
+      <span className="member__suggested-figure">
+        Suggested: {suggested.minutes} min
+        <span className="member__budget-human"> ({formatMinutes(suggested.minutes)})</span>
+      </span>
+      <span className="member__suggested-reason">{suggested.reason[0]}</span>
+      <span className="member__suggested-reason">{suggested.reason[1]}</span>
+      {/* No tap while the week already holds this figure from the
+          suggestion — `onUse` is null then, and the block is a readout. */}
+      {onUse ? (
+        <button
+          className="button button--quiet"
+          type="button"
+          onClick={onUse}
+          disabled={busy}
+          aria-label={`Use the suggested figure for ${member.display_name}`}
+        >
+          Use this
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+SuggestionReadout.propTypes = {
+  member: PropTypes.object.isRequired,
+  suggested: PropTypes.shape({
+    minutes: PropTypes.number.isRequired,
+    reason: PropTypes.arrayOf(PropTypes.string).isRequired,
+  }),
+  onUse: PropTypes.func,
+  busy: PropTypes.bool,
 }
 
 /**
@@ -1023,6 +1137,9 @@ function MemberRow({
   busyWeek,
   busyComplaint,
   timeZone,
+  // #480 — the household's completed prior weeks; the control filters its
+  // own member's out. Optional in the #166 shape.
+  history = [],
   // #179 — the organizer hands the role to this row's member and stays on as
   // an ordinary member. Optional in the #166 shape: a roster with no handler
   // wired renders exactly what it did.
@@ -1196,6 +1313,7 @@ function MemberRow({
           busyWeek={busyWeek}
           busyComplaint={isMe ? busyComplaint : null}
           timeZone={timeZone}
+          history={history}
         />
         {/* #95 — the calendar sits directly under this week's minutes, because
             that is the number it exists to inform (#96 turns the connection into
@@ -1351,6 +1469,7 @@ MemberRow.propTypes = {
   busyWeek: PropTypes.object,
   busyComplaint: PropTypes.string,
   timeZone: PropTypes.string,
+  history: PropTypes.array,
   onTransfer: PropTypes.func,
   signIn: PropTypes.shape({ kind: PropTypes.string.isRequired }),
 }
@@ -1444,6 +1563,10 @@ export default function Roster({
   calendarRevokeNote = null,
   busyWeeks = [],
   busyComplaint = null,
+  // #480 — `weeklyHistory`'s rows for the household, App's fold of the chores
+  // and the prior weeks' busy figures. Optional in the #166 shape: a roster
+  // handed none renders exactly what #106 shipped.
+  history = [],
   // #166 — optional, and its absence renders exactly what #163 shipped.
   onCreateHousehold = null,
   // #173 — optional, the #166 shape: join another household with a code.
@@ -1782,6 +1905,7 @@ export default function Roster({
                 busyWeek={busyWeekFor(busyWeeks, member.id, periodStart)}
                 busyComplaint={busyComplaint}
                 timeZone={household.timezone}
+                history={history}
               />
             ))}
           </ul>
@@ -2325,6 +2449,7 @@ Roster.propTypes = {
   calendarRevokeNote: PropTypes.string,
   busyWeeks: PropTypes.array,
   busyComplaint: PropTypes.string,
+  history: PropTypes.array,
   onCreateHousehold: PropTypes.func,
   onJoinHousehold: PropTypes.func,
   invitations: PropTypes.array,

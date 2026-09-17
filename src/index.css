@@ -746,6 +746,32 @@ body {
   opacity: 0.75;
 }
 
+/* The budget suggested from the person's own recent weeks — story #480.
+
+   Above the calendar readout and in its register, for its reason: an OFFER
+   beside a number the person owns. The two reason lines take the whole row so
+   they read as sentences under the figure rather than running on from it, and
+   the tap comes after them — the person reads why before they take it. */
+.member__suggested {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.member__suggested-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.member__suggested-reason {
+  display: block;
+  flex-basis: 100%;
+  opacity: 0.75;
+}
+
 /* #87 — the provisioning form, opened from a member row. Same shape as the
    week form above it: it replaces the row's button in place rather than
    opening a dialog, so the organizer stays on the roster they are reading. */

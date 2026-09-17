@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -2780,5 +2780,181 @@ describe('#458 — an invited member reads as invited, not signed in', () => {
     at(60_000)
     render458({ members: [{ ...INVITED, claimed_by: null }] })
     expect(screen.getByTestId('access-m1')).toHaveTextContent(/^No sign-in yet$/)
+  })
+})
+
+// #480 — the week suggested from the person's own recent weeks. The
+// arithmetic is capacity.suggest.test.js; what is tested here is the block
+// the roster draws from it, the tap that turns it into a prefill, the word a
+// save carries, and the calendar's tap stepping aside.
+describe('the history-based suggestion — #480', () => {
+  const zoned = { ...household, timezone: 'America/New_York' }
+  const name = roster[0].display_name
+  // PERIOD is 2026-08-10; these are the four Mondays before it.
+  const PRIOR = ['2026-07-13', '2026-07-20', '2026-07-27', '2026-08-03']
+  const historyFor = (memberId, done, busy = null) =>
+    done.map((doneMinutes, i) => ({
+      memberId,
+      periodStart: PRIOR.slice(-done.length)[i],
+      doneMinutes,
+      busyMinutes: busy ? busy[i] : null,
+      workMinutes: 0,
+    }))
+  // 180, 210, 210, 260 done → median 210; 90 busy in each of those weeks.
+  const steady = historyFor('m1', [180, 210, 210, 260], [90, 90, 90, 90])
+  const busyRow = {
+    id: 'busy-1',
+    member_id: 'm1',
+    period_start: PERIOD,
+    busy_minutes: 45,
+    event_count: 3,
+    computed_at: '2026-08-12T01:00:00Z',
+  }
+  const suggestedRow = {
+    id: 'o1',
+    member_id: 'm1',
+    period_start: PERIOD,
+    minutes: 210,
+    note: null,
+    source: 'suggested',
+  }
+  const useSuggested = (who = name) =>
+    clickAndSettle(
+      screen.getByRole('button', { name: new RegExp(`use the suggested figure for ${who}`, 'i') }),
+    )
+  const minutesField = (who = name) =>
+    screen.getByLabelText(new RegExp(`minutes this week for ${who}`, 'i'))
+  const save = () => clickAndSettle(screen.getByRole('button', { name: /^save$/i }))
+  const withHistory = (extra = {}) =>
+    setup({ household: zoned, me: roster[0], history: steady, ...extra })
+
+  it('AC 3: shows the figure as Suggested, with its two reason lines and one tap, on the row it is about', () => {
+    withHistory()
+    const block = within(rowFor(name)).getByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 210 min/i)
+    expect(block).toHaveTextContent(/typically 210 min done over 4 weeks/)
+    expect(block).toHaveTextContent(/no calendar read this week/)
+    expect(
+      within(block).getByRole('button', { name: /use the suggested figure for placeholder one/i }),
+    ).toBeInTheDocument()
+    // The housemate has no history, so nothing on their row claims one.
+    expect(within(rowFor('Placeholder Two')).queryByTestId('suggested-m2')).not.toBeInTheDocument()
+  })
+
+  it('AC 3: Use this prefills the editor with the figure, names its source, and saves with the word', async () => {
+    const { onSetCapacity } = withHistory()
+    await useSuggested()
+    expect(minutesField()).toHaveValue(210)
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your recent weeks/i)
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith('m1', '210', 'suggested')
+  })
+
+  it('an edited figure is no longer the suggestion’s — it saves as manual and the source line goes', async () => {
+    // #97 AC 2's rule, taken for #97's reason: the figure is arithmetic on
+    // numbers the person can see, so a figure they changed is theirs.
+    const { onSetCapacity } = withHistory()
+    await useSuggested()
+    fireEvent.change(minutesField(), { target: { value: '200' } })
+    expect(screen.queryByTestId('week-source-m1')).not.toBeInTheDocument()
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith('m1', '200', 'manual')
+  })
+
+  it('reads this week’s calendar into the figure, and the calendar’s own tap steps aside — one Use this per row', () => {
+    withHistory({ busyWeeks: [busyRow] })
+    const row = rowFor(name)
+    // 45 busy this week against a usual 90 → 45 quieter → 210 + 45.
+    const block = within(row).getByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 255 min/i)
+    expect(block).toHaveTextContent(/calendar 45 min quieter this week/)
+    // The calendar's figure and its date stay readable; its button does not.
+    expect(within(row).getByText(/calendar suggests:/i)).toHaveTextContent('45 min busy')
+    expect(
+      within(row).queryByRole('button', { name: /use the calendar’s figure/i }),
+    ).not.toBeInTheDocument()
+    // Counted by accessible name — the label is the name, and both taps are
+    // labelled "Use the … figure for …" — so exactly one is on offer.
+    expect(within(row).getAllByRole('button', { name: /^use the .* figure for/i })).toHaveLength(1)
+    expect(within(row).getAllByText(/^use this$/i)).toHaveLength(1)
+  })
+
+  it('AC 2: below two completed weeks the calendar’s suggestion is the fallback, and nothing claims history', () => {
+    withHistory({ history: historyFor('m1', [210]), busyWeeks: [busyRow] })
+    const row = rowFor(name)
+    expect(within(row).queryByTestId('suggested-m1')).not.toBeInTheDocument()
+    expect(row).not.toHaveTextContent(/over \d+ weeks?/)
+    expect(row).not.toHaveTextContent(/suggested:/i)
+    expect(
+      within(row).getByRole('button', { name: /use the calendar’s figure for placeholder one/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('AC 2: no history at all renders exactly what #106 shipped', () => {
+    setup({ household: zoned, me: roster[0], busyWeeks: [busyRow] })
+    expect(screen.queryByTestId('suggested-m1')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /use the calendar’s figure for placeholder one/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('names WHOSE weeks on a housemate’s row, and "your" only on the member’s own', async () => {
+    withHistory({ history: [...steady, ...historyFor('m2', [30, 40, 30, 40])] })
+    await useSuggested('Placeholder Two')
+    expect(minutesField('Placeholder Two')).toHaveValue(35)
+    expect(screen.getByTestId('week-source-m2')).toHaveTextContent(
+      /from placeholder two’s recent weeks/i,
+    )
+    expect(screen.getByTestId('week-source-m2')).not.toHaveTextContent(/your/i)
+  })
+
+  it('AC 3: a week set from the suggestion says so where the figure is read', () => {
+    withHistory({ overrides: [suggestedRow] })
+    expect(within(rowFor(name)).getByTestId('week-m1')).toHaveTextContent(
+      /This week: 210 min.*· set from suggestion/,
+    )
+  })
+
+  it('re-opening a suggested week keeps its word on an unedited save', async () => {
+    const { onSetCapacity } = withHistory({ overrides: [suggestedRow] })
+    await clickAndSettle(
+      screen.getByRole('button', { name: new RegExp(`set this week for ${name}`, 'i') }),
+    )
+    expect(screen.getByTestId('week-source-m1')).toHaveTextContent(/from your recent weeks/i)
+    await save()
+    expect(onSetCapacity).toHaveBeenCalledWith('m1', '210', 'suggested')
+  })
+
+  it('once the week holds the suggested figure from the suggestion, the block keeps its reasons and drops its tap', () => {
+    // design-bar verdict, 2026-09-16: offering to use the number already in
+    // use is a control whose only position is the current one.
+    withHistory({ overrides: [suggestedRow] })
+    const block = within(rowFor(name)).getByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/typically 210 min done over 4 weeks/)
+    expect(
+      within(block).queryByRole('button', { name: /use the suggested figure/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('a suggested week whose figure has since moved offers the new one, and a TYPED week at the same figure keeps the tap', () => {
+    // The history now says 210; the row holds 200 from an earlier suggestion.
+    withHistory({ overrides: [{ ...suggestedRow, minutes: 200 }] })
+    expect(
+      within(rowFor(name)).getByRole('button', { name: /use the suggested figure/i }),
+    ).toBeInTheDocument()
+    cleanup()
+    // Typed 210 by hand: taking the suggestion would change the row's word,
+    // so it is still a choice and the tap stays.
+    withHistory({ overrides: [{ ...suggestedRow, source: 'manual' }] })
+    expect(
+      within(rowFor(name)).getByRole('button', { name: /use the suggested figure/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('is disabled while the roster is busy, like every other control on the row', () => {
+    withHistory({ busy: true })
+    expect(
+      screen.getByRole('button', { name: /use the suggested figure for placeholder one/i }),
+    ).toBeDisabled()
   })
 })

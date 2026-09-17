@@ -262,6 +262,42 @@ body {
   color: var(--ink-dim);
 }
 
+/* #483 — the browser can install this app, offered once. The notice's
+   grammar — a left rule above the tab strip — with the accent on the rule,
+   because this is an offer rather than a report, and full ink because it
+   carries controls. A wrapping row with the two 44px buttons in ONE group:
+   where they fit beside the sentence they sit at its right (1280px: one 52px
+   row, MEASURED 2026-09-16 in the prototype); where they do not, they drop
+   together under it, still at the right edge (360px and 320px: 80px, the
+   sentence's row then the buttons', no horizontal overflow). The first draft
+   let each button wrap on its own, and at 360px Install sat beside the
+   sentence while Not now dropped alone underneath — 104px, and the two
+   answers read as unrelated. Never a modal, never over anything: it takes
+   its own height in the flow. */
+.shell__install {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid var(--accent);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.shell__install-text {
+  flex: 1 1 8rem;
+}
+
+.shell__install-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 /* #50 — the re-balance, announced. An EVENT above whatever surface is on
    screen, never a screen of its own: the charter's moment must be perceptible
    as an event, and this is the sentence it arrives in. The accent marks that
@@ -2213,7 +2249,8 @@ details[open] > .shopping-past__run-summary > .card__subheading::before {
      belong at the left edge under the heading, so it keeps its left alignment
      and simply stops growing. */
   .shell__tagline,
-  .shell__notice {
+  .shell__notice,
+  .shell__install {
     max-width: 40rem;
   }
 

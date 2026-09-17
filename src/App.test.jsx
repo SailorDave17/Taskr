@@ -819,6 +819,245 @@ describe('#304 — Continue with Google, from the sign-in screen', () => {
   })
 })
 
+describe('#343 — the website’s link opens on start-your-household', () => {
+  // `https://taskr.madcowhq.com/?start` — a query flag on the root, because
+  // `/start` is a 404 on the deployed site (no router, no rewrite; #175/#176
+  // dropped). Read once at boot, stripped at once, acted on only when the URL
+  // carried nothing else the app reads.
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const ORIGIN = 'https://taskr.example.test'
+
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /**
+   * A URL to boot on, and a `replaceState` that MOVES the URL the way a
+   * browser's does. The harnesses above use a recording `vi.fn()` and read its
+   * calls; that is not enough here, because the claim under test is that the
+   * readers running AFTER the strip see a URL without the flag — and a fake
+   * that records the strip while leaving `location.search` as it was would let
+   * a strip placed after those reads pass every assertion below.
+   */
+  const atUrl = (search = '', hash = '') => {
+    const location = { origin: ORIGIN, pathname: '/', search, hash }
+    replaceState = vi.fn((_state, _title, url) => {
+      const next = new URL(url, ORIGIN)
+      location.pathname = next.pathname
+      location.search = next.search
+      location.hash = next.hash
+    })
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: location,
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    atUrl('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  // "Start a household" is a BUTTON on the sign-in card (the link under the
+  // form), a HEADING on the account card — and, signed in, the HEADING of the
+  // household card too. So the heading alone names the account card only while
+  // signed out; its absence is asserted by the fields only it carries.
+  const accountHeading = () => screen.findByRole('heading', { name: /start a household/i })
+  const signInButton = () => screen.findByRole('button', { name: /^sign in$/i })
+  const noAccountCard = () => {
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument()
+  }
+
+  it('POSITIVE CONTROL: the bare root, signed out, still opens on sign-in and touches the URL not at all', async () => {
+    // Without this, every "the account card is shown" assertion below passes
+    // against an app that always shows it, and every strip assertion against
+    // one that strips on every boot.
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: `?start` with no session opens on the account card, framed as starting a household, with sign-in one link away', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start')
+    await renderApp()
+
+    expect(await accountHeading()).toBeInTheDocument()
+    expect(screen.getByText(/first, your own account/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/your email/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
+    // Not the sign-in form — the inversion of #154's weights, for this arrival.
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^sign in$/i })).not.toBeInTheDocument()
+
+    // The way back, for a visitor who has an account after all.
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(await signInButton()).toBeInTheDocument()
+  })
+
+  it('AC 1: the flag is read once and stripped, so a reload does not re-arm it', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start')
+    await renderApp()
+    await accountHeading()
+
+    // ONE strip, to the bare root — nothing else was on the URL to keep.
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    // And what the address bar now holds is what the next boot would read.
+    expect(globalThis.location.search).toBe('')
+    expect(globalThis.location.hash).toBe('')
+  })
+
+  it('AC 2: a member who opens the link lands in their household, exactly as without it', async () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    atUrl('?start')
+    await renderApp('Who')
+
+    await screen.findByRole('region', { name: /who is in the household/i })
+    noAccountCard()
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+    // Never signed out, never a second household — #166 is the deliberate path
+    // for that, and this flag is not it.
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    // Stripped all the same: the flag is spent whoever opened it.
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  it('AC 2: a signed-in person with no household lands on Name the household, flag or no flag', async () => {
+    api.listHouseholds.mockResolvedValue([])
+    atUrl('?start')
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByLabelText(/household name/i)).toBeInTheDocument()
+    noAccountCard()
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: the return leg needs no flag — a signed-in person with no household gets Name the household on the bare root', async () => {
+    // The confirmation link lands on the origin (`confirmationRedirectTo`
+    // reads the origin and nothing else), so this boot is what a person gets
+    // after following it from ANY device: a session, no household, no flag.
+    api.listHouseholds.mockResolvedValue([])
+    atUrl('')
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByLabelText(/household name/i)).toBeInTheDocument()
+    noAccountCard()
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: a sign-in return in the FRAGMENT beside the flag is handled first, and the flag is dropped', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl(
+      '?start',
+      '#error=access_denied&error_code=provider_refused&error_description=the+user+denied+access',
+    )
+    await renderApp()
+
+    // The sign-in screen, with the return's own sentence — not the account card.
+    expect(await signInButton()).toBeInTheDocument()
+    expect(screen.getByText(/google did not sign you in/i)).toBeInTheDocument()
+    noAccountCard()
+    // Two strips, in order: the flag alone, leaving the fragment for the reader
+    // that owns it; then the fragment, once read.
+    expect(replaceState.mock.calls).toEqual([
+      [
+        null,
+        '',
+        '/#error=access_denied&error_code=provider_refused&error_description=the+user+denied+access',
+      ],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a bad-flow-state return in the QUERY beside the flag is handled first, and the flag is dropped', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start&error=invalid_request&error_code=bad_oauth_state')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    expect(screen.getByText(/took too long or was already used/i)).toBeInTheDocument()
+    noAccountCard()
+    // The sign-in reader saw its return whole: the first strip took only the flag.
+    expect(replaceState.mock.calls).toEqual([
+      [null, '', '/?error=invalid_request&error_code=bad_oauth_state'],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a calendar return beside the flag is handled first — the code reaches the exchange, and the flag is dropped', async () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atUrl('?start&code=the-code&state=the-state')
+    await renderApp()
+
+    await waitFor(() => expect(calendarApi.completeConnect).toHaveBeenCalledTimes(1))
+    // Exactly what Google sent — `readConsentReturn` never saw the flag.
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    noAccountCard()
+    expect(replaceState.mock.calls).toEqual([
+      [null, '', '/?code=the-code&state=the-state'],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a calendar return beside the flag with NO session still yields to the return', async () => {
+    // A consent that came back to an expired session. The signed-out boot does
+    // not exchange the code (it reads nothing), and the account card is still
+    // not the answer: this person was connecting a calendar, not arriving from
+    // the website. Only the flag is stripped — the consent stays on the URL for
+    // the reader that owns it, as it always has on a signed-out boot.
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start&code=the-code&state=the-state')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(replaceState.mock.calls).toEqual([[null, '', '/?code=the-code&state=the-state']])
+  })
+
+  it('AC 4: an auth link beside the flag is not a website arrival, even when it left no session', async () => {
+    // `readAuthCallback` finds the token in the fragment whatever the session
+    // did; a person following an invitation is not a visitor from the website,
+    // so the flag yields to it and the sign-in screen is what they get.
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start', '#access_token=t&refresh_token=r&expires_in=3600&token_type=bearer&type=invite')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
+  })
+})
+
 describe('when the signed-in person belongs to a household', () => {
   // `timezone` is `not null default 'UTC'` since 0005, so a household row always
   // carries one. #36's load figures resolve capacity for a PERIOD, and

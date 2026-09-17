@@ -9422,3 +9422,130 @@ describe('#440 — a session that ends here lands on the sign-in form, and nothi
     expect(screen.queryByText(SKIPPED)).not.toBeInTheDocument()
   })
 })
+
+// #483 — the offer to install Taskr, in the shell. The DECISION (captured
+// event, already-installed gate, 30-day "Not now") is `installOffer.test.js`'s
+// subject; what this file proves is where the line lands and what the two
+// buttons reach, through the real shell. The controller is faked in the shape
+// `startInstallOffer` returns, driven by hand.
+describe('#483 — the install offer, in the shell', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+  }
+  const makeOffer = (offered = true) => {
+    const listeners = new Set()
+    const offer = {
+      offered,
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      isOffered: () => offer.offered,
+      install: vi.fn(),
+      dismiss: vi.fn(),
+      set(next) {
+        offer.offered = next
+        for (const listener of listeners) listener()
+      },
+    }
+    return offer
+  }
+  const renderWithOffer = async (offer) => {
+    await act(async () => void render(<App installOffer={offer} />))
+  }
+  const line = () => screen.queryByTestId('install-offer')
+
+  const joined = () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+  }
+
+  it('AC 1: with a household showing, one line offers Install and Not now, in the shell and not over anything', async () => {
+    joined()
+    const offer = makeOffer(true)
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    const strip = line()
+    expect(strip).toBeInTheDocument()
+    expect(within(strip).getByText(/install taskr on this phone/i)).toBeInTheDocument()
+    // In the flow of the shell, above the tab strip, and not a modal.
+    expect(strip.closest('main.shell')).not.toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(strip.compareDocumentPosition(screen.getByRole('button', { name: 'Who' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    // The two answers reach the controller, and nothing else does.
+    await act(async () => void fireEvent.click(within(strip).getByRole('button', { name: /^install$/i })))
+    expect(offer.install).toHaveBeenCalledTimes(1)
+    expect(offer.dismiss).not.toHaveBeenCalled()
+    await act(async () => void fireEvent.click(within(strip).getByRole('button', { name: /not now/i })))
+    expect(offer.dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('follows the controller: the line appears when the browser fires, and goes when it is answered', async () => {
+    joined()
+    const offer = makeOffer(false)
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    expect(line()).not.toBeInTheDocument()
+    await act(async () => offer.set(true))
+    expect(line()).toBeInTheDocument()
+    await act(async () => offer.set(false))
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('never on the sign-in screen, even while the browser is offering', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderWithOffer(makeOffer(true))
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('never on the onboarding screen, even while the browser is offering', async () => {
+    // The shared default: a session and no household.
+    await renderWithOffer(makeOffer(true))
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('survives the remount a sign-out causes: the next person, joined, is offered again', async () => {
+    // #440 remounts the app on session end; the controller outlives it and
+    // the subscription follows the new instance.
+    joined()
+    let session = { user: { id: 'person-a' } }
+    api.currentSession.mockImplementation(async () => session)
+    api.sessionIsGone.mockImplementation(async () => session === null)
+    api.signOut.mockImplementation(async () => {
+      session = null
+    })
+    const offer = makeOffer(true)
+    await renderWithOffer(offer)
+    await act(async () => void fireEvent.click(await screen.findByRole('button', { name: 'Who' })))
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(line()).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign out$/i })))
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+    api.signIn.mockImplementation(async () => {
+      session = { user: { id: 'person-a' } }
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(line()).toBeInTheDocument()
+  })
+
+  it('with no controller at all (the tests’ default), nothing is shown and nothing is stored', async () => {
+    joined()
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(line()).not.toBeInTheDocument()
+    expect(window.localStorage.length).toBe(0)
+  })
+})

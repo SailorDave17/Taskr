@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import { startAppUpdates } from './lib/appUpdate.js'
+import { startInstallOffer } from './lib/installOffer.js'
 import './index.css'
 
 // #347 — the one registration path, and it starts BEFORE the app loads.
@@ -21,6 +22,13 @@ import './index.css'
 // remounts on every session end (#440).
 const updates = startAppUpdates({ registerSW })
 
+// #483 — the browser's install offer is captured here for the same reason:
+// `beforeinstallprompt` fires whenever Chrome decides the criteria are met,
+// which can be before App's import below has resolved, and an event that fired
+// before a listener existed is gone. The controller lives for the life of the
+// page; App reads it through a prop.
+const installOffer = startInstallOffer()
+
 // An app that fails to load leaves a blank page: nothing on it to protect, and
 // nobody coming back to it on purpose. So the updater looks for the fixed
 // deploy — or a rollback — every minute instead of every hour (owner decision,
@@ -29,7 +37,7 @@ import('./App.jsx')
   .then(({ default: App }) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
-        <App />
+        <App installOffer={installOffer} />
       </StrictMode>,
     )
   })

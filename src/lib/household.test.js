@@ -1702,3 +1702,81 @@ describe('leaveHousehold — the client half of #431', () => {
     expect(calls).toEqual([])
   })
 })
+
+describe('#482 — the trust choice is recorded before the sign-in call', () => {
+  // The session is saved INSIDE the auth call, so the storage adapter has to
+  // know where to put it by the time the call starts. These read the flag at
+  // the moment the fake is entered — a flag written after the call would read
+  // as unset here and the session would already be in localStorage.
+  const FLAG = 'taskr.untrustedSession'
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  function flagAtCall(method) {
+    const original = fakeClient.auth[method]
+    const seen = []
+    const spy = vi.spyOn(fakeClient.auth, method).mockImplementation((...args) => {
+      seen.push(sessionStorage.getItem(FLAG))
+      return original(...args)
+    })
+    return { seen, restore: () => spy.mockRestore() }
+  }
+
+  it('password, unticked: the flag is set when signInWithPassword is entered', async () => {
+    const probe = flagAtCall('signInWithPassword')
+    try {
+      await signIn({ email: 'kid@example.com', password: '4821', trusted: false })
+    } finally {
+      probe.restore()
+    }
+    expect(probe.seen).toEqual(['1'])
+  })
+
+  it('password, ticked or unsaid: the flag is cleared before the call', async () => {
+    sessionStorage.setItem(FLAG, '1') // left by an earlier untrusted sign-in in this tab
+    const probe = flagAtCall('signInWithPassword')
+    try {
+      await signIn({ email: 'kid@example.com', password: '4821' })
+    } finally {
+      probe.restore()
+    }
+    expect(probe.seen).toEqual([null])
+  })
+
+  it('Google, unticked: the flag is set before the page leaves', async () => {
+    const probe = flagAtCall('signInWithOAuth')
+    try {
+      await signInWithGoogle({ trusted: false })
+    } finally {
+      probe.restore()
+    }
+    expect(probe.seen).toEqual(['1'])
+  })
+
+  it('Google, unsaid: trusted, as before #482', async () => {
+    sessionStorage.setItem(FLAG, '1')
+    const probe = flagAtCall('signInWithOAuth')
+    try {
+      await signInWithGoogle()
+    } finally {
+      probe.restore()
+    }
+    expect(probe.seen).toEqual([null])
+  })
+
+  it('a browser that will not keep the flag refuses the untrusted sign-in without calling auth', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('refused', 'QuotaExceededError')
+    })
+    try {
+      await expect(
+        signIn({ email: 'kid@example.com', password: '4821', trusted: false }),
+      ).rejects.toThrow(/Trust this device/)
+    } finally {
+      setItem.mockRestore()
+    }
+    expect(calls.filter((c) => c.op === 'signInWithPassword')).toHaveLength(0)
+  })
+})

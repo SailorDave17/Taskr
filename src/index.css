@@ -349,6 +349,29 @@ body {
   gap: 0.875rem;
 }
 
+/* #478 — what threw, for a problem report, behind a disclosure on the
+   render-failure card. The summary is a control, so it gets the 44px floor
+   and keeps the browser's own marker (it is not `display: flex`, which is
+   what hid the marker on the Shop tab). The detail is the raw message: it
+   may carry ids with no spaces, so it breaks anywhere rather than pushing
+   the card wider than a 360px screen. */
+.render-failure__details {
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.render-failure__summary {
+  min-height: 44px;
+  line-height: 44px;
+  cursor: pointer;
+}
+
+.render-failure__detail {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -481,6 +504,49 @@ body {
    rule: the two routes carry equal weight for the people they apply to, and
    the divider only says the second is an alternative rather than a further
    step. Dim ink, like every other aside on a card. */
+/* #482 — "Trust this device" on the sign-in form. The whole row is the label,
+   so the tap target is the row (54px at 360 wide), not the 18px box; the hint
+   sits under the label in the note's size and ink.
+
+   Kept tight on purpose (design-bar, 2026-09-17). Measured at 360x800 with the
+   row hidden as the baseline: the row pushes Continue with Google down by its
+   own height plus the form's gap, and with #304's stale-sign-in notice showing
+   there were 56px under that button to give. No in-form row fits in 56px, so
+   the button straddles the fold in that case whatever this rule says — the
+   owner accepted that over moving the box below Google, where a phone never
+   shows it before Sign in is tapped. This rule only keeps the cost at 68px
+   rather than 80px. */
+.trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.trust__box {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--accent);
+}
+
+.trust__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.trust__label {
+  font-size: 0.9375rem;
+}
+
+.trust__hint {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  color: var(--ink-dim);
+}
+
 .divider {
   margin: 0.75rem 0;
   text-align: center;

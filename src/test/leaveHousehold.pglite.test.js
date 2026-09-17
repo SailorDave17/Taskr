@@ -218,11 +218,14 @@ describe('leaving and handing over a household, run against a real Postgres (#43
   })
 
   describe('the grants the leave function may revoke', () => {
-    const connect = (householdId, memberId, token) =>
+    // Every token carries its Google account: since 0047 (#474) a token with
+    // none is never offered, which would make every assertion below read [].
+    // The keying rule itself is revokeKeying.pglite.test.js's.
+    const connect = (householdId, memberId, token, sub) =>
       db.query(
-        `insert into public.calendar_tokens (household_id, member_id, refresh_token, scope)
-         values ($1, $2, $3, 'https://www.googleapis.com/auth/calendar.freebusy')`,
-        [householdId, memberId, token],
+        `insert into public.calendar_tokens (household_id, member_id, refresh_token, scope, google_sub)
+         values ($1, $2, $3, 'https://www.googleapis.com/auth/calendar.freebusy', $4)`,
+        [householdId, memberId, token, sub],
       )
     const offered = async (memberId) =>
       (
@@ -253,15 +256,15 @@ describe('leaving and handing over a household, run against a real Postgres (#43
          values ($1, 'Placeholder One', 60, $2) returning id`,
         [staying.id, member],
       )
-      await connect(household, memberRowId, 'token-member-here')
-      await connect(staying.id, elsewhere[0].id, 'token-member-elsewhere')
+      await connect(household, memberRowId, 'token-member-here', 'sub-member')
+      await connect(staying.id, elsewhere[0].id, 'token-member-elsewhere', 'sub-member')
       // Everybody else's grants exist at BOTH assertions — one in this
       // household, one in the other. Without them a read of every token in the
       // table looks exactly like a read of the leaver's, and the function's
       // `t.member_id = …` clause could be deleted on a green suite
       // (review-fanout, 2026-09-11).
-      await connect(household, organizerRowId, 'token-organizer-here')
-      await connect(staying.id, staying.organizer_member_id, 'token-outsider-elsewhere')
+      await connect(household, organizerRowId, 'token-organizer-here', 'sub-organizer')
+      await connect(staying.id, staying.organizer_member_id, 'token-outsider-elsewhere', 'sub-outsider')
       expect(await offered(memberRowId)).toEqual([])
       // POSITIVE CONTROL: once the leaver's other connection goes, the grant
       // here is offered — and only it.

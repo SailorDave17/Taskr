@@ -82,6 +82,7 @@ const {
   CONSENT_HOUSEHOLD_KEY,
   CONSENT_STATE_KEY,
   EVENT_READ_SCOPES,
+  GOOGLE_ACCOUNT_SCOPE,
   GOOGLE_AUTH_ENDPOINT,
   GOOGLE_CALENDAR_READONLY_SCOPE,
   GOOGLE_FREEBUSY_SCOPE,
@@ -167,12 +168,22 @@ describe('AC 3 — the consent request asks for free/busy and nothing more', () 
     // be ONE, and it must not be one that returns the content of a meeting.
     // That survives #101 widening the ask, which spelling the current value
     // twice would not.
+    //
+    // #474 put `openid` beside it, which reads no calendar at all, so "one
+    // scope" became "one CALENDAR scope" and the whole list is pinned below.
     const scope = paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')
-    expect(scope, 'the URL must carry what this module declares').toBe(GOOGLE_FREEBUSY_SCOPE)
-    expect(scope.split(/\s+/)).toHaveLength(1)
+    const calendarScopes = scope.split(/\s+/).filter((s) => s !== GOOGLE_ACCOUNT_SCOPE)
+    expect(calendarScopes, 'the URL must carry what this module declares').toEqual([GOOGLE_FREEBUSY_SCOPE])
     expect(scope, 'a content-reading scope must never be the initial ask').not.toMatch(
       /readonly|\.events|calendar\.calendars/,
     )
+  })
+
+  it('#474 — asks for openid beside it, so the token can name its Google account, and for no profile or address', () => {
+    expect(GOOGLE_ACCOUNT_SCOPE).toBe('openid')
+    const scope = paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')
+    expect(scope.split(/\s+/)).toEqual(['openid', GOOGLE_FREEBUSY_SCOPE])
+    expect(scope).not.toMatch(/\b(email|profile)\b|userinfo/)
   })
 
   it('names the free/busy scope Google publishes, not a readonly one', () => {
@@ -931,7 +942,7 @@ describe('#101 AC 1 — the widened scope is asked for through the SAME consent 
     // tests above assert that on a URL built with no scope argument, and this
     // is the same fact from the other side: the default IS free/busy.
     expect(paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')).toBe(
-      GOOGLE_FREEBUSY_SCOPE,
+      `openid ${GOOGLE_FREEBUSY_SCOPE}`,
     )
   })
 
@@ -944,7 +955,8 @@ describe('#101 AC 1 — the widened scope is asked for through the SAME consent 
       location: LOCATION,
     })
     const params = paramsOf(url)
-    expect(params.get('scope')).toBe(GOOGLE_CALENDAR_READONLY_SCOPE)
+    // `openid` rides along (#474), so the widened token names its account too.
+    expect(params.get('scope')).toBe(`openid ${GOOGLE_CALENDAR_READONLY_SCOPE}`)
     // INCREMENTAL: added to the free/busy grant, never replacing it.
     expect(params.get('include_granted_scopes')).toBe('true')
     // And a LASTING one, for the same two reasons the first consent is.

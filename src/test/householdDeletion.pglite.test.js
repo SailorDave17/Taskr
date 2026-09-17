@@ -63,12 +63,17 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
       [household],
     )
 
-  /** A calendar connection for one member, written as the owner the way calendar.pglite.test.js does. */
-  const connectCalendar = (householdId, memberId, refreshToken) =>
+  /**
+   * A calendar connection for one member, written as the owner the way calendar.pglite.test.js does.
+   * `sub` is the Google account: since 0047 (#474) a token with none is never
+   * offered for revoking, so the purge fixtures name one. The keying rule
+   * itself is revokeKeying.pglite.test.js's.
+   */
+  const connectCalendar = (householdId, memberId, refreshToken, sub = `sub-${refreshToken}`) =>
     db.query(
-      `insert into public.calendar_tokens (household_id, member_id, refresh_token, scope)
-       values ($1, $2, $3, 'https://www.googleapis.com/auth/calendar.freebusy')`,
-      [householdId, memberId, refreshToken],
+      `insert into public.calendar_tokens (household_id, member_id, refresh_token, scope, google_sub)
+       values ($1, $2, $3, 'https://www.googleapis.com/auth/calendar.freebusy', $4)`,
+      [householdId, memberId, refreshToken, sub],
     )
 
   const organizerRowId = async () =>
@@ -321,8 +326,8 @@ describe('deleting a household, run against a real Postgres (#430)', () => {
         [staying, member],
       )
       await connectCalendar(household, await organizerRowId(), 'token-organizer')
-      await connectCalendar(household, memberRowId, 'token-member-here')
-      await connectCalendar(staying, elsewhere[0].id, 'token-member-elsewhere')
+      await connectCalendar(household, memberRowId, 'token-member-here', 'sub-member')
+      await connectCalendar(staying, elsewhere[0].id, 'token-member-elsewhere', 'sub-member')
 
       const offered = async () =>
         (

@@ -98,7 +98,8 @@ describe('no session — the sign-in screen', () => {
     fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
     await clickAndSettle(signInButton())
 
-    expect(onSignIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821' })
+    // `trusted: true` — #482's default, which is today's behaviour.
+    expect(onSignIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: true })
   })
 
   it('reports a refusal without hinting which half was wrong', async () => {
@@ -145,7 +146,8 @@ describe('continuing with Google — #304', () => {
     await clickAndSettle(googleButton())
 
     expect(onSignInWithGoogle).toHaveBeenCalledTimes(1)
-    expect(onSignInWithGoogle).toHaveBeenCalledWith()
+    // The only thing passed is #482's choice — no credential rides along.
+    expect(onSignInWithGoogle).toHaveBeenCalledWith({ trusted: true })
     expect(onSignIn).not.toHaveBeenCalled()
   })
 
@@ -858,5 +860,61 @@ describe('#155 — a forgotten password, from the sign-in screen', () => {
     expect(screen.getByText(/nobody above you/i)).toBeInTheDocument()
     expect(screen.queryByText(/cannot be reset from inside the app/i)).not.toBeInTheDocument()
     expect(screen.getByText(/sign-in screen can email you a link to set a new one/i)).toBeInTheDocument()
+  })
+})
+
+describe('#482 — Trust this device', () => {
+  const trustBox = () => screen.getByRole('checkbox', { name: /trust this device/i })
+  const fillSignIn = () => {
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+  }
+
+  it('AC 1: the sign-in form carries the box, ticked, with the line saying what unticked means', () => {
+    setup({ onSignInWithGoogle: vi.fn() })
+    expect(trustBox()).toBeChecked()
+    expect(trustBox()).toHaveAccessibleName('Trust this device — stay signed in')
+    expect(trustBox()).toHaveAccessibleDescription(
+      /you’ll be signed out when you close the browser/i,
+    )
+    // Inside the password form, so it sits with the credentials it qualifies.
+    expect(trustBox().closest('form')).toBe(signInButton().closest('form'))
+  })
+
+  it('AC 1: the promise stops at closing the browser — nothing about the app or the device', () => {
+    // AC 6: an installed app's window is a browser session, so the copy must
+    // not promise anything a closed window would not do.
+    setup()
+    const hint = document.getElementById('trust-hint')
+    expect(hint).toHaveTextContent(/^Unticked, you’ll be signed out when you close the browser\.$/)
+  })
+
+  it('AC 1: ticked, the password sign-in says trusted', async () => {
+    const { onSignIn } = setup()
+    fillSignIn()
+    await clickAndSettle(signInButton())
+    expect(onSignIn).toHaveBeenCalledWith(expect.objectContaining({ trusted: true }))
+  })
+
+  it('AC 2: unticked, the password sign-in says not trusted', async () => {
+    const { onSignIn } = setup()
+    fireEvent.click(trustBox())
+    expect(trustBox()).not.toBeChecked()
+    fillSignIn()
+    await clickAndSettle(signInButton())
+    expect(onSignIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: false })
+  })
+
+  it('AC 3: unticked, Continue with Google carries the same choice', async () => {
+    const onSignInWithGoogle = vi.fn().mockResolvedValue(undefined)
+    setup({ onSignInWithGoogle })
+    fireEvent.click(trustBox())
+    await clickAndSettle(screen.getByRole('button', { name: /continue with google/i }))
+    expect(onSignInWithGoogle).toHaveBeenCalledWith({ trusted: false })
+  })
+
+  it('the box is still there when Google sign-in is switched off — it belongs to the password form', () => {
+    setup({ googleSignIn: false })
+    expect(trustBox()).toBeChecked()
   })
 })

@@ -159,7 +159,10 @@ function refuse(message: string, status: number): Response {
 async function exchangeCode(
   deps: CalendarConnectDeps,
   { code, redirectUri, clientId, clientSecret }: Record<string, string>,
-): Promise<{ ok: true; refreshToken: string; scope: string } | { ok: false; message: string; status: number }> {
+): Promise<
+  | { ok: true; refreshToken: string; scope: string; googleSub: string | null }
+  | { ok: false; message: string; status: number }
+> {
   let response: Response
   try {
     response = await deps.fetch(GOOGLE_TOKEN_ENDPOINT, {
@@ -219,7 +222,56 @@ async function exchangeCode(
     }
   }
 
-  return { ok: true, refreshToken, scope: String(payload.scope ?? '') }
+  return {
+    ok: true,
+    refreshToken,
+    scope: String(payload.scope ?? ''),
+    googleSub: googleAccountOf(payload.id_token, clientId),
+  }
+}
+
+/** The issuers Google's OpenID documentation lists for its ID tokens. */
+export const GOOGLE_ISSUERS = Object.freeze(['https://accounts.google.com', 'accounts.google.com'])
+
+/**
+ * Which Google account consented — #474.
+ *
+ * Google revokes a whole account's grant when any one of its refresh tokens is
+ * revoked, so the leave, purge and disconnect paths must know which account a
+ * token belongs to (`0047`). The consent asks for `openid` for exactly this, and
+ * Google then puts an `id_token` beside the refresh token; its `sub` is the
+ * account's stable id.
+ *
+ * The signature is NOT checked, and that is OpenID Connect's own allowance
+ * (Core 1.0 §3.1.3.7): this token came straight from Google's token endpoint
+ * over TLS, in answer to a request carrying Taskr's client secret, so nobody
+ * else could have put it there. `aud` and `iss` are still compared, because
+ * they are free to check and a mismatch means something is badly wrong.
+ *
+ * @returns the `sub`, or `null` when there is none or it does not check out.
+ *   `null` is the SAFE answer rather than an error: a token whose account is
+ *   unknown is never revoked by a leave or a purge, so the worst outcome is a
+ *   grant left listed in the person's Google account — never a grant revoked
+ *   out from under another household. The connection itself still works.
+ */
+export function googleAccountOf(idToken: unknown, clientId: string): string | null {
+  if (typeof idToken !== 'string') return null
+  const parts = idToken.split('.')
+  if (parts.length !== 3) return null
+  let claims: any
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0))
+    claims = JSON.parse(new TextDecoder().decode(bytes))
+  } catch {
+    return null
+  }
+  if (!claims || typeof claims !== 'object') return null
+  const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
+  if (!audience.includes(clientId)) return null
+  if (!GOOGLE_ISSUERS.includes(claims.iss)) return null
+  return typeof claims.sub === 'string' && claims.sub ? claims.sub : null
 }
 
 /**
@@ -371,6 +423,9 @@ export function createHandler(deps: CalendarConnectDeps) {
         member_id: member.id,
         refresh_token: exchanged.refreshToken,
         scope: exchanged.scope,
+        // Written even when null, so a reconnect that could not name its
+        // account does not keep the PREVIOUS consent's account — #474.
+        google_sub: exchanged.googleSub,
       },
       { onConflict: 'member_id' },
     )

@@ -222,8 +222,20 @@ function makeFetch(answer) {
   return fn
 }
 
-const googleOk = (body = { refresh_token: '1//placeholder-refresh', scope: FREEBUSY }) =>
-  new Response(JSON.stringify(body), { status: 200 })
+/**
+ * An unsigned ID token carrying `claims` — #474. The handler reads the payload
+ * only (its docblock says why the signature is not checked), so the header and
+ * signature segments are placeholders. base64url, as Google encodes it.
+ */
+const idToken = (claims) =>
+  ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'placeholder-signature'].join('.')
+
+const GOOGLE_SUB = '109876543210987654321'
+const ID_TOKEN = idToken({ iss: 'https://accounts.google.com', aud: ENV.GOOGLE_CLIENT_ID, sub: GOOGLE_SUB })
+
+const googleOk = (
+  body = { refresh_token: '1//placeholder-refresh', scope: `openid ${FREEBUSY}`, id_token: ID_TOKEN },
+) => new Response(JSON.stringify(body), { status: 200 })
 
 function post(
   body = {
@@ -435,7 +447,8 @@ describe('AC 2 — the exchange happens on the server', () => {
       household_id: 'household-1',
       member_id: 'member-1',
       refresh_token: '1//placeholder-refresh',
-      scope: FREEBUSY,
+      scope: `openid ${FREEBUSY}`,
+      google_sub: GOOGLE_SUB,
     })
     // A second connection is a CORRECTION of the same fact, so the old token is
     // replaced. Accumulating rows would be a pile of live credentials nobody is
@@ -451,9 +464,11 @@ describe('AC 2 — the exchange happens on the server', () => {
     expect(connection.row).toEqual({
       household_id: 'household-1',
       member_id: 'member-1',
-      scope: FREEBUSY,
+      scope: `openid ${FREEBUSY}`,
     })
     expect(JSON.stringify(connection.row)).not.toContain('1//')
+    // #474 — the Google account id stays in the table no client can read.
+    expect(JSON.stringify(connection.row)).not.toContain(GOOGLE_SUB)
   })
 
   it('records what Google GRANTED rather than what was asked for', async () => {
@@ -465,6 +480,54 @@ describe('AC 2 — the exchange happens on the server', () => {
     )
     await handler()(post())
     expect(world.writes.find((w) => w.table === 'calendar_tokens').row.scope).toContain('readonly')
+  })
+})
+
+describe('#474 — which Google account consented', () => {
+  const storedSub = () => world.writes.find((w) => w.table === 'calendar_tokens').row.google_sub
+
+  it('stores the account off the ID token Google returns beside the refresh token', async () => {
+    await handler()(post())
+    expect(storedSub()).toBe(GOOGLE_SUB)
+  })
+
+  it('stores null, and still connects, when Google returned no ID token', async () => {
+    // Null rather than an absent key: an upsert that omitted the column would
+    // keep a previous consent's account on a reconnect that may be another one.
+    fetchFn = makeFetch(googleOk({ refresh_token: '1//x', scope: FREEBUSY }))
+    const response = await handler()(post())
+    expect(response.status).toBe(200)
+    const row = world.writes.find((w) => w.table === 'calendar_tokens').row
+    expect(row).toHaveProperty('google_sub', null)
+  })
+
+  it.each([
+    ['another client', { iss: 'https://accounts.google.com', aud: 'someone-else', sub: GOOGLE_SUB }],
+    ['another issuer', { iss: 'https://accounts.example.test', aud: ENV.GOOGLE_CLIENT_ID, sub: GOOGLE_SUB }],
+    ['no subject', { iss: 'https://accounts.google.com', aud: ENV.GOOGLE_CLIENT_ID }],
+  ])('stores null for an ID token issued to %s', async (_, claims) => {
+    fetchFn = makeFetch(googleOk({ refresh_token: '1//x', scope: FREEBUSY, id_token: idToken(claims) }))
+    await handler()(post())
+    expect(storedSub()).toBeNull()
+  })
+
+  it('stores null for an ID token that is not a token at all', async () => {
+    fetchFn = makeFetch(googleOk({ refresh_token: '1//x', scope: FREEBUSY, id_token: 'not.a-token' }))
+    const response = await handler()(post())
+    expect(response.status).toBe(200)
+    expect(storedSub()).toBeNull()
+  })
+
+  it('accepts the bare issuer and an audience list, both of which Google documents', async () => {
+    fetchFn = makeFetch(
+      googleOk({
+        refresh_token: '1//x',
+        scope: FREEBUSY,
+        id_token: idToken({ iss: 'accounts.google.com', aud: ['other', ENV.GOOGLE_CLIENT_ID], sub: 'sub-2' }),
+      }),
+    )
+    await handler()(post())
+    expect(storedSub()).toBe('sub-2')
   })
 })
 

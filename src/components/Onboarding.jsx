@@ -141,6 +141,10 @@ export default function Onboarding({
   const [password, setPassword] = useState('')
   const [signInEmail, setSignInEmail] = useState('')
   const [signInPassword, setSignInPassword] = useState('')
+  // #482 — "Trust this device", ticked by default: nearly every sign-in to a
+  // household app is on the person's own phone. Not remembered between
+  // sign-ins; each one asks again, which is the point of the box.
+  const [trusted, setTrusted] = useState(true)
   // #155 — the address a reset is asked for, seeded from the sign-in box when
   // the person takes the link so an address already typed is not typed twice,
   // and what an ACCEPTED request came back with. A refusal goes on the error
@@ -460,7 +464,7 @@ export default function Onboarding({
             className="stack"
             onSubmit={(e) => {
               e.preventDefault()
-              run(() => onSignIn({ email: signInEmail, password: signInPassword }))
+              run(() => onSignIn({ email: signInEmail, password: signInPassword, trusted }))
             }}
           >
             <label className="field">
@@ -483,6 +487,29 @@ export default function Onboarding({
                 onChange={(e) => setSignInPassword(e.target.value)}
                 autoComplete="current-password"
               />
+            </label>
+            {/* #482 — inside the form so it sits with the credentials, and read
+                by Continue with Google below as well: the choice is about this
+                sign-in, whichever route it takes. The hint says what unticked
+                means and promises nothing more — an installed app's window is a
+                browser session too, so closing it ends the sign-in the same way. */}
+            <label className="trust">
+              <input
+                className="trust__box"
+                type="checkbox"
+                checked={trusted}
+                onChange={(e) => setTrusted(e.target.checked)}
+                aria-labelledby="trust-label"
+                aria-describedby="trust-hint"
+              />
+              <span className="trust__text">
+                <span className="trust__label" id="trust-label">
+                  Trust this device — stay signed in
+                </span>
+                <span className="trust__hint" id="trust-hint">
+                  Unticked, you&rsquo;ll be signed out when you close the browser.
+                </span>
+              </span>
             </label>
             <button className="button" type="submit" disabled={busy || !signInReady}>
               Sign in
@@ -538,7 +565,7 @@ export default function Onboarding({
               <button
                 className="button button--quiet button--block"
                 type="button"
-                onClick={() => run(() => onSignInWithGoogle?.())}
+                onClick={() => run(() => onSignInWithGoogle?.({ trusted }))}
                 disabled={busy}
               >
                 Continue with Google

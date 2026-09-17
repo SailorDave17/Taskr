@@ -139,6 +139,7 @@ import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
 import ChoosePassword from './components/ChoosePassword.jsx'
+import InstallOffer, { useInstallOffer } from './components/InstallOffer.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import PendingDeletion from './components/PendingDeletion.jsx'
 import Roster from './components/Roster.jsx'
@@ -261,24 +262,49 @@ const ENDED_ELSEWHERE =
  * still needs, shown on the sign-in screen in the slot a failed sign-in return
  * uses (`signInNotice`).
  */
-export default function App() {
+export default function App({ installOffer = null }) {
   const [session, setSession] = useState({ epoch: 0, notice: null })
   const handleSessionEnded = useCallback(
     (notice) => setSession(({ epoch }) => ({ epoch: epoch + 1, notice: notice || null })),
     [],
   )
   return (
-    <Shell key={session.epoch} carriedNotice={session.notice} onSessionEnded={handleSessionEnded} />
+    <Shell
+      key={session.epoch}
+      carriedNotice={session.notice}
+      onSessionEnded={handleSessionEnded}
+      installOffer={installOffer}
+    />
   )
+}
+
+// #483 — the install offer's controller, started by `src/main.jsx` before this
+// module loads and handed in rather than imported, so it outlives every
+// remount above and a test can render the app with a faked one. Null is a
+// build with no controller, and reads as never offered.
+const installOfferShape = PropTypes.shape({
+  subscribe: PropTypes.func.isRequired,
+  isOffered: PropTypes.func.isRequired,
+  install: PropTypes.func.isRequired,
+  dismiss: PropTypes.func.isRequired,
+})
+
+App.propTypes = {
+  installOffer: installOfferShape,
 }
 
 Shell.propTypes = {
   carriedNotice: PropTypes.string,
   onSessionEnded: PropTypes.func.isRequired,
+  installOffer: installOfferShape,
 }
 
-function Shell({ carriedNotice = null, onSessionEnded }) {
+function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   const [status, setStatus] = useState('loading')
+  // #483 — whether the browser's install offer is showing. Read here rather
+  // than deeper down because the gate is the SHELL's state: joined, never the
+  // sign-in or onboarding cards.
+  const installOffered = useInstallOffer(installOffer)
   const [household, setHousehold] = useState(null)
   // #164 — EVERY household this person belongs to, in `listHouseholds()`'s
   // order, held beside the active one because the shell needs the count to
@@ -2818,6 +2844,15 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         <p className="shell__notice" role="status">
           {notice}
         </p>
+      ) : null}
+
+      {/* #483 — the browser can install this app, said once. Only while a
+          household is showing: somebody still signing in or starting a
+          household has not decided they want the app yet. Whether it shows at
+          all — the captured event, the already-installed gate, the 30-day
+          "Not now" — is `src/lib/installOffer.js`'s decision. */}
+      {status === 'joined' && installOffered ? (
+        <InstallOffer onInstall={installOffer.install} onDismiss={installOffer.dismiss} />
       ) : null}
 
       {status === 'loading' ? (

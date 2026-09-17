@@ -5,6 +5,7 @@ import { REFRESH_DEBOUNCE_MS } from './realtime.js'
 import {
   DEFERRED_RECHECK_MS,
   RECOVERY_CHECK_INTERVAL_MS,
+  UNSEEN_INSTALL_GRACE_MS,
   UPDATE_CHECK_INTERVAL_MS,
   createEditTracker,
   startAppUpdates,
@@ -38,7 +39,41 @@ function makeTarget({ onLine = true, controlled = true } = {}) {
   target.location = { reload: vi.fn() }
   target.setInterval = (...args) => setInterval(...args)
   target.clearInterval = (id) => clearInterval(id)
+  target.setTimeout = (...args) => setTimeout(...args)
+  target.clearTimeout = (id) => clearTimeout(id)
   return target
+}
+
+/** A ServiceWorker as the registration exposes it: a state, and `statechange`. */
+function makeWorker(state = 'installing') {
+  const sw = new EventTarget()
+  sw.state = state
+  sw.setState = (next) => {
+    sw.state = next
+    sw.dispatchEvent(new Event('statechange'))
+  }
+  return sw
+}
+
+/**
+ * The cold open of #454: the page registers while an older worker controls
+ * it AND a newer one is already installing — the one shape workbox-window
+ * never reports. `finishInstall` moves that worker to waiting, as the browser
+ * does.
+ */
+function makeUnseenInstall() {
+  const sw = makeWorker('installing')
+  const registration = { active: {}, installing: sw, waiting: null, update: vi.fn(async () => {}) }
+  registration.finishInstall = () => {
+    registration.installing = null
+    registration.waiting = sw
+    sw.setState('installed')
+  }
+  registration.failInstall = () => {
+    registration.installing = null
+    sw.setState('redundant')
+  }
+  return registration
 }
 
 /** A tracker the test sets by hand, for the updater's own decisions. */
@@ -388,6 +423,101 @@ describe('#347 — the updater decides when a waiting build is taken', () => {
   })
 })
 
+describe('#454 — a worker already installing when the page registered, on a page an older worker controls', () => {
+  let target
+  let tracker
+  let fake
+  let registration
+  let app
+
+  const start = (options = {}) => {
+    app?.stop()
+    target = makeTarget(options)
+    fake = makeRegisterSW()
+    app = startAppUpdates({ registerSW: fake.registerSW, tracker, target, fetchImpl: async () => ({ status: 200 }) })
+    fake.options.onRegisteredSW('/sw.js', registration)
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    tracker = makeTracker()
+    registration = makeUnseenInstall()
+    app = null
+    start()
+  })
+
+  afterEach(() => {
+    app.stop()
+    vi.useRealTimers()
+  })
+
+  it('AC 2 — the plugin gets half a second to report it; unreported and still waiting, the app takes it and reloads on the takeover', async () => {
+    expect(UNSEEN_INSTALL_GRACE_MS).toBe(500)
+    registration.finishInstall()
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS - 1)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fake.updateSW).toHaveBeenCalledTimes(1)
+    // The plugin never armed its reload for a worker it did not see, so the
+    // takeover is this page's to act on — once.
+    takeover(target)
+    takeover(target)
+    expect(target.location.reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC 3 — one the plugin does report within the grace is the plugin’s: taken once, and the reload left to the plugin', async () => {
+    registration.finishInstall()
+    await vi.advanceTimersByTimeAsync(200)
+    fake.options.onNeedRefresh()
+    expect(fake.updateSW).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS)
+    expect(fake.updateSW).toHaveBeenCalledTimes(1)
+    takeover(target)
+    expect(target.location.reload).not.toHaveBeenCalled()
+  })
+
+  it('AC 3 — mid-edit, the unseen worker waits like any other, and is taken once the edit ends', async () => {
+    tracker.dirty = true
+    registration.finishInstall()
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS + DEFERRED_RECHECK_MS * 3)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+    tracker.finishEdit()
+    expect(fake.updateSW).toHaveBeenCalledTimes(1)
+  })
+
+  it('an install that fails is nothing to take', async () => {
+    registration.failInstall()
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+  })
+
+  it('a worker that stopped waiting during the grace — another tab took it — is not messaged again', async () => {
+    registration.finishInstall()
+    await vi.advanceTimersByTimeAsync(100)
+    registration.waiting = null
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+  })
+
+  it('a first visit’s own install is not an update: no worker controlled the page, so nothing is taken and nothing reloads', async () => {
+    registration = makeUnseenInstall()
+    registration.active = null
+    start({ controlled: false })
+    registration.finishInstall()
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+    takeover(target)
+    expect(target.location.reload).not.toHaveBeenCalled()
+  })
+
+  it('stop() cancels a pending grace', async () => {
+    registration.finishInstall()
+    app.stop()
+    await vi.advanceTimersByTimeAsync(UNSEEN_INSTALL_GRACE_MS)
+    expect(fake.updateSW).not.toHaveBeenCalled()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The takeover end to end, through the plugin's real client.
 // ---------------------------------------------------------------------------
@@ -448,13 +578,16 @@ function loadPluginClient({ reload, Workbox }) {
 class FakeWorkbox {
   static last = null
   static serviceWorker = null
+  /** The registration `register()` resolves with next, when a test needs one already installing (#454). */
+  static nextRegistration = null
   constructor(url, options) {
     this.url = url
     this.options = options
     this.listeners = {}
     this.skipWaitingMessages = 0
     this.takeoverIsUpdate = true
-    this.registration = { installing: null, update: vi.fn(async () => {}) }
+    this.registration = FakeWorkbox.nextRegistration ?? { installing: null, update: vi.fn(async () => {}) }
+    FakeWorkbox.nextRegistration = null
     FakeWorkbox.last = this
   }
   addEventListener(type, listener) {
@@ -483,7 +616,7 @@ describe('#347 — the takeover, through vite-plugin-pwa’s own client', () => 
   // The plugin registers asynchronously (a dynamic import, then register()).
   const settle = () => new Promise((done) => setTimeout(done, 0))
 
-  const start = async (options = {}) => {
+  const start = async ({ unseenGraceMs, ...options } = {}) => {
     app?.stop()
     reload = vi.fn()
     target = makeTarget(options)
@@ -493,6 +626,7 @@ describe('#347 — the takeover, through vite-plugin-pwa’s own client', () => 
       tracker,
       target,
       fetchImpl: async () => ({ status: 200 }),
+      ...(unseenGraceMs === undefined ? {} : { unseenGraceMs }),
     })
     await settle()
     wb = FakeWorkbox.last
@@ -552,5 +686,31 @@ describe('#347 — the takeover, through vite-plugin-pwa’s own client', () => 
     expect(wb.url).toBe('/sw.js')
     await app.check()
     expect(wb.registration.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('#454 — a worker already waiting when the page registered is reported without isUpdate, and still taken and reloaded onto', async () => {
+    // workbox-window reports a worker it finds waiting at registration as
+    // `{ sw, wasWaitingBeforeRegister: true }` — no `isUpdate` on the event.
+    // The plugin must not key on it: the reload keys on the controller at
+    // registration, which is what a cold open of a stale device has.
+    wb.emit('waiting', { sw: {}, wasWaitingBeforeRegister: true })
+    await settle()
+    expect(wb.skipWaitingMessages).toBe(1)
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('#454 — a worker already installing when the page registered is never reported by the plugin; the app takes it and reloads the page itself', async () => {
+    const registration = makeUnseenInstall()
+    FakeWorkbox.nextRegistration = registration
+    await start({ unseenGraceMs: 10 })
+    expect(wb.registration).toBe(registration)
+    registration.finishInstall()
+    await new Promise((done) => setTimeout(done, 30))
+    // Through the plugin's real updateSW → workbox-window's skip-waiting message.
+    expect(wb.skipWaitingMessages).toBe(1)
+    // The plugin never saw the worker, so it never armed its own reload…
+    expect(reload).not.toHaveBeenCalled()
+    // …and the page reloaded itself on the takeover the message caused.
+    expect(target.location.reload).toHaveBeenCalledTimes(1)
   })
 })

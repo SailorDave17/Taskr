@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -9794,6 +9794,347 @@ describe('#483 — the install offer, in the shell', () => {
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(line()).not.toBeInTheDocument()
     expect(window.localStorage.length).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #478 — a household switch never leaves an empty page.
+//
+// The mechanism was MEASURED on the owner's account on production (2026-09-17,
+// recorded on the issue): `refresh()` landed household B's roster a round trip
+// before B's chores, Split handed `allocate()` B's members with A's chores,
+// `place()` threw on a chore held by somebody outside that roster, and with no
+// error boundary React unmounted the whole app. These tests hold the two
+// fixes — everything lands in one render, and a render throw costs a surface
+// rather than the page — plus the criteria written before the mechanism was
+// known.
+// ---------------------------------------------------------------------------
+describe('#478 — switching households never leaves an empty page', () => {
+  // UUIDs, not the readable ids other describes use: the stored choice is
+  // written only for a uuid (`writeActiveHouseholdChoice`), and the failed-
+  // switch test below reads it back.
+  const HOME = { id: '4780a000-0000-4000-8000-00000000000a', name: 'Placeholder Household', organizer_member_id: 'm-a1', timezone: 'America/New_York' }
+  const AWAY = { id: '4780b000-0000-4000-8000-00000000000b', name: 'Placeholder Other Household', organizer_member_id: 'm-b1', timezone: 'America/New_York' }
+  const STORED_CHOICE = 'taskr.activeHousehold'
+  const invitationRow = (id) => ({
+    id,
+    household_id: HOME.id,
+    created_by_member_id: 'm-a1',
+    created_at: '2026-09-10T19:04:00.000Z',
+    expires_at: '2099-09-17T19:04:00.000Z',
+    withdrawn_at: null,
+    redeemed_at: null,
+    redeemed_by_member_id: null,
+  })
+  const rosterHome = [
+    { id: 'm-a1', household_id: HOME.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm-a2', household_id: HOME.id, display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' },
+  ]
+  const rosterAway = [
+    { id: 'm-b2', household_id: AWAY.id, display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm-b1', household_id: AWAY.id, display_name: 'Placeholder Other Organizer', weekly_minutes: 200, claimed_by: 'person-b' },
+  ]
+  // A chore DONE THIS WEEK and held by a member who exists only in HOME — the
+  // shape of the owner's chore `7875e977` (done, held by `992be3b7`). Done
+  // matters: Split's reachability probe frees outstanding work and pins only
+  // done work to its holder, so only a done chore reaches `place()`'s refusal
+  // when it is paired with AWAY's roster. Written first as an OUTSTANDING
+  // chore, the measured-mechanism test below passed with the fix reverted.
+  const chore = (id, householdId, holder) => ({
+    id,
+    household_id: householdId,
+    title: 'Placeholder Chore',
+    expected_minutes: 30,
+    due_on: '2026-09-18',
+    created_at: '2026-09-10T00:00:00Z',
+    completed_at: new Date().toISOString(),
+    completed_by_member_id: holder,
+    missed_at: null,
+    assigned_member_id: holder,
+    assigned_source: 'manual',
+    repeat_kind: 'none',
+    actual_minutes: 30,
+    source: 'manual',
+  })
+  const choresHome = [chore('c-home', HOME.id, 'm-a2')]
+  const choresAway = [chore('c-away', AWAY.id, 'm-b1')]
+
+  const switcher = () => screen.getByRole('combobox', { name: 'Household' })
+  const tabs = () => screen.queryByRole('navigation', { name: 'Household surfaces' })
+  const switchTo = async (id) =>
+    act(async () => void fireEvent.change(switcher(), { target: { value: id } }))
+
+  /** A promise the test resolves or rejects by hand. */
+  function deferred() {
+    let resolve
+    let reject
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    api.listMembers.mockImplementation(async (id) => (id === HOME.id ? rosterHome : id === AWAY.id ? rosterAway : []))
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : id === AWAY.id ? choresAway : []))
+  })
+
+  it('MEASURED MECHANISM: while the new household’s chores are in flight, the page shows the old household whole, never the new roster beside the old chores', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher()).toHaveValue(HOME.id)
+
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    // The roster read for AWAY has answered; its chores have not. Under the
+    // measured code the roster landed here and Split threw.
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    // Still the household that was on screen: nothing of AWAY has landed.
+    expect(switcher()).toHaveValue(HOME.id)
+
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(tabs()).toBeInTheDocument()
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('MEASURED MECHANISM, the other way round: a LATER read in flight lands nothing either, so the new chores never sit beside the old roster', async () => {
+    // The first test holds the chores read, so it cannot see chores landing
+    // early. This holds the exclusions read, which comes after the chores:
+    // if the chores landed on their own, HOME's roster would sit beside
+    // AWAY's done chore held by `m-b1`, and Split would throw.
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    const held = deferred()
+    exclusionsApi.listExclusions.mockImplementation((ids) =>
+      ids.includes('m-b1') ? held.promise : Promise.resolve([]),
+    )
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(choresApi.listChores).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    await act(async () => held.resolve([]))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: mid-switch on the Split view, the tab strip and the switcher stay on screen, disabled, on the household still shown', async () => {
+    // On Split, where the measured throw happens — review-fanout found the
+    // first draft of this test ran on Chores, where nothing can throw, and
+    // asserted only what `busy` already guaranteed before the fix.
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toBeDisabled()
+    expect(switcher()).toHaveValue(HOME.id)
+    expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).not.toBeDisabled())
+    expect(switcher()).toHaveValue(AWAY.id)
+  })
+
+  it('a failed switch puts the choice back: the stored choice and the next read follow the household on screen', async () => {
+    // review-fanout, 2026-09-17: the read landed nothing, HOME stayed on
+    // screen, and the remembered choice still said AWAY — so the next
+    // background read swapped to AWAY with nobody asking.
+    await renderApp('Who')
+    await screen.findByRole('combobox', { name: 'Household' })
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    expect(window.localStorage.getItem(STORED_CHOICE)).toBe(HOME.id)
+
+    // The next read — the roster's own Refresh here, a focus or an echo in
+    // life — reads HOME, not the household that failed.
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : choresAway))
+    const readsBefore = api.listMembers.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^refresh$/i })))
+    await waitFor(() => expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOME.id)
+    expect(switcher()).toHaveValue(HOME.id)
+  })
+
+  it('a switch in flight leaves the household on screen whole: its invitations stay until the new household lands', async () => {
+    // review-fanout, 2026-09-17: the choice cleared HOME's list at once,
+    // and with the landing deferred HOME's organizer card read as though
+    // its codes had been withdrawn for the whole switch.
+    invitationsApi.listInvitations.mockImplementation(async (id) => (id === HOME.id ? [invitationRow('inv-478')] : []))
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitation-inv-478')).toBeInTheDocument()
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.getByTestId('invitation-inv-478')).toBeInTheDocument()
+    // And when AWAY lands, HOME's code goes with HOME.
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('invitation-inv-478')).not.toBeInTheDocument()
+  })
+
+  it('AC 2: a chores read that rejects mid-switch keeps the shell and the household that was showing, with the error visible once, beside the surface', async () => {
+    await renderApp('Chores')
+    await screen.findByRole('combobox', { name: 'Household' })
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    // The surface is up, so it says it; the shell's strip does not repeat it
+    // (owner decision 2026-09-17: the strip is for when no surface is up).
+    expect(screen.queryByTestId('shell-error')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/placeholder refusal/)).toHaveLength(1)
+  })
+
+  it('AC 2 / AC 6: with no surface up to say it, a read that rejects is shown in the shell’s own strip — and removing the strip reddens this', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // HOME's Split has failed (the render-failure card is up), so no surface
+    // draws `error`. A switch whose chores read rejects lands nothing, HOME's
+    // failed Split stays keyed as it was, and the only place the refusal can
+    // appear is the strip.
+    choresApi.listChores.mockImplementation((id) =>
+      id === HOME.id
+        ? Promise.resolve([chore('c-orphan', HOME.id, 'm-nobody')])
+        : Promise.reject(new Error('loading the chores: placeholder refusal')),
+    )
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    await switchTo(AWAY.id)
+    const strip = await screen.findByTestId('shell-error')
+    expect(strip).toHaveTextContent('placeholder refusal')
+    expect(strip).toHaveAttribute('role', 'alert')
+    expect(failure).not.toContainElement(strip)
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+  })
+
+  it('AC 2: an invitations read that rejects after the household landed keeps the new household on screen, with the error visible', async () => {
+    // person-a organises neither fixture household here, so make them AWAY's
+    // organizer: the invitations read happens only for the organizer.
+    api.listHouseholds.mockResolvedValue([HOME, { ...AWAY, organizer_member_id: 'm-b2' }])
+    invitationsApi.listInvitations.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the invitations: placeholder refusal')) : Promise.resolve([]),
+    )
+    await renderApp('Who')
+    await screen.findByRole('combobox', { name: 'Household' })
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(invitationsApi.listInvitations).toHaveBeenCalledWith(AWAY.id)
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(AWAY.id)
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('AC 3: a switch whose household read comes back empty leaves the joined state for the household form, never an empty shell', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    api.listHouseholds.mockResolvedValue([])
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(tabs()).not.toBeInTheDocument())
+    expect(screen.getByRole('region', { name: /start a household/i })).toBeInTheDocument()
+  })
+
+  // The three tests below throw during render ON PURPOSE. React and jsdom both
+  // report a caught render error on the console; silenced here so the run
+  // output carries only what is unexpected.
+  const quietRenderErrors = () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    return () => spy.mockRestore()
+  }
+
+  it('AC 6: a surface that throws while rendering costs only that surface — the shell and the tabs stay, with the reason and a Reload', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // A done chore held by somebody in NO roster, in the same read: `place()`
+    // refuses it on an ordinary load. Remove the surface boundary and the
+    // root one catches it instead — with no tabs and a different heading.
+    choresApi.listChores.mockResolvedValue([chore('c-orphan', HOME.id, 'm-nobody')])
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    expect(failure).toHaveTextContent(/could not show this household/i)
+    expect(within(failure).getByRole('alert')).toHaveTextContent(/taskr hit a problem showing this/i)
+    expect(within(failure).getByTestId('render-failure-detail')).toHaveTextContent(
+      /assigned to unknown member m-nobody/,
+    )
+    expect(within(failure).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toBeInTheDocument()
+  })
+
+  it('AC 6: the failure clears when another household is chosen — the next move is the retry', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOME.id ? [chore('c-orphan', HOME.id, 'm-nobody')] : choresAway,
+    )
+    await renderApp()
+    await screen.findByTestId('render-failure')
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+
+    // Back on HOME with its data mended, the SAME boundary key is up again
+    // with a working surface. A read that fails now is the surface's to say,
+    // so the shell's strip must not speak over it: the failure it answered
+    // belonged to the boundary that has since gone.
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : choresAway))
+    await switchTo(HOME.id)
+    await waitFor(() => expect(switcher()).toHaveValue(HOME.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(screen.queryByTestId('shell-error')).not.toBeInTheDocument()
+  })
+
+  it('AC 6: the failure clears when another TAB is chosen — the card says so, and a test holds it', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // Split throws; Chores does not call the allocator. review-fanout found
+    // the tab half of the boundary's key untested while the card's own
+    // sentence tells a person to try another tab.
+    choresApi.listChores.mockResolvedValue([chore('c-orphan', HOME.id, 'm-nobody')])
+    await renderApp()
+    await screen.findByTestId('render-failure')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await waitFor(() => expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Chores' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('the last resort: a throw ABOVE the surfaces draws a sentence and a Reload inside the page frame, never an empty page', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // A household name that is not text makes the switcher itself throw —
+    // outside the surface boundary, so only the root one can catch it.
+    api.listHouseholds.mockResolvedValue([{ ...HOME, name: { unexpected: true } }, AWAY])
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    expect(failure).toHaveTextContent(/taskr could not draw this screen/i)
+    expect(within(failure).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(failure.closest('main.shell')).not.toBeNull()
+    expect(screen.getByRole('heading', { level: 1, name: 'Taskr' })).toBeInTheDocument()
   })
 })
 

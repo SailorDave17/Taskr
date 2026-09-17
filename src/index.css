@@ -349,6 +349,29 @@ body {
   gap: 0.875rem;
 }
 
+/* #478 — what threw, for a problem report, behind a disclosure on the
+   render-failure card. The summary is a control, so it gets the 44px floor
+   and keeps the browser's own marker (it is not `display: flex`, which is
+   what hid the marker on the Shop tab). The detail is the raw message: it
+   may carry ids with no spaces, so it breaks anywhere rather than pushing
+   the card wider than a 360px screen. */
+.render-failure__details {
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.render-failure__summary {
+  min-height: 44px;
+  line-height: 44px;
+  cursor: pointer;
+}
+
+.render-failure__detail {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

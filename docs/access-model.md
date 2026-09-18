@@ -7,8 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0047` (#474) is NOT yet applied** — see the #474 section below for what applies it and
-  how it is read. **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
+- Status: **`0001`–`0047` are ALL applied to the live project** (`0047` on 2026-09-17 in #474's own
+  session, before PR #513 merged — a column and two function bodies that **`npm run check:live`
+  cannot see**, *measured* **75 of 75** on 2026-09-17 in #469's session, and confirmed by the
+  read-only catalog query in the #474 section below; this line said `0047` was NOT yet applied
+  until #469, the apply having landed after the sentence was written; `0046` on 2026-09-16 in #480's own
   session, at md5 `7d201b925939d32460a27146134d2006` (`6884 characters, 8 statements`), read back
   identical — a constraint widening and a trigger body that **`npm run check:live` cannot see**,
   *measured* **75 of 75** on both sides, confirmed by the read-only catalog query in the #480
@@ -54,7 +57,7 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-16 — *measured **75 of 75*** at #182's pickup.
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-17 — *measured **75 of 75*** in #469's session, as at #182's pickup on 2026-09-16.
   From 2026-09-11 it held FIVE rows — #430's three (`request_household_deletion`,
   `restore_household` and `household_deletion_status`, red until `0042` was applied on 2026-09-12)
   and #431's two (`transfer_household` until `0043` was applied, and the `leave-household` Edge
@@ -2676,6 +2679,14 @@ alternative ending ("grants are per refresh token, close it moot") is false.
   `calendar_tokens.google_sub`, and `pg_get_functiondef` for both functions, where `google_sub`
   is absent before and present after. **Re-pasting `0042` or `0043` after `0047` restores the
   sign-in-keyed body** of the function that file declares; re-paste `0047` after either.
+- **Applied.** `0047` went in on 2026-09-17 from #474's own session at the owner's go-ahead, before
+  PR #513 merged, with the md5 read back matching; `calendar-connect`, `calendar-disconnect` and
+  `leave-household` were deployed after it, in that order, because the new `calendar-connect`
+  writes `google_sub`. The catalog query read no `google_sub` column and neither body naming it
+  before the apply, and all three present after, with `authenticated` still unable to execute
+  either function (readings on #474). *Re-read 2026-09-17 in #469's session*: the column present,
+  both bodies naming `google_sub`, `authenticated` execute false on both; `check:live` **75 of
+  75**.
 
 ## How the rules are enforced
 

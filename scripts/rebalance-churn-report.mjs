@@ -14,8 +14,12 @@
 // read rather than argued.
 
 import { allocate, reallocate } from '../src/lib/allocation.js'
-import { SCENARIOS } from '../src/lib/allocation.corpus.js'
-import { BUDGETS, busyWeek } from '../src/lib/rebalance.corpus.js'
+import { SCENARIOS as CORPUS } from '../src/lib/allocation.corpus.js'
+import { BUDGETS, busyWeek, churnScenarios } from '../src/lib/rebalance.corpus.js'
+
+// #481 — the shapes that carry a history steer are excluded, with the
+// measurement that decided it, in `churnScenarios`'s docblock.
+const SCENARIOS = churnScenarios(CORPUS)
 
 /**
  * One arm over the whole corpus.

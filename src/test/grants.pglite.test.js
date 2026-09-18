@@ -313,6 +313,17 @@ const CLIENT_OPERATIONS = [
     site: 'invitations.js withdrawInvitation()',
     sql: "update public.invitations set withdrawn_at = 'now' where false",
   },
+  // #481 — the assignment record, read by household before every deal-out.
+  // Select is the client's ONLY privilege here, by column; the trigger on
+  // `chores` is the single writer. assignmentHistory.pglite.test.js asserts
+  // insert, update and delete are all REFUSED, which is this list's mirror
+  // image for a single-writer table, as it is for `calendar_busy` above.
+  {
+    table: 'chore_assignment_history',
+    op: 'select',
+    site: 'assignmentHistory.js listAssignmentHistory()',
+    sql: 'select id, household_id, chore_id, repeat_parent_id, from_member_id, to_member_id, from_source, source, actor_member_id, period_start, recorded_at from public.chore_assignment_history limit 0',
+  },
   // #368 — `shopping_items` 'delete' / 'shopping.js removeItem()' stood here
   // until `0034`. The privilege is gone (the remove is an RPC now), so the row
   // cannot stay: every entry in this list is a statement the client must be

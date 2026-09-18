@@ -7,7 +7,13 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0048` are ALL applied to the live project** (`0048` on 2026-09-18 in #467's
+- Status: **`0001`–`0049` are ALL applied to the live project** (`0049` on 2026-09-18 in #481's own
+  session, before its PR opened, at md5 `41ae68f8964e592d590f338f246aa64a` (`15157 characters,
+  15 statements`), read back identical — a table the client reads, so `npm run check:live` moved
+  *measured* **75 of 77 → 77 of 77** on the apply (the second red was a hand list, see the #481
+  section), `npm run probe:live-grants` **20 of 20** with its new absence row, and the read-only
+  catalog query in the #481 section read the trigger, the function and the grants on the after
+  side; `0048` on 2026-09-18 in #467's
   own session, before its PR opened, at md5 `fc6ce0bbc3a623c913db0ac2a9f91be3` (`4728 characters,
   4 statements`), read back identical — a body replace of `transfer_household` that **`npm run
   check:live` cannot see**, *measured* **75 of 75** after, confirmed by the read-only catalog query
@@ -2730,6 +2736,72 @@ could not take it back if that person never arrived.
   present; `prosecdef` true, `authenticated` execute true and `anon` false on both sides.
   `check:live` **75 of 75** after. So the boundary is live now; the client's filter reaches the
   deployed app with the next `develop → release` promotion.
+
+## Who has held each chore, and who moved it — #481, 2026-09-18
+
+The allocator was memoryless, and its tie-break deterministic, so the same household dealt the same
+chore to the same person week after week by construction — and a hand move off somebody was
+respected for one week (`0018`'s manual pin) and forgotten the next. The owner's words: *if a
+particular chore keeps getting assigned to one person, especially if it often gets reassigned after
+it is doled out — create a logic to account for that.* The logic is in
+[`docs/allocation-corpus.md`](allocation-corpus.md); this entry is the record it reads.
+
+- **The table (`0049`).** `chore_assignment_history`: one append-only row per assignment change —
+  the chore, its repeat parent where it has one (`generated_from`, the key "the same chore" is read
+  by, since an occurrence is a new row every week), the household, holder before and after, source
+  before and after (`chores.assigned_source`'s words, deliberately not re-checked here), who did it
+  (`acting_member`), the Monday of the week it landed in **in the household's zone**
+  (`date_trunc('week', now() at time zone households.timezone)`, `0005`'s Monday check on it), and
+  when. No foreign key on the chore or the members, on purpose: the record must outlive both — a
+  removed member's rows are the ones that say "moved off them", and a repeat's occurrences come
+  and go. It follows exactly one deletion, the household's, by cascade.
+- **The writer.** A trigger on `chores` (`chores_record_assignment`, definer function
+  `record_chore_assignment`, revoked from `public`, `anon` and `authenticated`), not an insert in
+  each RPC — so no function body another file declares is replaced, and a later re-paste of `0018`,
+  `0029` or `0042` cannot silently drop the record from the function it restores. It fires
+  `after update of assigned_member_id, assigned_source`, when the holder or the source changed **or
+  the row is an open deal-out placement** (`new.assigned_source = 'auto'` with `completed_at` null
+  on both sides) — the second clause because "the last three deal-outs all went to A" is exactly
+  the case where the incumbent wins the tie and nothing on the row changes, and the
+  `completed_at` guard because `complete_chore` and `uncomplete_chore` SET the assignment columns
+  while preserving an auto holder. So it also records what the story did not name: an
+  un-completion releasing a claim, and a removal's `on delete set null`.
+- **Who reads, who writes.** `authenticated` holds SELECT on every column, `household_id` included
+  (the `0014` route — read by household, because a row must outlive the member it names), under
+  one same-household policy through `current_household_ids()`. No insert, update or delete grant
+  or policy for any client role; `anon` holds nothing. `service_role` is granted nothing by the
+  file and holds the platform's default. **Not published** to Realtime, by name in
+  `src/lib/realtime.js`'s `UNWATCHED_TABLES`: every row lands in the same transaction as a
+  published `chores` update, so watching it would echo each event into a second read.
+- **What each instrument can see.** `check:live` sees the table through its `LIVE_SCHEMA` entry
+  (red until the apply, then one honest new row). `probe:live-grants` sees the absence of any
+  table-level `authenticated` privilege (`MEASURED_TABLE_ACLS`, `authenticated: null`). **Neither
+  sees the trigger, its predicate or the function's ACL.** The live instrument for that half is a
+  read-only catalog query through `scripts/management-api.mjs`'s `runQuery`, taken after the apply:
+  `pg_get_triggerdef` for `chores_record_assignment` (the `WHEN (...)` clause carrying all three
+  disjuncts), `pg_get_functiondef` and `prosecdef` for `record_chore_assignment`,
+  `has_function_privilege` for `authenticated` and `anon` (both false), the policy row from
+  `pg_policies`, and `column_privileges` for `authenticated` (SELECT on all eleven columns, nothing
+  else). The suite that runs on every push is `src/test/assignmentHistory.pglite.test.js`: one
+  test per RPC, the predicate's edges, the refusals, the zone, the re-paste, and one end-to-end
+  where the rows the trigger wrote steer the next deal-out.
+- **Applied.** `0049` went in on 2026-09-18 from #481's own session at the owner's go-ahead at the
+  commit gate, before the PR opened: `npm run migrate:live`, 15 statements, md5
+  `41ae68f8964e592d590f338f246aa64a` read back matching the file. It had to land **before** the
+  `develop → release` promotion that carries this story: until it did, the deployed deal-out would
+  have read a table that does not exist — `listAssignmentHistory` throws and `reassignHousehold`
+  surfaces it through `mutate()` — a failure, not a degradation. The catalog query read nothing on
+  the before side (no relation) and on the after side: the table with `authenticated` holding no
+  table-level privilege and SELECT on all eleven columns, one policy
+  (`chore_assignment_history_select_same_household`, SELECT), the trigger
+  `AFTER UPDATE OF assigned_member_id, assigned_source … WHEN (…)` carrying all three disjuncts,
+  `record_chore_assignment` with `prosecdef` true, `at time zone h.timezone` in its body, execute
+  false for `authenticated` and `anon`, the table comment present, `published` 0, and 0 rows.
+  `check:live` **75 of 77** before and **77 of 77** after — the second red was
+  `schema.integration.test.js`'s own copy of the excused-table list, a fourth hand list that the
+  full suite does not run (integration config) and that the overlay's list of six did not name;
+  corrected in the same commit. `probe:live-grants` **20 of 20** after, its new
+  `chore_assignment_history` row reading the expected absence.
 
 ## How the rules are enforced
 

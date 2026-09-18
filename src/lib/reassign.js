@@ -25,7 +25,13 @@
 // wasted retry), where the reverse order would accept a stale one.
 
 import { reallocate, minutesOf } from './allocation.js'
-import { capacitiesFor, listCapacity, periodStartFor } from './capacity.js'
+import {
+  HISTORY_WINDOW_WEEKS,
+  historyKeyOf,
+  listAssignmentHistory,
+  steeringFor,
+} from './assignmentHistory.js'
+import { capacitiesFor, listCapacity, periodStartFor, priorPeriodStarts } from './capacity.js'
 import { isMissed, isOutstanding, listChores } from './chores.js'
 import { choresInWeek } from './done.js'
 import { isExcluded, listExclusions } from './exclusions.js'
@@ -112,6 +118,18 @@ export const REASSIGN_MAX_ATTEMPTS = 3
  * the churn in minutes. None of that is recomputable from the stored rows —
  * the budget verdict depends on the state the run replaced — which is exactly
  * why it travels with the result instead of being derived again elsewhere.
+ * Since #481 it also carries `steered`: which freed chores the history rule
+ * sent away from somebody, to whom and why, which the Split reads for its one
+ * "why" line per chore. Same reasoning — the steer depends on weeks the
+ * stored rows do not show.
+ *
+ * `history` (#481) is the household's `chore_assignment_history` rows for the
+ * last `HISTORY_WINDOW_WEEKS` weeks, folded here into the allocator's `steer`
+ * input by `steeringFor`. Only the FREED chores are steered — a pin is never
+ * placed, so a steer on it would be inert — and each is read under its
+ * repeat parent where it has one (`historyKeyOf`), because an occurrence is
+ * a new row every week and "the same chore" is the parent. Empty by default,
+ * so every caller that predates the rule gets exactly the plan it always did.
  */
 export function planReassignment({
   members,
@@ -121,6 +139,7 @@ export function planReassignment({
   periodStart,
   timeZone,
   leavingMemberId = null,
+  history = [],
 }) {
   // #431 — see the docblock.
   const staying = leavingMemberId == null ? members : members.filter((m) => m.id !== leavingMemberId)
@@ -180,11 +199,21 @@ export function planReassignment({
     if (holder != null) previous.push({ choreId: chore.id, memberId: holder })
   }
 
+  // #481 — see the docblock. Keyed by the rows the allocator will place.
+  const steer = steeringFor({
+    history,
+    chores: chores
+      .filter((chore) => freed.has(chore.id))
+      .map((chore) => ({ id: chore.id, key: historyKeyOf(chore) })),
+    periodStart,
+  })
+
   const result = reallocate({
     members: capacities,
     chores: allocatorChores,
     isEligible: (chore, member) => !isExcluded(exclusions, chore.id, member.id),
     previous,
+    steer,
   })
 
   const placements = [
@@ -206,6 +235,7 @@ export function planReassignment({
       jobsMoved: result.jobsMoved,
       minutesMoved: result.minutesMoved,
       changeBudgetMinutes: result.changeBudgetMinutes,
+      steered: result.steered,
     },
     result,
   }
@@ -249,6 +279,13 @@ export async function reassignHousehold({ householdId, leavingMemberId = null })
     const periodStart = periodStartFor(new Date(), household.timezone)
     const overrides = await listCapacity(periodStart, memberIds)
     const exclusions = await listExclusions(memberIds)
+    // #481 — the last weeks of who held what, read after the version like
+    // every other input, so a stale read is refused by the CAS with the rest.
+    const history = await listAssignmentHistory(
+      householdId,
+      priorPeriodStarts(periodStart, HISTORY_WINDOW_WEEKS)[0],
+      periodStart,
+    )
 
     const { placements, verdict } = planReassignment({
       members,
@@ -258,6 +295,7 @@ export async function reassignHousehold({ householdId, leavingMemberId = null })
       periodStart,
       timeZone: household.timezone,
       leavingMemberId,
+      history,
     })
 
     // Every key explicit — no shorthand — because liveSchema.test.js derives

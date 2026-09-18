@@ -651,7 +651,17 @@ describe('#342 AC 6 — POSITIVE CONTROL: the publication check can actually fai
   // every live instrument green. Each row is ALSO the assertion that its table
   // stays unpublished.
   it('has an excused table to probe, so an empty loop is impossible', () => {
-    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
+    // #481 added the third: `chore_assignment_history` is written by a
+    // trigger in the same transaction as the published `chores` update, so
+    // every event there is an echo — probed as UNPUBLISHED like the other two.
+    // This copy of the list is outside `npm test` (integration config), so a
+    // green full suite did not reach it; check:live did, 75 of 77 before the
+    // edit.
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual([
+      'member_split_seen',
+      'invitations',
+      'chore_assignment_history',
+    ])
   })
 
   for (const table of Object.keys(UNWATCHED_TABLES)) {

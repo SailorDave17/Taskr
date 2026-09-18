@@ -40,8 +40,23 @@ budget and a rounding error against a 300-minute one.
 
 ## The recorded figures
 
-Last re-derived 2026-08-25, on the corpus as committed. Thirteen shapes, **43 jobs held by somebody**
+Last re-derived 2026-09-18, on the corpus as committed. Thirteen shapes, **43 jobs held by somebody**
 before the change — that is the denominator, because work nobody holds cannot churn.
+
+**Thirteen, not the corpus's fifteen — the #481 re-run.** #481 gave the allocator a history rule
+(a chore that kept landing on one person, or kept being moved off them, is steered elsewhere) and
+asked for this table to be re-run, since the rule can move minutes the budget must still bound. It
+was, twice. Run over all fifteen shapes with each shape's steer carried into every arm, the two
+#481 shapes — two members, two chores, a steer that holds in every arm — moved **nothing** under
+the busy-week rule and the baseline fell to 25 of 47 (53.2%), under the prototype's 8-of-14 floor
+that `#41 AC 2` makes a failing test. That is a fact about those two shapes, which were written to
+ask a different question, not about the budget: they dilute the denominator without exercising
+churn. So the churn corpus is **every shape with no history steer** (`churnScenarios` in
+[`src/lib/rebalance.corpus.js`](../src/lib/rebalance.corpus.js), asserted in both directions by
+`src/lib/rebalance.test.js`), the figures below are unchanged from 2026-08-25, and the claim the
+re-run was for — that the budget still bounds a steer — is asserted at the boundary in the same
+test file: a steer off the incumbent goes through at a budget equal to the chore's minutes and is
+refused one minute under it, with nothing then reported as steered.
 
 | Change budget | Jobs moved | Minutes moved | Shapes reaching level | Shapes the budget bound |
 |---|---|---|---|---|

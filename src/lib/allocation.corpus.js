@@ -341,4 +341,74 @@ export const SCENARIOS = [
       noCapacity: [],
     },
   },
+
+  // -------------------------------------------------------------------------
+  // #481 — what recent weeks say. `steer` is the allocator's history input,
+  // exactly as `isEligible` is its capability input: the fold that produces
+  // it from `chore_assignment_history` is assignmentHistory.js, and these
+  // shapes assert what the allocator DOES with a steer, not how one is found.
+  // Added as new shapes rather than edits to the thirteen above (AC 5), which
+  // still run with no steer and must not move.
+  // -------------------------------------------------------------------------
+
+  {
+    name: 'a chore that keeps landing on one person, and somebody else has room',
+    why:
+      '#481 AC 2. Two equal budgets and two chores. Unsteered, dishes (40, placed ' +
+      'first as the larger job) goes to `a` on the deterministic tie-break and ' +
+      'laundry (30) to `b` — 40 against 30, week after week, by construction. With ' +
+      'the last three deal-outs on `a` recorded, the rule prefers `b` for dishes: ' +
+      'both are at zero when it is placed, so the alternative is within tolerance, ' +
+      'and laundry then lands on `a`. The load FLIPS — 30 against 40 — which is ' +
+      'what makes this shape redden without the rule, since the corpus asserts ' +
+      'minutes and never the chore-to-member map.',
+    workingMembers: 2,
+    members: [
+      { id: 'a', capacityMinutes: 100 },
+      { id: 'b', capacityMinutes: 100 },
+    ],
+    chores: [
+      { id: 'dishes', expectedMinutes: 40 },
+      { id: 'laundry', expectedMinutes: 30 },
+    ],
+    steer: [{ choreId: 'dishes', avoid: ['a'], kind: 'repeat', weeks: 3 }],
+    expect: {
+      load: { a: [30, 1], b: [40, 1] },
+      level: true,
+      reason: null,
+      unassignable: [],
+      noCapacity: [],
+      steered: [{ choreId: 'dishes', from: 'a', to: 'b', kind: 'repeat', weeks: 3, moved: true }],
+    },
+  },
+
+  {
+    name: 'a chore only one person can do is not steered, and no line claims it could have been',
+    why:
+      '#481 AC 4. The same two budgets and the same steer off `a` for dishes, but ' +
+      '`b` may not do dishes. Nothing else is eligible, so the rule does not fire: ' +
+      'dishes stays on `a` at its full 40 and `steered` is EMPTY — the Split reads ' +
+      'its "why" line from that list, and a line saying the chore was steered away ' +
+      'from `a` when it could not have been is the failure this shape exists to ' +
+      'catch. Laundry goes to `b`, so the load is the unsteered answer.',
+    workingMembers: 2,
+    members: [
+      { id: 'a', capacityMinutes: 100 },
+      { id: 'b', capacityMinutes: 100 },
+    ],
+    chores: [
+      { id: 'dishes', expectedMinutes: 40 },
+      { id: 'laundry', expectedMinutes: 30 },
+    ],
+    isEligible: (chore, member) => chore.id !== 'dishes' || member.id === 'a',
+    steer: [{ choreId: 'dishes', avoid: ['a'], kind: 'movedOff', weeks: 2 }],
+    expect: {
+      load: { a: [40, 1], b: [30, 1] },
+      level: true,
+      reason: null,
+      unassignable: [],
+      noCapacity: [],
+      steered: [],
+    },
+  },
 ]

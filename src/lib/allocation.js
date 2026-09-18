@@ -303,12 +303,18 @@ export function assess({ members, chores }) {
  * @param {(chore: object, member: object) => boolean} [input.isEligible]
  *   Eligibility as an input predicate (AC 7), so the capability model can
  *   change — or arrive from #37 — without this module changing.
+ * @param {Array<{choreId: string, avoid: string[], kind: 'repeat'|'movedOff'}>} [input.steer]
+ *   What recent weeks say about a chore — #481. An INPUT, like capacity and
+ *   eligibility, for the same reason: this module reads no history table, so
+ *   the fold that produces it (`steeringFor` in assignmentHistory.js) can be
+ *   argued about with a corpus. See `place` for what each kind does.
  */
-export function allocate({ members, chores, isEligible = () => true }) {
+export function allocate({ members, chores, isEligible = () => true, steer = [] }) {
   return allocationOf({
     members,
     chores,
     isEligible,
+    steer,
     // No previous allocation, so there is nothing to be stable ABOUT: the
     // incumbency branch inside `place` is unreachable and every tie falls to
     // the deterministic key. That is deliberate, and it is what makes this
@@ -357,6 +363,10 @@ export function allocate({ members, chores, isEligible = () => true }) {
  *   comes back as, and because it is the only part of the previous result this
  *   function is entitled to consult.
  * @param {number} [input.changeBudgetMinutes]
+ * @param {Array} [input.steer]  as `allocate`'s — #481. A steer off the
+ *   incumbent is a DISCRETIONARY move and is charged to the budget like any
+ *   other; when the budget refuses it the chore stays where it was and the
+ *   verdict says the budget bound the result, exactly as for a levelness move.
  */
 export function reallocate({
   members,
@@ -364,6 +374,7 @@ export function reallocate({
   isEligible = () => true,
   previous = [],
   changeBudgetMinutes = CHANGE_BUDGET_MINUTES,
+  steer = [],
 }) {
   const { allocation, boundByBudget } = allocationOf({
     members,
@@ -371,6 +382,7 @@ export function reallocate({
     isEligible,
     held: new Map(previous.map((entry) => [entry.choreId, entry.memberId])),
     changeBudgetMinutes,
+    steer,
   })
 
   // AC 1 - the churn figures come from DIFFING the two allocations, not from
@@ -427,9 +439,10 @@ export function movedBetween(previous, next) {
  * hand back exactly the shape it always has. A `boundByBudget: false` on a
  * function that has no budget would be an answer to a question nobody asked.
  */
-function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes }) {
+function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes, steer }) {
   assertMembers(members)
   assertChores(chores)
+  assertSteer(steer)
 
   // Sorted copies, so input order cannot reach the result (#40 AC 6). Nothing
   // in this module shuffles and nothing calls Math.random: the same household
@@ -450,7 +463,7 @@ function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes }
   // zero-capacity rule are two places for it to be relaxed by one character.
   const working = roster.filter((m) => m.capacityMinutes > 0)
 
-  const { assignments, unassignable, boundByBudget } = place({
+  const { assignments, unassignable, boundByBudget, steered } = place({
     roster,
     byMemberId,
     working,
@@ -458,6 +471,7 @@ function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes }
     isEligible,
     held,
     changeBudgetMinutes,
+    steerFor: new Map(steer.map((entry) => [entry.choreId, entry])),
   })
 
   // The fairness arithmetic runs over the work that actually landed on someone,
@@ -485,6 +499,17 @@ function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes }
     allocation: {
       assignments: [...assignments].sort(byChoreId),
       unassignable: [...unassignable].sort(),
+      // #481 — every chore whose holder the history rule DECIDED: who it
+      // would have gone to, who it went to instead, why, and whether that
+      // was a move (`moved`) or the rule keeping it where it was because the
+      // best alternative was its own incumbent — the Split picks its verb
+      // from that flag, since "went to" over a chore that stayed put is a
+      // false sentence (review-fanout, 2026-09-18). Empty whenever `steer` is
+      // empty, so a caller that predates the rule reads the shape it always
+      // did plus one empty list. A steer the budget refused, or that had
+      // nobody else to go to, is NOT here: a line claiming the rule acted
+      // when it did not is AC 4's named failure.
+      steered: [...steered].sort(byChoreId),
       load: verdict.load,
       // Named, never given a share. #40 AC 7: "reported as having no capacity
       // rather than as infinitely loaded".
@@ -516,10 +541,20 @@ function allocationOf({ members, chores, isEligible, held, changeBudgetMinutes }
  * - which is what makes the two stability mechanisms below inert rather than
  * special-cased when there is no previous allocation to be stable against.
  */
-function place({ roster, byMemberId, working, chores, isEligible, held, changeBudgetMinutes }) {
+function place({
+  roster,
+  byMemberId,
+  working,
+  chores,
+  isEligible,
+  held,
+  changeBudgetMinutes,
+  steerFor,
+}) {
   const minutesByMember = new Map(roster.map((m) => [m.id, 0]))
   const assignments = []
   const unassignable = []
+  const steered = []
 
   // Minutes of DISCRETIONARY movement spent so far. NOT the reported churn
   // figure - see `reallocate`, which diffs the two allocations for that.
@@ -591,6 +626,61 @@ function place({ roster, byMemberId, working, chores, isEligible, held, changeBu
     const incumbent = tied.find((entry) => entry.member.id === heldBy)?.member ?? null
     let chosen = incumbent ?? tied[0].member
 
+    // #481 - what recent weeks say. Two signals, two strengths, and the
+    // order of the guards is the order of the criteria:
+    //
+    //   * Nothing to steer unless the rule's member is the one about to get
+    //     it. A chore already going elsewhere needs no help.
+    //   * AC 4 - a chore only one member can do is not steered, and the
+    //     `steered` list (which is what the Split reads its "why" line from)
+    //     says nothing about it. `scored` is the ELIGIBLE set, so the
+    //     alternatives are drawn from it and a chore with one eligible
+    //     member has none - there is no separate guard to forget.
+    //   * `repeat` (AC 2, "prefers another eligible member ... staying within
+    //     LEVEL_TOLERANCE"): another candidate whose resulting share is within
+    //     the tolerance of the best resulting share takes it. A wider gap is
+    //     a fairness cost, and fairness of minutes is never traded for
+    //     variety - the story's own words.
+    //   * `movedOff` (AC 3, "a last-resort holder - chosen only when nobody
+    //     else eligible has room"): another candidate who would stay AT OR
+    //     UNDER their own capacity takes it, whatever the gap. Owner decision
+    //     at pickup, 2026-09-18, over the within-tolerance reading: a person
+    //     moved this chore off them twice, and a rule that handed it straight
+    //     back whenever they were the lowest-loaded would be the exact
+    //     behaviour they complained about. The off-level minutes this can
+    //     cost are reported by `assess`, never hidden - the honest half, as
+    //     for a pin (#41 AC 6).
+    //
+    // Among the members who fit, the lowest resulting share wins, ties to the
+    // lowest id - the same deterministic key as the tie-break above, so a
+    // steered household in a different input order is the same answer.
+    //
+    // The budget below still applies: a steer off the incumbent is a
+    // discretionary move like any other, and when the budget refuses it the
+    // chore stays and nothing is recorded as steered.
+    // `avoid` is a list (assignmentHistory.js says why): the rule acts when
+    // the member about to be chosen is ON it, and the alternatives exclude
+    // everybody on it.
+    const rule = steerFor.get(chore.id)
+    let steeredBy = null
+    let steeredFrom = null
+    if (rule && rule.avoid.includes(chosen.id)) {
+      const fits = scored.filter(
+        (entry) =>
+          !rule.avoid.includes(entry.member.id) &&
+          (rule.kind === 'movedOff'
+            ? entry.share <= 1 + EPSILON
+            : entry.share <= lowest + LEVEL_TOLERANCE + EPSILON),
+      )
+      if (fits.length > 0) {
+        let best = fits[0]
+        for (const entry of fits) if (entry.share < best.share - EPSILON) best = entry
+        steeredFrom = chosen.id
+        chosen = best.member
+        steeredBy = rule
+      }
+    }
+
     // #41 AC 4 - the change budget, in minutes.
     //
     // Only a DISCRETIONARY move is charged: the chore has a previous holder,
@@ -610,14 +700,31 @@ function place({ roster, byMemberId, working, chores, isEligible, held, changeBu
       } else {
         chosen = byMemberId.get(heldBy)
         boundByBudget = true
+        // The steer was refused with the move; see the block above.
+        steeredBy = null
       }
+    }
+
+    if (steeredBy) {
+      steered.push({
+        choreId: chore.id,
+        from: steeredFrom,
+        to: chosen.id,
+        kind: steeredBy.kind,
+        weeks: steeredBy.weeks ?? null,
+        // False when the rule's answer was the chore's own incumbent: the
+        // rule decided the outcome (unsteered it would have moved), but no
+        // holder changed, so `jobsMoved` does not count it and the Split
+        // must not say "went to".
+        moved: heldBy === undefined || heldBy !== chosen.id,
+      })
     }
 
     assignments.push({ choreId: chore.id, memberId: chosen.id, manual: false })
     minutesByMember.set(chosen.id, minutesByMember.get(chosen.id) + chore.expectedMinutes)
   }
 
-  return { assignments, unassignable, boundByBudget }
+  return { assignments, unassignable, boundByBudget, steered }
 }
 
 /**
@@ -689,6 +796,26 @@ function assertChores(chores) {
     if (chore == null || chore.id === undefined) throw new Error('Every chore needs an id.')
     if (typeof chore.expectedMinutes !== 'number' || !Number.isFinite(chore.expectedMinutes)) {
       throw new Error(`Chore ${chore.id} needs expectedMinutes.`)
+    }
+  }
+}
+
+// #481. A steer with an unknown kind would be silently inert — `place` would
+// fall through both branches — and an inert rule reads as a household with no
+// pattern to steer. Refused instead.
+function assertSteer(steer) {
+  if (!Array.isArray(steer)) throw new Error('allocate needs a steer array (empty is fine).')
+  for (const entry of steer) {
+    if (
+      entry == null ||
+      entry.choreId === undefined ||
+      !Array.isArray(entry.avoid) ||
+      entry.avoid.length === 0
+    ) {
+      throw new Error('Every steer entry names a choreId and a list of members to avoid.')
+    }
+    if (entry.kind !== 'repeat' && entry.kind !== 'movedOff') {
+      throw new Error(`Steer for chore ${entry.choreId} has unknown kind ${entry.kind}.`)
     }
   }
 }

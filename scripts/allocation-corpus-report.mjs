@@ -22,6 +22,9 @@ const rows = SCENARIOS.map((scenario) => {
     members: scenario.members,
     chores: scenario.chores,
     isEligible: scenario.isEligible,
+    // #481 — a shape may carry what recent weeks said, the way it may carry
+    // an eligibility predicate. The thirteen older shapes carry none.
+    steer: scenario.steer,
   })
   return {
     name: scenario.name,

@@ -119,3 +119,45 @@ describe('handing the organizer role over from the roster (#179)', () => {
     expect(makeOrganizerIn(row)).toBeInTheDocument()
   })
 })
+
+// #467 — `claimed_by` is set when an invitation is SENT (#341), so a claimed
+// row may be somebody who has never opened it. `signInStates` (0045) is what
+// tells the two apart, and 0048 refuses the hand-over to anyone who has not
+// accepted. Stamps are relative to the real clock: one minute ago is a live
+// link, two days ago an expired one.
+describe('#467 — the role is offered only to somebody who has accepted', () => {
+  const MINUTE = 60 * 1000
+  const invited = { id: 'm4', display_name: 'Placeholder Second', weekly_minutes: 20, claimed_by: 'device-d' }
+  const withInvited = [organizerRow, signedIn, neverSignedIn, invited]
+  const states = (invitedAt) => [
+    { member_id: 'm1', invited_at: null, confirmed_at: '2026-09-01T00:00:00Z' },
+    { member_id: 'm2', invited_at: '2026-09-01T00:00:00Z', confirmed_at: '2026-09-01T00:05:00Z' },
+    { member_id: 'm4', invited_at: new Date(Date.now() - invitedAt).toISOString(), confirmed_at: null },
+  ]
+
+  it('AC 1 — never on a row whose invitation is outstanding', () => {
+    setup({ members: withInvited, signInStates: states(MINUTE) })
+    expect(screen.getByTestId('access-m4')).toHaveTextContent(/not joined yet/)
+    expect(makeOrganizerIn(rowFor('Placeholder Second'))).toBeNull()
+  })
+
+  it('AC 1 — never on a row whose invitation expired unaccepted', () => {
+    setup({ members: withInvited, signInStates: states(2 * 24 * 60 * MINUTE) })
+    expect(screen.getByTestId('access-m4')).toHaveTextContent(/Invitation expired/)
+    expect(makeOrganizerIn(rowFor('Placeholder Second'))).toBeNull()
+  })
+
+  it('AC 3 — a member who has accepted is offered it exactly as before', () => {
+    const { onTransferHousehold } = setup({ members: withInvited, signInStates: states(MINUTE) })
+    fireEvent.click(makeOrganizerIn(rowFor('Placeholder Two')))
+    fireEvent.click(
+      within(rowFor('Placeholder Two')).getByRole('button', { name: /^make placeholder two the organizer\?$/i }),
+    )
+    expect(onTransferHousehold).toHaveBeenCalledWith('h1', 'm2')
+  })
+
+  it('with no sign-in read yet, a claimed row is offered as before #458 — the function is the boundary then', () => {
+    setup({ members: withInvited, signInStates: null })
+    expect(makeOrganizerIn(rowFor('Placeholder Second'))).toBeInTheDocument()
+  })
+})

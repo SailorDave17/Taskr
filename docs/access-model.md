@@ -7,7 +7,11 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0047` are ALL applied to the live project** (`0047` on 2026-09-17 in #474's own
+- Status: **`0001`–`0048` are ALL applied to the live project** (`0048` on 2026-09-18 in #467's
+  own session, before its PR opened, at md5 `fc6ce0bbc3a623c913db0ac2a9f91be3` (`4728 characters,
+  4 statements`), read back identical — a body replace of `transfer_household` that **`npm run
+  check:live` cannot see**, *measured* **75 of 75** after, confirmed by the read-only catalog query
+  in the #467 section below; `0047` on 2026-09-17 in #474's own
   session, before PR #513 merged — a column and two function bodies that **`npm run check:live`
   cannot see**, *measured* **75 of 75** on 2026-09-17 in #469's session, and confirmed by the
   read-only catalog query in the #474 section below; this line said `0047` was NOT yet applied
@@ -2579,7 +2583,8 @@ A member can leave from the Who tab. An organizer first hands the household over
   nothing could retry it. If the sign-in cannot be deleted, the person is told as a warning, because
   they have already left.
 - **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
-  a member of the same household who has signed in. An organizer who cannot sign in could provision
+  a member of the same household who has signed in — since `0048` (#467), one whose invitation has
+  been **accepted**, not merely sent; see the #467 section. An organizer who cannot sign in could provision
   nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
   besides `create_household`. It is a definer because the alternative — widening `0005`'s
   `update (name, timezone)` grant on `households` to carry the column — would let any member reassign
@@ -2687,6 +2692,44 @@ alternative ending ("grants are per refresh token, close it moot") is false.
   either function (readings on #474). *Re-read 2026-09-17 in #469's session*: the column present,
   both bodies naming `google_sub`, `authenticated` execute false on both; `check:live` **75 of
   75**.
+
+## The household is handed only to somebody who has joined — #467, 2026-09-18
+
+#179 and #431 hand the household over through `transfer_household` (`0043`), which refused a
+member with no `claimed_by` and nothing else. #458 measured that `claimed_by` is set when an
+invitation is **sent** (#341), before the person has followed the link, so an organizer could make
+somebody organizer who had never opened their invitation — and, staying on as an ordinary member,
+could not take it back if that person never arrived.
+
+- **The boundary (`0048`).** `transfer_household` now also refuses a member whose account has no
+  `auth.users.email_confirmed_at`, with the sentence *"<name> has not accepted their invitation
+  yet, so the household cannot be handed to them"*. Nothing else in the function changed: same
+  signature, same definer, same grants (`from public, anon` revoked, `authenticated` granted).
+  It reads `auth.users` directly rather than through `0045`'s `member_sign_in_states`, which is
+  a client read scoped to the caller's households. **Re-pasting `0043` after `0048` restores the
+  claim-only body**; re-paste `0048` after it.
+- **The offer.** The roster's per-row *Make organizer* and the leave-and-hand-over list both read
+  `signInStateFor(...).kind === 'joined'` — the same answer the row's label reads — instead of
+  `claimed_by`. While `member_sign_in_states` has not answered, that falls back to `claimed_by`,
+  #458's documented degraded case; the function is the boundary then, and its refusal names the
+  person.
+- **Who it refuses, *measured on the live project 2026-09-18*** with a read-only count before the
+  file was written: 13 claimed members, 1 with an unconfirmed account (an invitation
+  outstanding), **0** of them organizers and **0** unconfirmed accounts that were never invited —
+  so no account minted confirmed by the retired `provision` action is newly refused.
+- **Instruments.** `src/test/leaveHousehold.pglite.test.js`'s #467 block refuses an outstanding and
+  an expired invitation, hands over to the same member once confirmed (the control), and re-applies
+  the file. `check:live` is blind to `0048` (a body under an unchanged signature, `0028`'s reason);
+  the live instrument is `pg_get_functiondef` read before and after the apply, where
+  `email_confirmed_at` is absent before and present after, with `has_function_privilege` for
+  `authenticated` and `anon` in the same select.
+- **Applied.** `0048` went in on 2026-09-18 from #467's own session at the owner's go-ahead, before
+  the PR opened: `npm run migrate:live`, 4 statements, md5 `fc6ce0bbc3a623c913db0ac2a9f91be3` read
+  back matching the file. The catalog query read the body md5 `d0f9befe…` with no
+  `email_confirmed_at` before, and `95e1eb34…` with it after; the comment naming #467 absent then
+  present; `prosecdef` true, `authenticated` execute true and `anon` false on both sides.
+  `check:live` **75 of 75** after. So the boundary is live now; the client's filter reaches the
+  deployed app with the next `develop → release` promotion.
 
 ## How the rules are enforced
 

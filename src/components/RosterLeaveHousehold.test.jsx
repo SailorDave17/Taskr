@@ -130,6 +130,48 @@ describe('the organizer leaving: hand it over or delete it, in one confirm (#431
     expect(screen.queryByRole('button', { name: /^leave placeholder household\?$/i })).toBeNull()
   })
 
+  // #467 — `claimed_by` is set when an invitation is SENT (#341); 0048 refuses
+  // a hand-over to anyone who has not accepted, so the list reads the sign-in
+  // state (0045) rather than the claim. Stamps are relative to the real clock.
+  describe('#467 — only somebody who has accepted is offered as a successor', () => {
+    const MINUTE = 60 * 1000
+    const invited = { id: 'm4', display_name: 'Placeholder Second', weekly_minutes: 20, claimed_by: 'device-d' }
+    const states = (invitedAt) => [
+      { member_id: 'm1', invited_at: null, confirmed_at: '2026-09-01T00:00:00Z' },
+      { member_id: 'm2', invited_at: '2026-09-01T00:00:00Z', confirmed_at: '2026-09-01T00:05:00Z' },
+      { member_id: 'm4', invited_at: new Date(Date.now() - invitedAt).toISOString(), confirmed_at: null },
+    ]
+    const optionsShown = () => screen.getAllByRole('option').map((o) => o.textContent)
+
+    it('AC 1 and AC 3 — leaves out an outstanding invitation and offers the member who accepted', () => {
+      asOrganizer({ members: [organizerRow, invited, signedIn, neverSignedIn], signInStates: states(MINUTE) })
+      fireEvent.click(leaveButton())
+      expect(optionsShown()).toEqual(['Placeholder Two'])
+    })
+
+    it('AC 1 — leaves out an invitation that expired unaccepted', () => {
+      asOrganizer({
+        members: [organizerRow, invited, signedIn, neverSignedIn],
+        signInStates: states(2 * 24 * 60 * MINUTE),
+      })
+      fireEvent.click(leaveButton())
+      expect(optionsShown()).toEqual(['Placeholder Two'])
+    })
+
+    it('AC 1 — with only an unaccepted invitation left, says it cannot be handed over and offers delete', () => {
+      const { onHandOverAndLeave } = asOrganizer({
+        members: [organizerRow, invited, neverSignedIn],
+        signInStates: states(MINUTE),
+      })
+      fireEvent.click(leaveButton())
+      expect(screen.getByText(/nobody else here has signed in yet/i)).toBeInTheDocument()
+      expect(screen.queryByRole('option')).toBeNull()
+      expect(screen.queryByRole('button', { name: /and leave$/i })).toBeNull()
+      expect(screen.getByRole('button', { name: /instead$/i })).toBeInTheDocument()
+      expect(onHandOverAndLeave).not.toHaveBeenCalled()
+    })
+  })
+
   it('with nobody else signed in, says it cannot be handed over and still offers delete', () => {
     asOrganizer({ members: [organizerRow, neverSignedIn] })
     fireEvent.click(leaveButton())

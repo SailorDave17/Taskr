@@ -1382,8 +1382,11 @@ function MemberRow({
             who could not organize anything (0016's dead end, 0043's check) —
             #87's rule again: a control the database will always turn down is
             worse than no control. The organizer stays on the roster as an
-            ordinary member; leaving as well is the Leave card's hand-over. */}
-        {!isOrganizer || isMe || !member.claimed_by || !onTransfer ? null : confirmingTransfer ? (
+            ordinary member; leaving as well is the Leave card's hand-over.
+            #467 — "signed in" is `signIn.kind === 'joined'`, not `claimed_by`:
+            an invitation sets `claimed_by` when it is SENT (#341), and 0048
+            refuses a member who has not accepted it. */}
+        {!isOrganizer || isMe || signIn.kind !== 'joined' || !onTransfer ? null : confirmingTransfer ? (
           <>
             <button
               className="button"
@@ -1674,7 +1677,14 @@ export default function Roster({
   // cannot sign in could provision nobody (0016's dead end).
   const [confirmingLeave, setConfirmingLeave] = useState(false)
   const [successorId, setSuccessorId] = useState('')
-  const successors = members.filter((m) => m.claimed_by && m.id !== me?.id)
+  // #467 — somebody who has JOINED, not merely been invited: `claimed_by` is
+  // set when an invitation is sent (#341), so the list reads the sign-in state
+  // the row's label reads, and 0048 refuses anyone else. While that read has
+  // not answered, `signInStateFor` falls back to `claimed_by` (#458's reason);
+  // the function is the boundary then, and its refusal names the person.
+  const successors = members.filter(
+    (m) => m.id !== me?.id && signInStateFor(m, signInStates, now).kind === 'joined',
+  )
   const successorName = successors.find((m) => m.id === successorId)?.display_name ?? ''
   // Design-bar, 2026-09-11 (#431): both confirms opened BELOW the fold at
   // 360×800 when tapped from the bottom of the Who tab — measured, the member's

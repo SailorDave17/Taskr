@@ -184,12 +184,14 @@ describe('continuing with Google — #304', () => {
     // let them try the password box underneath it.
     setup({
       onSignInWithGoogle: vi.fn(),
+      // The #465 wording: a cancelled Google screen, not a test-user refusal.
       signInNotice:
-        'Google did not sign you in. If Google said this app has not been opened to your account, the organizer is the one who can add it — ask them.',
+        'Google did not sign you in — its screen was cancelled or did not complete. Press Continue with Google to try again, or sign in with your password here.',
     })
     const note = screen.getByTestId('sign-in-return')
     expect(note).toHaveAttribute('role', 'alert')
-    expect(note).toHaveTextContent(/organizer/i)
+    expect(note).toHaveTextContent(/cancelled or did not complete/i)
+    expect(note).not.toHaveTextContent(/organizer/i)
     expect(signInButton()).toBeInTheDocument()
     // The cold-arrival paragraph steps aside for the notice: design-bar measured
     // the two together pushing Continue with Google 3–47px below the fold at

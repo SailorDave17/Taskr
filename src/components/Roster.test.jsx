@@ -2781,6 +2781,62 @@ describe('#458 — an invited member reads as invited, not signed in', () => {
     render458({ members: [{ ...INVITED, claimed_by: null }] })
     expect(screen.getByTestId('access-m1')).toHaveTextContent(/^No sign-in yet$/)
   })
+
+  // #468 — the edit form's note under the address field read `claimed_by`
+  // alone, so it told the organizer an invited person "already has a sign-in"
+  // beside a row that said they had not joined. Both fixtures are claimed; only
+  // `confirmed_at` tells them apart.
+  describe('#468 — the note under the address field in the edit form', () => {
+    const PENDING_NOTE =
+      'Placeholder One’s invitation went to the address it was first sent to. ' +
+      'Changing this does not redirect it — sending it again goes to that same address.'
+    const JOINED_NOTE =
+      'Placeholder Two already has a sign-in, so changing this does not change the ' +
+      'address they sign in with — that one is fixed at the moment the sign-in was given.'
+    const openEdit = (name) =>
+      fireEvent.click(within(rowFor(name)).getByRole('button', { name: /^edit$/i }))
+
+    it('AC 1 — an outstanding invitation: says where it went, not that they have a sign-in', () => {
+      at(60_000)
+      render458()
+      openEdit('Placeholder One')
+      const note = screen.getByTestId('address-note-m1')
+      expect(note).toHaveTextContent(PENDING_NOTE)
+      expect(note).not.toHaveTextContent(/sign-in/i)
+    })
+
+    it('AC 1 — an expired invitation reads the same', () => {
+      at(2 * HOUR)
+      render458()
+      openEdit('Placeholder One')
+      const note = screen.getByTestId('address-note-m1')
+      expect(note).toHaveTextContent(PENDING_NOTE)
+      expect(note).not.toHaveTextContent(/sign-in/i)
+    })
+
+    it('AC 2 — a member who has accepted keeps the note unchanged', () => {
+      at(60_000)
+      render458()
+      openEdit('Placeholder Two')
+      expect(screen.getByTestId('address-note-m2')).toHaveTextContent(JOINED_NOTE)
+    })
+
+    it('with no sign-in read, a claimed row keeps the note it had before #458', () => {
+      at(60_000)
+      render458({ signInStates: null })
+      openEdit('Placeholder One')
+      expect(screen.getByTestId('address-note-m1')).toHaveTextContent(
+        JOINED_NOTE.replace('Placeholder Two', 'Placeholder One'),
+      )
+    })
+
+    it('a row with no account has no note at all', () => {
+      at(60_000)
+      render458({ members: [{ ...INVITED, claimed_by: null }] })
+      openEdit('Placeholder One')
+      expect(screen.queryByTestId('address-note-m1')).not.toBeInTheDocument()
+    })
+  })
 })
 
 // #480 — the week suggested from the person's own recent weeks. The

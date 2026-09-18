@@ -671,14 +671,18 @@ describe('signing in with Google — #304', () => {
       expect(readSignInReturn(location ?? {})).toBeNull()
     })
 
-    it('names the organizer on a Google refusal, and does NOT say the password was wrong', () => {
-      // AC 5. The consent screen is in Testing, so an account the organizer has
-      // not registered is refused by Google — and the organizer is the one
-      // person who can change that. The collapsed credential sentence is the
-      // wrong answer here because no credential was involved.
+    it('says a Google refusal was cancelled or not completed, offers both ways back in, and does NOT name the organizer (#465)', () => {
+      // #304 AC 5, reworded by #465. `access_denied` is the person backing out
+      // of Google's screen; the test-user list does not gate sign-in
+      // (measured 2026-09-16, #330/#339), so sending them to the organizer
+      // to be "added" was wrong. The collapsed credential sentence is still
+      // the wrong answer because no credential was involved.
       const sentence = describeSignInReturn({ error: 'access_denied', code: null, description: null })
-      expect(sentence).toMatch(/has not been opened to your account/i)
-      expect(sentence).toMatch(/organizer/i)
+      expect(sentence).toMatch(/cancelled or did not complete/i)
+      expect(sentence).toMatch(/Continue with Google/)
+      expect(sentence).toMatch(/password/i)
+      expect(sentence).not.toMatch(/organizer/i)
+      expect(sentence).not.toMatch(/add it/i)
       expect(sentence).not.toMatch(/did not match/i)
     })
 
@@ -701,7 +705,9 @@ describe('signing in with Google — #304', () => {
         description: 'Email link is invalid or has expired',
       })
       expect(sentence).toMatch(/Email link is invalid or has expired/)
-      expect(sentence).not.toMatch(/organizer/i)
+      // The access_denied branch's own words, so this cannot pass by that branch
+      // being taken (it said "organizer" until #465; now it says "cancelled").
+      expect(sentence).not.toMatch(/cancelled/i)
     })
 
     it('quotes the description for anything else, and says so when there is none', () => {

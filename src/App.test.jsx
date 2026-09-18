@@ -3921,22 +3921,23 @@ describe('connecting a calendar (#95)', () => {
       expect(replaceState).toHaveBeenCalledWith(null, '', '/')
     })
 
-    it('AC 5: a Google refusal in the fragment names the organizer on the sign-in screen', async () => {
-      // The implicit flow's error channel. The consent screen is in Testing, so
-      // an account the organizer has not registered is refused by Google; the
-      // sentence says who can fix that and does not blame a password nobody
-      // typed. The SHAPE here is GoTrue's documented one, not a measured
-      // refusal — the provider was not enabled on the live project when this
-      // was written, so the live half of AC 5 was left to the confirmation
-      // story (#330, done 2026-09-16).
+    it('AC 5: a Google refusal in the fragment says the sign-in was cancelled, on the sign-in screen (#465 wording)', async () => {
+      // The implicit flow's error channel. `access_denied` is the person
+      // backing out of Google's screen; the sentence says so, offers both ways
+      // back in, and does not blame a password nobody typed. It no longer
+      // sends them to the organizer to be "added": the test-user list gates
+      // the calendar's sensitive scopes, not sign-in (measured 2026-09-16 on
+      // #330's run, recorded on #339; reworded by #465). The SHAPE here is
+      // GoTrue's documented one.
       api.currentSession.mockResolvedValue(null)
       atUrl('', '#error=access_denied&error_description=The+user+denied+access')
       await renderApp()
       await screen.findByRole('button', { name: /^sign in$/i })
 
       const note = screen.getByTestId('sign-in-return')
-      expect(note).toHaveTextContent(/has not been opened to your account/i)
-      expect(note).toHaveTextContent(/organizer/i)
+      expect(note).toHaveTextContent(/cancelled or did not complete/i)
+      expect(note).toHaveTextContent(/Continue with Google/)
+      expect(note).not.toHaveTextContent(/organizer/i)
       expect(note).not.toHaveTextContent(/did not match/i)
       expect(calendarApi.completeConnect).not.toHaveBeenCalled()
       expect(replaceState).toHaveBeenCalledWith(null, '', '/')

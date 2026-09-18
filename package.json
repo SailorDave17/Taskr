@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Fair, time-budget allocation of household chores",
+  "description": "Splits a household's chores by the time each person has.",
   "license": "MIT",
   "scripts": {
     "dev": "vite",

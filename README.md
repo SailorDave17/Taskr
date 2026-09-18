@@ -324,18 +324,20 @@ authority. Closing that gap is [#78](https://github.com/SailorDave17/Taskr/issue
 suite applies every migration from disk, so a green CI run says nothing whatsoever about the live
 project.
 
-**The engine is half-wired.** The allocator (#40) divides work by capacity and says plainly when
-level is unreachable, judged against a 13-shape corpus; per-week capacity (#44) makes a person's
-minutes a fact about *this* week rather than a standing number. #36 connected the first of the two:
-the load figures resolve capacity through `capacity.js`, so a week override changes the numbers on
-screen as soon as a week override is set, which #46 does. **The allocator has a reader but no
-writer** — #47's split screen calls `allocate` to ask whether level is reachable at all, and it is
-the first screen a joined household sees, but nothing on a phone divides the work automatically:
-no code path assigns a chore from the allocator's answer, which is the thing the app is ultimately
-for (#49). #41's `reallocate` has no caller at all yet.
+**The engine is wired end to end.** The allocator (#40) divides work by capacity and says plainly
+when level is unreachable, judged against a 13-shape corpus; per-week capacity (#44) makes a
+person's minutes a fact about *this* week rather than a standing number. #36 connected the first of
+the two: the load figures resolve capacity through `capacity.js`, so a week override changes the
+numbers on screen as soon as a week override is set, which #46 does. **The allocator's answer is
+written, not only read.** #47's split screen calls `allocate` to ask whether level is reachable at
+all, and it is the first screen a joined household sees. Since #49 (2026-08-27) the household's open
+chores re-assign whenever a capacity changes — `reassign.js` calls #41's `reallocate` and
+`apply_assignments` stores the result, with no button to press, because a button someone has to
+press is the negotiation moved rather than removed. Since #284 (2026-09-03) **Deal these out** on
+the Split tab deals out the work nobody holds, through that same re-assignment, so a fresh household
+reaches its first fair split without hand-assigning every chore.
 
-That is where the next work goes: re-assigning the household's open chores from current capacity is
-#49. Setting a week's capacity by hand shipped as #46 on 2026-08-09, and showing the split as a share
+Setting a week's capacity by hand shipped as #46 on 2026-08-09, and showing the split as a share
 of each person's own capacity shipped as #47 on 2026-08-25 — the split screen described above is
 #47's. What it replaced was `Commitment` on the chore screen, which #36 had shipped deliberately as
 the ugliest honest form, plain minutes with no bar and no percentage, because the charter's test is

@@ -1204,7 +1204,13 @@ function MemberRow({
               refuses once `claimed_by` is set, so an address already in use is
               only movable in the Supabase dashboard. The note below says so
               rather than leaving the organizer to find out by being locked
-              out. */}
+              out.
+
+              #468 — `claimed_by` is set when an invitation is SENT (#341), so
+              the note reads `signIn` rather than the claim, the way the row's
+              label does since #458. The substance holds for an invitation
+              still out: the account kept the address it was invited at, and
+              "Send the invitation again" goes there, not to this field. */}
           <label className="field">
             <span className="field__label">Email address</span>
             <input
@@ -1217,8 +1223,14 @@ function MemberRow({
               aria-label={`Email address for ${member.display_name}`}
             />
           </label>
-          {member.claimed_by ? (
-            <p className="card__note">
+          {signIn.kind === 'invited' || signIn.kind === 'expired' ? (
+            <p className="card__note" data-testid={`address-note-${member.id}`}>
+              {member.display_name}’s invitation went to the address it was
+              first sent to. Changing this does not redirect it — sending it
+              again goes to that same address.
+            </p>
+          ) : member.claimed_by ? (
+            <p className="card__note" data-testid={`address-note-${member.id}`}>
               {member.display_name} already has a sign-in, so changing this does
               not change the address they sign in with — that one is fixed at the
               moment the sign-in was given.

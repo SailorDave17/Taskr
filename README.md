@@ -48,9 +48,12 @@ hosted database rather than on the device.
 **One account can now hold more than one household.** The household's name above the tabs becomes a
 control for anybody who belongs to two, every surface re-reads against whichever is chosen, and the
 Who tab can start another one without signing out. This device remembers the last household chosen —
-the only thing kept between visits besides the sign-in itself, and it is a pointer at a row rather
-than a copy of one, so the household, the roster and the chores still arrive from the server on every
-load. With nothing remembered the app opens on the **oldest** household; somebody in exactly one
+one of four things kept between visits — the others are an unredeemed invitation code
+(`taskr.pendingInvitation`, #173), whether the install offer was dismissed or taken
+(`taskr.installOffer`, #483), and, only when "Trust this device" was ticked, the sign-in itself: an
+untrusted sign-in is held in `sessionStorage` and dies with the browser (#482). It is a pointer at a
+row rather than a copy of one, so the household, the roster and the chores still arrive from the
+server on every load. With nothing remembered the app opens on the **oldest** household; somebody in exactly one
 household sees the name exactly as before and is offered no control at all.
 
 *"Between visits" is the precise claim and the first draft of this paragraph overstated it as "the

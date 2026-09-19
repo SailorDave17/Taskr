@@ -58,7 +58,14 @@ describe('#342 — the watched list is derived from what the client reads', () =
     // #172 added the second, for the owner's reason at pickup: `invitations` is
     // read by the organizer's device alone, and publishing it would put the row
     // — `token_hash` among its columns — on a channel with no other reader.
-    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
+    // #481 added the third: `chore_assignment_history` is written by a trigger
+    // in the same transaction as the published `chores` update, so every
+    // event there is an echo of one the channel has just delivered.
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual([
+      'member_split_seen',
+      'invitations',
+      'chore_assignment_history',
+    ])
   })
 
   it('scopes each table by a column its OWN client column list carries', () => {

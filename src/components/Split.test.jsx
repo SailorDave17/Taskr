@@ -585,6 +585,79 @@ describe('#159 AC 6 — one household on screen, whatever else exists', () => {
   })
 })
 
+// #481 — why the last deal-out steered a chore, one line each, rendered from
+// the stored verdict's `steered` list exactly as the re-balance note is.
+describe('why a chore was steered (#481)', () => {
+  const stored = (steered) => ({
+    contested: true,
+    level: true,
+    reason: null,
+    boundByBudget: false,
+    jobsMoved: 1,
+    minutesMoved: 40,
+    changeBudgetMinutes: 120,
+    applied_at: '2026-09-14T12:00:00Z',
+    steered,
+  })
+  const dishes = { ...chore('c-dishes', 40, 'm2'), title: 'Dishes' }
+
+  it('says nothing when the run steered nothing, and nothing for a run that predates the rule', () => {
+    setup({ chores: [dishes], lastRebalance: stored([]) })
+    expect(screen.queryByTestId('steer-notes')).not.toBeInTheDocument()
+    const older = stored([])
+    delete older.steered
+    setup({ chores: [dishes], lastRebalance: older })
+    expect(screen.queryByTestId('steer-notes')).not.toBeInTheDocument()
+  })
+
+  it('says a chore was moved off somebody twice recently, in the issue’s words', () => {
+    setup({
+      chores: [dishes],
+      lastRebalance: stored([{ choreId: 'c-dishes', from: 'm1', to: 'm2', kind: 'movedOff', weeks: 2 }]),
+    })
+    expect(screen.getByTestId('steer-note').textContent).toBe(
+      'Dishes went to Placeholder Two: moved off Placeholder One twice recently.',
+    )
+  })
+
+  it('says a chore had landed on somebody three weeks running', () => {
+    setup({
+      chores: [dishes],
+      lastRebalance: stored([{ choreId: 'c-dishes', from: 'm1', to: 'm2', kind: 'repeat', weeks: 3 }]),
+    })
+    expect(screen.getByTestId('steer-note').textContent).toBe(
+      'Dishes went to Placeholder Two: it had landed on Placeholder One three weeks running.',
+    )
+  })
+
+  it('says a chore STAYS with somebody when the rule kept it with its own incumbent', () => {
+    setup({
+      chores: [dishes],
+      lastRebalance: stored([{ choreId: 'c-dishes', from: 'm1', to: 'm2', kind: 'repeat', weeks: 3, moved: false }]),
+    })
+    expect(screen.getByTestId('steer-note').textContent).toBe(
+      'Dishes stays with Placeholder Two: it had landed on Placeholder One three weeks running.',
+    )
+  })
+
+  it('draws one line per steered chore, and none for a chore no longer on the list', () => {
+    const bins = { ...chore('c-bins', 20, 'm1'), title: 'Placeholder Chore' }
+    setup({
+      chores: [dishes, bins],
+      lastRebalance: stored([
+        { choreId: 'c-dishes', from: 'm1', to: 'm2', kind: 'movedOff', weeks: 3 },
+        { choreId: 'c-bins', from: 'm2', to: 'm1', kind: 'repeat', weeks: 3 },
+        { choreId: 'c-gone', from: 'm2', to: 'm1', kind: 'repeat', weeks: 3 },
+      ]),
+    })
+    const notes = screen.getAllByTestId('steer-note').map((n) => n.textContent)
+    expect(notes).toEqual([
+      'Dishes went to Placeholder Two: moved off Placeholder One three times recently.',
+      'Placeholder Chore went to Placeholder One: it had landed on Placeholder Two three weeks running.',
+    ])
+  })
+})
+
 // #49 AC 7 — what the last automatic re-balance reported, rendered from the
 // verdict the run STORED rather than from any computation here. The wiring
 // that fetches it is App's (App.test.jsx); what the run stores is the pglite

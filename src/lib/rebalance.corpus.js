@@ -68,3 +68,23 @@ export function busyWeek(members) {
  * flat line and prove nothing about the shape of the curve.
  */
 export const BUDGETS = [0, 30, 60, 120, Infinity]
+
+/**
+ * The shapes the churn table is measured over — every corpus shape that
+ * carries no history steer (#481).
+ *
+ * The two #481 shapes exist to ask what the allocator does with a steer, and
+ * a shape that steers a chore off its incumbent in EVERY arm has no churn to
+ * measure: the busy week lands, the steer holds, nothing moves. Folding them
+ * into this table did not change what it says about the budget — it diluted
+ * the denominator, *measured* on 2026-09-18: the baseline fell from 25 of 43
+ * (58.1%) to 25 of 47 (53.2%), under the prototype's 8-of-14 floor that #41
+ * AC 2 makes a failing test, on shapes that were never about a capacity
+ * change. So the partition is stated here, once, and asserted in
+ * rebalance.test.js. What the budget does to a steer — refuses it one minute
+ * under the chore's cost, allows it at the cost — is asserted at the boundary
+ * in the same file, which is a stronger claim than an aggregate row could be.
+ */
+export function churnScenarios(scenarios) {
+  return scenarios.filter((scenario) => !scenario.steer)
+}

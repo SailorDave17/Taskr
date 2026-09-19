@@ -40,8 +40,16 @@ const monday = '2026-08-24'
 // The zone is UTC so the fixture rows' `completed_at` (Aug 26–27, mid-day
 // UTC) fall inside `monday`'s week however the machine is pinned — #471 made
 // the planner refuse to run without one.
-function plan({ members, chores, exclusions = [], overrides = [] }) {
-  return planReassignment({ members, chores, exclusions, overrides, periodStart: monday, timeZone: 'UTC' })
+function plan({ members, chores, exclusions = [], overrides = [], history = [] }) {
+  return planReassignment({
+    members,
+    chores,
+    exclusions,
+    overrides,
+    periodStart: monday,
+    timeZone: 'UTC',
+    history,
+  })
 }
 
 function placementMap(placements) {
@@ -371,6 +379,71 @@ describe('planReassignment — the verdict travels (AC 7)', () => {
     expect(verdict.boundByBudget).toBe(result.boundByBudget)
     expect(verdict.jobsMoved).toBe(result.jobsMoved)
     expect(verdict.minutesMoved).toBe(result.minutesMoved)
+  })
+})
+
+// #481 — the history reaches the allocator as a steer, keyed by the row the
+// allocator will place. The fold is assignmentHistory.test.js; the rule is
+// allocation.test.js; this is the wiring between rows and both.
+describe('#481 — what recent weeks say travels into the plan', () => {
+  const members = [
+    { id: 'm-alex', weekly_minutes: 300 },
+    { id: 'm-robin', weekly_minutes: 300 },
+  ]
+  // The three Mondays before `monday` (2026-08-24).
+  const weeks = ['2026-08-03', '2026-08-10', '2026-08-17']
+  const dealtToRobin = weeks.map((week, i) => ({
+    id: `h-${i}`,
+    chore_id: `c-dishes-${i}`,
+    repeat_parent_id: 'p-dishes',
+    from_member_id: null,
+    to_member_id: 'm-robin',
+    from_source: null,
+    source: 'auto',
+    actor_member_id: 'm-alex',
+    period_start: week,
+    recorded_at: `${week}T10:00:00Z`,
+  }))
+  // This week's occurrence, dealt to robin by Monday's run and so robin's as
+  // INCUMBENT. 'm-alex' < 'm-robin', so an unheld occurrence would go to alex
+  // on the tie-break with no steer at all, and a test on it would pass for
+  // the wrong reason; held by robin, incumbency keeps it there unsteered and
+  // only the rule moves it.
+  const occurrence = {
+    ...row('c-dishes-w', 60, { holder: 'm-robin', source: 'auto' }),
+    generated_from: 'p-dishes',
+  }
+
+  it('steers this week’s occurrence off the member its parent kept landing on, and says so', () => {
+    const { placements, verdict } = plan({ members, chores: [occurrence], history: dealtToRobin })
+    expect(placementMap(placements).get('c-dishes-w')).toBe('m-alex')
+    expect(verdict.steered).toEqual([
+      { choreId: 'c-dishes-w', from: 'm-robin', to: 'm-alex', kind: 'repeat', weeks: 3, moved: true },
+    ])
+  })
+
+  it('POSITIVE CONTROL: with no history the same occurrence stays with robin', () => {
+    const { placements, verdict } = plan({ members, chores: [occurrence] })
+    expect(placementMap(placements).get('c-dishes-w')).toBe('m-robin')
+    expect(verdict.steered).toEqual([])
+  })
+
+  it('does not steer a chore a person placed by hand — a pin is never dealt', () => {
+    const pinned = { ...occurrence, assigned_member_id: 'm-robin', assigned_source: 'manual' }
+    const { placements, verdict } = plan({ members, chores: [pinned], history: dealtToRobin })
+    expect(placementMap(placements).has('c-dishes-w')).toBe(false)
+    expect(verdict.steered).toEqual([])
+  })
+
+  it('reads a one-off under its own id, so another chore’s history does not reach it', () => {
+    const oneOff = row('c-bins', 60)
+    const { verdict } = plan({ members, chores: [oneOff], history: dealtToRobin })
+    expect(verdict.steered).toEqual([])
+  })
+
+  it('carries an empty list, not nothing, when there is no history', () => {
+    const { verdict } = plan({ members, chores: [occurrence] })
+    expect(verdict.steered).toEqual([])
   })
 })
 

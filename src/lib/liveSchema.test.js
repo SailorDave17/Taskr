@@ -134,14 +134,15 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
     expect(extra, `in LIVE_SCHEMA but read nowhere in src/: ${extra.join(', ')}`).toEqual([])
   })
 
-  it('covers the twelve tables the app still reads', () => {
+  it('covers the thirteen tables the app still reads', () => {
     // #78 named five, of which `household_devices` was one and #62 drops it. The
     // set went to four, back to five with #37's `chore_exclusions` — a different
     // fifth — to six with #95's `calendar_connections`, to seven with #96's
     // `calendar_busy`, to ten with #352's three shopping tables, to eleven
-    // with #101's `calendar_imports`, and to twelve with #172's `invitations`
-    // (#416 AC 1 — the entry #171 deliberately withheld until a reader existed).
-    // Every edit is stated, because a
+    // with #101's `calendar_imports`, to twelve with #172's `invitations`
+    // (#416 AC 1 — the entry #171 deliberately withheld until a reader existed),
+    // and to thirteen with #481's `chore_assignment_history`, the record the
+    // deal-out reads before it plans. Every edit is stated, because a
     // required-set that changes size silently is exactly how somebody quietly
     // weakens a check. (`member_split_seen` and `chore_repeat_exceptions` are
     // read too and are asserted by the two directional tests above; this list
@@ -160,6 +161,7 @@ describe('#78 — the live-schema list cannot fall behind the code', () => {
       'shopping_items',
       'calendar_imports',
       'invitations',
+      'chore_assignment_history',
     ]) {
       expect(LIVE_TABLES).toContain(table)
     }

@@ -518,6 +518,7 @@ describe('AC 2 — the scenario corpus, every expectation written by hand', () =
         members: scenario.members,
         chores: scenario.chores,
         isEligible: scenario.isEligible,
+        steer: scenario.steer,
       })
 
       const actualLoad = {}
@@ -532,6 +533,10 @@ describe('AC 2 — the scenario corpus, every expectation written by hand', () =
       expect(result.reason).toEqual(scenario.expect.reason)
       expect(result.unassignable).toEqual(scenario.expect.unassignable)
       expect(result.noCapacity.map((n) => n.memberId)).toEqual(scenario.expect.noCapacity)
+      // #481 — what the history rule moved, or `[]`. Asserted for EVERY shape
+      // so the thirteen without a steer prove the rule is inert without one
+      // (AC 5), not only that the two with one behave.
+      expect(result.steered).toEqual(scenario.expect.steered ?? [])
     })
   }
 
@@ -548,6 +553,7 @@ describe('AC 2 — the scenario corpus, every expectation written by hand', () =
         members: scenario.members,
         chores: scenario.chores,
         isEligible: scenario.isEligible,
+        steer: scenario.steer,
       }).level,
     }))
     const total = results.length
@@ -592,6 +598,148 @@ describe('AC 2 — the scenario corpus, every expectation written by hand', () =
 // ---------------------------------------------------------------------------
 // #47 — the arithmetic the household surface shares with the allocator.
 // ---------------------------------------------------------------------------
+
+// #481 — what recent weeks say, as an input. Which steers exist for which
+// history rows is assignmentHistory.test.js; this is what the allocator DOES
+// with one. Expected placements are hand-computed from the placement rule.
+describe('#481 — a steer, and the two strengths it comes in', () => {
+  const equal = [
+    { id: 'a', capacityMinutes: 100 },
+    { id: 'b', capacityMinutes: 100 },
+  ]
+  const dishes = { id: 'dishes', expectedMinutes: 40 }
+  const holderOf = (result, id) => result.assignments.find((x) => x.choreId === id)?.memberId
+
+  it('unsteered, an even tie goes to the lowest id — the case the rule exists for', () => {
+    const result = allocate({ members: equal, chores: [dishes] })
+    expect(holderOf(result, 'dishes')).toBe('a')
+    expect(result.steered).toEqual([])
+  })
+
+  describe('repeat — prefers another member within the tolerance (AC 2)', () => {
+    const steer = [{ choreId: 'dishes', avoid: ['a'], kind: 'repeat', weeks: 3 }]
+
+    it('sends the chore to somebody else when they would end within LEVEL_TOLERANCE', () => {
+      const result = allocate({ members: equal, chores: [dishes], steer })
+      expect(holderOf(result, 'dishes')).toBe('b')
+      expect(result.steered).toEqual([
+        { choreId: 'dishes', from: 'a', to: 'b', kind: 'repeat', weeks: 3, moved: true },
+      ])
+    })
+
+    it('avoids EVERY member on the list, and names the one it would have chosen', () => {
+      // a and c both on the list, a the lowest id: the chore skips both and
+      // lands on b, and `from` is a — the member it would have gone to.
+      const three = [...equal, { id: 'c', capacityMinutes: 100 }]
+      const both = [{ choreId: 'dishes', avoid: ['c', 'a'], kind: 'movedOff', weeks: 2 }]
+      const result = allocate({ members: three, chores: [dishes], steer: both })
+      expect(holderOf(result, 'dishes')).toBe('b')
+      expect(result.steered[0]).toMatchObject({ from: 'a', to: 'b' })
+    })
+
+    it('stays when the only alternative would sit more than the tolerance worse', () => {
+      // b already carries 30 by hand: 0.3 before dishes, 0.7 with it, against
+      // a's 0.4 — a 30pp gap, three times the tolerance. Fairness of minutes
+      // is never traded for variety, so dishes stays on a and nothing claims
+      // otherwise.
+      const chores = [dishes, { id: 'pinned', expectedMinutes: 30, assignedMemberId: 'b' }]
+      const result = allocate({ members: equal, chores, steer })
+      expect(holderOf(result, 'dishes')).toBe('a')
+      expect(result.steered).toEqual([])
+    })
+
+    it('AT the tolerance the alternative still takes it', () => {
+      // b carries 10 by hand: 0.1 before, 0.5 with dishes, against a's 0.4 —
+      // exactly LEVEL_TOLERANCE apart. Asserted at the boundary so the
+      // comparison is `<=` and not `<`.
+      const chores = [dishes, { id: 'pinned', expectedMinutes: 10, assignedMemberId: 'b' }]
+      const result = allocate({ members: equal, chores, steer })
+      expect(holderOf(result, 'dishes')).toBe('b')
+      expect(result.steered).toHaveLength(1)
+    })
+
+    it('picks the lowest resulting share among those who fit, ties to the lowest id', () => {
+      const three = [...equal, { id: 'c', capacityMinutes: 100 }]
+      const result = allocate({ members: three, chores: [dishes], steer })
+      expect(holderOf(result, 'dishes')).toBe('b')
+      const lighter = [...equal, { id: 'c', capacityMinutes: 200 }]
+      expect(holderOf(allocate({ members: lighter, chores: [dishes], steer }), 'dishes')).toBe('c')
+    })
+  })
+
+  describe('movedOff — a last resort, chosen only when nobody else has room (AC 3)', () => {
+    const steer = [{ choreId: 'dishes', avoid: ['a'], kind: 'movedOff', weeks: 2 }]
+
+    it('sends the chore to somebody who would stay under their capacity, whatever the gap', () => {
+      // The same 30pp gap the repeat rule refuses: b ends at 0.7, under
+      // capacity, so b takes it. Owner decision at pickup, 2026-09-18.
+      const chores = [dishes, { id: 'pinned', expectedMinutes: 30, assignedMemberId: 'b' }]
+      const result = allocate({ members: equal, chores, steer })
+      expect(holderOf(result, 'dishes')).toBe('b')
+      expect(result.steered).toEqual([
+        { choreId: 'dishes', from: 'a', to: 'b', kind: 'movedOff', weeks: 2, moved: true },
+      ])
+    })
+
+    it('and the off-level minutes it costs are reported, never hidden', () => {
+      const chores = [dishes, { id: 'pinned', expectedMinutes: 30, assignedMemberId: 'b' }]
+      const result = allocate({ members: equal, chores, steer })
+      expect(result.level).toBe(false)
+      expect(result.offLevel).toEqual({ memberId: 'b', minutes: 35 })
+    })
+
+    it('AT capacity still has room; one minute over does not', () => {
+      const atCapacity = [dishes, { id: 'pinned', expectedMinutes: 60, assignedMemberId: 'b' }]
+      expect(holderOf(allocate({ members: equal, chores: atCapacity, steer }), 'dishes')).toBe('b')
+      const over = [dishes, { id: 'pinned', expectedMinutes: 61, assignedMemberId: 'b' }]
+      const result = allocate({ members: equal, chores: over, steer })
+      expect(holderOf(result, 'dishes')).toBe('a')
+      expect(result.steered).toEqual([])
+    })
+  })
+
+  describe('what a steer never does', () => {
+    it('does nothing when the chore was going elsewhere anyway', () => {
+      const steer = [{ choreId: 'dishes', avoid: ['b'], kind: 'movedOff', weeks: 2 }]
+      const result = allocate({ members: equal, chores: [dishes], steer })
+      expect(holderOf(result, 'dishes')).toBe('a')
+      expect(result.steered).toEqual([])
+    })
+
+    it('does nothing for a chore only one member can do, and claims nothing (AC 4)', () => {
+      const steer = [{ choreId: 'dishes', avoid: ['a'], kind: 'movedOff', weeks: 2 }]
+      const result = allocate({
+        members: equal,
+        chores: [dishes],
+        isEligible: (chore, member) => member.id === 'a',
+        steer,
+      })
+      expect(holderOf(result, 'dishes')).toBe('a')
+      expect(result.steered).toEqual([])
+    })
+
+    it('never moves a chore a human placed', () => {
+      const steer = [{ choreId: 'pinned', avoid: ['a'], kind: 'movedOff', weeks: 2 }]
+      const chores = [{ id: 'pinned', expectedMinutes: 40, assignedMemberId: 'a' }]
+      const result = allocate({ members: equal, chores, steer })
+      expect(holderOf(result, 'pinned')).toBe('a')
+      expect(result.steered).toEqual([])
+    })
+
+    it('refuses a steer of a kind it does not know rather than ignoring it', () => {
+      expect(() =>
+        allocate({ members: equal, chores: [dishes], steer: [{ choreId: 'dishes', avoid: ['a'], kind: 'rotate' }] }),
+      ).toThrow(/unknown kind/)
+      expect(() => allocate({ members: equal, chores: [dishes], steer: [{ choreId: 'dishes' }] })).toThrow(
+        /members to avoid/,
+      )
+      // A bare string is the old contract and is refused, not coerced.
+      expect(() =>
+        allocate({ members: equal, chores: [dishes], steer: [{ choreId: 'dishes', avoid: 'a', kind: 'repeat' }] }),
+      ).toThrow(/members to avoid/)
+    })
+  })
+})
 
 describe('#47 criterion 7 — what one chore contributes', () => {
   it('open work contributes its ESTIMATE', () => {

@@ -2118,6 +2118,26 @@ details[open] > .shopping-past__run-summary > .card__subheading::before {
   overflow-wrap: anywhere;
 }
 
+/* Why the last deal-out steered a chore (#481) — one line per chore, in the
+   re-balance footnote's register: a fact about the run, not an alert, and no
+   palette attached to the person it was steered away from. */
+.split__steer {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.split__steer-row {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
 /* What the fairness number does not count (#59) — the claim's own boundary,
    sitting under the verdict it bounds. Same quiet register as the re-balance
    footnote: an acknowledgement, never an alert, and no palette that could read

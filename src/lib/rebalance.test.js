@@ -3,7 +3,12 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { allocate, reallocate, movedBetween, CHANGE_BUDGET_MINUTES } from './allocation.js'
 import { SCENARIOS } from './allocation.corpus.js'
-import { BUDGETS, busyWeek } from './rebalance.corpus.js'
+import { BUDGETS, busyWeek, churnScenarios } from './rebalance.corpus.js'
+
+// #481 — the churn table is measured over the shapes with no history steer;
+// the partition and its measurement are in rebalance.corpus.js, and asserted
+// below so it cannot quietly widen or narrow.
+const CHURN_SCENARIOS = churnScenarios(SCENARIOS)
 
 // #41 - bounding the minutes a re-balance moves.
 //
@@ -76,7 +81,7 @@ function corpusTotals(run) {
   let level = 0
   let contested = 0
   let bound = 0
-  for (const scenario of SCENARIOS) {
+  for (const scenario of CHURN_SCENARIOS) {
     const result = run(scenario)
     jobsMoved += result.jobsMoved
     minutesMoved += result.minutesMoved
@@ -593,6 +598,81 @@ describe('AC 8 - the figure reported is MINUTES', () => {
 })
 
 
+// #481 - a steer off the incumbent is a discretionary move and the budget
+// bounds it like any other. "Bounded by the same tolerance and budget as
+// #41, so fairness of minutes is never traded for variety" - the story's own
+// words, asserted at the boundary.
+describe('#481 - the change budget bounds a steer', () => {
+  const members = [
+    { id: 'a', capacityMinutes: 100 },
+    { id: 'b', capacityMinutes: 100 },
+  ]
+  const chores = [{ id: 'dishes', expectedMinutes: 40 }]
+  const previous = [{ choreId: 'dishes', memberId: 'a' }]
+  const steer = [{ choreId: 'dishes', avoid: ['a'], kind: 'repeat', weeks: 3 }]
+  const holderOf = (result) => result.assignments.find((x) => x.choreId === 'dishes')?.memberId
+
+  it('AT the budget the steer happens, and is reported', () => {
+    const result = reallocate({ members, chores, previous, steer, changeBudgetMinutes: 40 })
+    expect(holderOf(result)).toBe('b')
+    expect(result.boundByBudget).toBe(false)
+    expect(result.minutesMoved).toBe(40)
+    expect(result.steered).toEqual([
+      { choreId: 'dishes', from: 'a', to: 'b', kind: 'repeat', weeks: 3, moved: true },
+    ])
+  })
+
+  it('a steer whose answer is the incumbent keeps the chore, costs nothing, and says it STAYED', () => {
+    // b holds dishes and carries 10 by hand; a is the lower share, so the
+    // plain rule would move dishes to a. The steer refuses a, the best
+    // alternative is b — the incumbent — so nothing moves: no budget is
+    // spent, `jobsMoved` is 0, and the entry says `moved: false` so the
+    // Split does not print "went to b" over a chore b already had
+    // (review-fanout, 2026-09-18).
+    const held = [...chores, { id: 'pinned', expectedMinutes: 10, assignedMemberId: 'b' }]
+    const previousB = [{ choreId: 'dishes', memberId: 'b' }]
+    const unsteered = reallocate({ members, chores: held, previous: previousB, changeBudgetMinutes: 120 })
+    expect(holderOf(unsteered)).toBe('a')
+
+    const result = reallocate({ members, chores: held, previous: previousB, steer, changeBudgetMinutes: 0 })
+    expect(holderOf(result)).toBe('b')
+    expect(result.jobsMoved).toBe(0)
+    expect(result.boundByBudget).toBe(false)
+    expect(result.steered).toEqual([
+      { choreId: 'dishes', from: 'a', to: 'b', kind: 'repeat', weeks: 3, moved: false },
+    ])
+  })
+
+  it('ONE MINUTE BELOW it the steer is refused: the chore stays, the budget bound it, nothing is claimed', () => {
+    const result = reallocate({ members, chores, previous, steer, changeBudgetMinutes: 39 })
+    expect(holderOf(result)).toBe('a')
+    expect(result.boundByBudget).toBe(true)
+    expect(result.minutesMoved).toBe(0)
+    // The Split reads its "why" line from this list; a refused steer must
+    // not put one on screen.
+    expect(result.steered).toEqual([])
+  })
+
+  it('a budget of zero refuses every steer off an incumbent', () => {
+    const result = reallocate({ members, chores, previous, steer, changeBudgetMinutes: 0 })
+    expect(holderOf(result)).toBe('a')
+    expect(result.steered).toEqual([])
+  })
+
+  it('a chore nobody held is not charged - a new occurrence is steered at any budget', () => {
+    const result = reallocate({ members, chores, previous: [], steer, changeBudgetMinutes: 0 })
+    expect(holderOf(result)).toBe('b')
+    expect(result.boundByBudget).toBe(false)
+    expect(result.steered).toHaveLength(1)
+  })
+
+  it('a last-resort steer is charged the same way', () => {
+    const lastResort = [{ choreId: 'dishes', avoid: ['a'], kind: 'movedOff', weeks: 2 }]
+    expect(holderOf(reallocate({ members, chores, previous, steer: lastResort, changeBudgetMinutes: 0 }))).toBe('a')
+    expect(holderOf(reallocate({ members, chores, previous, steer: lastResort, changeBudgetMinutes: 40 }))).toBe('b')
+  })
+})
+
 describe('AC 2 - the baseline, and whether the corpus exercises the problem at all', () => {
   // The criterion sets a bar and points it at the FIXTURE rather than at the
   // allocator: "a baseline that does not reproduce churn comparable to the
@@ -622,7 +702,7 @@ describe('AC 2 - the baseline, and whether the corpus exercises the problem at a
     // An aggregate can clear the bar while no individual household ever
     // experiences the shuffled week the charter describes. The prototype's
     // finding was about ONE household seeing 8 of its 14 jobs move.
-    const worst = SCENARIOS.map((scenario) => {
+    const worst = CHURN_SCENARIOS.map((scenario) => {
       const run = unstabilised(scenario)
       const movable = run.before.assignments.length
       return movable === 0 ? 0 : run.jobsMoved / movable
@@ -681,10 +761,23 @@ describe('AC 5 - the recorded table is a measurement, not an assertion', () => {
       // claim about the setting that names it.
       const row =
         `| ${label} | ${total.jobsMoved} of ${total.movableJobs} | ${total.minutesMoved} | ` +
-        `${total.level} of ${total.contested} | ${total.bound} of ${SCENARIOS.length} |`
+        `${total.level} of ${total.contested} | ${total.bound} of ${CHURN_SCENARIOS.length} |`
       expect(doc, `no row for ${label}: ${row}`).toContain(row)
     })
   }
+
+  it('#481 — is measured over every shape without a history steer, and those shapes exist', () => {
+    // The partition is a claim about the corpus: the steered shapes are
+    // excluded because a steer that holds in every arm has no churn to
+    // measure (rebalance.corpus.js). Both halves are asserted, so the filter
+    // can neither quietly widen (a steered shape leaking in dilutes the
+    // baseline under the floor above) nor become vacuous (no steered shape
+    // to exclude would make it a no-op nobody would notice).
+    expect(CHURN_SCENARIOS.every((scenario) => !scenario.steer)).toBe(true)
+    expect(SCENARIOS.length - CHURN_SCENARIOS.length).toBeGreaterThanOrEqual(2)
+    expect(CHURN_SCENARIOS.length).toBe(13)
+    expect(doc).toContain(`Thirteen shapes, **43 jobs held by somebody**`)
+  })
 
   it('POSITIVE CONTROL: the arms are not all the same, so the table has a shape', () => {
     // A doc-agreement test over rows that were all identical would pass on a

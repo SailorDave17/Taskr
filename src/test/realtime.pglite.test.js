@@ -81,11 +81,20 @@ describe('#342 — the publication 0037 fills, against a real Postgres', () => {
     // forgotten one look identical — and the reason is in UNWATCHED_TABLES.
     // #172 added `invitations` as the second, and it is asserted the same way:
     // read by the client, excused by name, and absent from the publication.
-    expect(Object.keys(UNWATCHED_TABLES)).toEqual(['member_split_seen', 'invitations'])
+    // #481 added `chore_assignment_history` as the third, asserted the same
+    // way: read by the client, excused by name (an echo of the published
+    // `chores` update it is written beside), and absent from the publication.
+    expect(Object.keys(UNWATCHED_TABLES)).toEqual([
+      'member_split_seen',
+      'invitations',
+      'chore_assignment_history',
+    ])
     expect(LIVE_TABLES).toContain('member_split_seen')
     expect(await publishedTables(db)).not.toContain('member_split_seen')
     expect(LIVE_TABLES).toContain('invitations')
     expect(await publishedTables(db)).not.toContain('invitations')
+    expect(LIVE_TABLES).toContain('chore_assignment_history')
+    expect(await publishedTables(db)).not.toContain('chore_assignment_history')
   })
 
   it('publishes inserts, updates AND deletes — the unfiltered DELETE binding rests on the last', async () => {

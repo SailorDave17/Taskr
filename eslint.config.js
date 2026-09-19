@@ -15,7 +15,16 @@ export default [
   // lint failed locally and passed in CI on the same commit — the shape cairn
   // records as a local gate running a different graph. Both lists are needed and
   // neither tool reads the other's.
-  { ignores: ['dist', 'dev-dist', 'node_modules', 'coverage', 'prodbundle*.js'] },
+  //
+  // `case-study/` is #452's output directory: `npm run case:screenshots` writes
+  // the PNGs there and builds its throwaway capture page under
+  // `case-study/.build/`. That build is bundled React — *measured*, linting it
+  // reported **99 errors** in the vendored chunk, none of them about this
+  // repo's own code. Same shape as `prodbundle*.js` above, and listed here for
+  // the same reason: `.gitignore` lists it and ESLint does not read that.
+  {
+    ignores: ['dist', 'dev-dist', 'node_modules', 'coverage', 'prodbundle*.js', 'case-study'],
+  },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx,mjs}'],

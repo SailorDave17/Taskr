@@ -2153,6 +2153,30 @@ correctly only because its rollback had deleted the account.
   and that GoTrue re-stamps `invited_at` is read off its source, not measured. The first organizer
   to press *Send the invitation again* is the first live reading.
 
+### A refusal that quotes a control — `provision-member`, #459
+
+**Not deployed at the time of writing.** The already-has-a-sign-in refusal now names *Create an
+invitation code*, the label the Who tab's button actually carries, instead of *Invite somebody by
+code*, which was never on screen. The sentence is in
+`supabase/functions/provision-member/handler.ts`, so **it takes effect only on
+`npm run deploy:function provision-member`** — until then production keeps answering with the
+wrong control name, and nothing in the bundle changes. This is a message-only change: no schema, no
+grant, no signature and no action list moves, so `check:live` and `probe:live-grants` are blind to
+it in both directions, and `check:deployed` is the instrument that says whether the deploy is owed.
+
+- **What holds it from returning**, which is the part #459 exists for: `src/test/gate.test.js`'s
+  `#459` block reads the handler's `(Who tab, "…")` aside and `src/components/Invitations.jsx`'s
+  rendered labels and asserts the first against the second. The expected string is extracted from
+  the component rather than written in the test, so a hand-copied label cannot satisfy it — rename
+  the button and the guard goes red until the refusal follows. *Proven by mutation, four predicted
+  first and four exact*: reverting to the old wrong name **1**, renaming the component's button
+  **2** (the positive control and the assertion), deleting the aside **1** (the positive control
+  alone), and dropping the *no invitation was sent* half **1**.
+- **The sentence had already been wrong twice** — *Use Reset sign-in instead* from #341 until
+  #191's review, then *Invite somebody by code* until this story, measured verbatim on production
+  (build `74aed25`) during #178. Both halves of the message are correct and kept: the row exists,
+  and no mail went.
+
 ### A suggested week is a person's — #480, 2026-09-16
 
 `0046` widens one check constraint and one trigger body on `member_capacity`, and nothing else:

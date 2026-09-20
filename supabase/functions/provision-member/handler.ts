@@ -616,9 +616,31 @@ export function createHandler(deps: ProvisionMemberDeps) {
           // to an account that belongs to another household's roster. An
           // established account joins a second household by redeeming a code
           // as itself (#173); this refusal is where an organizer learns that.
+          // THE QUOTED CONTROL NAME IS CHECKED — #459. This sentence has now
+          // named a control that does not exist TWICE: "Use Reset sign-in
+          // instead" until #191's review, then "Invite somebody by code" until
+          // this story, which was measured on production during #178. The Who
+          // tab's section reads *Invite someone* and its button reads *Create
+          // an invitation code*; neither spelling was ever on screen.
+          //
+          // Why the name is still quoted rather than described away: an
+          // organizer who has just been refused needs to be told what to press,
+          // and "use a code instead" without a control name is the wayfinding
+          // this refusal exists to give. The defect was never the quoting — it
+          // was that nothing held the quote to the surface.
+          //
+          // What holds it now: `gate.test.js`'s #459 block reads THIS file and
+          // `src/components/Invitations.jsx` and asserts the quoted string is a
+          // label that file actually renders. It cannot be satisfied by a
+          // second hand-written copy of the label, because the comparison is
+          // against the component's own source, not against a literal repeated
+          // here. The function is a Deno module that calls `Deno.serve` at
+          // import time and `src/` may not import from `supabase/functions/`
+          // (gate.test.js), so source text is the instrument available — the
+          // same one `edge-function-cors.test.js` uses, for the same reason.
           return refuse(
             `${address} already has a Taskr sign-in, so no invitation was sent. ` +
-              'Invite them with a code instead (Who tab, "Invite somebody by code") — they join as that account.',
+              'Invite them with a code instead (Who tab, "Create an invitation code") — they join as that account.',
             409,
           )
         }

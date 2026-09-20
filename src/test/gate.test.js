@@ -2270,6 +2270,102 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
 // same way the copies were: by reading the deployed source. A `createUser` that
 // came back would be an organizer choosing somebody's password again, and every
 // client test would stay green because the client never calls it.
+// #459 — a refusal that quotes a control must quote one that exists.
+//
+// `provision-member`'s already-has-a-sign-in refusal sends the organizer to a
+// control on the Who tab and names it in quotes. It has named a control that
+// does not exist TWICE: "Use Reset sign-in instead" from #341 until #191's
+// review, and then "Invite somebody by code" until this story — measured
+// verbatim on production (build `74aed25`) during #178, where the Who tab's
+// section read *Invite someone* and its button read *Create an invitation code*.
+//
+// WHY NOTHING CAUGHT IT. The sentence is in a Deno module that deploys
+// separately from the bundle, and the label is in a React component. No test on
+// either side can see the other: the function's own tests assert the refusal
+// against a literal copied from the function, and `Invitations.test.jsx` asserts
+// the button against a literal copied from the component. Both stay green while
+// the two drift apart, which is exactly what happened, twice.
+//
+// WHY THIS IS SOURCE TEXT. The handler calls `Deno.serve` at import time so it
+// cannot be imported here, and the block above forbids anything under `src/`
+// importing from `supabase/functions/`. Reading the file is the instrument
+// available — `edge-function-cors.test.js` reaches for it for the same reason
+// and records the same argument.
+//
+// WHAT MAKES THIS MORE THAN A SPELLING CHECK, and it is the whole point of
+// #459's criterion 2: the expected string is NOT written here. It is extracted
+// from `Invitations.jsx`'s own rendered labels, so a fix that hand-copied the
+// label into this file would be the same defect a third time. Rename the button
+// in the component and this goes red until the refusal follows.
+describe('#459 — the refusal names a control the Who tab actually renders', () => {
+  const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
+  const COMPONENT_SOURCE = 'src/components/Invitations.jsx'
+
+  const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8')
+
+  /**
+   * Every label the invitations card renders as a control or heading.
+   *
+   * Taken from the component's JSX text nodes rather than from a list written
+   * here. The shapes matched are a `<button>`'s text and the two heading
+   * elements the card uses; a label that moves between them still resolves.
+   */
+  const renderedLabels = () => {
+    const source = read(COMPONENT_SOURCE)
+    const labels = []
+    for (const [, text] of source.matchAll(/<(?:button|h2|h3)\b[^>]*?>\s*([^<{][^<]*?)\s*<\//g)) {
+      const cleaned = text.replace(/\s+/g, ' ').trim()
+      // A tag whose attributes span lines and contain `>` inside an arrow
+      // function (`onClick={() => onWithdraw(id)} disabled={busy} >`) is not
+      // parseable by a regex, and the greedy attempt swallows the attributes
+      // into the "label". Those fragments are dropped rather than tolerated:
+      // a junk entry in this list is a name the assertion below could match
+      // BY ACCIDENT, which would turn the guard into one that passes on a
+      // wrong quote. Measured on this component: three of eight entries were
+      // such fragments before this filter.
+      if (!cleaned || /[{}=]|\)\s*}/.test(cleaned)) continue
+      labels.push(cleaned)
+    }
+    return labels
+  }
+
+  /** Every control name the handler quotes inside a `(Who tab, "…")` aside. */
+  const quotedControls = () => {
+    const source = read(FUNCTION_SOURCE)
+    return [...source.matchAll(/\(Who tab,\s*"([^"]+)"\)/g)].map((m) => m[1])
+  }
+
+  it('POSITIVE CONTROL: the component renders labels and the handler quotes one', () => {
+    // Without this, both assertions below pass vacuously against a renamed
+    // file, a changed JSX shape, or a refusal whose aside was deleted — the
+    // failure mode #242's block above records as the guard staying correct
+    // while the hazard moves next door.
+    const labels = renderedLabels()
+    expect(labels.length, 'no labels parsed out of the invitations card').toBeGreaterThan(0)
+    expect(labels).toContain('Create an invitation code')
+    expect(quotedControls().length, 'the refusal quotes no control at all').toBeGreaterThan(0)
+  })
+
+  it('every control the refusal quotes is a label the Who tab renders', () => {
+    const labels = renderedLabels()
+    const strays = quotedControls().filter((name) => !labels.includes(name))
+    expect(
+      strays,
+      `the refusal sends an organizer to a control that does not exist: ${strays.join(', ')}. ` +
+        `The invitations card renders: ${labels.join(' | ')}`,
+    ).toEqual([])
+  })
+
+  it('the two facts the refusal carries are both still there', () => {
+    // #459 criterion 4. The sentence must keep saying that the sign-in exists
+    // AND that no mail went; a rewrite that drops either half is the defect
+    // #178 measured the refusal against in the first place.
+    const source = read(FUNCTION_SOURCE)
+    expect(source).toMatch(/already has a Taskr sign-in/)
+    expect(source).toMatch(/no invitation was sent/)
+  })
+})
+
 describe('#242 → #191 — the synthetic address has one copy, and the function mints nothing', () => {
   const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
 

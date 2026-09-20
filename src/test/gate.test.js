@@ -1989,7 +1989,13 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(6)
+    //
+    // SEVEN cards and SIX forms since #432 (2026-09-19): the seventh card is
+    // *Delete your account*, shown to somebody signed in with no household —
+    // departure, not capability, and it carries no form (two buttons and a
+    // sentence), which is why the form count did not move. It asks nothing
+    // about what a person can do, so #37's floor holds as stated.
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(7)
     expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(6)
   })
 

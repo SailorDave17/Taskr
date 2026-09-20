@@ -95,6 +95,10 @@ export default function Onboarding({
   googleSignIn = null,
   onSignUp,
   onSignOut,
+  // #432 — delete your own sign-in, from the one screen where a signed-in
+  // person is in no live household. Optional so every earlier test renders
+  // unchanged; App always passes it.
+  onDeleteAccount = null,
   onJoin,
   onHoldInvitation,
   // #155 — the reset request. Optional so the #154 tests render unchanged;
@@ -150,6 +154,8 @@ export default function Onboarding({
   // and what an ACCEPTED request came back with. A refusal goes on the error
   // strip like every other refusal on this screen.
   const [resetEmail, setResetEmail] = useState('')
+  // #432 — deleting the account is two taps, the Remove idiom.
+  const [confirmingDeleteAccount, setConfirmingDeleteAccount] = useState(false)
   const [resetNote, setResetNote] = useState(null)
   const [localError, setError] = useState(null)
   // #173 — the App-side error this screen has already answered. The prop has
@@ -396,6 +402,60 @@ export default function Onboarding({
               ) : null}
             </div>
           </form>
+        </section>
+      ) : null}
+
+      {/* #432 — the one place the delete itself happens: signed in, in no live
+          household, nothing left to leave. Below the household form because a
+          person who is done with Taskr is the rare visitor here; the invited
+          and the new organizer are the usual ones. Confirm-in-place, the
+          Remove idiom, and the confirm says it is immediate (owner decision at
+          pickup, 2026-09-19: nothing here is restorable, so no grace period)
+          and what Taskr cannot undo at Google. */}
+      {signedIn && onDeleteAccount ? (
+        <section className="card" aria-labelledby="delete-account-heading">
+          <h2 id="delete-account-heading" className="card__heading">
+            Delete your account
+          </h2>
+          {confirmingDeleteAccount ? (
+            <div className="row">
+              <p className="card__note" data-testid="delete-account-note">
+                Your sign-in is deleted now, and cannot be restored; you can create a new
+                account any time. If you were in a household that is being deleted, your
+                calendar connection there is disconnected first. Taskr cannot remove a Google
+                sign-in permission; take Taskr off your Google account&rsquo;s third-party
+                access yourself if you used one.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingDeleteAccount(false)
+                  run(onDeleteAccount)
+                }}
+                disabled={busy}
+              >
+                Delete my account?
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingDeleteAccount(false)}
+                disabled={busy}
+              >
+                Keep it
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDeleteAccount(true)}
+              disabled={busy}
+            >
+              Delete my account
+            </button>
+          )}
         </section>
       ) : null}
 
@@ -804,6 +864,8 @@ Onboarding.propTypes = {
   googleSignIn: PropTypes.bool,
   onSignUp: PropTypes.func.isRequired,
   onSignOut: PropTypes.func,
+  // #432. Optional for the same reason; App always passes it.
+  onDeleteAccount: PropTypes.func,
   // #173. Optional so the #154 tests render without a fixture edit; App
   // always passes all three, and gate.test.js says so.
   onJoin: PropTypes.func,

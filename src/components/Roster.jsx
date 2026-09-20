@@ -1601,6 +1601,15 @@ export default function Roster({
   // #431 — leaving, and the organizer's hand-over. Optional in the #166 shape.
   onLeaveHousehold = null,
   onHandOverAndLeave = null,
+  // #432 — whether the app offers account deletion at all. A boolean and not
+  // a handler, because on THIS surface the card never deletes anything: a
+  // person on the Who tab is in a live household, and the route out is Leave
+  // (whose last leave deletes the sign-in, #431). The handler lives on the
+  // no-household screen (Onboarding). Optional in the #166 shape.
+  accountDeletionOffered = false,
+  // #432 — how many households this person is in, for the sentence that says
+  // when their sign-in goes. App counts them; the roster sees one.
+  householdCount = 1,
   // #179 — the organizer hands the role over and STAYS. Optional in the #166
   // shape; drawn on each other signed-in row (MemberRow).
   onTransferHousehold = null,
@@ -1700,6 +1709,17 @@ export default function Roster({
   useEffect(() => {
     if (confirmingDelete) deleteConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }, [confirmingDelete])
+  // #432 — deleting your account, from inside a household: the confirm says
+  // that the sign-in goes with the last leave and routes into the Leave
+  // confirm above, rather than carrying a second copy of what leaving costs.
+  // Same two-tap idiom and the same scroll, since it sits lowest of all.
+  const [confirmingDeleteAccount, setConfirmingDeleteAccount] = useState(false)
+  const deleteAccountConfirmRef = useRef(null)
+  useEffect(() => {
+    if (confirmingDeleteAccount) {
+      deleteAccountConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [confirmingDeleteAccount])
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -2434,6 +2454,63 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #432 — deleting your own account, last of the three ways out. From
+          inside a household it is a ROUTE, not a delete: the owner's decision
+          at pickup (2026-09-19) was that the person is taken through leaving
+          first, and #431's leave already deletes a last-claim sign-in on the
+          spot, so the confirm names what goes and opens the Leave confirm —
+          whose organizer form already offers hand-over or delete (#427). The
+          delete itself happens only on the no-household screen. */}
+      {accountDeletionOffered && me && onLeaveHousehold ? (
+        <section className="card" aria-labelledby="delete-account-heading">
+          <h2 id="delete-account-heading" className="card__heading">
+            Delete your account
+          </h2>
+          {confirmingDeleteAccount ? (
+            <div className="row" ref={deleteAccountConfirmRef}>
+              <p className="card__note" data-testid="delete-account-note">
+                Your sign-in is deleted when you leave your last household
+                {householdCount > 1 ? `, and you are in ${householdCount}` : ''}.{' '}
+                {isOrganizer
+                  ? `You organize ${household.name}, so leaving it means handing it to somebody or deleting it.`
+                  : `Leave ${household.name} first.`}{' '}
+                Taskr cannot remove a Google sign-in permission; take Taskr off your Google
+                account&rsquo;s third-party access yourself if you used one.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingDeleteAccount(false)
+                  setSuccessorId(successors[0]?.id ?? '')
+                  setConfirmingLeave(true)
+                }}
+                disabled={busy}
+              >
+                Leave this household first
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingDeleteAccount(false)}
+                disabled={busy}
+              >
+                Keep my account
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDeleteAccount(true)}
+              disabled={busy}
+            >
+              Delete my account
+            </button>
+          )}
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -2484,4 +2561,6 @@ Roster.propTypes = {
   onTransferHousehold: PropTypes.func,
   onLeaveHousehold: PropTypes.func,
   onHandOverAndLeave: PropTypes.func,
+  accountDeletionOffered: PropTypes.bool,
+  householdCount: PropTypes.number,
 }

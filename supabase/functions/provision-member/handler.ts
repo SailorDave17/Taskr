@@ -367,6 +367,23 @@ export function createHandler(deps: ProvisionMemberDeps) {
     // ---- 3: the things that genuinely need service_role ----------------------
 
     if (action === 'revoke') {
+      // #432 — never the organizer's OWN row. Every check above has passed
+      // for it: the caller can see the row and organizes its household. Until
+      // this line only the hidden Remove button (Roster's `isMe`) stood between
+      // an organizer and deleting their own last-claim sign-in, which would
+      // leave the household with an organizer row nobody can claim (#427's
+      // code map). The member DELETE policy (0016) refuses the organizer's own
+      // row already; this is the same refusal for the auth half, and the
+      // sentence names the two routes that exist instead — #431's hand-over
+      // and #430's delete, both on the Who tab. Before the no-sign-in shortcut
+      // below, because an organizer's own row always has a sign-in.
+      if (member.claimed_by === caller.user.id) {
+        return refuse(
+          'You cannot revoke your own sign-in. Hand the household over, or delete it, from the Who tab.',
+          409,
+        )
+      }
+
       // #247/#262 — the auth half of removing somebody from the roster. The
       // member ROW is deliberately NOT deleted here: the client deletes it
       // through RLS after this answers, so `members_delete_same_household`

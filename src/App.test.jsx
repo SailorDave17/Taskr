@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -150,6 +150,11 @@ const calendarApi = {
   // rule AC 1's trigger is built out of.
   listBusyWeeks: vi.fn(),
   fetchBusyWeek: vi.fn(),
+  // #480 — the prior weeks' read. `weeklyHistory` and `suggestCapacity` stay
+  // REAL for the standing reason: pure, own tests, and a stub could disagree
+  // with the figure the roster draws. What App owes is ONE read per refresh
+  // and a first paint that does not wait for it.
+  listBusyHistory: vi.fn(),
   // #99 — the impure one. `revokeNoteFor` stays REAL (importActual below) for
   // the standing reason: it is pure, it has its own tests, and the sentence a
   // member reads about Google should be the one the app words rather than a
@@ -416,6 +421,9 @@ beforeEach(() => {
   calendarApi.listCalendarConnections.mockResolvedValue([])
   calendarApi.completeConnect.mockResolvedValue({ ok: true })
   calendarApi.listBusyWeeks.mockResolvedValue([])
+  // #480 — no prior weeks read, which with the fixtures' undated members is
+  // no history at all; the #480 tests give their members a `created_at`.
+  calendarApi.listBusyHistory.mockResolvedValue([])
   calendarApi.fetchBusyWeek.mockResolvedValue({ ok: true })
   calendarApi.disconnectCalendar.mockResolvedValue({ ok: true, memberId: 'm1', revoked: true })
   // #101 — nothing imported yet, which is the ordinary state; the import tests
@@ -769,7 +777,7 @@ describe('when nobody is signed in', () => {
     fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
 
-    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821' })
+    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: true })
     // The household's surfaces are up, and nothing onboarding-shaped remains.
     expect(await screen.findByRole('navigation', { name: /household surfaces/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
@@ -816,6 +824,245 @@ describe('#304 — Continue with Google, from the sign-in screen', () => {
     expect(api.createHousehold).not.toHaveBeenCalled()
     expect(api.addMember).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /continue with google/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('#343 — the website’s link opens on start-your-household', () => {
+  // `https://taskr.madcowhq.com/?start` — a query flag on the root, because
+  // `/start` is a 404 on the deployed site (no router, no rewrite; #175/#176
+  // dropped). Read once at boot, stripped at once, acted on only when the URL
+  // carried nothing else the app reads.
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const ORIGIN = 'https://taskr.example.test'
+
+  let replaceState
+  let realLocation
+  let realHistory
+
+  /**
+   * A URL to boot on, and a `replaceState` that MOVES the URL the way a
+   * browser's does. The harnesses above use a recording `vi.fn()` and read its
+   * calls; that is not enough here, because the claim under test is that the
+   * readers running AFTER the strip see a URL without the flag — and a fake
+   * that records the strip while leaving `location.search` as it was would let
+   * a strip placed after those reads pass every assertion below.
+   */
+  const atUrl = (search = '', hash = '') => {
+    const location = { origin: ORIGIN, pathname: '/', search, hash }
+    replaceState = vi.fn((_state, _title, url) => {
+      const next = new URL(url, ORIGIN)
+      location.pathname = next.pathname
+      location.search = next.search
+      location.hash = next.hash
+    })
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      writable: true,
+      value: location,
+    })
+    Object.defineProperty(globalThis, 'history', {
+      configurable: true,
+      writable: true,
+      value: { replaceState },
+    })
+  }
+
+  beforeEach(() => {
+    realLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+    realHistory = Object.getOwnPropertyDescriptor(globalThis, 'history')
+    atUrl('')
+  })
+
+  afterEach(() => {
+    if (realLocation) Object.defineProperty(globalThis, 'location', realLocation)
+    if (realHistory) Object.defineProperty(globalThis, 'history', realHistory)
+  })
+
+  // "Start a household" is a BUTTON on the sign-in card (the link under the
+  // form), a HEADING on the account card — and, signed in, the HEADING of the
+  // household card too. So the heading alone names the account card only while
+  // signed out; its absence is asserted by the fields only it carries.
+  const accountHeading = () => screen.findByRole('heading', { name: /start a household/i })
+  const signInButton = () => screen.findByRole('button', { name: /^sign in$/i })
+  const noAccountCard = () => {
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument()
+  }
+
+  it('POSITIVE CONTROL: the bare root, signed out, still opens on sign-in and touches the URL not at all', async () => {
+    // Without this, every "the account card is shown" assertion below passes
+    // against an app that always shows it, and every strip assertion against
+    // one that strips on every boot.
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+
+  it('AC 1: `?start` with no session opens on the account card, framed as starting a household, with sign-in one link away', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start')
+    await renderApp()
+
+    expect(await accountHeading()).toBeInTheDocument()
+    expect(screen.getByText(/first, your own account/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/your email/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
+    // Not the sign-in form — the inversion of #154's weights, for this arrival.
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^sign in$/i })).not.toBeInTheDocument()
+
+    // The way back, for a visitor who has an account after all.
+    fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }))
+    expect(await signInButton()).toBeInTheDocument()
+  })
+
+  it('AC 1: the flag is read once and stripped, so a reload does not re-arm it', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start')
+    await renderApp()
+    await accountHeading()
+
+    // ONE strip, to the bare root — nothing else was on the URL to keep.
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+    // And what the address bar now holds is what the next boot would read.
+    expect(globalThis.location.search).toBe('')
+    expect(globalThis.location.hash).toBe('')
+  })
+
+  it('AC 2: a member who opens the link lands in their household, exactly as without it', async () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    atUrl('?start')
+    await renderApp('Who')
+
+    await screen.findByRole('region', { name: /who is in the household/i })
+    noAccountCard()
+    expect(screen.queryByTestId('signed-in-note')).not.toBeInTheDocument()
+    // Never signed out, never a second household — #166 is the deliberate path
+    // for that, and this flag is not it.
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+    // Stripped all the same: the flag is spent whoever opened it.
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/')
+  })
+
+  it('AC 2: a signed-in person with no household lands on Name the household, flag or no flag', async () => {
+    api.listHouseholds.mockResolvedValue([])
+    atUrl('?start')
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByLabelText(/household name/i)).toBeInTheDocument()
+    noAccountCard()
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(api.createHousehold).not.toHaveBeenCalled()
+  })
+
+  it('AC 3: the return leg needs no flag — a signed-in person with no household gets Name the household on the bare root', async () => {
+    // The confirmation link lands on the origin (`confirmationRedirectTo`
+    // reads the origin and nothing else), so this boot is what a person gets
+    // after following it from ANY device: a session, no household, no flag.
+    api.listHouseholds.mockResolvedValue([])
+    atUrl('')
+    await renderApp()
+
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(screen.getByLabelText(/household name/i)).toBeInTheDocument()
+    noAccountCard()
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+
+  it('AC 4: a sign-in return in the FRAGMENT beside the flag is handled first, and the flag is dropped', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl(
+      '?start',
+      '#error=access_denied&error_code=provider_refused&error_description=the+user+denied+access',
+    )
+    await renderApp()
+
+    // The sign-in screen, with the return's own sentence — not the account card.
+    expect(await signInButton()).toBeInTheDocument()
+    expect(screen.getByText(/google did not sign you in/i)).toBeInTheDocument()
+    noAccountCard()
+    // Two strips, in order: the flag alone, leaving the fragment for the reader
+    // that owns it; then the fragment, once read.
+    expect(replaceState.mock.calls).toEqual([
+      [
+        null,
+        '',
+        '/#error=access_denied&error_code=provider_refused&error_description=the+user+denied+access',
+      ],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a bad-flow-state return in the QUERY beside the flag is handled first, and the flag is dropped', async () => {
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start&error=invalid_request&error_code=bad_oauth_state')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    expect(screen.getByText(/took too long or was already used/i)).toBeInTheDocument()
+    noAccountCard()
+    // The sign-in reader saw its return whole: the first strip took only the flag.
+    expect(replaceState.mock.calls).toEqual([
+      [null, '', '/?error=invalid_request&error_code=bad_oauth_state'],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a calendar return beside the flag is handled first — the code reaches the exchange, and the flag is dropped', async () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me])
+    calendarApi.completeConnect.mockResolvedValue({ ok: true })
+    atUrl('?start&code=the-code&state=the-state')
+    await renderApp()
+
+    await waitFor(() => expect(calendarApi.completeConnect).toHaveBeenCalledTimes(1))
+    // Exactly what Google sent — `readConsentReturn` never saw the flag.
+    expect(calendarApi.completeConnect).toHaveBeenCalledWith({
+      code: 'the-code',
+      error: null,
+      state: 'the-state',
+    })
+    noAccountCard()
+    expect(replaceState.mock.calls).toEqual([
+      [null, '', '/?code=the-code&state=the-state'],
+      [null, '', '/'],
+    ])
+  })
+
+  it('AC 4: a calendar return beside the flag with NO session still yields to the return', async () => {
+    // A consent that came back to an expired session. The signed-out boot does
+    // not exchange the code (it reads nothing), and the account card is still
+    // not the answer: this person was connecting a calendar, not arriving from
+    // the website. Only the flag is stripped — the consent stays on the URL for
+    // the reader that owns it, as it always has on a signed-out boot.
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start&code=the-code&state=the-state')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
+    expect(calendarApi.completeConnect).not.toHaveBeenCalled()
+    expect(replaceState.mock.calls).toEqual([[null, '', '/?code=the-code&state=the-state']])
+  })
+
+  it('AC 4: an auth link beside the flag is not a website arrival, even when it left no session', async () => {
+    // `readAuthCallback` finds the token in the fragment whatever the session
+    // did; a person following an invitation is not a visitor from the website,
+    // so the flag yields to it and the sign-in screen is what they get.
+    api.currentSession.mockResolvedValue(null)
+    atUrl('?start', '#access_token=t&refresh_token=r&expires_in=3600&token_type=bearer&type=invite')
+    await renderApp()
+
+    expect(await signInButton()).toBeInTheDocument()
+    noAccountCard()
   })
 })
 
@@ -3545,7 +3792,8 @@ describe('connecting a calendar (#95)', () => {
     expect(assign).toHaveBeenCalledTimes(1)
     const url = new URL(assign.mock.calls[0][0])
     expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
-    expect(url.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.freebusy')
+    // `openid` names the consenting Google account, and reads nothing (#474).
+    expect(url.searchParams.get('scope')).toBe('openid https://www.googleapis.com/auth/calendar.freebusy')
     // Built from where the app is running, so a preview and the custom domain
     // each ask for themselves rather than for a hard-coded host.
     expect(url.searchParams.get('redirect_uri')).toBe('https://taskr.example.test/')
@@ -6547,7 +6795,7 @@ describe('importing a calendar event as a chore (#101)', () => {
     expect(assign).toHaveBeenCalledTimes(1)
     const url = new URL(assign.mock.calls[0][0])
     // `startConnect` is REAL here, so this is the URL the app would send.
-    expect(url.searchParams.get('scope')).toBe(READONLY)
+    expect(url.searchParams.get('scope')).toBe(`openid ${READONLY}`)
     expect(url.searchParams.get('include_granted_scopes')).toBe('true')
     expect(url.searchParams.get('prompt')).toBe('consent')
     // The household on screen travels with the state, so the widened token
@@ -9420,5 +9668,692 @@ describe('#440 — a session that ends here lands on the sign-in form, and nothi
     // Joined again — the control that the screen below is a household at all.
     expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
     expect(screen.queryByText(SKIPPED)).not.toBeInTheDocument()
+  })
+})
+
+// #483 — the offer to install Taskr, in the shell. The DECISION (captured
+// event, already-installed gate, 30-day "Not now") is `installOffer.test.js`'s
+// subject; what this file proves is where the line lands and what the two
+// buttons reach, through the real shell. The controller is faked in the shape
+// `startInstallOffer` returns, driven by hand.
+describe('#483 — the install offer, in the shell', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+  }
+  const makeOffer = (offered = true) => {
+    const listeners = new Set()
+    const offer = {
+      offered,
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      isOffered: () => offer.offered,
+      install: vi.fn(),
+      dismiss: vi.fn(),
+      set(next) {
+        offer.offered = next
+        for (const listener of listeners) listener()
+      },
+    }
+    return offer
+  }
+  const renderWithOffer = async (offer) => {
+    await act(async () => void render(<App installOffer={offer} />))
+  }
+  const line = () => screen.queryByTestId('install-offer')
+
+  const joined = () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+  }
+
+  it('AC 1: with a household showing, one line offers Install and Not now, in the shell and not over anything', async () => {
+    joined()
+    const offer = makeOffer(true)
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    const strip = line()
+    expect(strip).toBeInTheDocument()
+    expect(within(strip).getByText(/install taskr on this phone/i)).toBeInTheDocument()
+    // In the flow of the shell, above the tab strip, and not a modal.
+    expect(strip.closest('main.shell')).not.toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(strip.compareDocumentPosition(screen.getByRole('button', { name: 'Who' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    // The two answers reach the controller, and nothing else does.
+    await act(async () => void fireEvent.click(within(strip).getByRole('button', { name: /^install$/i })))
+    expect(offer.install).toHaveBeenCalledTimes(1)
+    expect(offer.dismiss).not.toHaveBeenCalled()
+    await act(async () => void fireEvent.click(within(strip).getByRole('button', { name: /not now/i })))
+    expect(offer.dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('follows the controller: the line appears when the browser fires, and goes when it is answered', async () => {
+    joined()
+    const offer = makeOffer(false)
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    expect(line()).not.toBeInTheDocument()
+    await act(async () => offer.set(true))
+    expect(line()).toBeInTheDocument()
+    await act(async () => offer.set(false))
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('never on the sign-in screen, even while the browser is offering', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderWithOffer(makeOffer(true))
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('never on the onboarding screen, even while the browser is offering', async () => {
+    // The shared default: a session and no household.
+    await renderWithOffer(makeOffer(true))
+    expect(await screen.findByTestId('signed-in-note')).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('survives the remount a sign-out causes: the next person, joined, is offered again', async () => {
+    // #440 remounts the app on session end; the controller outlives it and
+    // the subscription follows the new instance.
+    joined()
+    let session = { user: { id: 'person-a' } }
+    api.currentSession.mockImplementation(async () => session)
+    api.sessionIsGone.mockImplementation(async () => session === null)
+    api.signOut.mockImplementation(async () => {
+      session = null
+    })
+    const offer = makeOffer(true)
+    await renderWithOffer(offer)
+    await act(async () => void fireEvent.click(await screen.findByRole('button', { name: 'Who' })))
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(line()).toBeInTheDocument()
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign out$/i })))
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+    api.signIn.mockImplementation(async () => {
+      session = { user: { id: 'person-a' } }
+      return { user: { id: 'person-a' } }
+    })
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+    expect(await screen.findByRole('button', { name: 'Who' })).toBeInTheDocument()
+    expect(line()).toBeInTheDocument()
+  })
+
+  it('with no controller at all (the tests’ default), nothing is shown and nothing is stored', async () => {
+    joined()
+    await renderApp('Who')
+    await screen.findByRole('region', { name: /who is in the household/i })
+    expect(line()).not.toBeInTheDocument()
+    expect(window.localStorage.length).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #478 — a household switch never leaves an empty page.
+//
+// The mechanism was MEASURED on the owner's account on production (2026-09-17,
+// recorded on the issue): `refresh()` landed household B's roster a round trip
+// before B's chores, Split handed `allocate()` B's members with A's chores,
+// `place()` threw on a chore held by somebody outside that roster, and with no
+// error boundary React unmounted the whole app. These tests hold the two
+// fixes — everything lands in one render, and a render throw costs a surface
+// rather than the page — plus the criteria written before the mechanism was
+// known.
+// ---------------------------------------------------------------------------
+describe('#478 — switching households never leaves an empty page', () => {
+  // UUIDs, not the readable ids other describes use: the stored choice is
+  // written only for a uuid (`writeActiveHouseholdChoice`), and the failed-
+  // switch test below reads it back.
+  const HOME = { id: '4780a000-0000-4000-8000-00000000000a', name: 'Placeholder Household', organizer_member_id: 'm-a1', timezone: 'America/New_York' }
+  const AWAY = { id: '4780b000-0000-4000-8000-00000000000b', name: 'Placeholder Other Household', organizer_member_id: 'm-b1', timezone: 'America/New_York' }
+  const STORED_CHOICE = 'taskr.activeHousehold'
+  const invitationRow = (id) => ({
+    id,
+    household_id: HOME.id,
+    created_by_member_id: 'm-a1',
+    created_at: '2026-09-10T19:04:00.000Z',
+    expires_at: '2099-09-17T19:04:00.000Z',
+    withdrawn_at: null,
+    redeemed_at: null,
+    redeemed_by_member_id: null,
+  })
+  const rosterHome = [
+    { id: 'm-a1', household_id: HOME.id, display_name: 'Placeholder One', weekly_minutes: 300, claimed_by: 'person-a' },
+    { id: 'm-a2', household_id: HOME.id, display_name: 'Placeholder Two', weekly_minutes: 60, claimed_by: 'person-b' },
+  ]
+  const rosterAway = [
+    { id: 'm-b2', household_id: AWAY.id, display_name: 'Placeholder Three', weekly_minutes: 120, claimed_by: 'person-a' },
+    { id: 'm-b1', household_id: AWAY.id, display_name: 'Placeholder Other Organizer', weekly_minutes: 200, claimed_by: 'person-b' },
+  ]
+  // A chore DONE THIS WEEK and held by a member who exists only in HOME — the
+  // shape of the owner's chore `7875e977` (done, held by `992be3b7`). Done
+  // matters: Split's reachability probe frees outstanding work and pins only
+  // done work to its holder, so only a done chore reaches `place()`'s refusal
+  // when it is paired with AWAY's roster. Written first as an OUTSTANDING
+  // chore, the measured-mechanism test below passed with the fix reverted.
+  const chore = (id, householdId, holder) => ({
+    id,
+    household_id: householdId,
+    title: 'Placeholder Chore',
+    expected_minutes: 30,
+    due_on: '2026-09-18',
+    created_at: '2026-09-10T00:00:00Z',
+    completed_at: new Date().toISOString(),
+    completed_by_member_id: holder,
+    missed_at: null,
+    assigned_member_id: holder,
+    assigned_source: 'manual',
+    repeat_kind: 'none',
+    actual_minutes: 30,
+    source: 'manual',
+  })
+  const choresHome = [chore('c-home', HOME.id, 'm-a2')]
+  const choresAway = [chore('c-away', AWAY.id, 'm-b1')]
+
+  const switcher = () => screen.getByRole('combobox', { name: 'Household' })
+  const tabs = () => screen.queryByRole('navigation', { name: 'Household surfaces' })
+  const switchTo = async (id) =>
+    act(async () => void fireEvent.change(switcher(), { target: { value: id } }))
+
+  /** A promise the test resolves or rejects by hand. */
+  function deferred() {
+    let resolve
+    let reject
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([HOME, AWAY])
+    api.listMembers.mockImplementation(async (id) => (id === HOME.id ? rosterHome : id === AWAY.id ? rosterAway : []))
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : id === AWAY.id ? choresAway : []))
+  })
+
+  it('MEASURED MECHANISM: while the new household’s chores are in flight, the page shows the old household whole, never the new roster beside the old chores', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher()).toHaveValue(HOME.id)
+
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    // The roster read for AWAY has answered; its chores have not. Under the
+    // measured code the roster landed here and Split threw.
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    // Still the household that was on screen: nothing of AWAY has landed.
+    expect(switcher()).toHaveValue(HOME.id)
+
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(tabs()).toBeInTheDocument()
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('MEASURED MECHANISM, the other way round: a LATER read in flight lands nothing either, so the new chores never sit beside the old roster', async () => {
+    // The first test holds the chores read, so it cannot see chores landing
+    // early. This holds the exclusions read, which comes after the chores:
+    // if the chores landed on their own, HOME's roster would sit beside
+    // AWAY's done chore held by `m-b1`, and Split would throw.
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    const held = deferred()
+    exclusionsApi.listExclusions.mockImplementation((ids) =>
+      ids.includes('m-b1') ? held.promise : Promise.resolve([]),
+    )
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(choresApi.listChores).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    await act(async () => held.resolve([]))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: mid-switch on the Split view, the tab strip and the switcher stay on screen, disabled, on the household still shown', async () => {
+    // On Split, where the measured throw happens — review-fanout found the
+    // first draft of this test ran on Chores, where nothing can throw, and
+    // asserted only what `busy` already guaranteed before the fix.
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toBeDisabled()
+    expect(switcher()).toHaveValue(HOME.id)
+    expect(screen.getByRole('button', { name: 'Split' })).toHaveAttribute('aria-current', 'page')
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).not.toBeDisabled())
+    expect(switcher()).toHaveValue(AWAY.id)
+  })
+
+  it('a failed switch puts the choice back: the stored choice and the next read follow the household on screen', async () => {
+    // review-fanout, 2026-09-17: the read landed nothing, HOME stayed on
+    // screen, and the remembered choice still said AWAY — so the next
+    // background read swapped to AWAY with nobody asking.
+    await renderApp('Who')
+    await screen.findByRole('combobox', { name: 'Household' })
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    expect(window.localStorage.getItem(STORED_CHOICE)).toBe(HOME.id)
+
+    // The next read — the roster's own Refresh here, a focus or an echo in
+    // life — reads HOME, not the household that failed.
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : choresAway))
+    const readsBefore = api.listMembers.mock.calls.length
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^refresh$/i })))
+    await waitFor(() => expect(api.listMembers.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOME.id)
+    expect(switcher()).toHaveValue(HOME.id)
+  })
+
+  it('a switch in flight leaves the household on screen whole: its invitations stay until the new household lands', async () => {
+    // review-fanout, 2026-09-17: the choice cleared HOME's list at once,
+    // and with the landing deferred HOME's organizer card read as though
+    // its codes had been withdrawn for the whole switch.
+    invitationsApi.listInvitations.mockImplementation(async (id) => (id === HOME.id ? [invitationRow('inv-478')] : []))
+    await renderApp('Who')
+    expect(await screen.findByTestId('invitation-inv-478')).toBeInTheDocument()
+    const held = deferred()
+    choresApi.listChores.mockImplementation((id) => (id === AWAY.id ? held.promise : Promise.resolve(choresHome)))
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(api.listMembers).toHaveBeenLastCalledWith(AWAY.id))
+    await act(async () => {})
+    expect(screen.getByTestId('invitation-inv-478')).toBeInTheDocument()
+    // And when AWAY lands, HOME's code goes with HOME.
+    await act(async () => held.resolve(choresAway))
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('invitation-inv-478')).not.toBeInTheDocument()
+  })
+
+  it('AC 2: a chores read that rejects mid-switch keeps the shell and the household that was showing, with the error visible once, beside the surface', async () => {
+    await renderApp('Chores')
+    await screen.findByRole('combobox', { name: 'Household' })
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+    // The surface is up, so it says it; the shell's strip does not repeat it
+    // (owner decision 2026-09-17: the strip is for when no surface is up).
+    expect(screen.queryByTestId('shell-error')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/placeholder refusal/)).toHaveLength(1)
+  })
+
+  it('AC 2 / AC 6: with no surface up to say it, a read that rejects is shown in the shell’s own strip — and removing the strip reddens this', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // HOME's Split has failed (the render-failure card is up), so no surface
+    // draws `error`. A switch whose chores read rejects lands nothing, HOME's
+    // failed Split stays keyed as it was, and the only place the refusal can
+    // appear is the strip.
+    choresApi.listChores.mockImplementation((id) =>
+      id === HOME.id
+        ? Promise.resolve([chore('c-orphan', HOME.id, 'm-nobody')])
+        : Promise.reject(new Error('loading the chores: placeholder refusal')),
+    )
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    await switchTo(AWAY.id)
+    const strip = await screen.findByTestId('shell-error')
+    expect(strip).toHaveTextContent('placeholder refusal')
+    expect(strip).toHaveAttribute('role', 'alert')
+    expect(failure).not.toContainElement(strip)
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(HOME.id)
+  })
+
+  it('AC 2: an invitations read that rejects after the household landed keeps the new household on screen, with the error visible', async () => {
+    // person-a organises neither fixture household here, so make them AWAY's
+    // organizer: the invitations read happens only for the organizer.
+    api.listHouseholds.mockResolvedValue([HOME, { ...AWAY, organizer_member_id: 'm-b2' }])
+    invitationsApi.listInvitations.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the invitations: placeholder refusal')) : Promise.resolve([]),
+    )
+    await renderApp('Who')
+    await screen.findByRole('combobox', { name: 'Household' })
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(invitationsApi.listInvitations).toHaveBeenCalledWith(AWAY.id)
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toHaveValue(AWAY.id)
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+  })
+
+  it('AC 3: a switch whose household read comes back empty leaves the joined state for the household form, never an empty shell', async () => {
+    await renderApp()
+    await screen.findByRole('combobox', { name: 'Household' })
+    api.listHouseholds.mockResolvedValue([])
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(tabs()).not.toBeInTheDocument())
+    expect(screen.getByRole('region', { name: /start a household/i })).toBeInTheDocument()
+  })
+
+  // The three tests below throw during render ON PURPOSE. React and jsdom both
+  // report a caught render error on the console; silenced here so the run
+  // output carries only what is unexpected.
+  const quietRenderErrors = () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    return () => spy.mockRestore()
+  }
+
+  it('AC 6: a surface that throws while rendering costs only that surface — the shell and the tabs stay, with the reason and a Reload', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // A done chore held by somebody in NO roster, in the same read: `place()`
+    // refuses it on an ordinary load. Remove the surface boundary and the
+    // root one catches it instead — with no tabs and a different heading.
+    choresApi.listChores.mockResolvedValue([chore('c-orphan', HOME.id, 'm-nobody')])
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    expect(failure).toHaveTextContent(/could not show this household/i)
+    expect(within(failure).getByRole('alert')).toHaveTextContent(/taskr hit a problem showing this/i)
+    expect(within(failure).getByTestId('render-failure-detail')).toHaveTextContent(
+      /assigned to unknown member m-nobody/,
+    )
+    expect(within(failure).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(tabs()).toBeInTheDocument()
+    expect(switcher()).toBeInTheDocument()
+  })
+
+  it('AC 6: the failure clears when another household is chosen — the next move is the retry', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    choresApi.listChores.mockImplementation(async (id) =>
+      id === HOME.id ? [chore('c-orphan', HOME.id, 'm-nobody')] : choresAway,
+    )
+    await renderApp()
+    await screen.findByTestId('render-failure')
+    await switchTo(AWAY.id)
+    await waitFor(() => expect(switcher()).toHaveValue(AWAY.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+
+    // Back on HOME with its data mended, the SAME boundary key is up again
+    // with a working surface. A read that fails now is the surface's to say,
+    // so the shell's strip must not speak over it: the failure it answered
+    // belonged to the boundary that has since gone.
+    choresApi.listChores.mockImplementation(async (id) => (id === HOME.id ? choresHome : choresAway))
+    await switchTo(HOME.id)
+    await waitFor(() => expect(switcher()).toHaveValue(HOME.id))
+    expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument()
+    choresApi.listChores.mockImplementation((id) =>
+      id === AWAY.id ? Promise.reject(new Error('loading the chores: placeholder refusal')) : Promise.resolve(choresHome),
+    )
+    await switchTo(AWAY.id)
+    expect(await screen.findByText(/placeholder refusal/)).toBeInTheDocument()
+    expect(screen.queryByTestId('shell-error')).not.toBeInTheDocument()
+  })
+
+  it('AC 6: the failure clears when another TAB is chosen — the card says so, and a test holds it', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // Split throws; Chores does not call the allocator. review-fanout found
+    // the tab half of the boundary's key untested while the card's own
+    // sentence tells a person to try another tab.
+    choresApi.listChores.mockResolvedValue([chore('c-orphan', HOME.id, 'm-nobody')])
+    await renderApp()
+    await screen.findByTestId('render-failure')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Chores' })))
+    await waitFor(() => expect(screen.queryByTestId('render-failure')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Chores' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('the last resort: a throw ABOVE the surfaces draws a sentence and a Reload inside the page frame, never an empty page', async () => {
+    const restore = quietRenderErrors()
+    onTestFinished(restore)
+    // A household name that is not text makes the switcher itself throw —
+    // outside the surface boundary, so only the root one can catch it.
+    api.listHouseholds.mockResolvedValue([{ ...HOME, name: { unexpected: true } }, AWAY])
+    await renderApp()
+    const failure = await screen.findByTestId('render-failure')
+    expect(failure).toHaveTextContent(/taskr could not draw this screen/i)
+    expect(within(failure).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    expect(failure.closest('main.shell')).not.toBeNull()
+    expect(screen.getByRole('heading', { level: 1, name: 'Taskr' })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #480 — a week's budget suggested from the last weeks' completions. The
+// arithmetic is capacity.suggest.test.js and the block is Roster.test.jsx;
+// what App owes is the READ (once per refresh, for the whole household, not
+// waited for) and the FOLD reaching the roster, and that the automatic path
+// is never handed the figure.
+// ---------------------------------------------------------------------------
+describe('#480 — a week suggested from the last weeks', () => {
+  const household = { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' }
+  const week = () => actualCapacity.periodStartFor(new Date(), household.timezone)
+  const mondays = () => actualCapacity.priorPeriodStarts(week(), 4)
+  // Joined at the start of the second-to-last prior week, so exactly two
+  // completed prior weeks exist — the floor, and a median that is easy to
+  // read off the fixture.
+  const me = {
+    id: 'm1',
+    display_name: 'Placeholder One',
+    weekly_minutes: 300,
+    claimed_by: 'person-a',
+    email: 'placeholder.one@example.test',
+    created_at: `${mondays()[2]}T12:00:00Z`,
+  }
+  const housemate = {
+    id: 'm2',
+    display_name: 'Placeholder Two',
+    weekly_minutes: 300,
+    claimed_by: 'person-b',
+    email: 'placeholder.two@example.test',
+    created_at: `${mondays()[2]}T12:00:00Z`,
+  }
+  const doneOn = (id, monday, minutes, holder = 'm1') => ({
+    id,
+    household_id: 'h1',
+    title: 'Placeholder Chore',
+    expected_minutes: minutes,
+    actual_minutes: null,
+    due_on: monday,
+    completed_at: `${monday}T16:00:00Z`,
+    completed_by_member_id: holder,
+    assigned_member_id: holder,
+    missed_at: null,
+    repeat_kind: 'none',
+  })
+  const twoWeeks = () => [doneOn('c1', mondays()[2], 100), doneOn('c2', mondays()[3], 120)]
+  const region = () => screen.findByRole('region', { name: /who is in the household/i })
+
+  beforeEach(() => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([me, housemate])
+  })
+
+  it('AC 5: reads the prior weeks’ busy figures ONCE per refresh, for the whole household and the whole window', async () => {
+    await renderApp('Who')
+    await region()
+    await waitFor(() => expect(calendarApi.listBusyHistory).toHaveBeenCalled())
+    // One per refresh — the roster read is once per refresh too, so the two
+    // counts agree; a read per member or per week would be 2× or 4× it.
+    expect(calendarApi.listBusyHistory.mock.calls.length).toBe(api.listMembers.mock.calls.length)
+    const [periods, memberIds] = calendarApi.listBusyHistory.mock.calls.at(-1)
+    expect(periods).toEqual(mondays())
+    expect(memberIds).toEqual(['m1', 'm2'])
+  })
+
+  it('AC 5: the roster paints — suggestion included — while the history read is still in flight', async () => {
+    // A read that never settles. The roster, this week's figure and the
+    // suggestion (from the chores the foreground read carries) must all be
+    // on screen regardless; the calendar half of the reason says it is
+    // missing rather than the block waiting for it.
+    calendarApi.listBusyHistory.mockImplementation(() => new Promise(() => {}))
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    await renderApp('Who')
+    await region()
+    expect(screen.getByTestId('week-m1')).toHaveTextContent(/This week: 300 min/)
+    expect(calendarApi.listBusyHistory).toHaveBeenCalled()
+    const block = await screen.findByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 110 min/i)
+    expect(block).toHaveTextContent(/typically 110 min done over 2 weeks/)
+  })
+
+  it('the fold reaches the roster: completions and the prior weeks’ busy rows become the figure', async () => {
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    calendarApi.listBusyHistory.mockResolvedValue([
+      { id: 'h1', member_id: 'm1', period_start: mondays()[2], busy_minutes: 60, event_count: 1, computed_at: '2026-09-01T00:00:00Z' },
+      { id: 'h2', member_id: 'm1', period_start: mondays()[3], busy_minutes: 60, event_count: 1, computed_at: '2026-09-08T00:00:00Z' },
+    ])
+    calendarApi.listBusyWeeks.mockResolvedValue([
+      { id: 'b1', member_id: 'm1', period_start: week(), busy_minutes: 90, event_count: 2, computed_at: new Date().toISOString() },
+    ])
+    await renderApp('Who')
+    await region()
+    // Median of 100 and 120 is 110; this week is 30 busier than the usual 60.
+    const block = await screen.findByTestId('suggested-m1')
+    await waitFor(() => expect(block).toHaveTextContent(/calendar 30 min busier this week/))
+    expect(block).toHaveTextContent(/suggested: 80 min/i)
+    // The housemate did nothing in EITHER week — no history, not a history of
+    // zero (design-bar verdict, 2026-09-16), so their row offers nothing.
+    expect(screen.queryByTestId('suggested-m2')).not.toBeInTheDocument()
+  })
+
+  it('AC 4: history alone writes nothing — the automatic path is handed the calendar, never the suggestion', async () => {
+    // #106's seam, fired the way its own tests fire it: a connection, a stale
+    // row, the fetch lands. The calendar says 0 busy, so its suggestion is the
+    // baseline and the decision is no-change. The HISTORY says 200 — inside
+    // the bound of 300 — and if it reached the decision the week would be
+    // written. It must not be.
+    const connection = { id: 'c1', member_id: 'm1', scope: 'freebusy', connected_at: '2026-08-24T00:00:00Z' }
+    const HOUR = 60 * 60 * 1000
+    const rowReadAgo = (msAgo, busy) => ({
+      id: 'b1',
+      member_id: 'm1',
+      period_start: week(),
+      busy_minutes: busy,
+      event_count: 0,
+      computed_at: new Date(Date.now() - msAgo).toISOString(),
+    })
+    calendarApi.listCalendarConnections.mockResolvedValue([connection])
+    choresApi.listChores.mockResolvedValue([doneOn('c1', mondays()[2], 200), doneOn('c2', mondays()[3], 200)])
+    let finish
+    calendarApi.fetchBusyWeek.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(13 * HOUR, 0)])
+    await renderApp('Who')
+    await waitFor(() => expect(calendarApi.fetchBusyWeek).toHaveBeenCalledTimes(1))
+    calendarApi.listBusyWeeks.mockResolvedValue([rowReadAgo(0, 0)])
+    await act(async () => finish({ ok: true }))
+    await act(async () => {})
+    // POSITIVE CONTROL: the suggestion exists and differs from the week.
+    expect(await screen.findByTestId('suggested-m1')).toHaveTextContent(/suggested: 200 min/i)
+    expect(screen.getByTestId('week-m1')).toHaveTextContent(/This week: 300 min/)
+    expect(capacityApi.setCapacity).not.toHaveBeenCalled()
+    expect(reassignApi.reassignHousehold).not.toHaveBeenCalled()
+  })
+
+  it('a failed history read costs the calendar half of the reason and nothing else', async () => {
+    calendarApi.listBusyHistory.mockRejectedValue(new Error('permission denied'))
+    choresApi.listChores.mockResolvedValue(twoWeeks())
+    await renderApp('Who')
+    await region()
+    const block = await screen.findByTestId('suggested-m1')
+    expect(block).toHaveTextContent(/suggested: 110 min/i)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('#482 — Trust this device, from App', () => {
+  const FLAG = 'taskr.untrustedSession'
+  const trustBox = () => screen.getByRole('checkbox', { name: /trust this device/i })
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('AC 2: unticked, the data layer is asked for an untrusted password sign-in', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signIn.mockResolvedValue({ user: { id: 'person-a' } })
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    fireEvent.click(trustBox())
+    fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: 'kid@example.com' } })
+    fireEvent.change(screen.getByLabelText(/password or pin/i), { target: { value: '4821' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^sign in$/i })))
+
+    expect(api.signIn).toHaveBeenCalledWith({ email: 'kid@example.com', password: '4821', trusted: false })
+  })
+
+  it('AC 3: unticked, Continue with Google reaches the data layer with the same choice', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    fireEvent.click(trustBox())
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+    expect(api.signInWithGoogle).toHaveBeenCalledWith({ trusted: false })
+  })
+
+  it('AC 1: ticked by default, Google is asked for a trusted sign-in', async () => {
+    api.currentSession.mockResolvedValue(null)
+    api.signInWithGoogle.mockResolvedValue(undefined)
+    await renderApp()
+    await screen.findByRole('button', { name: /^sign in$/i })
+
+    expect(trustBox()).toBeChecked()
+    await act(async () =>
+      void fireEvent.click(screen.getByRole('button', { name: /continue with google/i })),
+    )
+    expect(api.signInWithGoogle).toHaveBeenCalledWith({ trusted: true })
+  })
+
+  it('AC 5: booting an untrusted session still opens the household this device last chose', async () => {
+    sessionStorage.setItem(FLAG, '1')
+    window.localStorage.setItem('taskr.activeHousehold', HOUSEHOLD_TWO.id)
+    api.listHouseholds.mockResolvedValue([HOUSEHOLD_ONE, HOUSEHOLD_TWO])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+
+    await renderApp()
+    const switcher = await screen.findByRole('combobox', { name: 'Household' })
+    expect(switcher).toHaveValue(HOUSEHOLD_TWO.id)
+    expect(api.listMembers).toHaveBeenLastCalledWith(HOUSEHOLD_TWO.id)
+    expect(window.localStorage.getItem('taskr.activeHousehold')).toBe(HOUSEHOLD_TWO.id)
+  })
+
+  it('AC 5: booting an untrusted session still offers the invitation this device is holding', async () => {
+    sessionStorage.setItem(FLAG, '1')
+    window.localStorage.setItem(
+      'taskr.pendingInvitation',
+      JSON.stringify({ code: 'k7m3qp4rwn', name: 'Placeholder Three' }),
+    )
+    await renderApp()
+    const confirm = await screen.findByTestId('held-invitation-confirm')
+    expect(confirm).toHaveTextContent(/Placeholder Three/)
+    expect(window.localStorage.getItem('taskr.pendingInvitation')).not.toBeNull()
   })
 })

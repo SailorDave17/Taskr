@@ -274,7 +274,40 @@ describe('the manual floor — a person’s figure is never overwritten by a mac
     expect(isCalendarSourced('calendar_auto')).toBe(true)
     expect(isCalendarSourced('manual')).toBe(false)
     expect(isCalendarSourced('extraction')).toBe(false)
+    // #480 — the fifth word is a person's tap on their own past, not the
+    // calendar's arithmetic; the automatic path may not write over it.
+    expect(isCalendarSourced('suggested')).toBe(false)
     expect(isCalendarSourced(undefined)).toBe(false)
+  })
+})
+
+// #480 AC 4 — the history-based suggestion is OFFERED and never auto-applied.
+// Two halves: the figure never reaches this decision at all (the seam is
+// held by reading App's source, because a pure decision cannot tell where a
+// number came from), and a row a person wrote from it is a person's row.
+describe('#480 AC 4 — a suggested figure is never auto-applied', () => {
+  it('refuses over a SUGGESTED row whatever the delta — a person tapped it', () => {
+    const decision = autoApplyDecision({ member, override: row(210, 'suggested'), suggestion: 220 })
+    expect(decision).toMatchObject({ apply: false, reason: 'person-set', delta: 10 })
+  })
+
+  it('anchors on a suggested row’s own figure — it is the last figure a person held', () => {
+    expect(humanFigureFor(member, row(210, 'suggested'))).toBe(210)
+    expect(effectiveCapacity(member, row(210, 'suggested'))).toBe(210)
+  })
+
+  it('the calendar read seam hands the decision calendarSuggestion and nothing else', () => {
+    // A pure decision applies any number within the bound; what keeps the
+    // history figure out is that App never passes it. The seam is one call
+    // site, and its `suggestion:` argument is the calendar's arithmetic.
+    // Comments stripped so prose naming the alternative does not count.
+    const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    const seams = [...app.matchAll(/autoApplyDecision\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
+    expect(seams, 'POSITIVE CONTROL: exactly one call site').toHaveLength(1)
+    expect(seams[0]).toMatch(/suggestion:\s*calendarSuggestion\(/)
+    expect(app).not.toMatch(/suggestCapacity/)
   })
 })
 

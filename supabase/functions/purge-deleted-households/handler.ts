@@ -14,11 +14,13 @@
 //   1. Revoke the household's Google grants at Google, FIRST, because the delete
 //      in step 3 cascades the token rows away, and a grant nobody holds a token
 //      for can never be revoked. The tokens come from
-//      `household_tokens_to_revoke`, which leaves out a person still connected
-//      in another household: one Google account holds ONE grant with Taskr's
-//      single OAuth client, so revoking it would break that other household's
-//      calendar (owner decision at #430's review, 2026-09-11). Their token row
-//      still goes with the cascade. A household whose tokens cannot be READ is
+//      `household_tokens_to_revoke`, which leaves out a grant another household
+//      still uses: one Google account holds ONE grant with Taskr's single
+//      OAuth client, so revoking it would break that other household's
+//      calendar (owner decision at #430's review, 2026-09-11). Since `0047`
+//      (#474) that is keyed on the Google account, and a token whose account
+//      is unknown is never offered. Their token row still goes with the
+//      cascade. A household whose tokens cannot be READ is
 //      not purged this run and is retried tomorrow. A revoke Google REFUSES is
 //      not a reason to stop, for calendar-disconnect's reason: most refusals
 //      mean the grant is already gone.

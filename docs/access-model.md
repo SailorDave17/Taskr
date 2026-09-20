@@ -7,7 +7,18 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0041` are ALL applied to the live project** (`0041` on 2026-09-11 in #173's own
+- Status: **`0047` (#474) is NOT yet applied** — see the #474 section below for what applies it and
+  how it is read. **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
+  session, at md5 `7d201b925939d32460a27146134d2006` (`6884 characters, 8 statements`), read back
+  identical — a constraint widening and a trigger body that **`npm run check:live` cannot see**,
+  *measured* **75 of 75** on both sides, confirmed by the read-only catalog query in the #480
+  section below; `0045` on 2026-09-16 in #458's own
+  session and `0044` the same day in #180's — see their sections below; `0042` on 2026-09-12 in
+  #169's session, at md5 `67f00c9276df384cf1c391d119a60b7b` (`23313 characters, 50 statements`),
+  read back identical, *measured* `check:live` **71 of 74 → 74 of 74** and `probe:live-grants`
+  **20 of 20** after — see the #430 section; `0043` on 2026-09-11 in #431's post-merge session
+  (`8274 characters, 12 statements`, read back identical), `check:live` **69 of 74 → 70 of 74** —
+  see the #431 section; `0041` on 2026-09-11 in #173's own
   session, at md5 `ecabaf99ff72dcf9d92ce7a57085151a` (`8824 characters, 4 statements`), read back
   identical — see its entry below; a BODY replace of `redeem_invitation` that **`npm run check:live`
   cannot see** — *measured* **69 of 69** on both sides — and that
@@ -43,11 +54,13 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds FIVE rows as of 2026-09-11 — #430's three
-  (`request_household_deletion`, `restore_household` and `household_deletion_status`, red until
-  `0042` is applied) and #431's two (`transfer_household` until `0043` is applied, and the
-  `leave-household` Edge Function until it is deployed); their whole history is the #430 and #431
-  bullet in the excused-red table below. Until #430 this sentence still read EMPTY, which is the
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-16 — *measured **75 of 75*** at #182's pickup.
+  From 2026-09-11 it held FIVE rows — #430's three (`request_household_deletion`,
+  `restore_household` and `household_deletion_status`, red until `0042` was applied on 2026-09-12)
+  and #431's two (`transfer_household` until `0043` was applied, and the `leave-household` Edge
+  Function until it was deployed, both on 2026-09-11); their whole history is the #430 and #431
+  bullet in the excused-red table below. This sentence went on saying FIVE for five days after the
+  last of them drained, until #182 (#441). Until #430 it still read EMPTY, which is the
   miss the paragraph at "grep this file" warns about. Before that it was
   EMPTY again as of 2026-09-08 — *measured **51 of 62** immediately before `0037` was applied and **62 of 62** immediately after*** — #342
   opened ELEVEN rows on 2026-09-08, one per table in the `supabase_realtime` publication, probed by
@@ -1239,8 +1252,8 @@
 - **#430 opened THREE rows and #431 TWO on 2026-09-11, and neither story drained its rows in its
   own session.** #430's are three RPC probes: `request_household_deletion`, `restore_household` and
   `household_deletion_status`, red until `npm run migrate:live` applies `0042`. #431's are two:
-  - the `transfer_household` RPC probe, red until `0043` is applied;
-  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` ships it.
+  - the `transfer_household` RPC probe, red until `0043` was applied;
+  - the `leave-household` Edge Function probe, NOT DEPLOYED until `npm run deploy:function` shipped it.
 
   Both stories left the apply and the deploy to the owner's post-merge steps, because production is
   built from `release` and the migration must land before the client that calls it is promoted.
@@ -1249,6 +1262,14 @@
   not reach that cell, and #431's review-fanout found it still saying empty (2026-09-11).
   The RPCs that only Edge Functions call are deliberately unlisted: `leave_household`,
   `member_tokens_to_revoke` and #430's purge functions.
+
+  **All five drained, from sessions, after the merges.** #431's two on 2026-09-11, once #435 had
+  merged: *measured* **69 of 74** before anything, **70 of 74** after `npm run migrate:live`
+  applied `0043`, and **71 of 74** after `npm run deploy:function` (readings on #431). #430's three
+  on 2026-09-12, from #169's session: **71 of 74 → 74 of 74** across the `0042` apply (readings on
+  #430). `release` had been promoted with #430's client before that apply, so production's delete
+  card called three missing functions for most of a day. The set has been EMPTY since; *measured*
+  **75 of 75** on 2026-09-16 (#182), #458's one row having opened and drained in between.
 - **#342 opened ELEVEN rows on 2026-09-08 and drained all eleven in its own session.**
   One row per table in the `supabase_realtime` publication, probed by joining a Realtime channel
   as the seeded account and reading the `system` frame the server sends after the join — never
@@ -2119,6 +2140,37 @@ correctly only because its rollback had deleted the account.
   and that GoTrue re-stamps `invited_at` is read off its source, not measured. The first organizer
   to press *Send the invitation again* is the first live reading.
 
+### A suggested week is a person's — #480, 2026-09-16
+
+`0046` widens one check constraint and one trigger body on `member_capacity`, and nothing else:
+`member_capacity_source_known` admits a fifth word, `suggested` (a figure built from the person's
+own last weeks' completions and this week's calendar, taken with one tap — the rule is in
+`docs/capacity-model.md`), and `member_capacity_automatic_never_overtypes` refuses `calendar_auto`
+over a `suggested` row as it already did over `manual` and `extraction`, because that figure is
+**offered and never auto-applied** and the client's refusal is a read followed by a write (`0039`'s
+reason for the trigger existing at all).
+
+- **`check:live` and `probe:live-grants` are blind to it in both directions**, `0031`'s and `0044`'s
+  reason: no table, column, signature or grant moves. The instrument is the read-only catalog query,
+  taken on both sides of `npm run migrate:live`: `pg_get_constraintdef` for
+  `member_capacity_source_known` reads four words before and five after, and `pg_get_functiondef`
+  for `member_capacity_automatic_never_overtypes` carries `'suggested'` in its `in (...)` only
+  after. The pglite suite (`suggestedCapacity.pglite.test.js`) proves the widening in both
+  directions on a database built through `0045` and through `0046`.
+- **Until it is applied**, a member who taps *Use this* on a suggested figure and saves is refused
+  by the constraint — loudly, naming it, on the error strip — and the manual, calendar and
+  description paths are untouched. Nothing else in the story needs the apply.
+- **Applied 2026-09-16** from #480's session at the owner's go-ahead (the #100 routing, taken at
+  review-fanout's escalation question), before the PR opened: 8 statements, 6884 characters, md5
+  `7d201b925939d32460a27146134d2006` read back matching the file. *Measured* by the read-only
+  catalog query on both sides: `member_capacity_source_known` at `manual, extraction, calendar,
+  calendar_auto` before and with `suggested` fifth after; the trigger's `old.source in (...)` at
+  `('manual', 'extraction')` before and `('manual', 'extraction', 'suggested')` after; the function
+  comment naming #106 alone before and "#106, widened by #480" after; the `source` column comment
+  naming #480 only after; zero `suggested` rows on either side, so no stored row was changed.
+  `check:live` **75 of 75** immediately before and immediately after, unmoved, which is the
+  blindness this entry predicted and not evidence of the apply.
+
 ## Superseded: the PIN decision — 2026-08-06
 
 **Kept for the record. This is no longer what the app does — see *Read this first* above.** Retired
@@ -2447,10 +2499,11 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   `purge-deleted-households` Edge Function with `PURGE_SHARED_SECRET`. This is the recorded exception
   in `docs/hosting-decision.md`. For each due household the function:
   1. revokes the Google grants first, because the cascade takes the tokens. It revokes what
-     `household_tokens_to_revoke` returns, which leaves out a person still connected in another
-     household: one Google account holds one grant with Taskr's single OAuth client, so revoking it
-     would break that household's calendar (owner decision at #430's review). Their token row still
-     goes with the cascade;
+     `household_tokens_to_revoke` returns, which leaves out a grant another household still uses:
+     one Google account holds one grant with Taskr's single OAuth client, so revoking it would
+     break that household's calendar (owner decision at #430's review). Since `0047` (#474) "still
+     uses" is keyed on the **Google account**, and a token whose account is unknown is never
+     revoked — see the #474 section. Their token row still goes with the cascade;
   2. deletes each sign-in that claims nothing outside this household (#262's rule), **before** the
      household. `members_claimed_by_fkey` is ON DELETE SET NULL, so this is #247's recoverable order:
      a failed account step leaves the household due, and tomorrow's run retries it with the claimants
@@ -2482,8 +2535,12 @@ An organizer can delete their household from the Who tab. Owner decisions are on
 - **Re-paste hazard, measured.** Re-pasting `0041` after `0042` silently takes the pending-deletion
   refusal back out of `redeem_invitation`, and re-pasting `0042` restores it
   (`householdDeletion.pglite.test.js`). **The safe re-paste order now ends at `0042`.**
-- **Excused reds.** `check:live` reads the three client RPCs red until `0042` is applied. The purge's
-  functions are not in `LIVE_RPCS`, because the app never calls them.
+- **Applied, and the excused reds drained.** `check:live` read the three client RPCs red until
+  `0042` was applied — on 2026-09-12, from #169's session: `npm run migrate:live` ran 50
+  statements, and Postgres read back 23,313 characters at md5 `67f00c9276df384cf1c391d119a60b7b`,
+  identical to the file. *Measured* `check:live` **71 of 74 → 74 of 74** and `probe:live-grants`
+  **20 of 20** afterwards; a before/after catalog diff moved exactly this file's list (readings on
+  #430). The purge's functions are not in `LIVE_RPCS`, because the app never calls them.
 
 ## Leaving a household — #431, 2026-09-11
 
@@ -2507,8 +2564,8 @@ A member can leave from the Who tab. An organizer first hands the household over
   Google grant is readable only by `service_role`, and deleting an auth user needs `auth.admin`. In
   order, it:
   1. refuses the organizer;
-  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant still
-     used in another household (#430's rule);
+  2. revokes the leaver's grant, using `member_tokens_to_revoke`, which leaves out a grant another
+     connection still uses (#430's rule, keyed on the Google account since `0047`, #474);
   3. calls `leave_household` as the caller;
   4. deletes the sign-in if that household was its last claim (#262).
 
@@ -2572,9 +2629,53 @@ A member can leave from the Who tab. An organizer first hands the household over
   of two households leaving one still reads exactly the other (AC 8). `App.test.jsx` asserts the
   remembered household (#165) is forgotten on a leave while the list still names it — the gap
   PR #435 recorded as untestable is testable once the list is held still.
-- **Excused reds.** `check:live` reads `transfer_household` red until `0043` is applied, and
-  `leave-household` NOT DEPLOYED until it ships. `leave_household` and `member_tokens_to_revoke` are
+- **Applied, and the excused reds drained.** `check:live` read `transfer_household` red until
+  `0043` was applied, and `leave-household` NOT DEPLOYED until it shipped — both on 2026-09-11,
+  from a session after #435 merged: *measured* **69 of 74 → 70 of 74** across the apply and
+  **→ 71 of 74** across the deploy (readings on #431). `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.
+
+## A grant is kept while its Google account is used elsewhere — #474, 2026-09-17
+
+#430 and #431 kept a Google grant when the **same Taskr sign-in** held a token in another
+household, and gave the reason as "one Google account holds one grant". The reason was right and
+the key was wrong: two different sign-ins can consent the same Google account. Google's own
+documentation settles which one a grant belongs to — *"Revocation removes all OAuth 2.0 scopes
+previously granted to a project, invalidating any issued access or refresh tokens for all clients
+registered under that project"* (Google Identity, *OAuth 2.0 for Client-side Web Applications*,
+read 2026-09-17). So revoking any one refresh token for an account revokes them all, and #474's
+alternative ending ("grants are per refresh token, close it moot") is false.
+
+- **The account is recorded.** The consent now asks for `openid` beside the calendar scope
+  (`GOOGLE_ACCOUNT_SCOPE` in `src/lib/calendar.js`). That scope reads no calendar, no address and
+  no name; it makes Google return an ID token, and `calendar-connect` stores its `sub` in
+  `calendar_tokens.google_sub`. The column is on the table no client can read. The ID token's
+  signature is not checked, which OpenID Connect allows for a token taken straight from the token
+  endpoint over TLS; `aud` and `iss` are compared, and anything that does not check out is stored
+  as null.
+- **The rule (`0047`).** `member_tokens_to_revoke` and `household_tokens_to_revoke` offer a token
+  only when its account is **known**, and no other connection holds a token for the **same
+  account**. Where the other row's account is unknown, they fall back to the old sign-in
+  comparison. "Other" means another member row for a leave, so two members of one household sharing
+  an account are covered too, and another household for a purge.
+- **A token with no account is never revoked** (owner decision at #474's pickup). Every token stored
+  before `0047` is one. Its row still goes; the grant stays listed in that person's Google account
+  until they reconnect or remove it there. **The residual**: a legacy row held by a *different*
+  sign-in that consented the same account is invisible to both clauses, and closes as such rows
+  reconnect. On 2026-09-17 the live project held one connection, in the owner's household.
+- **`calendar-disconnect` asks the same rule** (folded into #474 at the owner's choice). Until now it
+  revoked unconditionally, so disconnecting in one household revoked the grant a second household
+  used, even for the same sign-in. A kept grant answers `revoked: null`, so the app shows no
+  "remove Taskr in your Google account" sentence, which would do the same harm by hand. An
+  unreadable rule revokes nothing and answers `false`.
+- **Instruments.** `src/test/revokeKeying.pglite.test.js` reads the old answer on a database built
+  through `0046` (the shared account's token offered) and the new answer after `0047`.
+  `check:live` is blind to `0047` in both directions (a column on a table no client names, and two
+  bodies under unchanged signatures, `0028`'s reason). The live instrument is a read-only catalog
+  query taken on both sides of `npm run migrate:live`: `information_schema.columns` for
+  `calendar_tokens.google_sub`, and `pg_get_functiondef` for both functions, where `google_sub`
+  is absent before and present after. **Re-pasting `0042` or `0043` after `0047` restores the
+  sign-in-keyed body** of the function that file declares; re-paste `0047` after either.
 
 ## How the rules are enforced
 

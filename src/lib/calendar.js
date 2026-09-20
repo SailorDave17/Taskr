@@ -103,6 +103,19 @@ export const EVENT_READ_SCOPES = Object.freeze([
   'https://www.googleapis.com/auth/calendar',
 ])
 
+/**
+ * Asked for beside every calendar scope — #474.
+ *
+ * `openid` alone reads no calendar and no profile: it makes Google return an
+ * ID token whose `sub` names the Google account that consented, and nothing
+ * else (no address, no name — those are the `email` and `profile` scopes,
+ * which this app does not ask for). `calendar-connect` stores that `sub`,
+ * because Google revokes a whole account's grant when any one of its tokens is
+ * revoked, and a leave, a purge or a disconnect must not revoke a grant another
+ * household still uses (`0047`).
+ */
+export const GOOGLE_ACCOUNT_SCOPE = 'openid'
+
 /** Google's OAuth 2.0 consent endpoint. */
 export const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 
@@ -198,8 +211,9 @@ export function newConsentState() {
  * `scope` DEFAULTS to free/busy and nothing widens it but a caller that names
  * the wider one — #101's `startConnect({ scope })` from the import control. The
  * default is the initial ask #95 AC 3 pins, and `calendar.test.js` asserts the
- * URL built with no scope argument still carries exactly one scope, the narrow
- * one.
+ * URL built with no scope argument still carries exactly one CALENDAR scope,
+ * the narrow one. `openid` rides beside whichever is asked (#474,
+ * `GOOGLE_ACCOUNT_SCOPE`), so an incremental consent names the account too.
  */
 export function consentUrl({
   redirectUri,
@@ -216,7 +230,7 @@ export function consentUrl({
     client_id: id,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope,
+    scope: `${GOOGLE_ACCOUNT_SCOPE} ${scope}`,
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
@@ -537,6 +551,40 @@ export async function listBusyWeeks(periodStart, memberIds) {
 
   if (error) {
     const err = new Error(`loading calendar busy minutes: ${error.message}`)
+    err.cause = error
+    throw err
+  }
+  return data ?? []
+}
+
+/**
+ * The derived busy figures ONE household has for a SET of weeks — #480's
+ * history read, the calendar half of `weeklyHistory`.
+ *
+ * ONE query for the whole window (AC 5): scoped by the member set exactly as
+ * `listBusyWeeks` is, with the same column list, and `.in` on the period
+ * rather than a range so what comes back is exactly the window the caller
+ * named and nothing older. App calls it once per refresh with
+ * `priorPeriodStarts`' Mondays and does NOT await it — the rows inform a
+ * suggestion, and a suggestion must not hold the roster back by a round trip.
+ *
+ * The rows carry nothing out of anybody's calendar, for `listBusyWeeks`'
+ * reason: `0030`'s column list is the whole minimization decision.
+ */
+export async function listBusyHistory(periodStarts, memberIds) {
+  if (!Array.isArray(periodStarts)) throw new Error('Which weeks? A busy history read must name them.')
+  if (!Array.isArray(memberIds)) {
+    throw new Error('Which household? A busy history read must name its members.')
+  }
+  if (memberIds.length === 0 || periodStarts.length === 0) return []
+  const { data, error } = await getSupabase()
+    .from('calendar_busy')
+    .select(CALENDAR_BUSY_COLUMNS)
+    .in('member_id', memberIds)
+    .in('period_start', periodStarts)
+
+  if (error) {
+    const err = new Error(`loading calendar busy history: ${error.message}`)
     err.cause = error
     throw err
   }

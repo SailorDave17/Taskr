@@ -43,6 +43,7 @@ import {
 } from './lib/activeHousehold.js'
 import { readGoogleSignIn } from './lib/authSettings.js'
 import { listSignInStates } from './lib/signInState.js'
+import { readStartFlag, withoutStartFlag } from './lib/startEntry.js'
 import {
   addChore,
   addChores,
@@ -64,6 +65,7 @@ import {
 } from './lib/chores.js'
 import {
   AUTO_APPLY_REFUSED_CODE,
+  SUGGESTION_WINDOW_WEEKS,
   autoApplyDecision,
   baselineMoved,
   calendarSuggestion,
@@ -71,11 +73,13 @@ import {
   clearCapacity,
   listCapacity,
   periodStartFor,
+  priorPeriodStarts,
   setCapacity,
 } from './lib/capacity.js'
 import { allowMember, excludeMember, listExclusions } from './lib/exclusions.js'
 import { extractCapacity, extractChores } from './lib/capture.js'
 import { choresInWeek } from './lib/done.js'
+import { weeklyHistory } from './lib/history.js'
 import { reassignHousehold } from './lib/reassign.js'
 import {
   announcementFrom,
@@ -95,6 +99,7 @@ import {
   fetchCalendarEvents,
   isBusyWeekStale,
   isRealEmailMember,
+  listBusyHistory,
   listBusyWeeks,
   listCalendarConnections,
   listCalendarImports,
@@ -139,8 +144,10 @@ import Chores from './components/Chores.jsx'
 import Done from './components/Done.jsx'
 import HouseholdSwitcher from './components/HouseholdSwitcher.jsx'
 import ChoosePassword from './components/ChoosePassword.jsx'
+import InstallOffer, { useInstallOffer } from './components/InstallOffer.jsx'
 import Onboarding, { ENTRY, entryStateFor } from './components/Onboarding.jsx'
 import PendingDeletion from './components/PendingDeletion.jsx'
+import RenderFailure from './components/RenderFailure.jsx'
 import Roster from './components/Roster.jsx'
 import Shopping from './components/Shopping.jsx'
 import Split from './components/Split.jsx'
@@ -261,24 +268,55 @@ const ENDED_ELSEWHERE =
  * still needs, shown on the sign-in screen in the slot a failed sign-in return
  * uses (`signInNotice`).
  */
-export default function App() {
+export default function App({ installOffer = null }) {
   const [session, setSession] = useState({ epoch: 0, notice: null })
   const handleSessionEnded = useCallback(
     (notice) => setSession(({ epoch }) => ({ epoch: epoch + 1, notice: notice || null })),
     [],
   )
+  // #478 — the last resort. A throw the surface boundary inside Shell does not
+  // cover (the switcher, an announcement, the shell itself) used to leave an
+  // empty page; this draws a sentence and a Reload in its place, inside the
+  // page's own frame (`shell`). Keyed where Shell was, so a session ending
+  // remounts both clean — #440's remount is unchanged.
   return (
-    <Shell key={session.epoch} carriedNotice={session.notice} onSessionEnded={handleSessionEnded} />
+    <RenderFailure key={session.epoch} heading="Taskr could not draw this screen" shell>
+      <Shell
+        carriedNotice={session.notice}
+        onSessionEnded={handleSessionEnded}
+        installOffer={installOffer}
+      />
+    </RenderFailure>
   )
+}
+
+// #483 — the install offer's controller, started by `src/main.jsx` before this
+// module loads and handed in rather than imported, so it outlives every
+// remount above and a test can render the app with a faked one. Null is a
+// build with no controller, and reads as never offered.
+const installOfferShape = PropTypes.shape({
+  subscribe: PropTypes.func.isRequired,
+  isOffered: PropTypes.func.isRequired,
+  install: PropTypes.func.isRequired,
+  dismiss: PropTypes.func.isRequired,
+})
+
+App.propTypes = {
+  installOffer: installOfferShape,
 }
 
 Shell.propTypes = {
   carriedNotice: PropTypes.string,
   onSessionEnded: PropTypes.func.isRequired,
+  installOffer: installOfferShape,
 }
 
-function Shell({ carriedNotice = null, onSessionEnded }) {
+function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   const [status, setStatus] = useState('loading')
+  // #483 — whether the browser's install offer is showing. Read here rather
+  // than deeper down because the gate is the SHELL's state: joined, never the
+  // sign-in or onboarding cards.
+  const installOffered = useInstallOffer(installOffer)
   const [household, setHousehold] = useState(null)
   // #164 — EVERY household this person belongs to, in `listHouseholds()`'s
   // order, held beside the active one because the shell needs the count to
@@ -314,6 +352,13 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // identical to `resolveActiveHousehold`. A counter, not a timestamp — two
   // choices inside one clock tick must be two epochs.
   const choiceEpochRef = useRef(0)
+  // #478 — the household whose rows are ON SCREEN, as `refresh()`'s landing
+  // block last set them. Distinct from `activeIdRef`, which is the one a
+  // person has CHOSEN and a read has not necessarily landed yet: the two
+  // differ for the whole of a switch, and for good if the switch's read
+  // fails. Read by that block to know when a household actually changed, and
+  // by `chooseHousehold` to put the choice back when its read fails.
+  const landedHouseholdRef = useRef(null)
   const [members, setMembers] = useState([])
   // #458 — who has accepted their invitation; null until the read answers.
   const [signInStates, setSignInStates] = useState(null)
@@ -381,6 +426,13 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // whole minimization decision, so the most this state could ever hold is an
   // integer, a count and a timestamp.
   const [busyWeeks, setBusyWeeks] = useState([])
+  // #480 — the PRIOR weeks' busy figures, the calendar half of the history a
+  // suggestion reads. Same rows as above for earlier Mondays, landed by a
+  // background read that `refresh()` starts and does not wait for; the
+  // counter is what stops a slow read from an earlier refresh landing over a
+  // later one's rows.
+  const [busyHistory, setBusyHistory] = useState([])
+  const busyHistoryReadRef = useRef(0)
   // #96 AC 5 — why the figure on screen is the one it is. Separate from `error`
   // because a calendar Google would not answer must not read as the app being
   // broken: the manual capacity path is untouched, the last derived figure is
@@ -429,6 +481,13 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // `null` while unknown. Only `false` hides Continue with Google; unknown
   // keeps it, for the reason `authSettings.js` gives.
   const [googleSignIn, setGoogleSignIn] = useState(null)
+  // #343 — did this boot arrive on the website's `?start` link, with nothing
+  // else on the URL? Then the sign-in screen opens on the create-your-account
+  // card instead of the sign-in form. Held in state for the reason
+  // `authCallback` below gives: the flag is stripped from the URL by the boot
+  // that read it, so the boot's reading is the only one there is. Decided at
+  // boot, never re-read, and false again on the remount a sign-out performs.
+  const [startHousehold, setStartHousehold] = useState(false)
   // #341 — the kind of auth link this boot arrived on (`invite` or `recovery`),
   // or null. Held in state rather than re-read at render time BECAUSE IT CANNOT
   // BE RE-READ: the fragment it comes from is consumed by the Supabase client at
@@ -482,6 +541,12 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // from it"), and it is the whole reason the tabs exist rather than a stack:
   // the thing judged at arm's length has to be the thing on screen.
   const [view, setView] = useState('split')
+  // #478 — which surface boundary has caught a render throw, by its key. The
+  // surfaces show `error` beside their own controls (the form owns its
+  // complaint, owner decision 2026-09-12); a surface that has been replaced
+  // by the failure card shows nothing, so the shell's strip takes the error
+  // for exactly that key and no other.
+  const [failedSurface, setFailedSurface] = useState(null)
   // #430 — households this person organizes that are pending deletion: what
   // the restore banner shows. Read once at boot and after each delete or
   // restore, not on every refresh (#351 priced a round trip at 562 ms).
@@ -577,12 +642,23 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     // #152's organizer controls off the screen until the read settles. The
     // docblock on `chooseHousehold` says `me` is right "by construction"; that
     // was true only after settle until these three setters were paired.
-    // Also found by review-fanout. The remaining reads below still land one at
-    // a time — that is `refresh()`'s pre-existing shape and a larger question —
-    // but the identity triple is now atomic.
-    setHouseholds(all)
-    setHousehold(found)
-    setMembers(roster)
+    // Also found by review-fanout.
+    //
+    // #478 — AND EVERYTHING A SURFACE DRAWS FROM LANDS WITH THEM. The triple
+    // was atomic and the reads below it landed one round trip each, so for
+    // one render a switch paired household B's roster with household A's
+    // chores. *Measured on the owner's own account, 2026-09-17*: Split handed
+    // that pair to `allocate()`, which refuses a chore held by somebody
+    // outside the roster (`place()`, allocation.js), React unmounted the whole
+    // tree, and the page stayed empty until a reload. So nothing is SET until
+    // every household-scoped read below has answered: the reads fill locals,
+    // and one block of setters after the last of them lands the lot in a
+    // single render (React 18 batches setters in one tick, awaits or not).
+    // A read that rejects therefore lands NOTHING — the household that was on
+    // screen stays, whole, under `mutate()`'s error — rather than half of the
+    // new one. The invitations and seen-marker reads further down stay after
+    // the landing: they are the organizer's card and the announcement, and a
+    // late arrival there is a card appearing, not two households in one frame.
     // #458 — whether each claimed member has ACCEPTED, read on every refresh
     // like the roster, so a person who follows their link shows as joined on
     // the next read rather than on the next reload. Its own try/catch for #96's
@@ -592,16 +668,16 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     // strip, because what it costs is one word's precision on rows that
     // already render, and an error there would sit over every roster until the
     // migration lands.
+    let signInRows
     try {
-      setSignInStates(found ? await listSignInStates(found.id) : [])
+      signInRows = found ? await listSignInStates(found.id) : []
     } catch {
-      setSignInStates(null)
+      signInRows = null
     }
     const memberIds = roster.map((m) => m.id)
     // #34: chores re-read through the same path as members, so the
     // mutate-then-refresh guarantee covers them without a second mechanism.
     const choreRows = found ? await listChores(found.id) : []
-    setChores(choreRows)
     // #353 — the shopping reads, scoped by the household just read, through
     // the same path as everything else: arriving on Shop shows what another
     // phone added in between for the same reason arriving on Who shows who
@@ -611,7 +687,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     // a round trip costs, and #355 took the TICK off this path entirely — see
     // `tickItem` below, which is the one write here that does not come through
     // `mutate()` and so never reaches this function.
-    setShopping(found ? await readShopping(shoppingClient(), found.id) : EMPTY_SHOPPING)
+    const shoppingState = found ? await readShopping(shoppingClient(), found.id) : EMPTY_SHOPPING
     // #46 — read this week's overrides from the SERVER on every refresh, through
     // the same path as everything else. AC 4 asks that nothing be served from a
     // local cache, and the way to be sure of that is to have no cache: a device
@@ -622,14 +698,12 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     // also makes the ordering explicit — a period from a stale household would
     // file this week's capacity under last week's key.
     const period = found ? periodStartFor(new Date(), found.timezone) : null
-    setPeriodStart(period)
     const overrideRows = period ? await listCapacity(period, memberIds) : []
-    setOverrides(overrideRows)
     // #37 AC 9 — read from the server on every refresh, through the same path as
     // everything else, so a device holds no exclusion state of its own. What
     // another phone recorded is on this screen after the next mutation for the
     // same reason the roster is: there is no cache to be stale.
-    setExclusions(found ? await listExclusions(memberIds) : [])
+    const exclusionRows = found ? await listExclusions(memberIds) : []
     // #105 — the skipped dates, read on every refresh like the exclusions
     // above. Scoped by the ANCHOR ids out of the chores just read, because only
     // an anchor can carry an exception and `household_id` is deliberately not
@@ -637,18 +711,18 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     const anchorIds = choreRows
       .filter((c) => c.repeat_kind && c.repeat_kind !== 'none')
       .map((c) => c.id)
-    setRepeatExceptions(found && anchorIds.length ? await listRepeatExceptions(anchorIds) : [])
+    const exceptionRows = found && anchorIds.length ? await listRepeatExceptions(anchorIds) : []
     // #95 AC 5 — "Calendar connected" is derived from a SERVER read on every
     // refresh, exactly like the roster. A locally remembered flag would show
     // connected on the phone that pressed the button and nothing on the phone
     // that reloads, which is the shape of "it worked for me" that this app's
     // whole read-through-the-server discipline exists to avoid.
-    setConnections(found ? await listCalendarConnections(memberIds) : [])
+    const connectionRows = found ? await listCalendarConnections(memberIds) : []
     // #101 — the import ledger, read like every other row here and BY
     // HOUSEHOLD rather than by the member set: a row whose importer has since
     // left the household (`member_id` null) is still an import the list must
     // refuse a second time, and a member-scoped read would drop it.
-    setCalendarImports(found ? await listCalendarImports(found.id) : [])
+    const importRows = found ? await listCalendarImports(found.id) : []
     // #96 — the derived figures, read like every other row here. Its OWN
     // try/catch, and that is not decoration: `0030` is unapplied on the live
     // project until somebody pastes it, and an unguarded read of a missing
@@ -659,9 +733,54 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     // swallowed, for the reason the announcement read below gives: a red
     // nobody can see is how a paste stays forgotten.
     let busyRows = null
+    let busyReadFailure = null
     if (found && period) {
       try {
         busyRows = await listBusyWeeks(period, memberIds)
+      } catch (err) {
+        busyReadFailure = err.message
+      }
+    }
+
+    // #478 — THE LANDING. Every setter a surface draws from, in one
+    // synchronous block after the last household-scoped read, so no render
+    // can see one household's roster beside another's rows. Nothing between
+    // here and the end of the block may await.
+    setHouseholds(all)
+    setHousehold(found)
+    setMembers(roster)
+    // THE OLD HOUSEHOLD'S NOTICES GO WHEN THE NEW ONE LANDS — not when it is
+    // chosen. Found by review-fanout on #164 and moved here by #478's: all
+    // four are written by a `refresh()` or an action and cleared only by the
+    // control that answers them, so left alone a re-balance announcement
+    // about A stood over B (and "Got it" there SPENT it — `writeSplitSeen`
+    // had already advanced A's marker), a calendar note about A's connection
+    // stood over B, and A's minted code and outstanding list sat under B's
+    // "Waiting to be used", withdrawable there. `chooseHousehold` cleared them
+    // at the choice, which was right while B's roster landed a round trip
+    // later; with the landing deferred to here it drew A's organizer card
+    // with its codes gone for the whole switch, and for good on a failed one.
+    // The later reads in this same refresh set B's own invitations and
+    // announcement after this.
+    const landing = found?.id ?? null
+    if (landedHouseholdRef.current !== landing) {
+      setAnnouncement(null)
+      setCalendarRevokeNote(null)
+      setMinted(null)
+      setInvitations([])
+      landedHouseholdRef.current = landing
+    }
+    setSignInStates(signInRows)
+    setChores(choreRows)
+    setShopping(shoppingState)
+    setPeriodStart(period)
+    setOverrides(overrideRows)
+    setExclusions(exclusionRows)
+    setRepeatExceptions(exceptionRows)
+    setConnections(connectionRows)
+    setCalendarImports(importRows)
+    if (found && period) {
+      if (busyReadFailure === null) {
         setBusyWeeks(busyRows)
         // Cleared on a SUCCESSFUL read, which the first version of this did not
         // do — the complaint was set here and cleared nowhere a member who
@@ -669,7 +788,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         // sentence standing under a figure that had since been read perfectly
         // well, for the rest of the session. Found by review-fanout, 2026-09-04.
         setBusyReadComplaint(null)
-      } catch (err) {
+      } else {
         // The figures are NOT discarded, and that reversal is what makes AC 5
         // reachable at all. Clearing them here meant the only state the
         // criterion describes — the last figure, its date, and a sentence
@@ -677,13 +796,54 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         // running app: this story's fetch fires only when there is no row, so
         // its own failures never coexist with a figure, and the one path that
         // could produce both was throwing the figure away. Keeping them is also
-        // what BusyReadout's docblock already claimed happened.
-        setBusyReadComplaint(err.message)
+        // what BusyReadout's docblock already claimed happened. (Rows kept
+        // across a SWITCH are the other household's, and are harmless: every
+        // reader matches a busy row by member id and week, and no member id
+        // belongs to two households.)
+        setBusyReadComplaint(busyReadFailure)
       }
     } else {
       setBusyWeeks([])
       setBusyReadComplaint(null)
       setBusyFetchComplaint(null)
+    }
+    // #480 — the prior weeks' calendar figures: ONE query for the window, and
+    // NOT awaited (AC 5). The rows feed a suggestion, and a suggestion must
+    // not hold the roster or the split back by a round trip — #351 priced one
+    // at 562 ms on Slow 4G — so this is the one read in `refresh()` the first
+    // paint does not wait for. Started here rather than at the end so it
+    // overlaps the reads below; sequenced so a slow read from an earlier
+    // refresh cannot land over a later one's. Completions need no read of
+    // their own: `choreRows` already carries every completion the household
+    // recorded (the Done tab groups them), and `weeklyHistory` folds the two
+    // at render.
+    //
+    // A failure is deliberately QUIET here, and that is a choice with a
+    // stated cost (owner decision at review-fanout's gate, 2026-09-16). The
+    // realistic failure is a TRANSIENT one — this is its own round trip,
+    // started after `listBusyWeeks` was awaited, so on the Slow 4G #351
+    // priced a request can fail while the one before it succeeded, and the
+    // busy read's complaint says nothing about it (and is shown only on the
+    // viewer's own row, only with a calendar connected). When that happens
+    // the roster reads "Suggested: N min … no calendar read in those weeks"
+    // and no red anywhere: a failed read and an empty one render the same
+    // (cairn: an-absent-result-reads-as-a-clean-one). Accepted because the
+    // figure is still an honest one — completions alone, with the calendar
+    // term zero — and the next refresh re-reads; a sentence under every
+    // member's suggestion for a request that usually succeeds a moment later
+    // was judged the worse trade.
+    if (found && period) {
+      const seq = ++busyHistoryReadRef.current
+      void listBusyHistory(priorPeriodStarts(period, SUGGESTION_WINDOW_WEEKS), memberIds).then(
+        (rows) => {
+          if (busyHistoryReadRef.current === seq) setBusyHistory(rows)
+        },
+        () => {
+          if (busyHistoryReadRef.current === seq) setBusyHistory([])
+        },
+      )
+    } else {
+      setBusyHistory([])
     }
     const uid = await currentUserId()
     setUserId(uid)
@@ -820,6 +980,24 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   const reads = useMemo(() => createReadQueue(refresh), [refresh])
   const requestRefresh = useCallback(() => reads.request(), [reads])
 
+  // #480 — one row per member per completed prior week, folded at render from
+  // the chores every refresh already reads and the busy rows the background
+  // read above lands. Pure and memoised on its inputs, so the roster is handed
+  // rows and a test can hand it the same rows directly.
+  const history = useMemo(
+    () =>
+      household && periodStart
+        ? weeklyHistory({
+            members,
+            chores,
+            busyWeeks: busyHistory,
+            timeZone: household.timezone,
+            periodStart,
+          })
+        : [],
+    [household, members, chores, busyHistory, periodStart],
+  )
+
   useEffect(() => {
     let cancelled = false
 
@@ -864,6 +1042,22 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         // construction, to pick up a SUCCESSFUL return's `#access_token` — so
         // the URL has to be intact when it looks. Stripped AFTER, for the same
         // reason, and so that a reload does not announce a spent failure twice.
+        //
+        // #343 — the website's link arrives as `?start` on this same root. Read
+        // HERE, in the same synchronous breath as the two readers below, and
+        // stripped AFTER `currentSession()` with them — the same shape, and
+        // not for the client's sake (it ignores this parameter) but for
+        // StrictMode's: in development React runs this effect twice, and a
+        // strip made before the first `await` is seen by the second run as a
+        // URL that never carried the flag. Measured 2026-09-16 on `npm run
+        // dev`: the flag stripped and the sign-in card opened. Reading before
+        // the await and stripping after it is why the readers below survive
+        // the same double run. Whether the flag is ACTED on is decided further
+        // down, after the returns are read: a return on the same URL is
+        // handled first and the flag is dropped, because a person coming back
+        // from Google or from a confirmation link is not a visitor from the
+        // website.
+        const startFlag = readStartFlag(globalThis.location?.search)
         const signInReturn = readSignInReturn(globalThis.location)
         // #341 — read in the SAME breath and for the same reason, which the
         // paragraph above spells out: the client reads the URL once, at
@@ -876,6 +1070,19 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         // asserted by a test rather than left to this comment.
         const callback = readAuthCallback(globalThis.location)
         const session = await currentSession()
+        // #343 — the flag leaves the URL first and alone: whatever else the
+        // query carries stays for the read it belongs to (`readConsentReturn`
+        // runs below, and its `?code=&state=` must still be there), and the
+        // fragment stays for the strip that owns it. So a reload does not
+        // re-arm the flag, and the address bar a visitor bookmarks is the root.
+        if (startFlag) {
+          const { pathname, search, hash } = globalThis.location
+          globalThis.history?.replaceState?.(
+            null,
+            '',
+            `${pathname}${withoutStartFlag(search)}${hash ?? ''}`,
+          )
+        }
         if (signInReturn || callback) {
           // #155 AC 5 — strip the FRAGMENT and keep the QUERY. Two auth
           // returns land on this one root URL on different channels: an
@@ -902,6 +1109,20 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         if (entryStateFor({ session, household: null }) === ENTRY.SIGNED_OUT) {
           if (!cancelled) {
             if (signInComplaint) setSignInNotice(signInComplaint)
+            // #343 — the flag opens the account card only when the URL carried
+            // nothing else the app reads. A sign-in return, an auth link or a
+            // calendar return on the same URL is handled first, and the flag
+            // is dropped rather than queued behind it (AC 4). Set BEFORE
+            // `setStatus`, so the screen mounts with its first view decided.
+            // Signed in, this state is never consulted: a member lands in
+            // their household and a person with no household lands on the
+            // household form, flag or no flag (AC 2).
+            setStartHousehold(
+              startFlag &&
+                !signInReturn &&
+                !callback &&
+                !readConsentReturn(globalThis.location?.search),
+            )
             setStatus('onboarding')
           }
           return
@@ -1327,7 +1548,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
   // as `anon` — refused since 0017 (#186) — with the refusal painted over a
   // sign-in that is working. Busy is released in `finally` for the failure
   // case; on success the page is gone before anybody reads the flag.
-  const handleSignInWithGoogle = useCallback(async () => {
+  const handleSignInWithGoogle = useCallback(async (choice) => {
     setBusy(true)
     setError(null)
     setSignInNotice(null)
@@ -1341,7 +1562,8 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         setGoogleSignIn(false)
         return
       }
-      await signInWithGoogle()
+      // #482 — the screen's "Trust this device" choice, passed through.
+      await signInWithGoogle(choice)
     } catch (err) {
       setError(err.message)
       throw err
@@ -1792,27 +2014,33 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
       // place a person makes one. Nothing writes on a plain load, so a device
       // whose owner has never switched household stores nothing at all.
       writeActiveHouseholdChoice(id)
-      // THE OLD HOUSEHOLD'S NOTICES DO NOT COME WITH IT. Found by
-      // review-fanout. Both of these are written by a `refresh()` and cleared
-      // only by the control that answers them, so neither had anything on the
-      // switch path: a re-balance announcement about household A stood over
-      // household B's surfaces, read against B's member names — and pressing
-      // "Got it" there SPENT it, because `writeSplitSeen` had already advanced
-      // A's seen marker in the refresh that produced it, so `announcementFrom`
-      // can never derive it again. The calendar note is the same shape: a
-      // sentence about letting go of a connection in A, standing over B, where
-      // the connection is per member-and-household and still live.
-      setAnnouncement(null)
-      setCalendarRevokeNote(null)
-      // #172 — a code minted for household A is A's. Left standing it would be
-      // read out as an invitation to B, whose roster is now on screen under it.
-      setMinted(null)
-      // And A's LIST, for the same reason — review finding. B's roster and its
-      // organizer answer land a moment before B's invitations are read, so for
-      // that window (and for good, if a read in between fails) A's outstanding
-      // codes sat under B's "Waiting to be used", withdrawable there.
-      setInvitations([])
-      return handleRefresh().catch(() => {})
+      // A's announcement, calendar note, minted code and invitation list are
+      // cleared where B actually LANDS, in `refresh()` — see the comment
+      // there for why they must go and why not here (#478).
+      const epoch = choiceEpochRef.current
+      return handleRefresh().catch(() => {
+        // #478 — A FAILED SWITCH PUTS THE CHOICE BACK. `refresh()` lands
+        // nothing when one of its reads rejects, so the household on screen is
+        // still the one before this choice while the ref and the stored choice
+        // already said `id`. Left like that (review-fanout, 2026-09-17), the
+        // next background read — a focus, a Realtime echo from the household
+        // on screen — swapped the screen to `id` with nobody asking; a write
+        // made on the screen landed where it was made and its own re-read then
+        // showed `id`, so the new row seemed to vanish; a reload opened `id`;
+        // and choosing the household on screen fired no change at all. So the
+        // choice follows what the screen shows. Only if nothing was chosen
+        // since (the epoch), and only when the landing really differs — a
+        // rejection AFTER the landing (the invitations read) leaves `id` on
+        // screen, and then there is nothing to put back. `mutate` has already
+        // put the message on screen.
+        if (choiceEpochRef.current !== epoch) return
+        const shown = landedHouseholdRef.current
+        if (shown === id) return
+        activeIdRef.current = shown
+        choiceEpochRef.current += 1
+        if (shown) writeActiveHouseholdChoice(shown)
+        else clearActiveHouseholdChoice()
+      })
     },
     [handleRefresh],
   )
@@ -2766,6 +2994,11 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
     [mutate, myMemberId],
   )
 
+  // #478 — the surface boundary's key: the household on screen and the tab.
+  // One name for it, because the boundary, the catch it reports and the strip
+  // that answers the catch must agree on it exactly.
+  const surfaceKey = `${household?.id ?? 'none'}:${view}`
+
   // #341 AC 2 — the invitation and recovery landing, returned BEFORE the shell
   // rather than rendered inside it.
   //
@@ -2818,6 +3051,15 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         <p className="shell__notice" role="status">
           {notice}
         </p>
+      ) : null}
+
+      {/* #483 — the browser can install this app, said once. Only while a
+          household is showing: somebody still signing in or starting a
+          household has not decided they want the app yet. Whether it shows at
+          all — the captured event, the already-installed gate, the 30-day
+          "Not now" — is `src/lib/installOffer.js`'s decision. */}
+      {status === 'joined' && installOffered ? (
+        <InstallOffer onInstall={installOffer.install} onDismiss={installOffer.dismiss} />
       ) : null}
 
       {status === 'loading' ? (
@@ -2925,6 +3167,9 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           // wins, for the reason the Who tab renders it beside its control.
           error={signOutComplaint ?? error}
           signInNotice={signInNotice}
+          // #343 — the website's `?start` arrival opens on the account card;
+          // every other boot opens on sign-in, #154's weighting.
+          initialView={startHousehold ? 'sign-up' : 'sign-in'}
           // Non-null only when boot found a session, because the signed-out path
           // returns before refresh() runs. Signed in AND on this screen is
           // precisely the half-finished state described above.
@@ -3005,6 +3250,30 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
         </nav>
       ) : null}
 
+      {/* #478 AC 2 — the error, when no surface is up to show it. Every
+          surface draws `error` beside the control that caused it, and that
+          stays the rule (a shared strip was measured 754–770px from the
+          control on 2026-09-12 and rejected). This strip exists for the one
+          state where no surface is drawn — its boundary has caught a throw —
+          so a read that fails then is still said somewhere. Keyed to that
+          boundary, so a surface that can speak is never spoken over. */}
+      {status === 'joined' && household && error && failedSurface === surfaceKey ? (
+        <p className="error" role="alert" data-testid="shell-error">
+          {error}
+        </p>
+      ) : null}
+
+      {/* #478 — the floor under every surface. A render throw here used to
+          unmount the whole app and leave an empty page until a reload; now
+          it costs only the surface, with its sentence, while the title, the
+          switcher and the tabs above stay usable. Keyed on the household
+          and the tab, so choosing either clears the failure. */}
+      <RenderFailure
+        key={surfaceKey}
+        heading="Could not show this household"
+        onCatch={() => setFailedSurface(surfaceKey)}
+        onRelease={() => setFailedSurface((failed) => (failed === surfaceKey ? null : failed))}
+      >
       {status === 'joined' && household && view === 'split' ? (
         <Split
           members={members}
@@ -3086,6 +3355,8 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           // do with calendars. The FETCH complaint is about this member's own
           // calendar by construction, so it needs no such gate.
           busyComplaint={busyFetchComplaint ?? (isConnected ? busyReadComplaint : null)}
+          // #480 — the completed prior weeks the suggestion reads.
+          history={history}
         />
       ) : null}
 
@@ -3194,6 +3465,7 @@ function Shell({ carriedNotice = null, onSessionEnded }) {
           onOpenPastRuns={handleOpenPastRuns}
         />
       ) : null}
+      </RenderFailure>
 
       <footer className="shell__footer">
         {/* #425 — a mailto the person reads and sends themselves; see

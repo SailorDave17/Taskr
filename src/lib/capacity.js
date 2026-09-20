@@ -56,23 +56,34 @@ export const MAX_CAPACITY_MINUTES = 10080
 
 /**
  * Every word `member_capacity.source` may hold — the set
- * `member_capacity_source_known` enforces since `0039`, in the order they
+ * `member_capacity_source_known` enforces since `0046`, in the order they
  * arrived: typed (#46), proposed from a description (#210), confirmed from a
- * calendar (#97), applied from a calendar with nobody tapping (#106). A test
- * reads the constraint out of the migration and holds this list equal to it,
- * so a fifth word has to arrive in both places.
+ * calendar (#97), applied from a calendar with nobody tapping (#106), taken
+ * from the person's own recent weeks (#480). A test reads the constraint out
+ * of the migration and holds this list equal to it, so a sixth word has to
+ * arrive in both places.
  */
-export const CAPACITY_SOURCES = Object.freeze(['manual', 'extraction', 'calendar', 'calendar_auto'])
+export const CAPACITY_SOURCES = Object.freeze([
+  'manual',
+  'extraction',
+  'calendar',
+  'calendar_auto',
+  'suggested',
+])
 
 /**
  * Is this row's figure the calendar's — confirmed by a tap or applied without
  * one? The two words the automatic path may write over (docs/capacity-model.md,
  * owner decision 2026-09-08); every other word is a person's and is never
- * overwritten by a machine. Named so the decision below holds the manual floor
- * as ONE predicate with its own test, rather than a pair spelled inline. The
- * roster does not use it — the roster asks per-word questions (an automatic
- * week reads differently from a confirmed one), and `0039`'s trigger asks the
- * complementary question server-side (`AUTO_APPLY_REFUSED_CODE`).
+ * overwritten by a machine — `suggested` included (#480): that figure reads
+ * the person's own past back at them and is offered, never applied, so a
+ * row carrying it is a person's tap and the automatic path refuses over it,
+ * here and in `0046`'s trigger. Named so the decision below holds the manual
+ * floor as ONE predicate with its own test, rather than a pair spelled
+ * inline. The roster does not use it — the roster asks per-word questions
+ * (an automatic week reads differently from a confirmed one), and the
+ * trigger asks the complementary question server-side
+ * (`AUTO_APPLY_REFUSED_CODE`).
  */
 export function isCalendarSourced(source) {
   return source === 'calendar' || source === 'calendar_auto'
@@ -220,6 +231,134 @@ export function calendarSuggestion(member, busyWeek) {
   return Math.max(MIN_CAPACITY_MINUTES, baseline - busy)
 }
 
+/**
+ * How many completed weeks a history-based suggestion reads, and how few it
+ * will speak from — #480, owner direction 2026-09-16.
+ *
+ * Four, because a month is long enough for one odd week to be outvoted and
+ * short enough that a person whose life changed in August is not being
+ * measured against June. Two as the floor: one week is an anecdote, and below
+ * the floor the roster falls back to the calendar's suggestion with no claim
+ * to be history-based (AC 2). Both are recorded with the rule they belong to
+ * in docs/capacity-model.md; `suggestCapacity` below is the only reader.
+ */
+export const SUGGESTION_WINDOW_WEEKS = 4
+export const SUGGESTION_MIN_WEEKS = 2
+
+/**
+ * The median of a list of numbers: the middle value, or the mean of the two
+ * middle values for an even count. `null` for an empty list.
+ *
+ * Exported because the corpus test proves the rule IS a median and not a
+ * mean — one heroic week (or one sick one) must not set next week's bar,
+ * which is the story's stated reason for the choice, and a mean lets it.
+ */
+export function median(values) {
+  if (!values || values.length === 0) return null
+  const sorted = values.map(Number).sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+/**
+ * A week's budget suggested from what the person actually got done lately,
+ * adjusted by how this week's calendar and work hours differ from those
+ * weeks' — #480. Pure: the caller builds `history` (`weeklyHistory` in
+ * history.js) and this is the arithmetic and the sentence.
+ *
+ * @param {{id: string}} member whose week — history rows for anybody else are ignored
+ * @param {Array<{memberId, periodStart, doneMinutes, busyMinutes, workMinutes}>} history
+ *   one row per COMPLETED prior week the member was in the household for, in any
+ *   order. A week with nothing done carries `doneMinutes: 0` and COUNTS; a week
+ *   with no calendar read carries `busyMinutes: null` and is left out of the
+ *   calendar comparison only.
+ * @param {{busy_minutes: number}|null|undefined} busyWeek this week's derived row
+ * @param {number} [workMinutes=0] this week's hours at work, in minutes — #479's
+ *   figure once that story lands; 0 until then, and the sibling rows carry 0 too
+ * @returns {{minutes, weeks, typicalMinutes, calendarDelta, workDelta, reason: [string, string]}|null}
+ *
+ * The rule, in the order it runs (docs/capacity-model.md carries the reasons):
+ *
+ *   1. the most recent SUGGESTION_WINDOW_WEEKS rows; fewer than
+ *      SUGGESTION_MIN_WEEKS → `null`, nothing to offer — and `null` too when
+ *      NOTHING was completed in any of them (design-bar verdict, 2026-09-16:
+ *      no history is not a history of zero);
+ *   2. typical = MEDIAN of `doneMinutes` over those weeks;
+ *   3. minus how much BUSIER this week's calendar is than those weeks' median
+ *      busy minutes (added back if quieter). Only weeks that HAD a calendar
+ *      read are compared, and with none — or with no read this week — the
+ *      term is zero: the completions already priced in whatever the calendar
+ *      usually holds, and there is nothing to compare against;
+ *   4. minus this week's work minutes beyond those weeks' median;
+ *   5. clamped to [MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES], whole minutes.
+ *
+ * The two reason lines are the two halves of that: what the person typically
+ * did, and what this week changes about it. They are sentences for the
+ * roster and nothing parses them.
+ *
+ * NEVER AUTO-APPLIED. `autoApplyDecision` is handed `calendarSuggestion` and
+ * nothing else (App.jsx's calendar read seam; capacity.autoApply.test.js holds
+ * that seam by reading the source), and a `suggested` row is a person's —
+ * `isCalendarSourced` says no to it and `0046`'s trigger refuses an automatic
+ * write over it. #106's bound was argued for a figure the calendar computed,
+ * not one that reads a person's own past back at them.
+ */
+export function suggestCapacity({ member, history, busyWeek, workMinutes = 0 }) {
+  const mine = (history ?? [])
+    .filter((row) => row.memberId === member?.id)
+    .sort((a, b) => (a.periodStart < b.periodStart ? -1 : a.periodStart > b.periodStart ? 1 : 0))
+  const recent = mine.slice(-SUGGESTION_WINDOW_WEEKS)
+  if (recent.length < SUGGESTION_MIN_WEEKS) return null
+  // No completion ANYWHERE in the window is not a history of zero — it is no
+  // history, and a confident "Suggested: 0 min" over it is the counter-moment
+  // (design-bar, owner verdict 2026-09-16, on the prototype's four-blank-weeks
+  // case). A blank week AMONG others still counts as zero, the story's rule;
+  // this guard fires only when every week is blank.
+  const doneMinutes = recent.map((week) => Number(week.doneMinutes ?? 0))
+  if (doneMinutes.every((minutes) => minutes === 0)) return null
+
+  const typical = Math.round(median(doneMinutes))
+
+  // `!= null` BEFORE `Number()`, `calendarSuggestion`'s reason: `Number(null)`
+  // is 0, which would read an unread calendar as an empty one.
+  const known = recent.filter(
+    (week) => week.busyMinutes != null && Number.isFinite(Number(week.busyMinutes)),
+  )
+  const thisBusy =
+    busyWeek && busyWeek.busy_minutes != null && Number.isFinite(Number(busyWeek.busy_minutes))
+      ? Number(busyWeek.busy_minutes)
+      : null
+  const calendarDelta =
+    thisBusy == null || known.length === 0
+      ? 0
+      : Math.round(thisBusy - median(known.map((week) => Number(week.busyMinutes))))
+
+  const workDelta = Math.round(
+    Number(workMinutes ?? 0) - median(recent.map((week) => Number(week.workMinutes ?? 0))),
+  )
+
+  const raw = typical - calendarDelta - workDelta
+  const minutes = Math.min(MAX_CAPACITY_MINUTES, Math.max(MIN_CAPACITY_MINUTES, Math.round(raw)))
+
+  const changes = []
+  if (thisBusy == null) changes.push('no calendar read this week')
+  else if (known.length === 0) changes.push('no calendar read in those weeks')
+  else if (calendarDelta > 0) changes.push(`calendar ${calendarDelta} min busier this week`)
+  else if (calendarDelta < 0) changes.push(`calendar ${-calendarDelta} min quieter this week`)
+  else changes.push('calendar about as busy as usual')
+  if (workDelta > 0) changes.push(`${workDelta} min more at work this week`)
+  else if (workDelta < 0) changes.push(`${-workDelta} min less at work this week`)
+
+  return {
+    minutes,
+    weeks: recent.length,
+    typicalMinutes: typical,
+    calendarDelta,
+    workDelta,
+    reason: [`typically ${typical} min done over ${recent.length} weeks`, changes.join('; ')],
+  }
+}
+
 function unwrap({ data, error }, whatWeWereDoing) {
   if (error) {
     const err = new Error(`${whatWeWereDoing}: ${error.message}`)
@@ -279,6 +418,27 @@ export function periodStartFor(instant, timeZone) {
   asUtc.setUTCDate(asUtc.getUTCDate() - (isoDow - WEEK_START_ISO_DOW))
 
   return asUtc.toISOString().slice(0, 10)
+}
+
+/**
+ * The Mondays of the `weeks` weeks BEFORE `periodStart`, oldest first — the
+ * window a history read names (#480).
+ *
+ * `periodStartFor`'s second stage on its own: a period start is a calendar
+ * date, not an instant, so this is pure UTC date arithmetic on the key and no
+ * zone or daylight-saving transition can move it. Refuses anything that is
+ * not a period start rather than counting back from garbage.
+ */
+export function priorPeriodStarts(periodStart, weeks) {
+  const start = new Date(`${periodStart}T00:00:00Z`)
+  if (!periodStart || Number.isNaN(start.getTime())) throw new Error('That is not a period start.')
+  const mondays = []
+  for (let back = weeks; back >= 1; back -= 1) {
+    const monday = new Date(start)
+    monday.setUTCDate(monday.getUTCDate() - 7 * back)
+    mondays.push(monday.toISOString().slice(0, 10))
+  }
+  return mondays
 }
 
 /**

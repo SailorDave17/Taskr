@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { assertPublishableKey } from './keyShape.js'
+import { sessionTrustStorage } from './sessionTrust.js'
 
 // The two values Vercel holds. They are `VITE_`-prefixed, so they are inlined
 // into the client bundle at build time and are readable by anyone who views
@@ -62,6 +63,10 @@ export function getSupabase() {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        // #482 — `localStorage` for a trusted sign-in, as before; the tab's
+        // `sessionStorage` for one made with "Trust this device" unticked, so
+        // it survives a reload and ends when the browser closes.
+        storage: sessionTrustStorage,
       },
     })
   }

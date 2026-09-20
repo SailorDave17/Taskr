@@ -176,6 +176,41 @@ page, and each build gets a distinct `assets/index-*.js` filename, so `curl` alo
 builds. **Check a deploy landed by reading the stamp, not by trusting the dashboard** — a deployment
 record answers about the deployment you asked about, not about what the URL currently resolves to.
 
+### 1a. The link the website carries — start your household (#343)
+
+**The URL the owner's website links to is `https://taskr.madcowhq.com/?start`** — that value, and
+no other. It opens the app on the create-your-account card, framed as starting a household, with the
+sign-in form as the link underneath; the bare root still opens on sign-in (#154), because nearly
+everyone opening the app already belongs to a household. The flag is read once at boot and stripped
+from the address bar, so a reload, a bookmark of what the address bar then shows, or a later sign-out
+all land on sign-in as they should. A signed-in person who follows the link is unaffected: a member
+lands in their household, and a person with no household lands on *Name the household* — the flag
+never signs anybody out and never starts a second household (#166 is the path for that).
+
+**Why a query string on the root and not a path.** `/start` is a **404** on the deployed site —
+*measured 2026-09-04 and again 2026-09-16*, `GET https://taskr.madcowhq.com/start` answers `404
+text/plain`. There is no router in the app and no single-page rewrite in `vercel.json` (which carries
+only the purge cron), so the root is the only path that reaches the app. The router and the rewrite
+were #175 and #176; **both were closed as not planned on 2026-09-09** — the charter's one reopen
+condition for a router was discharged by #341's invitation landing on the bare root, so a `/start`
+path is not arriving on any current story. The query form is therefore the published URL for the
+foreseeable future, not a stopgap.
+
+**If a router ever does land**, the path form `/start` must 301 — or the client-side equivalent,
+a redirect that keeps working for a link already printed — to `/?start`, so that the website's link
+never breaks whichever form a later story prefers. That is a criterion for the router story, and it is
+written here rather than on #175 because #175 is closed and tracks nothing.
+
+**What the website should say.** The `href` is this section's value; the anchor text is the other
+repo's decision (`SailorDave17/madcowsailing.com`, the `hq` app). Worth preferring *Start your
+household* over *Open Taskr* — the verb is the thing the visitor is deciding.
+
+**The return leg needs no flag.** The confirmation email's link lands on the origin the signup came
+from (`confirmationRedirectTo`, #129 — the origin only, never the query), and a signed-in person with
+no household gets *Name the household* on the bare root. `App.test.jsx`'s #343 describe proves it on
+the bare root with a session and no household; a confirmation followed from a second device is the
+same boot.
+
 ## 2. Supabase — the backend
 
 Not needed for the shell to deploy. Do it before **#5** (the roster), which is the first story that
@@ -896,6 +931,23 @@ time they come back to the app. Two limits, stated: an edit form that keeps its 
 successful save holds the update until it is closed; and a second open tab that is mid-edit
 reloads too, because the new worker takes over every tab at once.
 
+**A cold open on a device whose precache holds an older build (#454).** The old worker answers the
+navigation from its precache, so the first paint is the build the device already had; the page
+then finds the new worker, takes it, and reloads onto it — the mechanism above, with nothing
+cleared by hand. *Measured on #454 against a real worker across two local builds, in three
+orderings*: at natural timing the new build was on screen **3.6 s** after the cold open (the
+reload at 2.3 s); with the new build's install slowed by 2.5 s, 6.5 s; with the page's CPU
+throttled 6×, 17.5 s, of which 10 s was the page's own first paint. That flash of the old build
+is the cost of precaching the shell, paid once per deploy per device. A network-first shell was
+weighed at #454 and not taken: every cold open would pay a round trip, and an offline open would
+stall on a timeout before falling back to the precache. One ordering the plugin cannot see — a
+worker already installing when the page registered, which workbox-window attaches its listener
+too late to report — is guarded by the app itself: it gives the plugin
+`UNSEEN_INSTALL_GRACE_MS` (half a second) to report the worker and then takes it and reloads on
+the takeover. Chromium did not produce that ordering in any of the three runs. **None of this
+reaches a device still on a build from before #347** — see *Once, on the #347 deploy itself*
+below.
+
 **A deploy whose app fails on load is replaced by the next good deploy, or by a rollback, within
 about a minute.** The updater starts before the app and loads separately from it (`src/main.jsx`).
 When the app fails to load, the updater looks for a new build every `RECOVERY_CHECK_INTERVAL_MS` —
@@ -917,7 +969,10 @@ worker stays in charge and serves the old build until **every** Taskr window on 
 closed — on Android, swipe the installed app away from recents and close any Taskr browser tab,
 then open it again. After that one full close, the footer shows the #347 build, and every later
 deploy behaves as described above. It is also why #347's live observation is taken on the deploy
-**after** that one, not on #347's own.
+**after** that one, not on #347's own. *This is what #454 measured on production on 2026-09-15: a
+browser on `c21af5d` (2026-09-09) with the origin's worker installed and `waiting: true`, six days
+and four promotions after that build — the page had no client module to send SKIP_WAITING, and a
+reload could not move it.*
 
 **`registerType: 'autoUpdate'` alone did not deliver this, and re-reading the config will suggest it
 did.** Until #347 the config said `autoUpdate`, and the generated worker did take control of an open

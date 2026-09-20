@@ -262,6 +262,42 @@ body {
   color: var(--ink-dim);
 }
 
+/* #483 — the browser can install this app, offered once. The notice's
+   grammar — a left rule above the tab strip — with the accent on the rule,
+   because this is an offer rather than a report, and full ink because it
+   carries controls. A wrapping row with the two 44px buttons in ONE group:
+   where they fit beside the sentence they sit at its right (1280px: one 52px
+   row, MEASURED 2026-09-16 in the prototype); where they do not, they drop
+   together under it, still at the right edge (360px and 320px: 80px, the
+   sentence's row then the buttons', no horizontal overflow). The first draft
+   let each button wrap on its own, and at 360px Install sat beside the
+   sentence while Not now dropped alone underneath — 104px, and the two
+   answers read as unrelated. Never a modal, never over anything: it takes
+   its own height in the flow. */
+.shell__install {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.25rem 0 0.25rem 0.625rem;
+  border-left: 2px solid var(--accent);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.shell__install-text {
+  flex: 1 1 8rem;
+}
+
+.shell__install-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 /* #50 — the re-balance, announced. An EVENT above whatever surface is on
    screen, never a screen of its own: the charter's moment must be perceptible
    as an event, and this is the sentence it arrives in. The accent marks that
@@ -311,6 +347,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
+}
+
+/* #478 — what threw, for a problem report, behind a disclosure on the
+   render-failure card. The summary is a control, so it gets the 44px floor
+   and keeps the browser's own marker (it is not `display: flex`, which is
+   what hid the marker on the Shop tab). The detail is the raw message: it
+   may carry ids with no spaces, so it breaks anywhere rather than pushing
+   the card wider than a 360px screen. */
+.render-failure__details {
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.render-failure__summary {
+  min-height: 44px;
+  line-height: 44px;
+  cursor: pointer;
+}
+
+.render-failure__detail {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .row {
@@ -445,6 +504,49 @@ body {
    rule: the two routes carry equal weight for the people they apply to, and
    the divider only says the second is an alternative rather than a further
    step. Dim ink, like every other aside on a card. */
+/* #482 — "Trust this device" on the sign-in form. The whole row is the label,
+   so the tap target is the row (54px at 360 wide), not the 18px box; the hint
+   sits under the label in the note's size and ink.
+
+   Kept tight on purpose (design-bar, 2026-09-17). Measured at 360x800 with the
+   row hidden as the baseline: the row pushes Continue with Google down by its
+   own height plus the form's gap, and with #304's stale-sign-in notice showing
+   there were 56px under that button to give. No in-form row fits in 56px, so
+   the button straddles the fold in that case whatever this rule says — the
+   owner accepted that over moving the box below Google, where a phone never
+   shows it before Sign in is tapped. This rule only keeps the cost at 68px
+   rather than 80px. */
+.trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.trust__box {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--accent);
+}
+
+.trust__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.trust__label {
+  font-size: 0.9375rem;
+}
+
+.trust__hint {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  color: var(--ink-dim);
+}
+
 .divider {
   margin: 0.75rem 0;
   text-align: center;
@@ -707,6 +809,32 @@ body {
      figure (and its button) now that the parent wraps instead of stacking. */
   flex-basis: 100%;
   margin-top: 0.125rem;
+  opacity: 0.75;
+}
+
+/* The budget suggested from the person's own recent weeks — story #480.
+
+   Above the calendar readout and in its register, for its reason: an OFFER
+   beside a number the person owns. The two reason lines take the whole row so
+   they read as sentences under the figure rather than running on from it, and
+   the tap comes after them — the person reads why before they take it. */
+.member__suggested {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.member__suggested-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.member__suggested-reason {
+  display: block;
+  flex-basis: 100%;
   opacity: 0.75;
 }
 
@@ -2213,7 +2341,8 @@ details[open] > .shopping-past__run-summary > .card__subheading::before {
      belong at the left edge under the heading, so it keeps its left alignment
      and simply stops growing. */
   .shell__tagline,
-  .shell__notice {
+  .shell__notice,
+  .shell__install {
     max-width: 40rem;
   }
 

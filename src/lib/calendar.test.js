@@ -82,6 +82,7 @@ const {
   CONSENT_HOUSEHOLD_KEY,
   CONSENT_STATE_KEY,
   EVENT_READ_SCOPES,
+  GOOGLE_ACCOUNT_SCOPE,
   GOOGLE_AUTH_ENDPOINT,
   GOOGLE_CALENDAR_READONLY_SCOPE,
   GOOGLE_FREEBUSY_SCOPE,
@@ -103,6 +104,7 @@ const {
   busyComputedLabel,
   busyWeekFor,
   fetchBusyWeek,
+  listBusyHistory,
   listBusyWeeks,
   listCalendarConnections,
   newConsentState,
@@ -166,12 +168,22 @@ describe('AC 3 — the consent request asks for free/busy and nothing more', () 
     // be ONE, and it must not be one that returns the content of a meeting.
     // That survives #101 widening the ask, which spelling the current value
     // twice would not.
+    //
+    // #474 put `openid` beside it, which reads no calendar at all, so "one
+    // scope" became "one CALENDAR scope" and the whole list is pinned below.
     const scope = paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')
-    expect(scope, 'the URL must carry what this module declares').toBe(GOOGLE_FREEBUSY_SCOPE)
-    expect(scope.split(/\s+/)).toHaveLength(1)
+    const calendarScopes = scope.split(/\s+/).filter((s) => s !== GOOGLE_ACCOUNT_SCOPE)
+    expect(calendarScopes, 'the URL must carry what this module declares').toEqual([GOOGLE_FREEBUSY_SCOPE])
     expect(scope, 'a content-reading scope must never be the initial ask').not.toMatch(
       /readonly|\.events|calendar\.calendars/,
     )
+  })
+
+  it('#474 — asks for openid beside it, so the token can name its Google account, and for no profile or address', () => {
+    expect(GOOGLE_ACCOUNT_SCOPE).toBe('openid')
+    const scope = paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')
+    expect(scope.split(/\s+/)).toEqual(['openid', GOOGLE_FREEBUSY_SCOPE])
+    expect(scope).not.toMatch(/\b(email|profile)\b|userinfo/)
   })
 
   it('names the free/busy scope Google publishes, not a readonly one', () => {
@@ -628,6 +640,49 @@ describe('listBusyWeeks', () => {
   })
 })
 
+// #480 — the prior weeks' figures, read once for the whole window.
+describe('listBusyHistory', () => {
+  const WINDOW = ['2026-08-17', '2026-08-24', '2026-08-31', '2026-09-07']
+
+  it('is ONE query for the window: the same columns, the member set, and an `in` on the Mondays', async () => {
+    // AC 5's "one query per household for the window (not one per member per
+    // week)", as the recorded statement: one select, one `in` on members,
+    // one `in` on periods. A read that looped would record four selects; a
+    // read that matched on the member alone would record no period filter
+    // and return every week the household ever had.
+    await listBusyHistory(WINDOW, MEMBER_IDS)
+    expect(calls).toEqual([
+      { op: 'select', table: 'calendar_busy', cols: CALENDAR_BUSY_COLUMNS },
+      { op: 'in', table: 'calendar_busy', column: 'member_id', value: MEMBER_IDS },
+      { op: 'in', table: 'calendar_busy', column: 'period_start', value: WINDOW },
+    ])
+  })
+
+  it('reads nothing at all when the household has no members, or the window is empty', async () => {
+    expect(await listBusyHistory(WINDOW, [])).toEqual([])
+    expect(await listBusyHistory([], MEMBER_IDS)).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a read that names no weeks', async () => {
+    await expect(listBusyHistory(null, MEMBER_IDS)).rejects.toThrow(/Which weeks/)
+  })
+
+  it('refuses a read that names no member set', async () => {
+    await expect(listBusyHistory(WINDOW, undefined)).rejects.toThrow(/Which household/)
+  })
+
+  it('returns an empty list when nobody has a figure, rather than null', async () => {
+    selectResult = { data: null, error: null }
+    expect(await listBusyHistory(WINDOW, MEMBER_IDS)).toEqual([])
+  })
+
+  it('reports a failure in this app’s words, keeping the cause', async () => {
+    selectResult = { data: null, error: { message: 'permission denied', code: '42501' } }
+    await expect(listBusyHistory(WINDOW, MEMBER_IDS)).rejects.toThrow(/loading calendar busy history/)
+  })
+})
+
 describe('busyWeekFor', () => {
   const ROWS = [
     { member_id: 'm1', period_start: WEEK, busy_minutes: 300 },
@@ -887,7 +942,7 @@ describe('#101 AC 1 — the widened scope is asked for through the SAME consent 
     // tests above assert that on a URL built with no scope argument, and this
     // is the same fact from the other side: the default IS free/busy.
     expect(paramsOf(consentUrl({ redirectUri: 'https://x.test/', state: 's' })).get('scope')).toBe(
-      GOOGLE_FREEBUSY_SCOPE,
+      `openid ${GOOGLE_FREEBUSY_SCOPE}`,
     )
   })
 
@@ -900,7 +955,8 @@ describe('#101 AC 1 — the widened scope is asked for through the SAME consent 
       location: LOCATION,
     })
     const params = paramsOf(url)
-    expect(params.get('scope')).toBe(GOOGLE_CALENDAR_READONLY_SCOPE)
+    // `openid` rides along (#474), so the widened token names its account too.
+    expect(params.get('scope')).toBe(`openid ${GOOGLE_CALENDAR_READONLY_SCOPE}`)
     // INCREMENTAL: added to the free/busy grant, never replacing it.
     expect(params.get('include_granted_scopes')).toBe('true')
     // And a LASTING one, for the same two reasons the first consent is.

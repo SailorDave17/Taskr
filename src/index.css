@@ -13,8 +13,23 @@
      the first value to clear 4.5:1 on --surface (#2f9a80) drops the filled
      button's ink to 3.29:1, so one token cannot be both the fill and the
      text. This is the same hue at l=46% instead of 28%: 6.50:1 on --surface,
-     7.21:1 on --bg. gate.test.js computes both from this file. */
+     7.21:1 on --bg. gate.test.js computes both from this file.
+
+     #443 — every other place --accent was doing text's job (card headings,
+     the shell title, the member badge, the bought mark) now takes this token
+     too, and so does the split's DONE fill: a fill that has to be told from a
+     dim fill beside it needs the same weight as text does. MEASURED before
+     the change, real browser at 360×800: headings 2.70:1 on --surface, the
+     badge and the mark 2.99:1 on --bg, the title 2.99:1 against a 3:1 bar
+     for large text, done-vs-open fills 2.83:1 by sampled pixels. */
   --accent-ink: #33b798;
+  /* #443 — the accent for NON-TEXT ui on the dark surfaces: the focus ring
+     and the two accent borders. WCAG 1.4.11 asks 3:1 of those, not 4.5:1, and
+     --accent is 2.70:1 on --surface and 2.99:1 on --bg. Same hue at l=34%:
+     3.74:1 on --surface, 4.15:1 on --bg — cleared with a margin, and quieter
+     than --accent-ink on purpose, because a 1px border at 6.5:1 is louder
+     than a line that only has to be seen. gate.test.js computes both. */
+  --accent-line: #268870;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -72,7 +87,9 @@ body {
   margin: 0;
   font-size: clamp(2rem, 9vw, 2.75rem);
   letter-spacing: -0.02em;
-  color: var(--accent);
+  /* #443 — large text (32px bold at 360) needs 3:1 on --bg and --accent
+     measured 2.99:1 there; the text accent reads 7.21:1. */
+  color: var(--accent-ink);
 }
 
 .shell__tagline {
@@ -159,7 +176,11 @@ body {
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--accent);
+  /* #443 — the text accent (--accent is 2.70:1 on --surface). Nothing has
+     rendered this class since #5 replaced the status card with the roster;
+     the rule is kept pointed at the token that clears AA so a revival cannot
+     ship it at 2.70:1 again, and gate.test.js computes it from this file. */
+  color: var(--accent-ink);
 }
 
 .shell__status-body {
@@ -221,7 +242,11 @@ body {
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--accent);
+  /* #443 — the text accent: 16px bold is small text under WCAG (the bold
+     threshold is 18.66px), so this needs 4.5:1 on the card, and --accent
+     measured 2.70:1 — the faintest text on the sign-in card once #426 had
+     fixed its links. */
+  color: var(--accent-ink);
 }
 
 .card__body {
@@ -307,7 +332,9 @@ body {
 .announce {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-left: 3px solid var(--accent);
+  /* #443 — the line accent: 3px against --bg outside and --surface inside,
+     3:1 each way; --accent measured 2.99:1 and 2.70:1. */
+  border-left: 3px solid var(--accent-line);
   border-radius: 0.75rem;
   padding: 1rem 1.25rem;
   display: flex;
@@ -433,7 +460,10 @@ body {
 }
 
 .field__input:focus-visible {
-  outline: 2px solid var(--accent);
+  /* #443 — the line accent. The ring sits 1px outside the input's border, so
+     its neighbour is the card (--surface), where --accent measured 2.70:1
+     against the 3:1 a focus indicator needs. */
+  outline: 2px solid var(--accent-line);
   outline-offset: 1px;
 }
 
@@ -594,7 +624,9 @@ body {
   gap: 0.5rem;
   padding: 0.875rem;
   background: var(--bg);
-  border: 1px solid var(--accent);
+  /* #443 — the line accent: 1px against the card outside and --bg inside,
+     3:1 each way; --accent measured 2.70:1 and 2.99:1. */
+  border: 1px solid var(--accent-line);
   border-radius: 0.5rem;
 }
 
@@ -670,7 +702,9 @@ body {
 }
 
 .member__badge {
-  color: var(--accent);
+  /* #443 — the text accent: 17px at weight 500 is small text, on the row's
+     --bg, where --accent measured 2.99:1. */
+  color: var(--accent-ink);
   font-weight: 500;
 }
 
@@ -1619,7 +1653,9 @@ body {
 }
 
 .shopping-item__mark--done {
-  color: var(--accent);
+  /* #443 — the text accent: the tick is a 17px glyph on the row's --bg,
+     where --accent measured 2.99:1. */
+  color: var(--accent-ink);
 }
 
 /* The quiet control keeps to the right on its own line under the tap target,
@@ -2225,8 +2261,14 @@ details[open] > .shopping-past__run-summary > .card__subheading::before {
    be visually distinct, not that they be different colours. Two hues would
    invite reading one of them as a warning, which is the palette rule above. */
 .split__fill--done {
-  background: var(--accent);
-  filter: brightness(1.5);
+  /* #443 — the heavier weight is the text accent rather than a brightness
+     filter on the fill accent. MEASURED by sampled pixels at 360×800: done at
+     brightness(1.5) was rgb(46, 166, 138) against the open fill's
+     rgb(37, 84, 77) — 2.83:1, short of the 3:1 two adjacent fills need to be
+     told apart. The token reads 3.41:1 against the same open fill, and it is
+     a value gate.test.js can compute from this file (a filter is applied by
+     the browser, in sRGB, and asserting it means re-implementing it). */
+  background: var(--accent-ink);
 }
 
 .split__fill--open {

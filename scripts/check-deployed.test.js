@@ -4,11 +4,14 @@ import { FUNCTION_NAMES, SERVER_ONLY_FUNCTIONS } from './deploy-function.mjs'
 import { TOKEN_PAGE } from './management-api.mjs'
 import {
   bundleFilesOf,
+  commitIsOnRelease,
   deploymentVerdict,
   functionsToCheck,
   functionsUrl,
   listDeployedFunctions,
   parseDeployTime,
+  resolveReleaseRef,
+  sourceCommitHash,
   sourceCommitTime,
 } from './check-deployed.mjs'
 
@@ -270,5 +273,175 @@ describe('the verdict — AC 1, AC 3, AC 4', () => {
     const verdict = deploymentVerdict('provision-member', undefined, sourceMs)
     expect(verdict.stale).toBe(true)
     expect(verdict.reason).toContain('never deployed')
+  })
+})
+
+// #415 — two different facts were wearing one word.
+//
+// Production builds from `release`, and this script compares the deploy against
+// the last commit touching the function IN THE CHECKOUT IT RUNS IN, normally
+// `develop`. So a function whose newest source commit is not promoted yet reads
+// STALE while production is perfectly correct, and it stays red on every run
+// until the next promotion.
+//
+// Why that is worth a story: this instrument exists BECAUSE #196 measured
+// production serving a day-old build while `check:live` read 24 of 24 green. An
+// alarm that is always on cannot report the thing it was built for. *Measured
+// while writing this story*: the run showed 2 of 8 STALE and BOTH were real —
+// two genuinely owed deploys sitting inside a red the repo had learned to read
+// as the known-noisy one.
+describe('#415 — a deploy behind its source, versus behind an unpromoted branch', () => {
+  const sourceMs = Date.parse('2026-09-19T00:00:00Z')
+  const older = { slug: 'provision-member', updated_at: sourceMs - 60_000 }
+
+  it('POSITIVE CONTROL: with no ancestry information, the original claim is unchanged', () => {
+    // The old three-argument call still means what it always meant. Without
+    // this, every assertion below could pass against a function that had
+    // quietly stopped reporting staleness at all.
+    const verdict = deploymentVerdict('provision-member', older, sourceMs)
+    expect(verdict.stale).toBe(true)
+    expect(verdict.kind).toBe('behind-source')
+    expect(verdict.reason).toContain('predates')
+  })
+
+  it('AC 1: a source commit NOT on the release branch is reported as unpromoted, naming the branch', () => {
+    const verdict = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: false,
+      releaseRef: 'origin/release',
+    })
+    expect(verdict.kind).toBe('unpromoted')
+    expect(verdict.reason).toContain('origin/release')
+    expect(verdict.reason).toContain('promotion that has not happened')
+  })
+
+  it('an unpromoted verdict is still STALE — the fact is reclassified, never withdrawn', () => {
+    // FOUND BY MUTATION, predicted 1 and reddened 0: nothing here asserted
+    // that an unpromoted verdict keeps `stale: true`, so flipping it to
+    // `false` passed the whole suite. That would turn this story's fix into
+    // the defect it was written to avoid — the deploy genuinely IS behind its
+    // source, and only WHO fixes it changes. `main` decides what fails from
+    // `kind`; this holds the underlying fact.
+    const verdict = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: false,
+      releaseRef: 'origin/release',
+    })
+    expect(verdict.stale).toBe(true)
+  })
+
+  it('AC 2: the two cases are distinguishable, and a promoted commit stays a real staleness', () => {
+    const promoted = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: true,
+      releaseRef: 'origin/release',
+    })
+    const unpromoted = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: false,
+      releaseRef: 'origin/release',
+    })
+    expect(promoted.kind).toBe('behind-source')
+    expect(unpromoted.kind).toBe('unpromoted')
+    expect(promoted.kind).not.toBe(unpromoted.kind)
+  })
+
+  it('AC 3: a real staleness still reports stale — the verdict is not softened', () => {
+    // The criterion this file exists to keep honest. Both kinds are `stale`;
+    // what differs is WHICH, and only the promoted kind makes the command fail.
+    const verdict = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: true,
+      releaseRef: 'origin/release',
+    })
+    expect(verdict.stale).toBe(true)
+    expect(verdict.kind).toBe('behind-source')
+  })
+
+  it('an unanswerable ancestry falls back to the ORIGINAL claim, never to the softer one', () => {
+    // An instrument that downgrades its own alarm when it cannot check is the
+    // failure this whole file argues against. `undefined` is "I could not
+    // check", and it must not read as "not promoted".
+    const verdict = deploymentVerdict('provision-member', older, sourceMs, {
+      onReleaseBranch: undefined,
+      releaseRef: 'origin/release',
+    })
+    expect(verdict.kind).toBe('behind-source')
+  })
+
+  it('a current deploy is never reclassified, whatever the branch says', () => {
+    const verdict = deploymentVerdict(
+      'provision-member',
+      { slug: 'provision-member', updated_at: sourceMs + 60_000 },
+      sourceMs,
+      { onReleaseBranch: false, releaseRef: 'origin/release' },
+    )
+    expect(verdict.stale).toBe(false)
+    expect(verdict.kind).toBe('current')
+  })
+
+  it('a never-deployed function is never reclassified as unpromoted', () => {
+    // The loudest case must stay loudest: nothing on the platform is an
+    // omission at its maximum, and an unpromoted source does not excuse it.
+    const verdict = deploymentVerdict('provision-member', undefined, sourceMs, {
+      onReleaseBranch: false,
+      releaseRef: 'origin/release',
+    })
+    expect(verdict.stale).toBe(true)
+    expect(verdict.kind).toBe('never-deployed')
+  })
+
+  describe('commitIsOnRelease — the ancestry read', () => {
+    it('reports true when git says the commit is contained', () => {
+      expect(commitIsOnRelease('abc123', 'origin/release', () => true)).toBe(true)
+    })
+
+    it('reports false when git says it is not', () => {
+      expect(commitIsOnRelease('abc123', 'origin/release', () => false)).toBe(false)
+    })
+
+    it('reports undefined — not false — when git cannot answer', () => {
+      // A shallow clone, a missing ref, a git that failed. Reading any of
+      // those as "not promoted" would silently downgrade a real staleness.
+      expect(commitIsOnRelease('abc123', 'origin/release', () => undefined)).toBeUndefined()
+      expect(
+        commitIsOnRelease('abc123', 'origin/release', () => {
+          throw new Error('fatal: bad revision')
+        }),
+      ).toBeUndefined()
+    })
+
+    it('refuses to guess about an empty commit', () => {
+      expect(commitIsOnRelease('', 'origin/release', () => true)).toBeUndefined()
+    })
+  })
+
+  describe('resolveReleaseRef — which spelling of the branch exists', () => {
+    it('prefers origin/release, because a local release can sit behind it silently', () => {
+      expect(resolveReleaseRef((ref) => ref === 'origin/release' || ref === 'release')).toBe(
+        'origin/release',
+      )
+    })
+
+    it('falls back to a local release when there is no remote-tracking ref', () => {
+      expect(resolveReleaseRef((ref) => ref === 'release')).toBe('release')
+    })
+
+    it('returns undefined when neither exists, rather than inventing one', () => {
+      expect(resolveReleaseRef(() => false)).toBeUndefined()
+    })
+  })
+
+  describe('sourceCommitHash — reporting, not gating', () => {
+    it('returns the trimmed hash', () => {
+      expect(sourceCommitHash('provision-member', () => '  abc123\n')).toBe('abc123')
+    })
+
+    it('returns undefined on an empty or failed read rather than throwing', () => {
+      // `sourceCommitTime` has already refused the empty case by the time this
+      // runs, so a second throw here would turn a reporting nicety into a
+      // reason the whole check cannot run.
+      expect(sourceCommitHash('provision-member', () => '')).toBeUndefined()
+      expect(
+        sourceCommitHash('provision-member', () => {
+          throw new Error('git exploded')
+        }),
+      ).toBeUndefined()
+    })
   })
 })

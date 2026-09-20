@@ -293,15 +293,151 @@ export function defaultRunGit(name) {
  * The comparison is strict: a deploy strictly older than the last commit is
  * stale, an equal timestamp is not, because "predates" is the claim.
  */
-export function deploymentVerdict(name, deployed, sourceMs) {
+export function deploymentVerdict(name, deployed, sourceMs, source = {}) {
   if (!deployed) {
-    return { name, stale: true, reason: 'the platform has no function by this name — never deployed' }
+    return {
+      name,
+      stale: true,
+      kind: 'never-deployed',
+      reason: 'the platform has no function by this name — never deployed',
+    }
   }
   const deployedMs = parseDeployTime(deployed.updated_at)
   if (deployedMs < sourceMs) {
-    return { name, stale: true, deployedMs, reason: 'the deploy predates the last commit to its source' }
+    // #415 — TWO different facts wear the same word.
+    //
+    // Production builds from `release`. This script compares the deploy
+    // against the last commit touching the function IN THE CHECKOUT IT RUNS
+    // IN, which is normally `develop`. So a function whose newest source
+    // commit has not been promoted yet reads STALE while production is
+    // perfectly correct — the verdict is true about the tree and misleading
+    // about production, and it stays red on every run until the next
+    // promotion.
+    //
+    // That is not a cosmetic complaint. A standing red is one everybody
+    // learns to scroll past, and this instrument exists BECAUSE #196 measured
+    // production serving a day-old build while `check:live` read 24 of 24
+    // green. An alarm that is always on cannot report the thing it was built
+    // for. *Measured while writing this story*: the run showed 2 of 8 STALE
+    // and BOTH were real — sitting inside a red the repo had been reading as
+    // the known-noisy one.
+    //
+    // `onReleaseBranch` is undefined when the caller could not resolve it
+    // (no `release` ref, a shallow clone). Undefined is deliberately treated
+    // as the ORIGINAL claim rather than as the softer one: an instrument that
+    // downgrades its own alarm when it cannot check is the failure this whole
+    // file argues against.
+    if (source.onReleaseBranch === false) {
+      return {
+        name,
+        stale: true,
+        kind: 'unpromoted',
+        deployedMs,
+        reason:
+          `the deploy predates the last commit to its source, but that commit is not on ` +
+          `${source.releaseRef ?? 'release'} yet — production does not have it either, ` +
+          'so this is a promotion that has not happened rather than a deploy that is owed',
+      }
+    }
+    return {
+      name,
+      stale: true,
+      kind: 'behind-source',
+      deployedMs,
+      reason: 'the deploy predates the last commit to its source',
+    }
   }
-  return { name, stale: false, deployedMs, reason: '' }
+  return { name, stale: false, kind: 'current', deployedMs, reason: '' }
+}
+
+/**
+ * Is a commit contained in the release branch? — #415.
+ *
+ * Pure but for the injected runner, so the tests can drive every branch
+ * without a repository in a particular state. Returns `undefined` rather than
+ * a boolean when the question cannot be answered — no `release` ref, a shallow
+ * clone, a git that failed — because "I could not check" and "no, it is not
+ * there" are different claims and the verdict above treats them differently.
+ */
+export function commitIsOnRelease(commit, releaseRef, runner = defaultRunAncestry) {
+  if (!commit) return undefined
+  try {
+    return runner(commit, releaseRef)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The branch production builds from — #415.
+ *
+ * Resolved rather than hard-coded to one spelling: a checkout that has never
+ * checked `release` out has only the remote-tracking ref, and one that has
+ * carries both. `origin/release` is preferred because it is what the remote
+ * says, and a local `release` can sit behind it without anything saying so —
+ * which would make this check answer "not promoted" about a commit that is.
+ * `undefined` when neither exists, which `commitIsOnRelease` turns into "I
+ * could not check" rather than "no".
+ */
+export function resolveReleaseRef(runner = defaultRunRefExists) {
+  for (const ref of ['origin/release', 'release']) {
+    try {
+      if (runner(ref)) return ref
+    } catch {
+      // Try the next spelling; an unreadable ref is not an answer.
+    }
+  }
+  return undefined
+}
+
+/** The real ref-existence read, split out so tests can inject. */
+export function defaultRunRefExists(ref) {
+  const result = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+    encoding: 'utf8',
+  })
+  return result.status === 0
+}
+
+/**
+ * The hash of the last commit touching this function's bundle — #415.
+ *
+ * A separate read rather than a wider `sourceCommitTime`, deliberately: that
+ * function's contract is covered by tests that assert its refusals, and this
+ * question is only ever asked about a function already judged stale. An empty
+ * answer is `undefined` here rather than a throw, because `sourceCommitTime`
+ * has already refused the empty case by the time this runs — the caller is
+ * past that gate, and a second throw would turn a reporting nicety into a
+ * reason the whole check cannot run.
+ */
+export function sourceCommitHash(name, runner = defaultRunCommitHash) {
+  try {
+    const output = String(runner(name) ?? '').trim()
+    return output || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The real hash read, split out so tests can inject. */
+export function defaultRunCommitHash(name) {
+  const paths = [`supabase/functions/${name}`, ...bundleFilesOf(name)]
+  const result = spawnSync('git', ['log', '-1', '--format=%H', '--', ...paths], {
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) return undefined
+  return result.stdout
+}
+
+/** The real ancestry read, split out so tests can inject. */
+export function defaultRunAncestry(commit, releaseRef) {
+  if (!releaseRef) return undefined
+  const result = spawnSync('git', ['merge-base', '--is-ancestor', commit, releaseRef], {
+    encoding: 'utf8',
+  })
+  // 0 = contained, 1 = not contained, anything else = git could not answer.
+  if (result.status === 0) return true
+  if (result.status === 1) return false
+  return undefined
 }
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href
@@ -327,11 +463,22 @@ async function main(env) {
   const listed = await listDeployedFunctions({ ref, token, fetchImpl: fetch })
   if (!listed.ok) refuse(`Could not read the deployed-function records.\n\n${listed.error}`)
 
+  // #415 — resolved once, not per function.
+  const RELEASE_REF = resolveReleaseRef()
+
   const verdicts = []
   for (const name of names) {
     const deployed = listed.functions.find((fn) => fn.slug === name)
     const source = sourceCommitTime(name)
-    const verdict = deploymentVerdict(name, deployed, source.ms)
+    // #415 — only asked when it can change the answer. The ancestry read is
+    // two git calls, and a function whose deploy is current does not care
+    // whether its source is promoted.
+    const commit = sourceCommitHash(name)
+    const onReleaseBranch = commit ? commitIsOnRelease(commit, RELEASE_REF) : undefined
+    const verdict = deploymentVerdict(name, deployed, source.ms, {
+      onReleaseBranch,
+      releaseRef: RELEASE_REF,
+    })
     verdicts.push(verdict)
 
     console.log(name)
@@ -344,7 +491,16 @@ async function main(env) {
       console.log('  deployed : NOTHING — the platform has no function by this name')
     }
     console.log(`  source   : last commit ${source.iso}`)
-    console.log(`  verdict  : ${verdict.stale ? `STALE — ${verdict.reason}` : 'current — the deploy is not older than the source'}`)
+    // #415 — the word carries the distinction, not just the sentence after it.
+    // A reader scanning a column of verdicts sees which kind this is without
+    // reading to the end of the line.
+    const label = verdict.kind === 'unpromoted' ? 'NOT PROMOTED' : 'STALE'
+    console.log(
+      `  verdict  : ${verdict.stale ? `${label} — ${verdict.reason}` : 'current — the deploy is not older than the source'}`,
+    )
+    if (verdict.kind === 'unpromoted') {
+      console.log(`  source   : that commit is on this checkout and not on ${RELEASE_REF}`)
+    }
 
     // A dirty working tree is this comparison's stated blind spot, not a
     // verdict: `deploy:function` uploads the working tree, so uncommitted
@@ -362,11 +518,34 @@ async function main(env) {
     console.log('')
   }
 
-  const stale = verdicts.filter((verdict) => verdict.stale)
-  if (stale.length) {
+  // #415 — split, because the two need different actions from different
+  // people. A deploy that is owed is fixed by one command here; a commit that
+  // is not promoted is fixed by a `develop -> release` pull request, which is
+  // the owner's. Reporting them under one word sent every reader looking for
+  // the wrong fix, and made the whole verdict ignorable.
+  const owed = verdicts.filter((verdict) => verdict.stale && verdict.kind !== 'unpromoted')
+  const unpromoted = verdicts.filter((verdict) => verdict.kind === 'unpromoted')
+
+  if (unpromoted.length) {
+    // Printed BEFORE the refusal, so it is visible whether or not the check
+    // goes on to fail.
+    console.log(
+      `${unpromoted.length} of ${verdicts.length} function(s) have a source commit that is not on ` +
+        `${RELEASE_REF} yet:\n\n` +
+        unpromoted.map((verdict) => `  ${verdict.name}`).join('\n') +
+        '\n\nProduction builds from that branch, so it does not have those commits either and\n' +
+        'nothing is wrong with the deployed build. This is a promotion that has not\n' +
+        'happened, not a deploy that is owed, and it clears on the next\n' +
+        `develop -> ${RELEASE_REF?.replace(/^origin\//, '') ?? 'release'} merge.\n`,
+    )
+  }
+
+  // AC 3 — a real staleness still FAILS, and it fails on its own count rather
+  // than on a total that unpromoted commits had inflated.
+  if (owed.length) {
     refuse(
-      `${stale.length} of ${verdicts.length} Edge Function deploy(s) are STALE:\n\n` +
-        stale.map((verdict) => `  ${verdict.name} — ${verdict.reason}`).join('\n') +
+      `${owed.length} of ${verdicts.length} Edge Function deploy(s) are STALE:\n\n` +
+        owed.map((verdict) => `  ${verdict.name} — ${verdict.reason}`).join('\n') +
         '\n\nThe fix is one command:  npm run deploy:function\n' +
         'It deploys every function by default, and redeploying an unchanged one is a\n' +
         'no-op by content (the ezbr_sha256 does not move), so there is no cost to\n' +

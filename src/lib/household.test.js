@@ -185,6 +185,7 @@ const {
   listHouseholds,
   createHousehold,
   currentSession,
+  deleteAccount,
   describeSignInReturn,
   deviceTimezone,
   findClaimedMember,
@@ -1706,6 +1707,39 @@ describe('leaveHousehold — the client half of #431', () => {
   it('refuses to call the function without a household', async () => {
     await expect(leaveHousehold('')).rejects.toThrow(/which household/i)
     expect(calls).toEqual([])
+  })
+})
+
+describe('deleteAccount — the client half of #432', () => {
+  it('calls the account function with an empty body: WHO is the sign-in’s, never sent', async () => {
+    invokeResult = { data: { ok: true, deleted: true }, error: null }
+    await deleteAccount()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ op: 'invoke', body: {} })
+    expect(calls[0].name).toBe('delete-account')
+  })
+
+  it('reports the account deleted only when the function says so, exactly', async () => {
+    invokeResult = { data: { ok: true, deleted: true }, error: null }
+    expect(await deleteAccount()).toEqual({ deleted: true, revokeFailed: false })
+    invokeResult = { data: { ok: true, deleted: true, revokeFailed: true }, error: null }
+    expect(await deleteAccount()).toEqual({ deleted: true, revokeFailed: true })
+    invokeResult = { data: { ok: true, deleted: 'yes' }, error: null }
+    expect(await deleteAccount()).toMatchObject({ deleted: false })
+  })
+
+  it("passes the function's own refusal through verbatim", async () => {
+    const refusal = 'You are still in a household. Leave it first.'
+    invokeResult = { data: null, error: httpError({ error: refusal }) }
+    await expect(deleteAccount()).rejects.toThrow(refusal)
+  })
+
+  it('says the account was not deleted when the request never got an answer, and names the function', async () => {
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await deleteAccount().then(() => null, (err) => err)
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    expect(thrown.message).toMatch(/was not deleted/)
+    expect(thrown.message).toMatch(/delete-account/)
   })
 })
 

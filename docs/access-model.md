@@ -67,7 +67,7 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-17 — *measured **75 of 75*** in #469's session, as at #182's pickup on 2026-09-16.
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds ONE row since #432 (2026-09-19) — the `delete-account` Edge Function, NOT DEPLOYED until `npm run deploy:function` ships it, no migration beside it — and was EMPTY before that as of 2026-09-17 — *measured **75 of 75*** in #469's session, as at #182's pickup on 2026-09-16.
   From 2026-09-11 it held FIVE rows — #430's three (`request_household_deletion`,
   `restore_household` and `household_deletion_status`, red until `0042` was applied on 2026-09-12)
   and #431's two (`transfer_household` until `0043` was applied, and the `leave-household` Edge
@@ -2672,6 +2672,59 @@ A member can leave from the Who tab. An organizer first hands the household over
   from a session after #435 merged: *measured* **69 of 74 → 70 of 74** across the apply and
   **→ 71 of 74** across the deploy (readings on #431). `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.
+
+## Deleting your own account — #432, 2026-09-19
+
+A person can delete their own sign-in from the app. The owner's decisions are on #432 (pickup,
+2026-09-19) and #427; two of the story's filed premises had moved by the time it was worked, and
+the comment on #432 records how.
+
+- **It is immediate, and it is the LAST way out, not a fourth one.** The grace period already
+  applies wherever there is something to restore: an organizer deletes the household (#430) and the
+  purge deletes their sign-in when the period ends; a member leaves (#431) and `leave-household`
+  deletes a last-claim sign-in on the spot. What is left is a sign-in in **no live household**,
+  which holds nothing but the auth row — so there is no pending state, no restore, and no
+  migration. From inside a household the Who tab's *Delete your account* card is a **route**: its
+  confirm says the sign-in goes with the last leave and opens the Leave confirm, whose organizer
+  form already offers hand-over or delete. The delete itself happens only on the signed-in
+  no-household screen.
+- **The server half is the `delete-account` Edge Function**, caller-scoped like `leave-household`:
+  WHO is deleted is `auth.uid()` off the JWT, and the body is never read, so one account cannot
+  delete another (`handler.test.js` posts a body naming somebody else and reads the JWT's id in the
+  delete). In order, it:
+  1. refuses while a live household still claims the caller — read **as the caller**, so
+     `current_household_ids()` decides, and since `0042` that leaves out a household pending
+     deletion. This is why a member of a household that is being deleted, whom the leave path
+     refuses (`0043`'s reasoning), is not trapped: their rows do not block;
+  2. reads the rows that still claim them as `service_role` — after step 1, only rows in pending
+     households — and revokes the Google grant behind each through `member_tokens_to_revoke`
+     (keyed on the Google account since `0047`). Before the sign-in goes: not because the delete
+     takes the token row (`members_claimed_by_fkey` is ON DELETE SET NULL, so the member row and its
+     token outlive the account and the purge cascades them later) but because after it nobody can
+     come back to press Disconnect. If the tokens cannot be read, nothing is deleted and the person
+     is told to try again; a revoke Google refuses does not stop the delete, and the response says
+     `revokeFailed`, which the app turns into #99's sentence on the screen they land on;
+  3. `auth.admin.deleteUser` on the caller alone. Last, so every failure above leaves the account
+     exactly as it was. The app then ends the session the way a last leave does (#440).
+
+  It touches no row in `public`. #262's other-claims rule is not asked: the caller is deleting their
+  OWN account, and the only question is whether a live household still needs them.
+- **`provision-member`'s `revoke` refuses the organizer's own row** (409, naming the two routes
+  out). #427's code map found nothing stopped an organizer revoking the row their own JWT claims and
+  deleting their last-claim sign-in, leaving the household with an organizer row nobody can claim;
+  only the hidden Remove button stood in the way. The member DELETE policy (`0016`) already refuses
+  the organizer's own row; this is the same refusal for the auth half. `handler.test.js` holds it
+  and the row claimed by somebody else beside it as the positive control.
+- **The Google sign-in grant is out of reach**, and both confirms say so: `signInWithGoogle` asks
+  for no offline access and stores no token, so only the calendar grants can be revoked from here.
+  The person removes Taskr from their Google account's third-party access themselves.
+- **What each instrument sees.** No migration, so `check:live`, `probe:live-grants` and the catalog
+  query have nothing to read on the database side. `check:live` gains ONE row — the function's
+  preflight, listed in `LIVE_EDGE_FUNCTIONS` with its call site (`household.js deleteAccount`) —
+  red until `npm run deploy:function` ships it, which is the one post-merge step; `check:deployed`
+  reads it absent until then. The function's decisions are in
+  `supabase/functions/delete-account/handler.test.js` (order, whose power each step uses, the
+  refusals); what it cannot see is stated in that file's header.
 
 ## A grant is kept while its Google account is used elsewhere — #474, 2026-09-17
 

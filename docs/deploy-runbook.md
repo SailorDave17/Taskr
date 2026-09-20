@@ -414,6 +414,14 @@ it, and it needs no secret beyond the three Supabase injects: Google's revocatio
 token alone. Deploy it with `0043` applied. Until then `check:live` reads it NOT DEPLOYED and
 `transfer_household` red, both excused in the README.
 
+**And `delete-account` since #432**, the second function a person calls about themselves: it deletes
+the caller's own sign-in, immediately, once no live household claims it, revoking first the Google
+grant behind any row left in a household pending deletion. It is in `FUNCTION_NAMES`, so the bare
+`npm run deploy:function` ships it, and it needs no secret beyond the three Supabase injects and no
+migration: every function it calls exists since `0043`. Until it is deployed `check:live` reads it
+NOT DEPLOYED, excused in the README, and the app's *Delete my account* answers with the
+`deleteAccount` sentence naming this runbook.
+
 `npm run deploy:function` deploys all of them; `npm run deploy:function -- <name>` narrows it to one,
 and a name this repo does not have is refused by the script rather than handed to the CLI, which would
 fail with a message about a directory and send you to look at the filesystem instead of at what you

@@ -151,6 +151,54 @@ export async function leaveHousehold(householdId) {
   }
 }
 
+/** #432 — the account-deletion function's name, in one place; liveSchema.test.js resolves it. */
+const DELETE_ACCOUNT_FUNCTION = 'delete-account'
+
+/**
+ * #432 — delete your own sign-in, through the `delete-account` Edge Function.
+ * WHO is deleted is the JWT's, so nothing is sent: the body is empty and the
+ * function never reads one. It refuses while a live household still claims the
+ * caller (the app routes that person to Leave, whose last leave deletes the
+ * sign-in itself, #431), revokes the Google grant behind any row left in a
+ * household pending deletion, and deletes the sign-in — immediately, with no
+ * grace period (owner decision at #432's pickup). Returns
+ * `{ deleted, revokeFailed }`; `revokeFailed` becomes #99's sentence.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is — the
+ * same rule `callProvisioning` gives. A failure here means nothing was deleted:
+ * the function's own order puts the delete last.
+ */
+export async function deleteAccount() {
+  const { data, error } = await getSupabase().functions.invoke(DELETE_ACCOUNT_FUNCTION, {
+    body: {},
+  })
+  if (error) {
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const unreachable =
+      'Could not reach the account service, so your account was not deleted. Check this ' +
+      `device's connection — if it is fine, the ${DELETE_ACCOUNT_FUNCTION} function has ` +
+      'not been deployed to this project yet (see docs/deploy-runbook.md).'
+    const err = new Error(
+      detail ||
+        (error?.name === 'FunctionsFetchError'
+          ? unreachable
+          : `Could not delete your account: ${error?.message ?? 'unknown error'}`),
+    )
+    err.cause = error
+    throw err
+  }
+  return {
+    deleted: data?.deleted === true,
+    revokeFailed: data?.revokeFailed === true,
+  }
+}
+
 /**
  * The same, plus the two member-write failures that are worth naming — #242.
  *

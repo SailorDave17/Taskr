@@ -81,6 +81,11 @@ export const FUNCTION_NAMES = Object.freeze([
   // its last claim. Needs no secret beyond the three Supabase injects — Google's
   // revocation endpoint takes the token alone, as `calendar-disconnect`'s does.
   'leave-household',
+  // #432. Deleting your own sign-in: refuses while a live household still
+  // claims the caller, revokes the grant behind any row left in a household
+  // pending deletion, then `auth.admin.deleteUser` on the caller alone. The
+  // same three injected secrets and nothing else.
+  'delete-account',
 ])
 
 /**

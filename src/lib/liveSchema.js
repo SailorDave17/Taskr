@@ -581,6 +581,10 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // leaver's Google grant, leaves as them, deletes a last-claim sign-in. Reads
   // NOT DEPLOYED until `npm run deploy:function` ships it.
   'leave-household',
+  // #432. Invoked by `deleteAccount` (src/lib/household.js): revokes any
+  // grant left in a household pending deletion, then deletes the caller's own
+  // sign-in. Reads NOT DEPLOYED until `npm run deploy:function` ships it.
+  'delete-account',
 ])
 
 /**

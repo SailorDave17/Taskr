@@ -42,6 +42,9 @@ const api = {
   requestHouseholdDeletion: vi.fn(async () => ({})),
   // #431
   leaveHousehold: vi.fn(async () => ({ accountDeleted: false, warning: null })),
+  // #432 — deleting your own sign-in. The default answers as the function
+  // does on success; tests about a refusal override it.
+  deleteAccount: vi.fn(async () => ({ deleted: true, revokeFailed: false })),
   transferHousehold: vi.fn(async () => ({})),
   restoreHousehold: vi.fn(async () => ({})),
   // #440 — whether the local session is gone (a null session AND no error),
@@ -505,6 +508,7 @@ beforeEach(() => {
   api.requestHouseholdDeletion.mockResolvedValue({})
   api.restoreHousehold.mockResolvedValue({})
   api.leaveHousehold.mockResolvedValue({ accountDeleted: false, warning: null })
+  api.deleteAccount.mockResolvedValue({ deleted: true, revokeFailed: false })
   api.transferHousehold.mockResolvedValue({})
   // #342 — a channel that opens and can be closed, and nothing arrives on it
   // unless a test pushes something through the handlers it recorded.
@@ -9109,6 +9113,71 @@ describe('leaving a household, from App (#431)', () => {
     await leave()
     expect(api.leaveHousehold).toHaveBeenCalledTimes(1)
     expect(screen.queryByText(/Google may still list Taskr/)).toBeNull()
+  })
+})
+
+describe('deleting your own account, from App (#432)', () => {
+  const household = {
+    id: 'h1',
+    name: 'Placeholder Household',
+    timezone: 'America/New_York',
+    organizer_member_id: 'm9',
+  }
+  const me = { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' }
+  const organizerRow = { id: 'm9', display_name: 'Placeholder Organizer', weekly_minutes: 60, claimed_by: 'person-z' }
+
+  /** Signed in, in no household: the one screen where the delete happens. */
+  async function renderNoHousehold() {
+    api.currentSession.mockResolvedValue({ user: { id: 'person-a' } })
+    api.listHouseholds.mockResolvedValue([])
+    api.currentUserId.mockResolvedValue('person-a')
+    await renderApp()
+    await screen.findByRole('button', { name: /create household/i })
+  }
+  const deleteAccount = async () => {
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete my account$/i })))
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete my account\?$/i })))
+  }
+
+  it('from inside a household, routes into Leave and deletes nothing itself', async () => {
+    api.listHouseholds.mockResolvedValue([household])
+    api.listMembers.mockResolvedValue([organizerRow, me])
+    await renderApp('Who')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^delete my account$/i })))
+    expect(screen.getByTestId('delete-account-note')).toHaveTextContent(/leave placeholder household first/i)
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /^leave this household first$/i })))
+    expect(screen.getByRole('button', { name: /^leave placeholder household\?$/i })).toBeInTheDocument()
+    expect(api.deleteAccount).not.toHaveBeenCalled()
+    expect(api.leaveHousehold).not.toHaveBeenCalled()
+    expect(api.signOut).not.toHaveBeenCalled()
+  })
+
+  it('from the no-household screen, deletes through the function and then signs this device out', async () => {
+    await renderNoHousehold()
+    await deleteAccount()
+    expect(api.deleteAccount).toHaveBeenCalledTimes(1)
+    expect(api.deleteAccount.mock.calls[0]).toEqual([])
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    // Delete first, sign-out second: the other order would leave a sign-in
+    // nobody is holding a session for.
+    expect(api.deleteAccount.mock.invocationCallOrder[0]).toBeLessThan(api.signOut.mock.invocationCallOrder[0])
+  })
+
+  it('tells them when Google did not confirm the revoke, on the screen they land on (#99)', async () => {
+    api.deleteAccount.mockResolvedValue({ deleted: true, revokeFailed: true })
+    await renderNoHousehold()
+    await deleteAccount()
+    expect(api.signOut).toHaveBeenCalledWith({ everywhere: false })
+    expect(await screen.findByText(/Google may still list Taskr/)).toBeInTheDocument()
+  })
+
+  it("shows the function's refusal and keeps the session: nothing was deleted", async () => {
+    api.deleteAccount.mockRejectedValue(new Error('You are still in a household. Leave it first.'))
+    await renderNoHousehold()
+    await deleteAccount()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/still in a household/i)
+    expect(api.signOut).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /^delete my account$/i })).toBeInTheDocument()
   })
 })
 

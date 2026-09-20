@@ -164,6 +164,11 @@ describe('what it asks for — AC 3', () => {
       // added it while the table was still unread, which is the one entry here
       // whose ACL was decided before any client asked for the table.
       'invitations',
+      // #481 — the assignment record, in the same change that adds it to
+      // LIVE_SCHEMA. What `authenticated` holds on it is decided in `0049`
+      // (select by column, nothing else — the trigger is the one writer) and
+      // asserted in `MEASURED_TABLE_ACLS` as an absence at table level.
+      'chore_assignment_history',
     ])
   })
 

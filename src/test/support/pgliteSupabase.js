@@ -135,6 +135,8 @@ export const MIGRATIONS = [
   '0045_member_sign_in_state.sql',
   '0046_suggested_capacity_source.sql',
   '0047_revoke_keys_on_google_account.sql',
+  '0048_hand_over_only_to_a_member_who_has_joined.sql',
+  '0049_chore_assignment_history.sql',
 ]
 
 export function migrationSql(name) {

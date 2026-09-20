@@ -184,12 +184,14 @@ describe('continuing with Google — #304', () => {
     // let them try the password box underneath it.
     setup({
       onSignInWithGoogle: vi.fn(),
+      // The #465 wording: a cancelled Google screen, not a test-user refusal.
       signInNotice:
-        'Google did not sign you in. If Google said this app has not been opened to your account, the organizer is the one who can add it — ask them.',
+        'Google did not sign you in — its screen was cancelled or did not complete. Press Continue with Google to try again, or sign in with your password here.',
     })
     const note = screen.getByTestId('sign-in-return')
     expect(note).toHaveAttribute('role', 'alert')
-    expect(note).toHaveTextContent(/organizer/i)
+    expect(note).toHaveTextContent(/cancelled or did not complete/i)
+    expect(note).not.toHaveTextContent(/organizer/i)
     expect(signInButton()).toBeInTheDocument()
     // The cold-arrival paragraph steps aside for the notice: design-bar measured
     // the two together pushing Continue with Google 3–47px below the fold at
@@ -448,6 +450,63 @@ describe('signed in, but not in a household yet — the state between confirming
     setup({ signedIn: true, onSignOut })
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(onSignOut).toHaveBeenCalledWith({ everywhere: false })
+  })
+
+  describe('#432 — deleting the account from here, the one screen where it happens', () => {
+    const deleteButton = () => screen.queryByRole('button', { name: /^delete my account$/i })
+
+    it('is offered only to somebody signed in, and only when wired', () => {
+      setup({ signedIn: true, onDeleteAccount: vi.fn() })
+      expect(deleteButton()).toBeInTheDocument()
+    })
+
+    it('is absent when the app does not wire it, so the #154 screens render unchanged', () => {
+      setup({ signedIn: true })
+      expect(deleteButton()).toBeNull()
+    })
+
+    it('is absent signed out: there is no account to delete', () => {
+      setup({ onDeleteAccount: vi.fn() })
+      expect(deleteButton()).toBeNull()
+    })
+
+    it('deletes nothing on the first tap, and says it is immediate and what Google keeps', () => {
+      const onDeleteAccount = vi.fn().mockResolvedValue(undefined)
+      setup({ signedIn: true, onDeleteAccount })
+      fireEvent.click(deleteButton())
+      expect(onDeleteAccount).not.toHaveBeenCalled()
+      const note = screen.getByTestId('delete-account-note')
+      expect(note).toHaveTextContent(/deleted now, and cannot be restored/i)
+      expect(note).toHaveTextContent(/taskr cannot remove a google sign-in permission/i)
+    })
+
+    it('deletes on the second tap, with nothing sent: who is the sign-in’s', async () => {
+      const onDeleteAccount = vi.fn().mockResolvedValue(undefined)
+      setup({ signedIn: true, onDeleteAccount })
+      fireEvent.click(deleteButton())
+      fireEvent.click(screen.getByRole('button', { name: /^delete my account\?$/i }))
+      expect(onDeleteAccount).toHaveBeenCalledTimes(1)
+      expect(onDeleteAccount.mock.calls[0]).toEqual([])
+    })
+
+    it('can be kept, with nothing called', () => {
+      const onDeleteAccount = vi.fn()
+      setup({ signedIn: true, onDeleteAccount })
+      fireEvent.click(deleteButton())
+      fireEvent.click(screen.getByRole('button', { name: /^keep it$/i }))
+      expect(onDeleteAccount).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('delete-account-note')).toBeNull()
+      expect(deleteButton()).toBeInTheDocument()
+    })
+
+    it('shows a refusal beside the control, and the account is still there to try again', async () => {
+      const onDeleteAccount = vi.fn().mockRejectedValue(new Error('Could not delete your sign-in: auth down'))
+      setup({ signedIn: true, onDeleteAccount })
+      fireEvent.click(deleteButton())
+      fireEvent.click(screen.getByRole('button', { name: /^delete my account\?$/i }))
+      expect(await screen.findByRole('alert')).toHaveTextContent(/auth down/)
+      expect(deleteButton()).toBeInTheDocument()
+    })
   })
 
   it('does not offer to sign in somebody already signed in', () => {

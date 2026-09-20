@@ -5,6 +5,14 @@ dev-dist/
 coverage/
 *.local
 
+# Generated screenshots — #452. `npm run case:screenshots` writes the case
+# study's two split captures here, and `src/test/gate.test.js`'s image allowlist
+# permits exactly four TRACKED images because a screenshot of the running app
+# carries a whole roster at once. These are re-derivable by running the command,
+# and their consumer (madcowsailing.com) copies them out rather than reading
+# them from git.
+case-study/
+
 # Env — credentials never enter git (#4's stated prerequisite). Runtime config
 # for Supabase is set in Vercel's dashboard as VITE_-prefixed variables.
 #

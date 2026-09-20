@@ -1,5 +1,6 @@
 import { corsHeaders } from '@supabase/supabase-js/cors'
 import { SPLIT_SEEN_COLUMNS } from './announce.js'
+import { ASSIGNMENT_HISTORY_COLUMNS } from './assignmentHistory.js'
 import {
   CALENDAR_BUSY_COLUMNS,
   CALENDAR_CONNECTION_COLUMNS,
@@ -131,6 +132,14 @@ export const LIVE_SCHEMA = Object.freeze([
   // project that had revoked that one column would still read green here —
   // correctly, since nothing the client does would notice.
   Object.freeze({ table: 'invitations', columns: INVITATION_COLUMNS }),
+  // #481, arriving with `0049` — RED on purpose until that migration reaches
+  // the live project, exactly as every migration-borne entry above was for
+  // its file. The assignment record the deal-out reads before it plans, by
+  // household (`household_id` is in the list — the `0014` route — because a
+  // row must outlive the member it names). What the client does NOT hold —
+  // any write at all; the trigger is the one writer — is `0049`'s and
+  // `grants.pglite.test.js`'s to say; this list is what it reads.
+  Object.freeze({ table: 'chore_assignment_history', columns: ASSIGNMENT_HISTORY_COLUMNS }),
 ])
 
 /** The tables the client reads, for callers that only need the names. */
@@ -572,6 +581,10 @@ export const LIVE_EDGE_FUNCTIONS = Object.freeze([
   // leaver's Google grant, leaves as them, deletes a last-claim sign-in. Reads
   // NOT DEPLOYED until `npm run deploy:function` ships it.
   'leave-household',
+  // #432. Invoked by `deleteAccount` (src/lib/household.js): revokes any
+  // grant left in a household pending deletion, then deletes the caller's own
+  // sign-in. Reads NOT DEPLOYED until `npm run deploy:function` ships it.
+  'delete-account',
 ])
 
 /**

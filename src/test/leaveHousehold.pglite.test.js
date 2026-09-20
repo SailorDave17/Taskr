@@ -27,6 +27,7 @@ import { blankSqlComments } from './support/retiredVocabulary.js'
 vi.setConfig({ testTimeout: 30_000 })
 
 const FILE = '0043_leave_or_hand_over_a_household.sql'
+const FILE_467 = '0048_hand_over_only_to_a_member_who_has_joined.sql'
 
 describe('leaving and handing over a household, run against a real Postgres (#431)', () => {
   let db, organizer, member, outsider, household, organizerRowId, memberRowId
@@ -73,6 +74,10 @@ describe('leaving and handing over a household, run against a real Postgres (#43
     )
     memberRowId = added[0].id
     await provisionMember(db, memberRowId, member)
+    // #467 — `member` has ACCEPTED: `transfer_household` hands only to a
+    // confirmed account since 0048, and the harness's accounts are unconfirmed
+    // by default. The unaccepted cases are the #467 describe's own.
+    await db.query('update auth.users set email_confirmed_at = now() where id = $1', [member])
   })
 
   describe('leaving', () => {
@@ -214,6 +219,67 @@ describe('leaving and handing over a household, run against a real Postgres (#43
       expect(rows.map((r) => r.column_name)).not.toContain('organizer_member_id')
       // POSITIVE CONTROL: the same read finds the two columns 0005 does grant.
       expect(rows.map((r) => r.column_name)).toEqual(['name', 'timezone'])
+    })
+  })
+
+  // #467 — `claimed_by` is set when an invitation is SENT (#341, measured on
+  // #458), so "has signed in" has to be read off the account: 0048 refuses a
+  // member whose `auth.users.email_confirmed_at` is null.
+  describe('#467 — only to a member who has accepted their invitation', () => {
+    let invitedRowId, invited
+
+    const organizerIs = async () =>
+      (await db.query('select organizer_member_id as id from public.households where id = $1', [household])).rows[0].id
+
+    beforeEach(async () => {
+      invited = await newDevice(db, 'placeholder-invited@example.test')
+      const { rows } = await db.query(
+        `insert into public.members (household_id, display_name, weekly_minutes)
+         values ($1, 'Placeholder Two', 30) returning id`,
+        [household],
+      )
+      invitedRowId = rows[0].id
+      await provisionMember(db, invitedRowId, invited)
+    })
+
+    it('AC 2 — refuses a member whose invitation is outstanding, in a sentence saying they have not accepted', async () => {
+      await db.query(`update auth.users set invited_at = now() - interval '5 minutes' where id = $1`, [invited])
+      const result = await attempt(() => transfer(organizer, invitedRowId))
+      expect(result.error).toBe(
+        'Placeholder Two has not accepted their invitation yet, so the household cannot be handed to them',
+      )
+      expect(await organizerIs()).toBe(organizerRowId)
+    })
+
+    it('AC 2 — refuses a member whose invitation has expired unaccepted', async () => {
+      await db.query(`update auth.users set invited_at = now() - interval '2 days' where id = $1`, [invited])
+      const result = await attempt(() => transfer(organizer, invitedRowId))
+      expect(result.error).toMatch(/has not accepted their invitation yet/)
+      expect(await organizerIs()).toBe(organizerRowId)
+    })
+
+    it('AC 3 — hands over to the same member once they have accepted', async () => {
+      // POSITIVE CONTROL for the two refusals above: the one fact that changes
+      // is the confirmation, so it is what they were refused for.
+      await db.query(
+        `update auth.users set invited_at = now() - interval '5 minutes', email_confirmed_at = now() where id = $1`,
+        [invited],
+      )
+      const [row] = await transfer(organizer, invitedRowId)
+      expect(row.organizer_member_id).toBe(invitedRowId)
+    })
+
+    it('revokes from the right roles BY NAME in its own source, and re-applying it changes nothing', async () => {
+      const sql = blankSqlComments(migrationSql(FILE_467))
+      expect(sql).toMatch(/^revoke all on function public\.transfer_household\(uuid, uuid\) from public, anon;/m)
+      await db.exec(migrationSql(FILE_467))
+      expect((await attempt(() => transfer(organizer, invitedRowId))).error).toMatch(/has not accepted/)
+      const { rows } = await db.query(
+        `select has_function_privilege('anon', 'public.transfer_household(uuid, uuid)', 'execute') as anon,
+                has_function_privilege('authenticated', 'public.transfer_household(uuid, uuid)', 'execute') as authenticated,
+                (select prosecdef from pg_proc where oid = 'public.transfer_household(uuid, uuid)'::regprocedure) as definer`,
+      )
+      expect(rows[0]).toEqual({ anon: false, authenticated: true, definer: true })
     })
   })
 

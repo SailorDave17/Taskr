@@ -65,6 +65,14 @@ export const UNWATCHED_TABLES = Object.freeze({
     'organizer-only: the one device that may read a row is the one that minted or ' +
     'withdraws it, and publishing would put token_hash on a channel for no other reader — ' +
     'the column 0040 exists to keep scarce.',
+  // #481 — every row here is written by a trigger inside the same transaction
+  // as a `chores` update that IS published, so the news has already arrived
+  // by the time this row exists. Watching it would echo each assignment
+  // event into a second read of the same state — `member_split_seen`'s
+  // reason from the other side.
+  chore_assignment_history:
+    'an echo: written by a trigger in the same transaction as the chores update that is ' +
+    'already published, so every event here is one the household channel has just seen.',
 })
 
 /** The Realtime publication `0037` fills, by name — one string, asserted against pglite. */

@@ -31,6 +31,8 @@ import {
   // #430 — deleting and restoring a household.
   GRACE_PERIOD_DAYS,
   householdDeletionStatus,
+  // #432 — deleting your own sign-in.
+  deleteAccount,
   leaveHousehold,
   requestHouseholdDeletion,
   transferHousehold,
@@ -1833,6 +1835,30 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
       }),
     [mutate, requestRefresh, endSession],
   )
+  // #432 — delete your own sign-in, from the no-household screen. The function
+  // puts the delete last, so a throw means nothing changed and `mutate` shows
+  // it; a return means the sign-in is gone, which ends the session exactly as
+  // a last leave does (#440), carrying #99's sentence if Google did not
+  // confirm a revoke. `busy` is held across the sign-out for the leave path's
+  // reason.
+  const handleDeleteAccount = useCallback(
+    () =>
+      mutate(() => deleteAccount(), { endsSession: (result) => Boolean(result?.deleted) }).then(
+        async (result) => {
+          if (!result?.deleted) return result
+          const notes = [result.revokeFailed ? revokeNoteFor({ revoked: false }) : null].filter(Boolean)
+          setBusy(true)
+          try {
+            const failure = await endSession({ notes })
+            if (failure) setError([...notes, failure.message].join(' '))
+          } finally {
+            setBusy(false)
+          }
+          return result
+        },
+      ),
+    [mutate, endSession],
+  )
   // #431 — the organizer's way out that keeps the household: hand it over, then
   // leave as an ordinary member. Two writes, and the first is safe alone — an
   // organizer who handed over and then failed to leave is a member who can try
@@ -3153,6 +3179,9 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           onSignInWithGoogle={handleSignInWithGoogle}
           googleSignIn={googleSignIn}
           onSignOut={handleSignOut}
+          // #432 — the delete itself lives here: signed in, in no live
+          // household, nothing left to leave.
+          onDeleteAccount={handleDeleteAccount}
           // #173 — the invited person's two halves: hold a code while signed
           // out, redeem one while signed in with no household.
           onJoin={handleJoinHousehold}
@@ -3313,6 +3342,10 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           // #431 — leaving, and the organizer's hand-over.
           onLeaveHousehold={handleLeaveHousehold}
           onHandOverAndLeave={handleHandOverAndLeave}
+          // #432 — the card that routes into Leave; the delete itself is on
+          // the no-household screen.
+          accountDeletionOffered
+          householdCount={households.length}
           // #179 — the organizer hands the role over and stays.
           onTransferHousehold={handleTransferHousehold}
           // #166 — the affordance that did not exist. Owner decision at pickup:

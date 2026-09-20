@@ -1204,7 +1204,13 @@ function MemberRow({
               refuses once `claimed_by` is set, so an address already in use is
               only movable in the Supabase dashboard. The note below says so
               rather than leaving the organizer to find out by being locked
-              out. */}
+              out.
+
+              #468 — `claimed_by` is set when an invitation is SENT (#341), so
+              the note reads `signIn` rather than the claim, the way the row's
+              label does since #458. The substance holds for an invitation
+              still out: the account kept the address it was invited at, and
+              "Send the invitation again" goes there, not to this field. */}
           <label className="field">
             <span className="field__label">Email address</span>
             <input
@@ -1217,8 +1223,14 @@ function MemberRow({
               aria-label={`Email address for ${member.display_name}`}
             />
           </label>
-          {member.claimed_by ? (
-            <p className="card__note">
+          {signIn.kind === 'invited' || signIn.kind === 'expired' ? (
+            <p className="card__note" data-testid={`address-note-${member.id}`}>
+              {member.display_name}’s invitation went to the address it was
+              first sent to. Changing this does not redirect it — sending it
+              again goes to that same address.
+            </p>
+          ) : member.claimed_by ? (
+            <p className="card__note" data-testid={`address-note-${member.id}`}>
               {member.display_name} already has a sign-in, so changing this does
               not change the address they sign in with — that one is fixed at the
               moment the sign-in was given.
@@ -1370,8 +1382,11 @@ function MemberRow({
             who could not organize anything (0016's dead end, 0043's check) —
             #87's rule again: a control the database will always turn down is
             worse than no control. The organizer stays on the roster as an
-            ordinary member; leaving as well is the Leave card's hand-over. */}
-        {!isOrganizer || isMe || !member.claimed_by || !onTransfer ? null : confirmingTransfer ? (
+            ordinary member; leaving as well is the Leave card's hand-over.
+            #467 — "signed in" is `signIn.kind === 'joined'`, not `claimed_by`:
+            an invitation sets `claimed_by` when it is SENT (#341), and 0048
+            refuses a member who has not accepted it. */}
+        {!isOrganizer || isMe || signIn.kind !== 'joined' || !onTransfer ? null : confirmingTransfer ? (
           <>
             <button
               className="button"
@@ -1586,6 +1601,15 @@ export default function Roster({
   // #431 — leaving, and the organizer's hand-over. Optional in the #166 shape.
   onLeaveHousehold = null,
   onHandOverAndLeave = null,
+  // #432 — whether the app offers account deletion at all. A boolean and not
+  // a handler, because on THIS surface the card never deletes anything: a
+  // person on the Who tab is in a live household, and the route out is Leave
+  // (whose last leave deletes the sign-in, #431). The handler lives on the
+  // no-household screen (Onboarding). Optional in the #166 shape.
+  accountDeletionOffered = false,
+  // #432 — how many households this person is in, for the sentence that says
+  // when their sign-in goes. App counts them; the roster sees one.
+  householdCount = 1,
   // #179 — the organizer hands the role over and STAYS. Optional in the #166
   // shape; drawn on each other signed-in row (MemberRow).
   onTransferHousehold = null,
@@ -1662,7 +1686,14 @@ export default function Roster({
   // cannot sign in could provision nobody (0016's dead end).
   const [confirmingLeave, setConfirmingLeave] = useState(false)
   const [successorId, setSuccessorId] = useState('')
-  const successors = members.filter((m) => m.claimed_by && m.id !== me?.id)
+  // #467 — somebody who has JOINED, not merely been invited: `claimed_by` is
+  // set when an invitation is sent (#341), so the list reads the sign-in state
+  // the row's label reads, and 0048 refuses anyone else. While that read has
+  // not answered, `signInStateFor` falls back to `claimed_by` (#458's reason);
+  // the function is the boundary then, and its refusal names the person.
+  const successors = members.filter(
+    (m) => m.id !== me?.id && signInStateFor(m, signInStates, now).kind === 'joined',
+  )
   const successorName = successors.find((m) => m.id === successorId)?.display_name ?? ''
   // Design-bar, 2026-09-11 (#431): both confirms opened BELOW the fold at
   // 360×800 when tapped from the bottom of the Who tab — measured, the member's
@@ -1678,6 +1709,17 @@ export default function Roster({
   useEffect(() => {
     if (confirmingDelete) deleteConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }, [confirmingDelete])
+  // #432 — deleting your account, from inside a household: the confirm says
+  // that the sign-in goes with the last leave and routes into the Leave
+  // confirm above, rather than carrying a second copy of what leaving costs.
+  // Same two-tap idiom and the same scroll, since it sits lowest of all.
+  const [confirmingDeleteAccount, setConfirmingDeleteAccount] = useState(false)
+  const deleteAccountConfirmRef = useRef(null)
+  useEffect(() => {
+    if (confirmingDeleteAccount) {
+      deleteAccountConfirmRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [confirmingDeleteAccount])
 
   // The BASELINE total, deliberately unchanged by #46. It answers "how much time
   // does this household usually have", which is a different question from what
@@ -2412,6 +2454,63 @@ export default function Roster({
         </section>
       ) : null}
 
+      {/* #432 — deleting your own account, last of the three ways out. From
+          inside a household it is a ROUTE, not a delete: the owner's decision
+          at pickup (2026-09-19) was that the person is taken through leaving
+          first, and #431's leave already deletes a last-claim sign-in on the
+          spot, so the confirm names what goes and opens the Leave confirm —
+          whose organizer form already offers hand-over or delete (#427). The
+          delete itself happens only on the no-household screen. */}
+      {accountDeletionOffered && me && onLeaveHousehold ? (
+        <section className="card" aria-labelledby="delete-account-heading">
+          <h2 id="delete-account-heading" className="card__heading">
+            Delete your account
+          </h2>
+          {confirmingDeleteAccount ? (
+            <div className="row" ref={deleteAccountConfirmRef}>
+              <p className="card__note" data-testid="delete-account-note">
+                Your sign-in is deleted when you leave your last household
+                {householdCount > 1 ? `, and you are in ${householdCount}` : ''}.{' '}
+                {isOrganizer
+                  ? `You organize ${household.name}, so leaving it means handing it to somebody or deleting it.`
+                  : `Leave ${household.name} first.`}{' '}
+                Taskr cannot remove a Google sign-in permission; take Taskr off your Google
+                account&rsquo;s third-party access yourself if you used one.
+              </p>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => {
+                  setConfirmingDeleteAccount(false)
+                  setSuccessorId(successors[0]?.id ?? '')
+                  setConfirmingLeave(true)
+                }}
+                disabled={busy}
+              >
+                Leave this household first
+              </button>
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={() => setConfirmingDeleteAccount(false)}
+                disabled={busy}
+              >
+                Keep my account
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button button--quiet"
+              type="button"
+              onClick={() => setConfirmingDeleteAccount(true)}
+              disabled={busy}
+            >
+              Delete my account
+            </button>
+          )}
+        </section>
+      ) : null}
+
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -2462,4 +2561,6 @@ Roster.propTypes = {
   onTransferHousehold: PropTypes.func,
   onLeaveHousehold: PropTypes.func,
   onHandOverAndLeave: PropTypes.func,
+  accountDeletionOffered: PropTypes.bool,
+  householdCount: PropTypes.number,
 }

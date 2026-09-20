@@ -17,7 +17,7 @@
  */
 
 /** The contact address madcowhq.com publishes. One constant, one place. */
-export const REPORT_ADDRESS = 'hsc.coach@gmail.com'
+export const REPORT_ADDRESS = 'dave@madcowhq.com'
 
 /** Every field a report carries, in the order the body lists them. */
 export const REPORT_FIELDS = [

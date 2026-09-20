@@ -1989,7 +1989,13 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
     // The cost of a literal here is real and deliberate: a legitimate rework of
     // onboarding fails this test and has to change the number in a diff. That is
     // the same trade every floor in this file makes, and the AC asks for a count.
-    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(6)
+    //
+    // SEVEN cards and SIX forms since #432 (2026-09-19): the seventh card is
+    // *Delete your account*, shown to somebody signed in with no household —
+    // departure, not capability, and it carries no form (two buttons and a
+    // sentence), which is why the form count did not move. It asks nothing
+    // about what a person can do, so #37's floor holds as stated.
+    expect([...onboarding.matchAll(/<section className="card"/g)]).toHaveLength(7)
     expect([...onboarding.matchAll(/<form\b/g)]).toHaveLength(6)
   })
 
@@ -2270,6 +2276,102 @@ describe('#185 — no Supabase personal access token literal is in the repo', ()
 // same way the copies were: by reading the deployed source. A `createUser` that
 // came back would be an organizer choosing somebody's password again, and every
 // client test would stay green because the client never calls it.
+// #459 — a refusal that quotes a control must quote one that exists.
+//
+// `provision-member`'s already-has-a-sign-in refusal sends the organizer to a
+// control on the Who tab and names it in quotes. It has named a control that
+// does not exist TWICE: "Use Reset sign-in instead" from #341 until #191's
+// review, and then "Invite somebody by code" until this story — measured
+// verbatim on production (build `74aed25`) during #178, where the Who tab's
+// section read *Invite someone* and its button read *Create an invitation code*.
+//
+// WHY NOTHING CAUGHT IT. The sentence is in a Deno module that deploys
+// separately from the bundle, and the label is in a React component. No test on
+// either side can see the other: the function's own tests assert the refusal
+// against a literal copied from the function, and `Invitations.test.jsx` asserts
+// the button against a literal copied from the component. Both stay green while
+// the two drift apart, which is exactly what happened, twice.
+//
+// WHY THIS IS SOURCE TEXT. The handler calls `Deno.serve` at import time so it
+// cannot be imported here, and the block above forbids anything under `src/`
+// importing from `supabase/functions/`. Reading the file is the instrument
+// available — `edge-function-cors.test.js` reaches for it for the same reason
+// and records the same argument.
+//
+// WHAT MAKES THIS MORE THAN A SPELLING CHECK, and it is the whole point of
+// #459's criterion 2: the expected string is NOT written here. It is extracted
+// from `Invitations.jsx`'s own rendered labels, so a fix that hand-copied the
+// label into this file would be the same defect a third time. Rename the button
+// in the component and this goes red until the refusal follows.
+describe('#459 — the refusal names a control the Who tab actually renders', () => {
+  const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
+  const COMPONENT_SOURCE = 'src/components/Invitations.jsx'
+
+  const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8')
+
+  /**
+   * Every label the invitations card renders as a control or heading.
+   *
+   * Taken from the component's JSX text nodes rather than from a list written
+   * here. The shapes matched are a `<button>`'s text and the two heading
+   * elements the card uses; a label that moves between them still resolves.
+   */
+  const renderedLabels = () => {
+    const source = read(COMPONENT_SOURCE)
+    const labels = []
+    for (const [, text] of source.matchAll(/<(?:button|h2|h3)\b[^>]*?>\s*([^<{][^<]*?)\s*<\//g)) {
+      const cleaned = text.replace(/\s+/g, ' ').trim()
+      // A tag whose attributes span lines and contain `>` inside an arrow
+      // function (`onClick={() => onWithdraw(id)} disabled={busy} >`) is not
+      // parseable by a regex, and the greedy attempt swallows the attributes
+      // into the "label". Those fragments are dropped rather than tolerated:
+      // a junk entry in this list is a name the assertion below could match
+      // BY ACCIDENT, which would turn the guard into one that passes on a
+      // wrong quote. Measured on this component: three of eight entries were
+      // such fragments before this filter.
+      if (!cleaned || /[{}=]|\)\s*}/.test(cleaned)) continue
+      labels.push(cleaned)
+    }
+    return labels
+  }
+
+  /** Every control name the handler quotes inside a `(Who tab, "…")` aside. */
+  const quotedControls = () => {
+    const source = read(FUNCTION_SOURCE)
+    return [...source.matchAll(/\(Who tab,\s*"([^"]+)"\)/g)].map((m) => m[1])
+  }
+
+  it('POSITIVE CONTROL: the component renders labels and the handler quotes one', () => {
+    // Without this, both assertions below pass vacuously against a renamed
+    // file, a changed JSX shape, or a refusal whose aside was deleted — the
+    // failure mode #242's block above records as the guard staying correct
+    // while the hazard moves next door.
+    const labels = renderedLabels()
+    expect(labels.length, 'no labels parsed out of the invitations card').toBeGreaterThan(0)
+    expect(labels).toContain('Create an invitation code')
+    expect(quotedControls().length, 'the refusal quotes no control at all').toBeGreaterThan(0)
+  })
+
+  it('every control the refusal quotes is a label the Who tab renders', () => {
+    const labels = renderedLabels()
+    const strays = quotedControls().filter((name) => !labels.includes(name))
+    expect(
+      strays,
+      `the refusal sends an organizer to a control that does not exist: ${strays.join(', ')}. ` +
+        `The invitations card renders: ${labels.join(' | ')}`,
+    ).toEqual([])
+  })
+
+  it('the two facts the refusal carries are both still there', () => {
+    // #459 criterion 4. The sentence must keep saying that the sign-in exists
+    // AND that no mail went; a rewrite that drops either half is the defect
+    // #178 measured the refusal against in the first place.
+    const source = read(FUNCTION_SOURCE)
+    expect(source).toMatch(/already has a Taskr sign-in/)
+    expect(source).toMatch(/no invitation was sent/)
+  })
+})
+
 describe('#242 → #191 — the synthetic address has one copy, and the function mints nothing', () => {
   const FUNCTION_SOURCE = 'supabase/functions/provision-member/handler.ts'
 
@@ -2997,7 +3099,7 @@ describe('#426 — the link-styled buttons meet 4.5:1 on the dark surfaces they 
   })
 
   it('POSITIVE CONTROL: every token in the pairing is read out of :root, not defaulted', () => {
-    for (const name of ['accent', 'accent-ink', 'surface', 'bg']) {
+    for (const name of ['accent', 'accent-ink', 'accent-line', 'surface', 'bg']) {
       expect(token(name), `--${name} not found in :root`).toMatch(/^#[0-9a-f]{6}$/i)
     }
   })
@@ -3021,5 +3123,112 @@ describe('#426 — the link-styled buttons meet 4.5:1 on the dark surfaces they 
 
   it('and on --bg, so a link button placed outside a card is covered too', () => {
     expect(contrast(token('accent-ink'), token('bg'))).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  // #443 — the remaining --accent text and UI uses, one row per pairing the
+  // stylesheet can be read for. Each row reads the RULE (which token it points
+  // at) and the PAIRING (that token against the surface the element sits on),
+  // so a rule quietly pointed back at the fill accent, a token drifting darker
+  // and a surface drifting lighter each redden on their own. The surfaces are
+  // the ones MEASURED in a real browser at 360×800 on 2026-09-19, not the ones
+  // the issue's table guessed: the member badge and the bought mark sit on the
+  // row's --bg, the headings on the card's --surface, the title on --bg.
+  const AA_LARGE_OR_UI = 3
+  const rule = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const body = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1]
+    expect(body, `no ${selector} rule in the stylesheet`).toBeDefined()
+    return body
+  }
+  const declaration = (body, property) =>
+    body.match(new RegExp(`(?:^|[;\\s])${property}\\s*:\\s*([^;]+);`))?.[1]?.trim()
+
+  const TEXT_ROWS = [
+    // 16px/700 uppercase: bold text is "large" only from 18.66px, so 4.5:1.
+    { selector: '.card__heading', on: 'surface', needs: AA_TEXT },
+    // Unrendered since #5 (nothing in src/ carries the class); the rule is
+    // held at the token that clears AA so a revival cannot ship it at 2.70:1.
+    { selector: '.shell__status-heading', on: 'surface', needs: AA_TEXT },
+    { selector: '.member__badge', on: 'bg', needs: AA_TEXT },
+    { selector: '.shopping-item__mark--done', on: 'bg', needs: AA_TEXT },
+    // clamp(2rem, 9vw, 2.75rem) at 700: 32px bold at 360 wide, so large text.
+    { selector: '.shell__title', on: 'bg', needs: AA_LARGE_OR_UI },
+  ]
+  for (const { selector, on, needs } of TEXT_ROWS) {
+    it(`#443 ${selector} takes its colour from the text accent, which clears ${needs}:1 on --${on}`, () => {
+      const body = rule(selector)
+      expect(declaration(body, 'color')).toBe('var(--accent-ink)')
+      expect(contrast(token('accent-ink'), token(on))).toBeGreaterThanOrEqual(needs)
+    })
+  }
+
+  const LINE_ROWS = [
+    // The ring sits 1px outside the input, so its neighbour is the card.
+    { selector: '.field__input:focus-visible', property: 'outline', width: '2px', sides: ['surface', 'bg'] },
+    // A border has two neighbours: the element's own background inside it and
+    // the parent's outside. .announce is --surface on --bg.
+    { selector: '.announce', property: 'border-left', width: '3px', sides: ['surface', 'bg'] },
+    // .invitation-minted is --bg inside a --surface card.
+    { selector: '.invitation-minted', property: 'border', width: '1px', sides: ['bg', 'surface'] },
+  ]
+  for (const { selector, property, width, sides } of LINE_ROWS) {
+    it(`#443 ${selector} ${property} is the line accent, which clears 3:1 on --${sides.join(' and --')}`, () => {
+      const value = declaration(rule(selector), property)
+      expect(value).toBe(`${width} solid var(--accent-line)`)
+      for (const side of sides) {
+        expect(contrast(token('accent-line'), token(side))).toBeGreaterThanOrEqual(AA_LARGE_OR_UI)
+      }
+    })
+  }
+
+  it('#443 the split’s done fill is the text accent, and clears 3:1 against the open fill composited the way the browser draws it', () => {
+    // The done fill is a solid token with no filter. The open fill is --accent
+    // at an opacity over the bar's track, which is a white alpha over the
+    // card's --surface. Both blends are ordinary sRGB alpha compositing
+    // (out = a * fg + (1 - a) * bg per channel), which is what Chrome does:
+    // MEASURED by sampled pixels at 360×800 on 2026-09-19, the open fill
+    // rendered rgb(37, 84, 77) where this arithmetic gives (37.0, 83.9, 76.3),
+    // and the old done fill at brightness(1.5) rendered rgb(46, 166, 138)
+    // where an sRGB multiply gives (46.5, 166.5, 138). A filter is therefore
+    // NOT asserted here — it was replaced by the token, so nothing is left
+    // that this file would have to re-implement the browser to compute.
+    const done = rule('.split__fill--done')
+    expect(declaration(done, 'background')).toBe('var(--accent-ink)')
+    expect(declaration(done, 'filter')).toBeUndefined()
+
+    const open = rule('.split__fill--open')
+    expect(declaration(open, 'background')).toBe('var(--accent)')
+    const opacity = Number(declaration(open, 'opacity'))
+    expect(opacity).toBeGreaterThan(0)
+    expect(opacity).toBeLessThan(1)
+
+    const track = declaration(rule('.split__bar'), 'background')
+    const alpha = track.match(/^rgba\(\s*255\s*,\s*255\s*,\s*255\s*,\s*([0-9.]+)\s*\)$/)
+    expect(alpha, `the track is a white alpha over the card, not ${track}`).not.toBeNull()
+
+    const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    const blend = (fg, a, bg) => fg.map((v, i) => a * v + (1 - a) * bg[i])
+    const toHex = (c) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`
+    const trackColour = blend([255, 255, 255], Number(alpha[1]), rgb(token('surface')))
+    const openColour = blend(rgb(token('accent')), opacity, trackColour)
+    expect(contrast(token('accent-ink'), toHex(openColour))).toBeGreaterThanOrEqual(AA_LARGE_OR_UI)
+  })
+
+  it('#443 CONTROL: the fill accent is no longer the colour of any text, except the one filtered verdict', () => {
+    // Every `color: var(--accent)` left in the stylesheet, by selector. The
+    // one survivor carries a brightness filter the browser applies and this
+    // file does not compute — it is measured, not asserted (4.62:1 in the
+    // #426 readings). A second entry here is a text use of the FILL token,
+    // which is the defect the two-token split exists to end.
+    const survivors = []
+    for (const match of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const [, selector, body] = match
+      if (/(?:^|[;\s])color\s*:\s*var\(--accent\)\s*;/.test(body)) survivors.push(selector.trim())
+    }
+    expect(survivors).toEqual(['.split__verdict--level'])
+  })
+
+  it('#443 CONTROL: the line accent is still lighter than the fill accent, so it is not a rename of it', () => {
+    expect(contrast(token('accent-line'), token('surface'))).toBeGreaterThan(contrast(token('accent'), token('surface')))
   })
 })

@@ -755,3 +755,32 @@ describe('provision-member — the platform contract the split must not change',
     expect(opsOf(revokeWorld, 'deleteUser')).toMatchObject([{ id: 'auth-existing' }])
   })
 })
+
+describe('#432 — revoke refuses the organizer’s own row', () => {
+  // #427's code map: nothing in the function stopped an organizer revoking
+  // the row their own JWT claims, so a crafted call could delete their
+  // last-claim sign-in and leave the household with an organizer row nobody
+  // can claim. The positive control is the test above: a row claimed by
+  // SOMEBODY ELSE is still revoked, so the refusal below is about whose row
+  // it is and not about revoke being switched off.
+  it('answers 409 with the two routes out, and deletes nothing', async () => {
+    const own = { ...MEMBER, claimed_by: 'auth-1' } // the caller's own account
+    const world = makeWorld({ members: [own] })
+    const res = await call(world, { action: 'revoke', memberId: own.id })
+    expect(res.status).toBe(409)
+    await expect(res.json()).resolves.toEqual({
+      error: 'You cannot revoke your own sign-in. Hand the household over, or delete it, from the Who tab.',
+    })
+    expect(opsOf(world, 'deleteUser')).toEqual([])
+    // Refused AFTER the organizer check, not instead of it: a stranger's own
+    // row is still "no such person", never a 409 that confirms the row exists.
+    expect(opsOf(world, 'rpc').map((op) => op.name)).toEqual(['is_household_organizer'])
+  })
+
+  it('does not reach the other-claims read, which is about somebody else’s account', async () => {
+    const own = { ...MEMBER, claimed_by: 'auth-1' }
+    const world = makeWorld({ members: [own] })
+    await call(world, { action: 'revoke', memberId: own.id })
+    expect(opsOf(world, 'select').filter((op) => op.key === 'service')).toEqual([])
+  })
+})

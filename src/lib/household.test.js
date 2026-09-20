@@ -185,6 +185,7 @@ const {
   listHouseholds,
   createHousehold,
   currentSession,
+  deleteAccount,
   describeSignInReturn,
   deviceTimezone,
   findClaimedMember,
@@ -671,14 +672,18 @@ describe('signing in with Google — #304', () => {
       expect(readSignInReturn(location ?? {})).toBeNull()
     })
 
-    it('names the organizer on a Google refusal, and does NOT say the password was wrong', () => {
-      // AC 5. The consent screen is in Testing, so an account the organizer has
-      // not registered is refused by Google — and the organizer is the one
-      // person who can change that. The collapsed credential sentence is the
-      // wrong answer here because no credential was involved.
+    it('says a Google refusal was cancelled or not completed, offers both ways back in, and does NOT name the organizer (#465)', () => {
+      // #304 AC 5, reworded by #465. `access_denied` is the person backing out
+      // of Google's screen; the test-user list does not gate sign-in
+      // (measured 2026-09-16, #330/#339), so sending them to the organizer
+      // to be "added" was wrong. The collapsed credential sentence is still
+      // the wrong answer because no credential was involved.
       const sentence = describeSignInReturn({ error: 'access_denied', code: null, description: null })
-      expect(sentence).toMatch(/has not been opened to your account/i)
-      expect(sentence).toMatch(/organizer/i)
+      expect(sentence).toMatch(/cancelled or did not complete/i)
+      expect(sentence).toMatch(/Continue with Google/)
+      expect(sentence).toMatch(/password/i)
+      expect(sentence).not.toMatch(/organizer/i)
+      expect(sentence).not.toMatch(/add it/i)
       expect(sentence).not.toMatch(/did not match/i)
     })
 
@@ -701,7 +706,9 @@ describe('signing in with Google — #304', () => {
         description: 'Email link is invalid or has expired',
       })
       expect(sentence).toMatch(/Email link is invalid or has expired/)
-      expect(sentence).not.toMatch(/organizer/i)
+      // The access_denied branch's own words, so this cannot pass by that branch
+      // being taken (it said "organizer" until #465; now it says "cancelled").
+      expect(sentence).not.toMatch(/cancelled/i)
     })
 
     it('quotes the description for anything else, and says so when there is none', () => {
@@ -1700,6 +1707,39 @@ describe('leaveHousehold — the client half of #431', () => {
   it('refuses to call the function without a household', async () => {
     await expect(leaveHousehold('')).rejects.toThrow(/which household/i)
     expect(calls).toEqual([])
+  })
+})
+
+describe('deleteAccount — the client half of #432', () => {
+  it('calls the account function with an empty body: WHO is the sign-in’s, never sent', async () => {
+    invokeResult = { data: { ok: true, deleted: true }, error: null }
+    await deleteAccount()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ op: 'invoke', body: {} })
+    expect(calls[0].name).toBe('delete-account')
+  })
+
+  it('reports the account deleted only when the function says so, exactly', async () => {
+    invokeResult = { data: { ok: true, deleted: true }, error: null }
+    expect(await deleteAccount()).toEqual({ deleted: true, revokeFailed: false })
+    invokeResult = { data: { ok: true, deleted: true, revokeFailed: true }, error: null }
+    expect(await deleteAccount()).toEqual({ deleted: true, revokeFailed: true })
+    invokeResult = { data: { ok: true, deleted: 'yes' }, error: null }
+    expect(await deleteAccount()).toMatchObject({ deleted: false })
+  })
+
+  it("passes the function's own refusal through verbatim", async () => {
+    const refusal = 'You are still in a household. Leave it first.'
+    invokeResult = { data: null, error: httpError({ error: refusal }) }
+    await expect(deleteAccount()).rejects.toThrow(refusal)
+  })
+
+  it('says the account was not deleted when the request never got an answer, and names the function', async () => {
+    invokeResult = { data: null, error: fetchError() }
+    const thrown = await deleteAccount().then(() => null, (err) => err)
+    expect(thrown, 'the call was supposed to fail and did not').toBeTruthy()
+    expect(thrown.message).toMatch(/was not deleted/)
+    expect(thrown.message).toMatch(/delete-account/)
   })
 })
 

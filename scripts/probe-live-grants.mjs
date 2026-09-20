@@ -590,6 +590,15 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // removed. RED as *not there* until the apply, the same way
   // `extraction_calls` was for `0036`.
   Object.freeze({ table: 'invitations', authenticated: null }),
+  // #481, arriving with `0049` — the assignment record, which the client
+  // reads by column and never writes: the trigger on `chores` is the single
+  // writer, as the owner. So the expected table-level reading is an absence,
+  // and a letter appearing here for `authenticated` would mean a later
+  // migration granted a whole-row privilege nobody decided on — DELETE most
+  // of all, on a table whose whole point is that nothing is ever removed
+  // from it. RED as *not there* until the apply, the same way `invitations`
+  // was for `0040`.
+  Object.freeze({ table: 'chore_assignment_history', authenticated: null }),
   Object.freeze({ table: 'member_capacity', authenticated: 'd' }),
   // #50, arriving with `0020`, which revokes wholesale and grants by column —
   // so the expected table-level reading is an absence, like `households` above.

@@ -261,6 +261,60 @@ LastRebalance.propTypes = {
 }
 
 /**
+ * Why a chore changed hands because of recent weeks — #481, one line each.
+ *
+ * Rendered from the verdict the run STORED (`last_rebalance.steered`), for
+ * `LastRebalance`'s reason: the steer depends on weeks the current rows do not
+ * show, so a surface that re-derived it would eventually name a different
+ * reason than the run acted on. A chore that has since been completed or
+ * removed gets no line — there is nothing on anybody's list to explain.
+ *
+ * Both signals say why (owner decision at pickup, 2026-09-18): a chore the
+ * rule moved with no sentence beside it is the allocator quietly reopening a
+ * decision, which is the trust-killer this module's own header names. AC 4's
+ * half is upstream — `steered` carries only moves the rule actually made, so
+ * a chore only one person can do never reaches this list.
+ */
+function Steered({ verdict, chores, nameOf }) {
+  const lines = (verdict?.steered ?? [])
+    .map((entry) => ({ entry, chore: chores.find((c) => c.id === entry.choreId) }))
+    .filter(({ chore }) => chore)
+  if (lines.length === 0) return null
+  return (
+    <ul className="split__steer" data-testid="steer-notes">
+      {lines.map(({ entry, chore }) => (
+        <li className="split__steer-row" key={entry.choreId} data-testid="steer-note">
+          {/* `moved === false` is the rule keeping a chore with its own
+              incumbent because the member it would otherwise have gone to
+              is the one to avoid — decided by the rule, moved by nobody. */}
+          {chore.title} {entry.moved === false ? 'stays with' : 'went to'} {nameOf(entry.to)}:{' '}
+          {entry.kind === 'movedOff'
+            ? `moved off ${nameOf(entry.from)} ${timesWord(entry.weeks)} recently.`
+            : `it had landed on ${nameOf(entry.from)} ${weeksWord(entry.weeks)} running.`}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+Steered.propTypes = {
+  verdict: PropTypes.object,
+  chores: PropTypes.array.isRequired,
+  nameOf: PropTypes.func.isRequired,
+}
+
+function timesWord(n) {
+  if (n === 2) return 'twice'
+  if (n === 3) return 'three times'
+  return `${n ?? 'several'} times`
+}
+
+function weeksWord(n) {
+  if (n === 3) return 'three weeks'
+  return `${n ?? 'several'} weeks`
+}
+
+/**
  * What the fairness number does not count — story #59, the charter's
  * ambition 4 ("the invisible half is at least acknowledged").
  *
@@ -372,6 +426,10 @@ export default function Split({
         <Verdict actual={actual} reachable={reachable} reason={reason} nameOf={nameOf} />
 
         <LastRebalance verdict={lastRebalance} nameOf={nameOf} />
+
+        {/* #481 — under the run's footnote, because it is the same run's
+            footnote: which chores the last deal-out steered and why. */}
+        <Steered verdict={lastRebalance} chores={chores} nameOf={nameOf} />
 
         {/* #59 — directly under the verdict, because the verdict IS the
             fairness claim and this line is the claim's own stated boundary.

@@ -151,6 +151,54 @@ export async function leaveHousehold(householdId) {
   }
 }
 
+/** #432 — the account-deletion function's name, in one place; liveSchema.test.js resolves it. */
+const DELETE_ACCOUNT_FUNCTION = 'delete-account'
+
+/**
+ * #432 — delete your own sign-in, through the `delete-account` Edge Function.
+ * WHO is deleted is the JWT's, so nothing is sent: the body is empty and the
+ * function never reads one. It refuses while a live household still claims the
+ * caller (the app routes that person to Leave, whose last leave deletes the
+ * sign-in itself, #431), revokes the Google grant behind any row left in a
+ * household pending deletion, and deletes the sign-in — immediately, with no
+ * grace period (owner decision at #432's pickup). Returns
+ * `{ deleted, revokeFailed }`; `revokeFailed` becomes #99's sentence.
+ *
+ * The function's own refusals are sentences, so they are surfaced as-is — the
+ * same rule `callProvisioning` gives. A failure here means nothing was deleted:
+ * the function's own order puts the delete last.
+ */
+export async function deleteAccount() {
+  const { data, error } = await getSupabase().functions.invoke(DELETE_ACCOUNT_FUNCTION, {
+    body: {},
+  })
+  if (error) {
+    let detail = ''
+    try {
+      const body = await error.context?.json()
+      detail = body?.error ?? ''
+    } catch {
+      detail = ''
+    }
+    const unreachable =
+      'Could not reach the account service, so your account was not deleted. Check this ' +
+      `device's connection — if it is fine, the ${DELETE_ACCOUNT_FUNCTION} function has ` +
+      'not been deployed to this project yet (see docs/deploy-runbook.md).'
+    const err = new Error(
+      detail ||
+        (error?.name === 'FunctionsFetchError'
+          ? unreachable
+          : `Could not delete your account: ${error?.message ?? 'unknown error'}`),
+    )
+    err.cause = error
+    throw err
+  }
+  return {
+    deleted: data?.deleted === true,
+    revokeFailed: data?.revokeFailed === true,
+  }
+}
+
 /**
  * The same, plus the two member-write failures that are worth naming — #242.
  *
@@ -424,10 +472,16 @@ export async function signInWithGoogle({ trusted = true } = {}) {
  * both point there:
  *
  *   - `#error=…&error_code=…&error_description=…` in the FRAGMENT: a provider
- *     refusal (Google said no, or the account is not one of the consent
- *     screen's registered test users), or an expired confirmation link. This
- *     is the implicit flow's error channel, the counterpart of the
- *     `#access_token` it puts there on success.
+ *     refusal (the person backed out of Google's screen), or an expired
+ *     confirmation link. This is the implicit flow's error channel, the
+ *     counterpart of the `#access_token` it puts there on success. It is NOT
+ *     where an unregistered test user's refusal arrives: sign-in asks only
+ *     `email profile`, which Google classes as non-sensitive, so the consent
+ *     screen's Testing-mode test-user list never engages here (*measured
+ *     2026-09-16* on #330's run, recorded on #339 — an account not on the list
+ *     saw the ordinary consent screen and signed in). That refusal is real for
+ *     the calendar's sensitive scopes (#142) and comes back through
+ *     `readConsentReturn`, with the calendar's own `state`.
  *   - `?error=…&error_code=…` in the QUERY, with NO `state`: GoTrue's
  *     bad-flow-state redirects (`bad_oauth_state`, `bad_oauth_callback`,
  *     `flow_state_already_used`) come from middleware that never read the
@@ -543,15 +597,21 @@ const STALE_FLOW_CODES = new Set([
 ])
 
 /**
- * The sentence for a sign-in return, in words the person can act on — #304.
+ * The sentence for a sign-in return, in words the person can act on — #304,
+ * reworded by #465.
  *
- * Two things arrive as `access_denied` and cannot be told apart from here: the
- * person pressing Cancel at Google, and Google refusing an account the consent
- * screen has not been opened to — it is in Testing, so only the registered
- * test users get past it (`docs/deploy-runbook.md` §3b step 2). The sentence
- * fits both and names who can fix the second: the organizer, not Supabase and
- * not Google. It is NOT the collapsed "did not match" sentence — that one is
- * about a credential, and nothing here was a credential.
+ * `access_denied` here is the person backing out of Google's screen — Cancel,
+ * the tab closed, the account chooser dismissed — so the sentence says that
+ * and offers both ways back in. It does NOT tell them the organizer can "add"
+ * their account: until #465 it did, on the reading that the consent screen is
+ * in Testing and refuses anyone not on its test-user list. That reading was
+ * *measured false on 2026-09-16* (#330's run, recorded on #339): sign-in asks
+ * only `email profile`, non-sensitive, so the test-user list never engages
+ * and an unregistered account signed in normally. The refusal is real for the
+ * calendar's sensitive scopes (#142) and arrives through `readConsentReturn`,
+ * not here — `docs/deploy-runbook.md` §3b carries the corrected bullet. It is
+ * NOT the collapsed "did not match" sentence either — that one is about a
+ * credential, and nothing here was a credential.
  *
  * An expired confirmation link also arrives as `access_denied`, with
  * `error_code=otp_expired` — that is #129's flow, not this one, and it falls
@@ -561,9 +621,8 @@ const STALE_FLOW_CODES = new Set([
 export function describeSignInReturn({ error, code, description }) {
   if (error === 'access_denied' && code !== 'otp_expired') {
     return (
-      'Google did not sign you in. If Google said this app has not been opened to your ' +
-      'account, the organizer is the one who can add it — ask them. Or sign in with your ' +
-      'password here.'
+      'Google did not sign you in — its screen was cancelled or did not complete. Press ' +
+      'Continue with Google to try again, or sign in with your password here.'
     )
   }
   if (STALE_FLOW_CODES.has(code)) {

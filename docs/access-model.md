@@ -7,8 +7,21 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0047` (#474) is NOT yet applied** — see the #474 section below for what applies it and
-  how it is read. **`0001`–`0046` are ALL applied to the live project** (`0046` on 2026-09-16 in #480's own
+- Status: **`0001`–`0049` are ALL applied to the live project** (`0049` on 2026-09-18 in #481's own
+  session, before its PR opened, at md5 `41ae68f8964e592d590f338f246aa64a` (`15157 characters,
+  15 statements`), read back identical — a table the client reads, so `npm run check:live` moved
+  *measured* **75 of 77 → 77 of 77** on the apply (the second red was a hand list, see the #481
+  section), `npm run probe:live-grants` **20 of 20** with its new absence row, and the read-only
+  catalog query in the #481 section read the trigger, the function and the grants on the after
+  side; `0048` on 2026-09-18 in #467's
+  own session, before its PR opened, at md5 `fc6ce0bbc3a623c913db0ac2a9f91be3` (`4728 characters,
+  4 statements`), read back identical — a body replace of `transfer_household` that **`npm run
+  check:live` cannot see**, *measured* **75 of 75** after, confirmed by the read-only catalog query
+  in the #467 section below; `0047` on 2026-09-17 in #474's own
+  session, before PR #513 merged — a column and two function bodies that **`npm run check:live`
+  cannot see**, *measured* **75 of 75** on 2026-09-17 in #469's session, and confirmed by the
+  read-only catalog query in the #474 section below; this line said `0047` was NOT yet applied
+  until #469, the apply having landed after the sentence was written; `0046` on 2026-09-16 in #480's own
   session, at md5 `7d201b925939d32460a27146134d2006` (`6884 characters, 8 statements`), read back
   identical — a constraint widening and a trigger body that **`npm run check:live` cannot see**,
   *measured* **75 of 75** on both sides, confirmed by the read-only catalog query in the #480
@@ -54,7 +67,7 @@
   identical — see its entry below; `0034` on 2026-09-06 in #368's own
   session, at md5 `354cca29db27f04dbd5ac7e07e9562d3` (9045 characters, 6 statements), read back
   identical — **applied twice**, and the reason is the entry below; `0033` on 2026-09-05 in #354's own
-  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set is EMPTY as of 2026-09-16 — *measured **75 of 75*** at #182's pickup.
+  session, before the merge — see its entry below; `0032` the same day in #352's and `0031` in #97's), and **the expected-red set holds ONE row since #432 (2026-09-19) — the `delete-account` Edge Function, NOT DEPLOYED until `npm run deploy:function` ships it, no migration beside it — and was EMPTY before that as of 2026-09-17 — *measured **75 of 75*** in #469's session, as at #182's pickup on 2026-09-16.
   From 2026-09-11 it held FIVE rows — #430's three (`request_household_deletion`,
   `restore_household` and `household_deletion_status`, red until `0042` was applied on 2026-09-12)
   and #431's two (`transfer_household` until `0043` was applied, and the `leave-household` Edge
@@ -2140,6 +2153,30 @@ correctly only because its rollback had deleted the account.
   and that GoTrue re-stamps `invited_at` is read off its source, not measured. The first organizer
   to press *Send the invitation again* is the first live reading.
 
+### A refusal that quotes a control — `provision-member`, #459
+
+**Not deployed at the time of writing.** The already-has-a-sign-in refusal now names *Create an
+invitation code*, the label the Who tab's button actually carries, instead of *Invite somebody by
+code*, which was never on screen. The sentence is in
+`supabase/functions/provision-member/handler.ts`, so **it takes effect only on
+`npm run deploy:function provision-member`** — until then production keeps answering with the
+wrong control name, and nothing in the bundle changes. This is a message-only change: no schema, no
+grant, no signature and no action list moves, so `check:live` and `probe:live-grants` are blind to
+it in both directions, and `check:deployed` is the instrument that says whether the deploy is owed.
+
+- **What holds it from returning**, which is the part #459 exists for: `src/test/gate.test.js`'s
+  `#459` block reads the handler's `(Who tab, "…")` aside and `src/components/Invitations.jsx`'s
+  rendered labels and asserts the first against the second. The expected string is extracted from
+  the component rather than written in the test, so a hand-copied label cannot satisfy it — rename
+  the button and the guard goes red until the refusal follows. *Proven by mutation, four predicted
+  first and four exact*: reverting to the old wrong name **1**, renaming the component's button
+  **2** (the positive control and the assertion), deleting the aside **1** (the positive control
+  alone), and dropping the *no invitation was sent* half **1**.
+- **The sentence had already been wrong twice** — *Use Reset sign-in instead* from #341 until
+  #191's review, then *Invite somebody by code* until this story, measured verbatim on production
+  (build `74aed25`) during #178. Both halves of the message are correct and kept: the row exists,
+  and no mail went.
+
 ### A suggested week is a person's — #480, 2026-09-16
 
 `0046` widens one check constraint and one trigger body on `member_capacity`, and nothing else:
@@ -2576,7 +2613,8 @@ A member can leave from the Who tab. An organizer first hands the household over
   nothing could retry it. If the sign-in cannot be deleted, the person is told as a warning, because
   they have already left.
 - **Handing over.** `transfer_household(household_id, to_member_id)` is organizer only, and hands to
-  a member of the same household who has signed in. An organizer who cannot sign in could provision
+  a member of the same household who has signed in — since `0048` (#467), one whose invitation has
+  been **accepted**, not merely sent; see the #467 section. An organizer who cannot sign in could provision
   nobody, which is `0016`'s dead end. It is the only writer of `households.organizer_member_id`
   besides `create_household`. It is a definer because the alternative — widening `0005`'s
   `update (name, timezone)` grant on `households` to carry the column — would let any member reassign
@@ -2635,6 +2673,59 @@ A member can leave from the Who tab. An organizer first hands the household over
   **→ 71 of 74** across the deploy (readings on #431). `leave_household` and `member_tokens_to_revoke` are
   called only by the function, so they are not in `LIVE_RPCS`.
 
+## Deleting your own account — #432, 2026-09-19
+
+A person can delete their own sign-in from the app. The owner's decisions are on #432 (pickup,
+2026-09-19) and #427; two of the story's filed premises had moved by the time it was worked, and
+the comment on #432 records how.
+
+- **It is immediate, and it is the LAST way out, not a fourth one.** The grace period already
+  applies wherever there is something to restore: an organizer deletes the household (#430) and the
+  purge deletes their sign-in when the period ends; a member leaves (#431) and `leave-household`
+  deletes a last-claim sign-in on the spot. What is left is a sign-in in **no live household**,
+  which holds nothing but the auth row — so there is no pending state, no restore, and no
+  migration. From inside a household the Who tab's *Delete your account* card is a **route**: its
+  confirm says the sign-in goes with the last leave and opens the Leave confirm, whose organizer
+  form already offers hand-over or delete. The delete itself happens only on the signed-in
+  no-household screen.
+- **The server half is the `delete-account` Edge Function**, caller-scoped like `leave-household`:
+  WHO is deleted is `auth.uid()` off the JWT, and the body is never read, so one account cannot
+  delete another (`handler.test.js` posts a body naming somebody else and reads the JWT's id in the
+  delete). In order, it:
+  1. refuses while a live household still claims the caller — read **as the caller**, so
+     `current_household_ids()` decides, and since `0042` that leaves out a household pending
+     deletion. This is why a member of a household that is being deleted, whom the leave path
+     refuses (`0043`'s reasoning), is not trapped: their rows do not block;
+  2. reads the rows that still claim them as `service_role` — after step 1, only rows in pending
+     households — and revokes the Google grant behind each through `member_tokens_to_revoke`
+     (keyed on the Google account since `0047`). Before the sign-in goes: not because the delete
+     takes the token row (`members_claimed_by_fkey` is ON DELETE SET NULL, so the member row and its
+     token outlive the account and the purge cascades them later) but because after it nobody can
+     come back to press Disconnect. If the tokens cannot be read, nothing is deleted and the person
+     is told to try again; a revoke Google refuses does not stop the delete, and the response says
+     `revokeFailed`, which the app turns into #99's sentence on the screen they land on;
+  3. `auth.admin.deleteUser` on the caller alone. Last, so every failure above leaves the account
+     exactly as it was. The app then ends the session the way a last leave does (#440).
+
+  It touches no row in `public`. #262's other-claims rule is not asked: the caller is deleting their
+  OWN account, and the only question is whether a live household still needs them.
+- **`provision-member`'s `revoke` refuses the organizer's own row** (409, naming the two routes
+  out). #427's code map found nothing stopped an organizer revoking the row their own JWT claims and
+  deleting their last-claim sign-in, leaving the household with an organizer row nobody can claim;
+  only the hidden Remove button stood in the way. The member DELETE policy (`0016`) already refuses
+  the organizer's own row; this is the same refusal for the auth half. `handler.test.js` holds it
+  and the row claimed by somebody else beside it as the positive control.
+- **The Google sign-in grant is out of reach**, and both confirms say so: `signInWithGoogle` asks
+  for no offline access and stores no token, so only the calendar grants can be revoked from here.
+  The person removes Taskr from their Google account's third-party access themselves.
+- **What each instrument sees.** No migration, so `check:live`, `probe:live-grants` and the catalog
+  query have nothing to read on the database side. `check:live` gains ONE row — the function's
+  preflight, listed in `LIVE_EDGE_FUNCTIONS` with its call site (`household.js deleteAccount`) —
+  red until `npm run deploy:function` ships it, which is the one post-merge step; `check:deployed`
+  reads it absent until then. The function's decisions are in
+  `supabase/functions/delete-account/handler.test.js` (order, whose power each step uses, the
+  refusals); what it cannot see is stated in that file's header.
+
 ## A grant is kept while its Google account is used elsewhere — #474, 2026-09-17
 
 #430 and #431 kept a Google grant when the **same Taskr sign-in** held a token in another
@@ -2676,6 +2767,118 @@ alternative ending ("grants are per refresh token, close it moot") is false.
   `calendar_tokens.google_sub`, and `pg_get_functiondef` for both functions, where `google_sub`
   is absent before and present after. **Re-pasting `0042` or `0043` after `0047` restores the
   sign-in-keyed body** of the function that file declares; re-paste `0047` after either.
+- **Applied.** `0047` went in on 2026-09-17 from #474's own session at the owner's go-ahead, before
+  PR #513 merged, with the md5 read back matching; `calendar-connect`, `calendar-disconnect` and
+  `leave-household` were deployed after it, in that order, because the new `calendar-connect`
+  writes `google_sub`. The catalog query read no `google_sub` column and neither body naming it
+  before the apply, and all three present after, with `authenticated` still unable to execute
+  either function (readings on #474). *Re-read 2026-09-17 in #469's session*: the column present,
+  both bodies naming `google_sub`, `authenticated` execute false on both; `check:live` **75 of
+  75**.
+
+## The household is handed only to somebody who has joined — #467, 2026-09-18
+
+#179 and #431 hand the household over through `transfer_household` (`0043`), which refused a
+member with no `claimed_by` and nothing else. #458 measured that `claimed_by` is set when an
+invitation is **sent** (#341), before the person has followed the link, so an organizer could make
+somebody organizer who had never opened their invitation — and, staying on as an ordinary member,
+could not take it back if that person never arrived.
+
+- **The boundary (`0048`).** `transfer_household` now also refuses a member whose account has no
+  `auth.users.email_confirmed_at`, with the sentence *"<name> has not accepted their invitation
+  yet, so the household cannot be handed to them"*. Nothing else in the function changed: same
+  signature, same definer, same grants (`from public, anon` revoked, `authenticated` granted).
+  It reads `auth.users` directly rather than through `0045`'s `member_sign_in_states`, which is
+  a client read scoped to the caller's households. **Re-pasting `0043` after `0048` restores the
+  claim-only body**; re-paste `0048` after it.
+- **The offer.** The roster's per-row *Make organizer* and the leave-and-hand-over list both read
+  `signInStateFor(...).kind === 'joined'` — the same answer the row's label reads — instead of
+  `claimed_by`. While `member_sign_in_states` has not answered, that falls back to `claimed_by`,
+  #458's documented degraded case; the function is the boundary then, and its refusal names the
+  person.
+- **Who it refuses, *measured on the live project 2026-09-18*** with a read-only count before the
+  file was written: 13 claimed members, 1 with an unconfirmed account (an invitation
+  outstanding), **0** of them organizers and **0** unconfirmed accounts that were never invited —
+  so no account minted confirmed by the retired `provision` action is newly refused.
+- **Instruments.** `src/test/leaveHousehold.pglite.test.js`'s #467 block refuses an outstanding and
+  an expired invitation, hands over to the same member once confirmed (the control), and re-applies
+  the file. `check:live` is blind to `0048` (a body under an unchanged signature, `0028`'s reason);
+  the live instrument is `pg_get_functiondef` read before and after the apply, where
+  `email_confirmed_at` is absent before and present after, with `has_function_privilege` for
+  `authenticated` and `anon` in the same select.
+- **Applied.** `0048` went in on 2026-09-18 from #467's own session at the owner's go-ahead, before
+  the PR opened: `npm run migrate:live`, 4 statements, md5 `fc6ce0bbc3a623c913db0ac2a9f91be3` read
+  back matching the file. The catalog query read the body md5 `d0f9befe…` with no
+  `email_confirmed_at` before, and `95e1eb34…` with it after; the comment naming #467 absent then
+  present; `prosecdef` true, `authenticated` execute true and `anon` false on both sides.
+  `check:live` **75 of 75** after. So the boundary is live now; the client's filter reaches the
+  deployed app with the next `develop → release` promotion.
+
+## Who has held each chore, and who moved it — #481, 2026-09-18
+
+The allocator was memoryless, and its tie-break deterministic, so the same household dealt the same
+chore to the same person week after week by construction — and a hand move off somebody was
+respected for one week (`0018`'s manual pin) and forgotten the next. The owner's words: *if a
+particular chore keeps getting assigned to one person, especially if it often gets reassigned after
+it is doled out — create a logic to account for that.* The logic is in
+[`docs/allocation-corpus.md`](allocation-corpus.md); this entry is the record it reads.
+
+- **The table (`0049`).** `chore_assignment_history`: one append-only row per assignment change —
+  the chore, its repeat parent where it has one (`generated_from`, the key "the same chore" is read
+  by, since an occurrence is a new row every week), the household, holder before and after, source
+  before and after (`chores.assigned_source`'s words, deliberately not re-checked here), who did it
+  (`acting_member`), the Monday of the week it landed in **in the household's zone**
+  (`date_trunc('week', now() at time zone households.timezone)`, `0005`'s Monday check on it), and
+  when. No foreign key on the chore or the members, on purpose: the record must outlive both — a
+  removed member's rows are the ones that say "moved off them", and a repeat's occurrences come
+  and go. It follows exactly one deletion, the household's, by cascade.
+- **The writer.** A trigger on `chores` (`chores_record_assignment`, definer function
+  `record_chore_assignment`, revoked from `public`, `anon` and `authenticated`), not an insert in
+  each RPC — so no function body another file declares is replaced, and a later re-paste of `0018`,
+  `0029` or `0042` cannot silently drop the record from the function it restores. It fires
+  `after update of assigned_member_id, assigned_source`, when the holder or the source changed **or
+  the row is an open deal-out placement** (`new.assigned_source = 'auto'` with `completed_at` null
+  on both sides) — the second clause because "the last three deal-outs all went to A" is exactly
+  the case where the incumbent wins the tie and nothing on the row changes, and the
+  `completed_at` guard because `complete_chore` and `uncomplete_chore` SET the assignment columns
+  while preserving an auto holder. So it also records what the story did not name: an
+  un-completion releasing a claim, and a removal's `on delete set null`.
+- **Who reads, who writes.** `authenticated` holds SELECT on every column, `household_id` included
+  (the `0014` route — read by household, because a row must outlive the member it names), under
+  one same-household policy through `current_household_ids()`. No insert, update or delete grant
+  or policy for any client role; `anon` holds nothing. `service_role` is granted nothing by the
+  file and holds the platform's default. **Not published** to Realtime, by name in
+  `src/lib/realtime.js`'s `UNWATCHED_TABLES`: every row lands in the same transaction as a
+  published `chores` update, so watching it would echo each event into a second read.
+- **What each instrument can see.** `check:live` sees the table through its `LIVE_SCHEMA` entry
+  (red until the apply, then one honest new row). `probe:live-grants` sees the absence of any
+  table-level `authenticated` privilege (`MEASURED_TABLE_ACLS`, `authenticated: null`). **Neither
+  sees the trigger, its predicate or the function's ACL.** The live instrument for that half is a
+  read-only catalog query through `scripts/management-api.mjs`'s `runQuery`, taken after the apply:
+  `pg_get_triggerdef` for `chores_record_assignment` (the `WHEN (...)` clause carrying all three
+  disjuncts), `pg_get_functiondef` and `prosecdef` for `record_chore_assignment`,
+  `has_function_privilege` for `authenticated` and `anon` (both false), the policy row from
+  `pg_policies`, and `column_privileges` for `authenticated` (SELECT on all eleven columns, nothing
+  else). The suite that runs on every push is `src/test/assignmentHistory.pglite.test.js`: one
+  test per RPC, the predicate's edges, the refusals, the zone, the re-paste, and one end-to-end
+  where the rows the trigger wrote steer the next deal-out.
+- **Applied.** `0049` went in on 2026-09-18 from #481's own session at the owner's go-ahead at the
+  commit gate, before the PR opened: `npm run migrate:live`, 15 statements, md5
+  `41ae68f8964e592d590f338f246aa64a` read back matching the file. It had to land **before** the
+  `develop → release` promotion that carries this story: until it did, the deployed deal-out would
+  have read a table that does not exist — `listAssignmentHistory` throws and `reassignHousehold`
+  surfaces it through `mutate()` — a failure, not a degradation. The catalog query read nothing on
+  the before side (no relation) and on the after side: the table with `authenticated` holding no
+  table-level privilege and SELECT on all eleven columns, one policy
+  (`chore_assignment_history_select_same_household`, SELECT), the trigger
+  `AFTER UPDATE OF assigned_member_id, assigned_source … WHEN (…)` carrying all three disjuncts,
+  `record_chore_assignment` with `prosecdef` true, `at time zone h.timezone` in its body, execute
+  false for `authenticated` and `anon`, the table comment present, `published` 0, and 0 rows.
+  `check:live` **75 of 77** before and **77 of 77** after — the second red was
+  `schema.integration.test.js`'s own copy of the excused-table list, a fourth hand list that the
+  full suite does not run (integration config) and that the overlay's list of six did not name;
+  corrected in the same commit. `probe:live-grants` **20 of 20** after, its new
+  `chore_assignment_history` row reading the expected absence.
 
 ## How the rules are enforced
 

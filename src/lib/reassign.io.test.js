@@ -33,6 +33,14 @@ function makeQuery(table) {
       calls.push({ op: 'in', table, column, value })
       return q
     },
+    gte(column, value) {
+      calls.push({ op: 'gte', table, column, value })
+      return q
+    },
+    lt(column, value) {
+      calls.push({ op: 'lt', table, column, value })
+      return q
+    },
     order(column, opts) {
       calls.push({ op: 'order', table, column, ascending: opts?.ascending })
       return q
@@ -108,8 +116,26 @@ describe('reassignHousehold', () => {
     const tables = calls.filter((c) => c.op === 'select').map((c) => c.table)
     expect(tables[0]).toBe('households')
     expect(tables).toEqual(
-      expect.arrayContaining(['households', 'members', 'chores', 'member_capacity', 'chore_exclusions']),
+      expect.arrayContaining([
+        'households',
+        'members',
+        'chores',
+        'member_capacity',
+        'chore_exclusions',
+        // #481 — the assignment record, read like every other input, after
+        // the version.
+        'chore_assignment_history',
+      ]),
     )
+    // #481 — and read for exactly the window the fold reads: from a Monday
+    // three weeks back, up to and NOT including the week being dealt.
+    const from = calls.find((c) => c.op === 'gte' && c.table === 'chore_assignment_history')
+    const until = calls.find((c) => c.op === 'lt' && c.table === 'chore_assignment_history')
+    expect(from.column).toBe('period_start')
+    expect(until.column).toBe('period_start')
+    expect(from.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(until.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(from.value < until.value).toBe(true)
 
     const rpc = calls.find((c) => c.op === 'rpc')
     expect(rpc.name).toBe('apply_assignments')

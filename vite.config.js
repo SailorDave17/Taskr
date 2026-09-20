@@ -89,7 +89,7 @@ export default defineConfig({
       manifest: {
         name: 'Taskr',
         short_name: 'Taskr',
-        description: 'Fair, time-budget allocation of household chores',
+        description: "Splits a household's chores by the time each person has.",
         theme_color: '#1f6f5c',
         background_color: '#12171c',
         display: 'standalone',

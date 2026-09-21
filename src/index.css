@@ -196,10 +196,22 @@ body {
   color: var(--ink-dim);
 }
 
-/* #425 — "Report a problem", on its own line ABOVE the build stamp. Above, so
-   the footer still ends with `build <sha>`, which README tells a reader to look
-   for. Its own line, because it is the footer's one control, and a control here
-   is at least 44px tall however small its text.
+/* #451 — the footer's controls share one row, ABOVE the build stamp, so the
+   footer still ends with `build <sha>`. A row rather than a line each: two
+   44px lines would cost the footer twice what one does, and "Privacy" beside
+   "Report a problem" is how the issue asks for it. `gap` leaves the two
+   underlines visibly separate; `flex-wrap` lets the second link drop to its own
+   line rather than overflow if a translation ever makes the pair too wide. */
+.shell__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1.25rem;
+}
+
+/* #425 — "Report a problem", ABOVE the build stamp. Above, so the footer still
+   ends with `build <sha>`, which README tells a reader to look for. It is a
+   control, and a control here is at least 44px tall however small its text.
 
    Colour: the footer's own dim ink, underlined the way .button--link is. Not
    --accent, which is 3:1 against --bg — short of 4.5:1 for text this small —

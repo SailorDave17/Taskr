@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { PRIVACY_URL } from './lib/links.js'
 
 // The shell's own assertions (heading, fairness rule, build stamp) survive from
 // #4 unchanged — they are what makes a deploy observable. What changed in #5 is
@@ -559,11 +560,57 @@ describe('the shell, unchanged from #4', () => {
     expect(body).toContain(`Build: ${stamp.textContent.replace(/^build\s+/, '')}`)
     // A session and no household: the onboarding screen, and the report says so.
     expect(body).toContain('Screen: Onboarding screen')
-    // README tells a reader the footer ENDS with the build stamp, so the link
-    // sits above it rather than after it.
+    // README tells a reader the footer ENDS with the build stamp, so the links
+    // sit above it rather than after it. Since #451 the link shares a row with
+    // Privacy, so the footer's first child is that row and the link leads it.
     const footer = stamp.closest('footer')
-    expect(footer.firstElementChild).toBe(link)
+    expect(footer.firstElementChild).toBe(link.parentElement)
+    expect(link.parentElement.firstElementChild).toBe(link)
     expect(footer.lastElementChild).toBe(stamp)
+  })
+
+  it('links the published privacy policy beside "Report a problem", in a new tab (#451)', async () => {
+    await renderApp()
+    const privacy = screen.getByRole('link', { name: /^privacy$/i })
+    expect(privacy).toHaveAttribute('href', PRIVACY_URL)
+    // A new tab, so a person reading the policy does not lose the screen they
+    // were on; `noopener` so the opened page cannot reach back through
+    // `window.opener`. AC 1 asks for both.
+    expect(privacy).toHaveAttribute('target', '_blank')
+    // `noopener` is AC 1's; `noreferrer` is the lint gate's, and it also keeps
+    // the policy page from learning which screen the reader came from.
+    expect(privacy.getAttribute('rel')).toMatch(/\bnoopener\b/)
+    expect(privacy.getAttribute('rel')).toMatch(/\bnoreferrer\b/)
+    // "Beside": the same row as Report a problem, and that row above the stamp.
+    const report = screen.getByRole('link', { name: /report a problem/i })
+    expect(privacy.parentElement).toBe(report.parentElement)
+    const stamp = screen.getByTestId('build-commit')
+    expect(stamp.closest('footer').firstElementChild).toBe(privacy.parentElement)
+  })
+
+  it('shows the privacy link inside a household too (#451)', async () => {
+    // AC 1 says "any surface". The default fixture is signed in with no
+    // household; this is the joined shell, whose footer is rendered by the
+    // same branch but reached by a different one.
+    api.listHouseholds.mockResolvedValue([
+      { id: 'h1', name: 'Placeholder Household', timezone: 'America/New_York' },
+    ])
+    api.listMembers.mockResolvedValue([
+      { id: 'm1', display_name: 'Placeholder One', weekly_minutes: 120, claimed_by: 'person-a' },
+    ])
+    await renderApp('Chores')
+    expect(screen.getByRole('link', { name: /^privacy$/i })).toHaveAttribute('href', PRIVACY_URL)
+  })
+
+  it('shows the privacy link to somebody signed OUT, on the sign-in screen (#451)', async () => {
+    // The other half of "signed in or out" — the #425 link's own signed-out
+    // test at the sign-in screen is the shape this follows.
+    api.currentSession.mockResolvedValue(null)
+    await renderApp()
+    // The sign-in form is what is showing — the control that the signed-out
+    // fixture took effect, rather than the default screen passing by luck.
+    expect(screen.getByLabelText(/password or pin/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^privacy$/i })).toHaveAttribute('href', PRIVACY_URL)
   })
 
   it('names the tab the person is on, inside a household, and nothing about the household (#425)', async () => {

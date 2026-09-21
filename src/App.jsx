@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { buildInfo } from './buildInfo.js'
 import { reportHref, reportScreen } from './lib/reportProblem.js'
+import { PRIVACY_URL } from './lib/links.js'
 import { hasSupabaseConfig } from './lib/supabase.js'
 import { attachVisibilityRefresh, createReadQueue, subscribeToHousehold } from './lib/realtime.js'
 import {
@@ -3502,18 +3503,29 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
 
       <footer className="shell__footer">
         {/* #425 — a mailto the person reads and sends themselves; see
-            lib/reportProblem.js for why its fields are an allowlist. */}
-        <a
-          className="shell__report"
-          href={reportHref({
-            build: buildInfo.commit,
-            environment: buildInfo.env,
-            screen: reportScreen({ status, view, surfaces: SURFACES }),
-            browser: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
-          })}
-        >
-          Report a problem
-        </a>
+            lib/reportProblem.js for why its fields are an allowlist.
+            #451 — the privacy policy sits beside it, sharing the row so the
+            footer still ends with `build <sha>` (README's "read the page
+            footer" paragraph) and costs one 44px row rather than two. */}
+        <div className="shell__links">
+          <a
+            className="shell__report"
+            href={reportHref({
+              build: buildInfo.commit,
+              environment: buildInfo.env,
+              screen: reportScreen({ status, view, surfaces: SURFACES }),
+              browser: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
+            })}
+          >
+            Report a problem
+          </a>
+          {/* `noreferrer` as well as the `noopener` AC 1 asks for: the repo's
+              lint gate requires it, and it also keeps the policy page from
+              being told which Taskr screen the reader came from. */}
+          <a className="shell__report" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">
+            Privacy
+          </a>
+        </div>
         <span>{buildInfo.name}</span>
         <span aria-hidden="true"> · </span>
         <span>{buildInfo.env}</span>

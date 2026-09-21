@@ -1562,6 +1562,12 @@ describe('#19 — no real household name reaches version control', () => {
     // because the whole point is that they are the strings on the buttons.
     Rename: 'the rename control’s visible label in the #360 gesture assertion',
     Archive: 'the archive control’s visible label in the #360 gesture assertion',
+    // #484 — the name of SAFARI's own button, which the iOS install line tells
+    // the person to tap and the test asserts is the marked-up half of the
+    // sentence. Bare and capitalised, so the shape scan reads it as a name;
+    // declared rather than lower-cased for the same reason as the two above —
+    // it is the string on the button, and the sentence is wrong without it.
+    Share: 'iOS Safari’s share control, named in #484’s install instruction and asserted verbatim',
     // #409 — the whole of what widening the corpus to `README.md` and
     // `docs/*.md` turned up: FOUR literals, none of them a person and none of
     // them a household. They are recorded here with that count stated, because

@@ -140,6 +140,13 @@ const targets = [
   { file: 'icon-512.png', size: 512, inset: 0.14 },
   // Maskable: content pulled well inside the safe zone.
   { file: 'icon-512-maskable.png', size: 512, inset: 0.22 },
+  // #484 — iOS takes the home-screen icon from an `apple-touch-icon` link and
+  // from nothing else: without one it uses a SCREENSHOT of the page, so the
+  // icon is missing rather than wrong and nothing reports it. 180px is the
+  // size current iOS asks for. The NON-maskable inset, because iOS applies its
+  // own corner mask to the whole square and does not read `purpose`, so the
+  // 0.22 safe zone would just make the motif small.
+  { file: 'apple-touch-icon-180.png', size: 180, inset: 0.14 },
 ]
 
 for (const { file, size, inset } of targets) {

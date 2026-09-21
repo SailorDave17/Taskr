@@ -9799,15 +9799,20 @@ describe('#483 — the install offer, in the shell', () => {
     name: 'Placeholder Household',
     timezone: 'America/New_York',
   }
-  const makeOffer = (offered = true) => {
+  // #484 — the fake carries a REASON as well as a boolean, because the real
+  // controller does: the two are set together there, so a fake that held only
+  // the boolean could not reproduce the state the shell reads.
+  const makeOffer = (offered = true, reason = 'prompt') => {
     const listeners = new Set()
     const offer = {
       offered,
+      why: reason,
       subscribe: (listener) => {
         listeners.add(listener)
         return () => listeners.delete(listener)
       },
       isOffered: () => offer.offered,
+      reason: () => (offer.offered ? offer.why : null),
       install: vi.fn(),
       dismiss: vi.fn(),
       set(next) {
@@ -9912,6 +9917,49 @@ describe('#483 — the install offer, in the shell', () => {
     await screen.findByRole('region', { name: /who is in the household/i })
     expect(line()).not.toBeInTheDocument()
     expect(window.localStorage.length).toBe(0)
+  })
+
+  // #484 — the same host, the other line. What this adds over the component's
+  // own tests is that the SHELL passes the reason through: a shell that
+  // ignored it would render Android's copy to somebody on an iPhone, and every
+  // component test would still pass.
+  it('#484: an iOS reason renders the two-tap line in the shell, with no Install button', async () => {
+    joined()
+    const offer = makeOffer(true, 'ios')
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    const strip = line()
+    expect(strip).toBeInTheDocument()
+    expect(strip).toHaveAttribute('data-variant', 'ios')
+    expect(strip).toHaveTextContent(/tap share, then add to home screen/i)
+    expect(within(strip).queryByRole('button', { name: /^install$/i })).toBeNull()
+    // Same placement as #483's: in the shell, above the tab strip, not modal.
+    expect(strip.closest('main.shell')).not.toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(strip.compareDocumentPosition(screen.getByRole('button', { name: 'Who' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    // Not now is the one answer, and it reaches the shared controller.
+    await act(async () => void fireEvent.click(within(strip).getByRole('button', { name: /not now/i })))
+    expect(offer.dismiss).toHaveBeenCalledTimes(1)
+    expect(offer.install).not.toHaveBeenCalled()
+  })
+
+  it('#484: the iOS line is on the same gate — never on the sign-in screen', async () => {
+    api.currentSession.mockResolvedValue(null)
+    await renderWithOffer(makeOffer(true, 'ios'))
+    expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
+    expect(line()).not.toBeInTheDocument()
+  })
+
+  it('#484: an iOS dismissal takes the line away, through the same subscription', async () => {
+    joined()
+    const offer = makeOffer(true, 'ios')
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    expect(line()).toBeInTheDocument()
+    await act(async () => offer.set(false))
+    expect(line()).not.toBeInTheDocument()
   })
 })
 

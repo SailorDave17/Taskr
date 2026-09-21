@@ -300,6 +300,11 @@ export default function App({ installOffer = null }) {
 const installOfferShape = PropTypes.shape({
   subscribe: PropTypes.func.isRequired,
   isOffered: PropTypes.func.isRequired,
+  // #484 — which offer: `'prompt'` (a captured event) or `'ios'` (Safari's
+  // Share menu, named). Required, so a controller predating #484 is a
+  // propType warning rather than a line that silently renders Android's copy
+  // to somebody on an iPhone.
+  reason: PropTypes.func.isRequired,
   install: PropTypes.func.isRequired,
   dismiss: PropTypes.func.isRequired,
 })
@@ -316,9 +321,15 @@ Shell.propTypes = {
 
 function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   const [status, setStatus] = useState('loading')
-  // #483 — whether the browser's install offer is showing. Read here rather
-  // than deeper down because the gate is the SHELL's state: joined, never the
-  // sign-in or onboarding cards.
+  // #483 — whether the install offer is showing. Read here rather than deeper
+  // down because the gate is the SHELL's state: joined, never the sign-in or
+  // onboarding cards.
+  //
+  // #484 — the offer's REASON is read at the call site below rather than
+  // subscribed to separately. The two are set in the same assignment in the
+  // controller and it notifies once, so the render this hook schedules already
+  // sees the matching reason; a second store would be two snapshots of one
+  // value and could only ever disagree.
   const installOffered = useInstallOffer(installOffer)
   const [household, setHousehold] = useState(null)
   // #164 — EVERY household this person belongs to, in `listHouseholds()`'s
@@ -3080,13 +3091,18 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         </p>
       ) : null}
 
-      {/* #483 — the browser can install this app, said once. Only while a
-          household is showing: somebody still signing in or starting a
+      {/* #483/#484 — the app can be put on the home screen, said once. Only
+          while a household is showing: somebody still signing in or starting a
           household has not decided they want the app yet. Whether it shows at
-          all — the captured event, the already-installed gate, the 30-day
-          "Not now" — is `src/lib/installOffer.js`'s decision. */}
+          all — the captured event or Safari-on-iOS, the already-installed
+          gate, the 30-day "Not now" — is `src/lib/installOffer.js`'s decision,
+          and so is WHICH of the two lines this is. */}
       {status === 'joined' && installOffered ? (
-        <InstallOffer onInstall={installOffer.install} onDismiss={installOffer.dismiss} />
+        <InstallOffer
+          variant={installOffer.reason() ?? 'prompt'}
+          onInstall={installOffer.install}
+          onDismiss={installOffer.dismiss}
+        />
       ) : null}
 
       {status === 'loading' ? (

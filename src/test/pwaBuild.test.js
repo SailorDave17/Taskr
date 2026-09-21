@@ -88,3 +88,41 @@ describe('#347 AC 1 — one registration path, and it is the app’s', () => {
     expect(worker).toContain(bundlePath)
   })
 })
+
+// #484 AC 1 — the three things iOS does not read from the manifest.
+//
+// A REAL build again, for the reason above: the link and the two metas are in
+// `index.html`, the icon is in `public/`, and Vite's copy of `public/` is
+// what puts it in `dist/`. Each half fails silently on its own — a link to a
+// file that did not ship gives iOS nothing to use, and a file that shipped
+// with no link is never looked for — so the test asserts both and the same
+// filename in each.
+describe('#484 AC 1 — the iOS home-screen icon and meta tags ship', () => {
+  const ICON = 'icons/apple-touch-icon-180.png'
+
+  it('index.html links the apple-touch-icon, and the file is in the build', () => {
+    // Read the href out of the page rather than asserting a string, so the
+    // two halves cannot drift: the file checked is the file linked.
+    const link = indexHtml.match(/<link[^>]+rel="apple-touch-icon"[^>]*>/)
+    expect(link, 'index.html carries an apple-touch-icon link').not.toBeNull()
+    const href = link[0].match(/href="\/([^"]+)"/)
+    expect(href, 'the link names a file').not.toBeNull()
+    expect(href[1]).toBe(ICON)
+    expect(existsSync(join(out, href[1])), `${href[1]} ships in the build`).toBe(true)
+  })
+
+  it('the icon that shipped is a 180px PNG, which is the size iOS asks for', () => {
+    // Without this the link and the file could both be right and the icon
+    // still wrong — iOS would scale whatever it found. Read from the PNG's
+    // own IHDR, so it is the bytes that are checked and not the filename.
+    const png = readFileSync(join(out, ICON))
+    expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+    expect(png.readUInt32BE(16)).toBe(180)
+    expect(png.readUInt32BE(20)).toBe(180)
+  })
+
+  it('the two Apple metas ship: full screen on older iOS, and the name under the icon', () => {
+    expect(indexHtml).toMatch(/<meta[^>]+name="apple-mobile-web-app-capable"[^>]+content="yes"/)
+    expect(indexHtml).toMatch(/<meta[^>]+name="apple-mobile-web-app-title"[^>]+content="Taskr"/)
+  })
+})

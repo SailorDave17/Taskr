@@ -262,20 +262,21 @@ export function median(values) {
 
 /**
  * A week's budget suggested from what the person actually got done lately,
- * adjusted by how this week's calendar and work hours differ from those
- * weeks' — #480. Pure: the caller builds `history` (`weeklyHistory` in
- * history.js) and this is the arithmetic and the sentence.
+ * adjusted by how this week's calendar differs from those weeks' — #480.
+ * Pure: the caller builds `history` (`weeklyHistory` in history.js) and this
+ * is the arithmetic and the sentence.
+ *
+ * There is no work-hours term. #480 shipped one for a figure nothing ever
+ * supplied, and #518 removed it — docs/capacity-model.md records why.
  *
  * @param {{id: string}} member whose week — history rows for anybody else are ignored
- * @param {Array<{memberId, periodStart, doneMinutes, busyMinutes, workMinutes}>} history
+ * @param {Array<{memberId, periodStart, doneMinutes, busyMinutes}>} history
  *   one row per COMPLETED prior week the member was in the household for, in any
  *   order. A week with nothing done carries `doneMinutes: 0` and COUNTS; a week
  *   with no calendar read carries `busyMinutes: null` and is left out of the
  *   calendar comparison only.
  * @param {{busy_minutes: number}|null|undefined} busyWeek this week's derived row
- * @param {number} [workMinutes=0] this week's hours at work, in minutes — #479's
- *   figure once that story lands; 0 until then, and the sibling rows carry 0 too
- * @returns {{minutes, weeks, typicalMinutes, calendarDelta, workDelta, reason: [string, string]}|null}
+ * @returns {{minutes, weeks, typicalMinutes, calendarDelta, reason: [string, string]}|null}
  *
  * The rule, in the order it runs (docs/capacity-model.md carries the reasons):
  *
@@ -289,8 +290,7 @@ export function median(values) {
  *      read are compared, and with none — or with no read this week — the
  *      term is zero: the completions already priced in whatever the calendar
  *      usually holds, and there is nothing to compare against;
- *   4. minus this week's work minutes beyond those weeks' median;
- *   5. clamped to [MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES], whole minutes.
+ *   4. clamped to [MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES], whole minutes.
  *
  * The two reason lines are the two halves of that: what the person typically
  * did, and what this week changes about it. They are sentences for the
@@ -303,7 +303,7 @@ export function median(values) {
  * write over it. #106's bound was argued for a figure the calendar computed,
  * not one that reads a person's own past back at them.
  */
-export function suggestCapacity({ member, history, busyWeek, workMinutes = 0 }) {
+export function suggestCapacity({ member, history, busyWeek }) {
   const mine = (history ?? [])
     .filter((row) => row.memberId === member?.id)
     .sort((a, b) => (a.periodStart < b.periodStart ? -1 : a.periodStart > b.periodStart ? 1 : 0))
@@ -333,29 +333,22 @@ export function suggestCapacity({ member, history, busyWeek, workMinutes = 0 }) 
       ? 0
       : Math.round(thisBusy - median(known.map((week) => Number(week.busyMinutes))))
 
-  const workDelta = Math.round(
-    Number(workMinutes ?? 0) - median(recent.map((week) => Number(week.workMinutes ?? 0))),
-  )
-
-  const raw = typical - calendarDelta - workDelta
+  const raw = typical - calendarDelta
   const minutes = Math.min(MAX_CAPACITY_MINUTES, Math.max(MIN_CAPACITY_MINUTES, Math.round(raw)))
 
-  const changes = []
-  if (thisBusy == null) changes.push('no calendar read this week')
-  else if (known.length === 0) changes.push('no calendar read in those weeks')
-  else if (calendarDelta > 0) changes.push(`calendar ${calendarDelta} min busier this week`)
-  else if (calendarDelta < 0) changes.push(`calendar ${-calendarDelta} min quieter this week`)
-  else changes.push('calendar about as busy as usual')
-  if (workDelta > 0) changes.push(`${workDelta} min more at work this week`)
-  else if (workDelta < 0) changes.push(`${-workDelta} min less at work this week`)
+  let change
+  if (thisBusy == null) change = 'no calendar read this week'
+  else if (known.length === 0) change = 'no calendar read in those weeks'
+  else if (calendarDelta > 0) change = `calendar ${calendarDelta} min busier this week`
+  else if (calendarDelta < 0) change = `calendar ${-calendarDelta} min quieter this week`
+  else change = 'calendar about as busy as usual'
 
   return {
     minutes,
     weeks: recent.length,
     typicalMinutes: typical,
     calendarDelta,
-    workDelta,
-    reason: [`typically ${typical} min done over ${recent.length} weeks`, changes.join('; ')],
+    reason: [`typically ${typical} min done over ${recent.length} weeks`, change],
   }
 }
 

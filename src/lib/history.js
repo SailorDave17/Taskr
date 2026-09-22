@@ -59,9 +59,8 @@ export function completedMinutesOf(chore) {
  *
  * `busyMinutes` is the member's `calendar_busy` row for that week, or null
  * where none was read — null, not zero, because an unread calendar is unknown
- * and a zero would say "empty week". `workMinutes` is 0 until #479 records
- * hours at work per week; the field is here so that story fills a value
- * rather than adding a parameter.
+ * and a zero would say "empty week". There is no work-hours field: #480
+ * carried one at 0 for a figure nothing supplied, and #518 removed it.
  *
  * Refuses to run without a period or a zone rather than falling back to an
  * unfiltered fold, `choresInWeek`'s reason: that fallback IS the defect.
@@ -108,7 +107,6 @@ export function weeklyHistory({
         periodStart: monday,
         doneMinutes: done.get(key) ?? 0,
         busyMinutes: busy.has(key) ? busy.get(key) : null,
-        workMinutes: 0,
       })
     }
   }

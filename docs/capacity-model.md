@@ -252,7 +252,7 @@ same editor and the same Save.
 
 ### The rule, with its constants
 
-`suggestCapacity({ member, history, busyWeek, workMinutes })`, in the order it runs:
+`suggestCapacity({ member, history, busyWeek })`, in the order it runs:
 
 1. **The window is the most recent `SUGGESTION_WINDOW_WEEKS = 4` completed prior weeks**, and the
    floor is `SUGGESTION_MIN_WEEKS = 2`. Fewer than two → nothing is offered, and the roster falls
@@ -273,15 +273,31 @@ same editor and the same Save.
    negative (quieter) adds back. With no read this week, or none in those weeks, the term is zero:
    the completions already priced in whatever the calendar usually holds, and there is nothing to
    compare against. A missing read is unknown, never zero (`calendarSuggestion`'s rule).
-4. **Minus this week's work minutes beyond those weeks' median.** `workMinutes` is #479's figure
-   when that story lands and `0` until then, on both sides; the history rows carry the field so
-   #479 fills a value rather than adding a parameter.
-5. **Clamped to `[MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES]`**, whole minutes.
+4. **Clamped to `[MIN_CAPACITY_MINUTES, MAX_CAPACITY_MINUTES]`**, whole minutes.
 
 The result carries the figure and **two reason lines** — *typically 210 min done over 4 weeks* and
 *calendar 90 min busier this week* (or *quieter*, *about as busy as usual*, *no calendar read this
-week*, and the work term when it is non-zero) — which the roster shows under **Suggested: N min**
-with the one-tap *Use this*.
+week*) — which the roster shows under **Suggested: N min** with the one-tap *Use this*.
+
+### No work-hours term — retired with #479 (#518, 2026-09-22)
+
+#480 shipped a fourth step, *minus this week's work minutes beyond those weeks' median*, with a
+`workMinutes` slot in `suggestCapacity`, a `workMinutes: 0` field on every `weeklyHistory` row, and
+a Roster call handing in `0`, all waiting for #479 to record hours at work. **#479 was closed as not
+planned** (owner decision 2026-09-17): the baseline is chore time already net of work, so a work figure would
+subtract work twice, and describe-your-week (#210) already covers an unusual work week. With both
+sides always `0`, the term computed `0 − 0` on every call and never moved a suggestion.
+
+**Removed, not kept dormant** (owner decision at #518's pickup). A parameter nothing feeds still
+reads as a pending feature, which is how the code kept promising #479's figure after #479 was
+closed. Keeping it would have left #480's AC 1 literally true, and that was the only argument for
+it. A future work input would have to add the term back and argue for it again.
+
+**This changes a shipped criterion.** #480 AC 1 asked for a corpus of at least six cases including
+*work hours only*. That case was retired with #479, along with the two others that ran a work term
+(*both terms* and *less at work than usual*). The corpus keeps nine cases covering the other five
+shapes, and every remaining expectation is unchanged. `0046`'s header comment still says the
+figure is adjusted by "work hours". It is an applied migration, so it stays as written.
 
 ### What a "completed prior week" is, and whose completion
 

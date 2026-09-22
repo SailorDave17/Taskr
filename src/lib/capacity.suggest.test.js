@@ -78,10 +78,11 @@ describe('priorPeriodStarts', () => {
 })
 
 describe('AC 1 — the corpus, every expectation written by hand', () => {
-  it('POSITIVE CONTROL: the corpus carries every shape the story names, and at least six cases', () => {
+  it('POSITIVE CONTROL: the corpus carries every shape the story names, and at least five cases', () => {
     // A corpus that lost its blank-week case would still be a corpus. The
-    // story asks for six named shapes; each is tagged and each must be here.
-    expect(SCENARIOS.length).toBeGreaterThanOrEqual(6)
+    // story asked for six named shapes; work-only was retired with #479
+    // (#518), and each of the other five is tagged and must be here.
+    expect(SCENARIOS.length).toBeGreaterThanOrEqual(5)
     const shapes = new Set(SCENARIOS.map((s) => s.shape))
     for (const shape of REQUIRED_SHAPES) expect(shapes, `missing the ${shape} case`).toContain(shape)
   })
@@ -97,7 +98,6 @@ describe('AC 1 — the corpus, every expectation written by hand', () => {
       member: scenario.member,
       history: scenario.history,
       busyWeek: scenario.busyWeek,
-      workMinutes: scenario.workMinutes,
     })
     expect(result).toEqual(scenario.expect)
   })
@@ -107,16 +107,14 @@ describe('AC 1 — the corpus, every expectation written by hand', () => {
     // heroic July weeks the "recent" four.
     const windowed = SCENARIOS.find((s) => s.name.startsWith('the window'))
     const reversed = [...windowed.history].reverse()
-    expect(
-      suggestCapacity({ ...windowed, history: reversed, workMinutes: windowed.workMinutes }),
-    ).toEqual(windowed.expect)
+    expect(suggestCapacity({ ...windowed, history: reversed })).toEqual(windowed.expect)
   })
 
   it('AC 1 — a median, not a mean: the corpus as a whole discriminates the two', () => {
     // Stated as a property of the CORPUS rather than left to the mutation
     // pass alone: for most cases the mean of the done minutes is not the
-    // median, so a mean-based rule cannot pass them. Two cases (work-only
-    // and the floor) have equal mean and median on purpose and say so.
+    // median, so a mean-based rule cannot pass them. One case (the floor)
+    // has equal mean and median on purpose.
     const discriminating = SCENARIOS.filter((s) => {
       const recent = s.history.slice(-SUGGESTION_WINDOW_WEEKS).map((w) => w.doneMinutes)
       const mean = recent.reduce((a, b) => a + b, 0) / recent.length

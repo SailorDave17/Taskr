@@ -976,4 +976,34 @@ describe('#482 — Trust this device', () => {
     setup({ googleSignIn: false })
     expect(trustBox()).toBeChecked()
   })
+
+  // #484 AC 5 — this is the first screen in the home-screen app on iOS, and
+  // the installed app's storage is separate from the Safari tab it was added
+  // from: the sign-in made in the tab does not carry over. The copy must not
+  // suggest it does, and the temptation is real — "stay signed in" reads like
+  // a promise about the device rather than about this browser session.
+  //
+  // The assertion above pins the hint to one exact sentence, so that half is
+  // already held. What this adds is the CLASS: no text on this screen makes a
+  // carry-over claim, so a future sentence added anywhere here is caught too.
+  it('#484 AC 5: nothing on the sign-in screen claims a sign-in carries into the installed app', () => {
+    setup({ onSignInWithGoogle: vi.fn() })
+    const text = document.body.textContent
+    // The phrasings that would be wrong on iOS. Each is a sentence somebody
+    // could reasonably write while thinking about Android, where the installed
+    // PWA does share the browser profile's storage.
+    for (const claim of [
+      /already signed in/i,
+      /stay(ing)? signed in (on|across) (this )?(device|app)/i,
+      /carr(y|ies|ied) over/i,
+      /no need to sign in again/i,
+      /once per device/i,
+      /added to your home screen/i,
+    ]) {
+      expect(text, `the sign-in screen must not claim: ${claim}`).not.toMatch(claim)
+    }
+    // The positive control: the screen DOES say the one true thing, so this
+    // test cannot pass by the screen being empty.
+    expect(text).toMatch(/you’ll be signed out when you close the browser/i)
+  })
 })

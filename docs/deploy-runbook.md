@@ -889,10 +889,16 @@ Both **verified 2026-08-05** on the owner's Android phone.
 - **AC 1** — open the production URL on a phone **on cellular data with Wi-Fi off**. Wi-Fi would let
   a LAN route succeed and the test would pass for the wrong reason. *Result: the shell loaded with
   no login prompt.*
-- **AC 2** — Android Chrome only. The household is single-platform (owner-confirmed at pickup), so
-  this AC was shrunk from "Android Chrome and iOS Safari" as the AC's own wording invites. Confirm
-  the app launches **standalone** — no browser address bar. The icon should be the three unequal
-  bars. *Result: installed and launched standalone.*
+- **AC 2** — Android Chrome when this was verified. The household was single-platform
+  (owner-confirmed at pickup), so this AC was shrunk from "Android Chrome and iOS Safari" as the AC's
+  own wording invites. Confirm the app launches **standalone** — no browser address bar. The icon
+  should be the three unequal bars. *Result: installed and launched standalone.*
+
+  **#484 widened this, 2026-09-21.** iOS Safari is now an install target too — the route there is the
+  person's own **Share → Add to Home Screen**, since Safari has no install prompt a page can open,
+  and the app says so in one dismissable line. The same two things to confirm on an iPhone or iPad:
+  the app launches with no address bar, and the icon is the three unequal bars rather than a
+  screenshot of the page. See the iOS storage note in step 4's tail.
 
   **Correction to this AC's wording.** It says to use **⋮ → Add to Home Screen**. That entry was not
   offered; Chrome showed **Install app** instead, which is the *stronger* signal — Chrome offers
@@ -989,9 +995,26 @@ JavaScript until its next navigation, which an installed PWA never makes (measur
 note `vite-plugin-pwa-autoupdate-ships-no-reload`). The config is now `registerType: 'prompt'` with
 `injectRegister: false`, and the reasons are in `vite.config.js`.
 
-If iOS ever joins the household, `apple-touch-icon` and `apple-mobile-web-app-*` meta tags are the
-addition needed; they were deliberately left out rather than added speculatively for a platform
-nobody owns.
+**iOS joined the household — #484, 2026-09-21.** The `apple-touch-icon` link and the two
+`apple-mobile-web-app-*` meta tags that this paragraph used to name as "the addition needed" are in
+`index.html` now, and `npm run icons` emits `public/icons/apple-touch-icon-180.png`. The three are
+exactly what iOS does *not* read from the manifest: without the icon link iOS uses a screenshot of
+the page as the home-screen icon, `-capable` is what older iOS reads for full screen, and `-title` is
+the name under the icon.
+
+### What the home-screen app on iOS does NOT inherit from Safari (#484)
+
+**A home-screen app on iOS has its own storage, separate from the Safari tab it was added from.** A
+sign-in made in the tab does not carry into the installed app, and neither does the remembered
+household (`taskr.activeHousehold`) nor #482's trust choice. **The person signs in once more after
+installing, and that is the platform's behaviour rather than a defect** — so nothing in the app's copy
+promises otherwise. The first screen in the installed app is the sign-in form with the trust
+checkbox, and the line under it says only what unticking it does.
+
+*Reasoned* from WebKit's storage partitioning for home-screen web apps, 2026-09-16 (#484's filing);
+**not yet measured on a device** — the reading is #484's live criterion, deferred to its own issue.
+Android Chrome differs: the installed PWA shares the browser profile's origin storage there, so this
+is an iOS fact and not a general one.
 
 ## 5. What you cannot delegate
 
@@ -1113,4 +1136,9 @@ the general command is exactly what a token of this authority makes easy and wha
 against building.
 
 **What is still the owner's either way: deciding to paste.** Neither route changes that a migration
-reaching the live project is a deliberate act with a sequence — apply, then promote.
+reaching the live project is a deliberate act with a sequence — apply, then promote. **The one
+exception, and it inverts the order: a file that takes away something the production bundle still
+uses.** `0051` (#419) withdraws `invitations.expires_at` from the client's insert grant, and every
+bundle before #419 sends that column, so its sequence is promote, then apply; `0050`, its other
+half, went first. Such a file says so in its first lines — read a migration's header before
+applying it, not only its filename.

@@ -28,11 +28,12 @@
 //
 // What a pass means is still "consistent with Postgres, given the Supabase-
 // shaped environment stubbed in support/pgliteSupabase.js". The statements are
-// written as PostgREST writes them — a JSON string for `token_hash` arrives as
-// text and is cast to `bytea`, and `withdrawn_at` arrives as the text `'now'` —
-// so the cast Postgres performs is the one under test. PostgREST's own leg,
-// from supabase-js's JSON to those parameters, is not reproduced here; it is
-// the same leg `expires_at` rides on every mint.
+// written as PostgREST writes them — the mint is `invitationMintRow`'s own
+// object, its keys the column list and its JSON cast through
+// `json_populate_record` (#419), so `token_hash`'s `\x…` text becomes a
+// `bytea` the way it does on the server; `withdrawn_at` arrives as the text
+// `'now'`. PostgREST's own leg, from supabase-js's JSON to that statement, is
+// not reproduced here.
 //
 // Names are synthetic — see #19.
 
@@ -43,8 +44,9 @@ import {
   SERVER_NOW,
   generateInvitationCode,
   hashInvitationCode,
-  invitationExpiryFrom,
+  invitationMintRow,
 } from '../lib/invitations.js'
+import { insertAsPostgrest } from './support/postgrestInsert.js'
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -81,22 +83,20 @@ describe('#172 — minting through the client, redeeming through 0040', () => {
 
   /**
    * The mint exactly as `mintInvitation` issues it: the organizer's own role,
-   * the four granted columns, and the digest computed in JavaScript and sent as
-   * the text PostgREST would send.
+   * `invitationMintRow`'s object as the payload — the three columns `0051`
+   * grants, since #419 — and the digest computed in JavaScript and sent as the
+   * text PostgREST would send.
    */
   const mintAsClient = async (code) => {
     // Hashed BEFORE the role switch, as the browser does it: the digest exists
     // before any statement is issued, and nothing about it depends on who asks.
-    const tokenHash = await hashInvitationCode(code)
+    const row = invitationMintRow({
+      householdId: home.household.id,
+      tokenHash: await hashInvitationCode(code),
+      createdByMemberId: home.organizer,
+    })
     const made = await asDevice(db, home.organizerDevice, () =>
-      attempt(() =>
-        db.query(
-          `insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at)
-           values ($1, $2::text::bytea, $3, $4::text::timestamptz)
-           returning ${INVITATION_COLUMNS}`,
-          [home.household.id, tokenHash, home.organizer, invitationExpiryFrom()],
-        ),
-      ),
+      attempt(() => insertAsPostgrest(db, 'invitations', row, INVITATION_COLUMNS)),
     )
     expect(made.ok, made.error ?? '').toBe(true)
     return made.value.rows[0]

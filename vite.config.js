@@ -40,9 +40,22 @@ for (const [name, value] of Object.entries(process.env)) {
   if (name.startsWith('VITE_')) assertPublishableKey(value, `the production build (${name})`)
 }
 
-// The install target is Android Chrome only — the household is single-platform
-// (owner-confirmed at pickup of #4). iOS Safari meta tags are deliberately absent
-// rather than added speculatively; see docs/hosting-decision.md.
+// The install target is Android Chrome AND iOS Safari.
+//
+// It was Android Chrome only until #484 — the household was single-platform,
+// owner-confirmed at pickup of #4, and the Apple meta tags were "deliberately
+// absent rather than added speculatively". That was right when it was written.
+// The owner reopened it on 2026-09-16, after #483 shipped the Android install
+// offer and they asked whether iOS could be offered anything: #484 is the
+// decision that widened the target, and the tags are no longer speculative —
+// `index.html` carries the `apple-touch-icon` link and the two
+// `apple-mobile-web-app-*` metas, which are the three things iOS does not read
+// from the manifest below. See docs/hosting-decision.md.
+//
+// The two platforms are offered different things, because they offer different
+// things: Chrome has an install sheet a page can open, and Safari has a Share
+// menu only the person can use. `src/lib/installOffer.js` holds both.
+
 // Which commit is live. Vercel sets VERCEL_GIT_COMMIT_SHA at build time; it is
 // not VITE_-prefixed, so it does not reach the client on its own. Mapping it in
 // is what makes #4's "the deployed URL updates" observable at all — without it

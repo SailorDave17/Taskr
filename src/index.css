@@ -324,8 +324,21 @@ body {
   color: var(--ink);
 }
 
+/* The BASIS is the whole of what decides which element gets squeezed, and
+   #484 moved the answer. At `8rem` the sentence shrank to fit beside the
+   buttons: measured on the real stylesheet at 360px, #484's instruction
+   wrapped to THREE lines inside 207px while Not now kept a comfortable 89px
+   beside it, and "Add to Home Screen" — one of the two controls the person has
+   to find — was itself broken across a line. The instruction is the product
+   here; the dismissal is furniture.
+
+   `18rem` is wider than any phone row minus a button, so the sentence claims
+   the row and the buttons wrap beneath it rather than the other way round. It
+   still sits on one line beside them from 768px up, where there is room for
+   both. `1 1` rather than `1 0`, so a narrow row can still shrink it as a last
+   resort instead of overflowing. */
 .shell__install-text {
-  flex: 1 1 8rem;
+  flex: 1 1 18rem;
 }
 
 .shell__install-actions {

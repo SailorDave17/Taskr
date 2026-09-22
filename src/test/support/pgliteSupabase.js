@@ -137,6 +137,8 @@ export const MIGRATIONS = [
   '0047_revoke_keys_on_google_account.sql',
   '0048_hand_over_only_to_a_member_who_has_joined.sql',
   '0049_chore_assignment_history.sql',
+  '0050_invitation_expiry_from_the_database_clock.sql',
+  '0051_invitation_expiry_withdrawn_from_the_client.sql',
 ]
 
 export function migrationSql(name) {

@@ -300,7 +300,8 @@ export const MEASURED_GRANTS = Object.freeze([
   // insert grant in both directions. RED as `ar` until `0051` is applied —
   // and `0051` is applied AFTER the promotion carrying #419's client, the
   // owner's sequencing (see the file's header), so this row is the deliberate
-  // red for that window.
+  // red for that window. *Measured 2026-09-22*, either side of the apply that
+  // followed the promotion: `ar` → `r`, and this probe 20 of 21 → 21 of 21.
   Object.freeze({
     table: 'invitations',
     column: 'expires_at',

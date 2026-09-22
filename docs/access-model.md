@@ -7,11 +7,16 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0050` are applied to the live project, and `0051` is NOT — by design, until the
-  `develop → release` promotion carrying #419's client** (owner decision at #419's pickup: `0051`
-  withdraws `expires_at` from the client's insert grant, and the bundle in production until that
-  promotion still sends it, so applying it first would refuse every mint there — see the #419
-  section). `0050` on 2026-09-21 in #419's own session, before its PR opened, at md5
+- Status: **`0001`–`0051` are ALL applied to the live project** (`0051` on 2026-09-22 at 01:43 UTC in
+  #419's step-9 session, **after** the `develop → release` promotion carrying #419's client — the one
+  file here applied after its promotion rather than before, by the owner's decision at #419's pickup,
+  because it withdraws `expires_at` from the client's insert grant and every earlier bundle sends it.
+  Production was confirmed first to be serving that client: build `8d5e529`, the `release` head,
+  whose one `invitations` insert names three columns. md5 `dc6c406bbb0a993c753be6ea9aa04969`
+  (`3666 characters, 4 statements`), read back identical; `npm run probe:live-grants` *measured*
+  **20 of 21 → 21 of 21** on its `invitations.expires_at` row (`ar` → `r`), and `npm run check:live`
+  **77 of 78** after, blind to an insert grant as predicted — see the #419 section.
+  `0050` on 2026-09-21 in #419's own session, before its PR opened, at md5
   `9dc2ca885206fcaee35f99dff6b8e4e7` (`4718 characters, 2 statements`), read back identical — a
   column default that **`npm run check:live` cannot see**, *measured* **77 of 78** before the apply
   (the one red `delete-account`, #432's undeployed function) and the same after, and that
@@ -2953,9 +2958,36 @@ one ahead lengthened the code past the seven days the card and the share message
   and the grant still `authenticated=ar` on both sides — `0050` does not touch it. `check:live`
   **77 of 78** on both sides (the red is `delete-account`, #432's undeployed function);
   `probe:live-grants` **20 of 21** on both sides.
-- **Not yet applied: `0051`** — after the promotion carrying #419's client reaches production. Its
-  readings go here when it lands: `probe:live-grants` 20 of 21 → 21 of 21, and
-  `has_column_privilege(..., 'expires_at', 'INSERT')` true → false with the two controls unmoved.
+- **Applied: `0051`**, on 2026-09-22 at 01:43 UTC from #419's step-9 session, after the owner
+  promoted `develop → release` (PR #543, `release` at `8d5e529`). **The precondition was read
+  before the apply, not assumed**: a merge is not a deploy, so the production site itself was
+  fetched — the build stamp compiled into its App chunk read `8d5e529`, and the entry bundle's one `invitations` insert is
+  `invitationMintRow`'s three columns, the bundle's four other `expires_at:` keys all being
+  supabase-js auth-session fields. `npm run migrate:live`, 4 statements, md5
+  `dc6c406bbb0a993c753be6ea9aa04969` read back matching the file. The read-only catalog query,
+  both sides a minute apart:
+
+  | reading | before | after |
+  |---|---|---|
+  | `expires_at` column ACL | `authenticated=ar` | `authenticated=r` |
+  | `authenticated` INSERT on `expires_at` | true | **false** |
+  | control: INSERT on `household_id` | true | true |
+  | control: INSERT on `created_at` | false | false |
+  | INSERT columns | `created_by_member_id, expires_at, household_id, token_hash` | `created_by_member_id, household_id, token_hash` |
+  | SELECT columns / UPDATE columns | 9 / `withdrawn_at` | 9 / `withdrawn_at` |
+  | table-level ACL, `authenticated` DELETE, `anon` SELECT | none, false, false | none, false, false |
+  | `expires_at` default | `(now() + '168:00:00'::interval)` | unchanged |
+
+  `npm run probe:live-grants` **20 of 21 → 21 of 21** (the `invitations.expires_at` row `ar` → `r`,
+  `anon` reaching nothing on both sides); `npm run check:live` **77 of 78** after, blind to an insert
+  grant as predicted, its one red `delete-account` (#432's undeployed function) and not this file's.
+  **An instrument fact for the next grant reading here**: `information_schema.column_privileges`
+  read EMPTY for `authenticated` through the read-only Management API role, because that view
+  lists only grants the *querying* role is party to and `supabase_read_only_user` is not a member
+  of `authenticated`. `has_column_privilege` over `pg_attribute` is what read the column lists
+  above; the empty view is not a reading of an empty grant. **The residual window**: a device
+  still running a pre-#419 bundle is refused `permission denied` on a mint until it updates, which
+  `src/lib/appUpdate.js` does on the next hourly check or when the tab is next shown.
 
 ## How the rules are enforced
 

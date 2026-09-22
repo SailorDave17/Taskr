@@ -43,18 +43,12 @@
 // COUNTS ONLY in the response: no token and no other person is named.
 
 import { GOOGLE_REVOKE_ENDPOINT } from '../calendar-disconnect/handler.ts'
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
 
-/**
- * Every header supabase-js puts on a `functions.invoke` call — the same list as
- * the other functions, restated for their reason (a deploy-path constant must not
- * change silently). `src/test/edge-function-cors.test.js` checks every directory.
- */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+/** The one list every function answers with (`_shared/http.ts`), re-exported for the test. */
+export { CORS }
 
 export interface Filterable {
   eq(column: string, value: unknown): Filterable
@@ -78,18 +72,6 @@ export interface LeaveHouseholdDeps {
   createClient: (url: string, key: string, options?: unknown) => SupabaseLike
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/** Says what is wrong without saying whether anybody else exists — the siblings' rule. */
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
-}
-
 /** Ask Google to forget one grant. Best-effort and never throws — calendar-disconnect's reason. */
 async function revokeAtGoogle(deps: LeaveHouseholdDeps, refreshToken: string): Promise<boolean> {
   try {
@@ -110,21 +92,10 @@ export const ACCOUNT_NOT_DELETED =
 
 export function createHandler(deps: LeaveHouseholdDeps) {
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
-    let body: { householdId?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
-    // `null` parses as JSON and `null.householdId` would escape as a bare 500
-    // with no CORS headers (calendar-disconnect's guard, same reason).
-    if (!body || typeof body !== 'object') return refuse('Send a JSON body.', 400)
+    // Method, Bearer and a JSON-object body, null guard included (`_shared/preamble.ts`).
+    const request = await callerRequest<{ householdId?: string }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     const householdId = String(body.householdId ?? '')
     if (!householdId) return refuse('No household was named.', 400)
@@ -136,14 +107,9 @@ export function createHandler(deps: LeaveHouseholdDeps) {
 
     // ---- everything the CALLER is allowed to see and be --------------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
     // Constructed here, used only after the caller-scoped checks have passed.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

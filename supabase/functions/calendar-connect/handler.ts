@@ -48,37 +48,15 @@
 // return a row at all — `maybeSingle()` over two rows is a refusal, not a pick —
 // so this endpoint failed outright for anyone in two households.
 
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
+
 /** Google's OAuth 2.0 token endpoint. Named so the test can assert it is the one used. */
 export const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 
-/**
- * Every header supabase-js puts on a `functions.invoke` call.
- *
- * The same list as `provision-member`, restated rather than imported, and #112
- * is why the list is this long: a browser preflight asks about ALL of the
- * headers at once and a list missing even one fails the whole request before it
- * is sent, with the client reporting "Failed to send a request to the Edge
- * Function" — a sentence that names no header and reads like a dropped
- * connection.
- *
- * `authorization` and `content-type` are the two anyone would think of.
- * `apikey` is set by the client's own fetch wrapper on every request,
- * `x-client-info` is a default header on every Supabase client, and
- * `x-retry-count` is postgrest-js's — none of the three appears at any call site
- * in this repo, which is why the short list looked complete.
- *
- * Restated rather than imported for the reason `provision-member` gives: this is
- * a deploy-path constant, and a value that must not change silently should not
- * be resolved at deploy time. `src/test/edge-function-cors.test.js` asserts the
- * list in EVERY function directory still covers the SDK's published set, so an
- * SDK release that adds a header fails the gate here rather than on a phone.
- */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+/** The one list every function answers with (`_shared/http.ts`), re-exported for the test. */
+export { CORS }
 
 /** The three environment names this function cannot run without, beyond Supabase's own. */
 export const REQUIRED_GOOGLE_ENV = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
@@ -127,24 +105,6 @@ export interface CalendarConnectDeps {
   env: (name: string) => string | undefined
   /** Built per request, because the caller-scoped one carries the caller's JWT. */
   createClient: (url: string, key: string, options?: unknown) => SupabaseLike
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/**
- * A refusal says what is wrong without saying whether anybody else exists.
- *
- * Same rule as `provision-member`: the caller-scoped read already decided what
- * this caller may know, and echoing more back would turn the endpoint into a way
- * to probe other households.
- */
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
 }
 
 /**
@@ -282,18 +242,11 @@ export function googleAccountOf(idToken: unknown, clientId: string): string | nu
  */
 export function createHandler(deps: CalendarConnectDeps) {
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
-    let body: { code?: string; redirectUri?: string; householdId?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
+    // Method, Bearer and a JSON-object body — the null-body guard reached this
+    // handler with #562, where it had been missing since 2026-09-04.
+    const request = await callerRequest<{ code?: string; redirectUri?: string; householdId?: string }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     const code = String(body.code ?? '')
     const redirectUri = String(body.redirectUri ?? '')
@@ -332,17 +285,12 @@ export function createHandler(deps: CalendarConnectDeps) {
 
     // ---- 1 & 2: everything the CALLER is allowed to see and be ---------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
 
     // Constructed here but deliberately NOT used until the caller-scoped checks
     // below have passed. Creating a client grants nothing; what matters is which
     // one answers the authorization questions.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

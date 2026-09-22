@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import { configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
@@ -64,12 +65,44 @@ for (const [name, value] of Object.entries(process.env)) {
 // tells you that you are not looking at a hosted build.
 const commitSha = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7)
 
+// #540 — which RELEASE is live. The sha above says which commit, and a sha is
+// not orderable or quotable from memory; the release version is. It is READ
+// from package.json rather than restated here, so the one value `npm version`
+// moves is the one every surface names — the footer, the report mailto and
+// `/version.json` below. src/buildInfo.test.js reads it back against the file.
+const releaseVersion = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version
+
+// #540 AC 5 — `/version.json`, so `curl` can ask which release and commit the
+// URL serves without parsing a bundle. Emitted by the build, never committed
+// under `public/`, so it cannot disagree with the bundle it ships beside. It
+// is also kept OUT of the service worker's precache (workbox's default globs
+// take js, css and html only): a precached copy would be answered by the
+// worker, which is the stale-page shape #347 removed.
+// src/test/pwaBuild.test.js asserts all three against a real build.
+function versionFile() {
+  return {
+    name: 'taskr-version-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: `${JSON.stringify({ version: releaseVersion, commit: commitSha || 'local' })}\n`,
+      })
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(commitSha),
+    'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(releaseVersion),
   },
   plugins: [
     react(),
+    versionFile(),
     VitePWA({
       // #347 — `prompt`, with registration done by `src/lib/appUpdate.js`
       // through the plugin's client module. Until #347 this read `autoUpdate`

@@ -2588,6 +2588,117 @@ describe('#243 — the CI triggers match the branch model', () => {
   })
 })
 
+// #540 AC 1 — the release version is stated once, and the lockfile agrees.
+//
+// `npm version <part> --no-git-tag-version` moves both root `version` fields
+// together; a hand edit of package.json moves one. npm does not refuse the
+// mismatch — `npm ci` installs happily — so the lockfile would go on naming the
+// old release with every gate green. Both of its copies are read: the top-level
+// field and the root package's entry under `packages[""]`.
+describe('#540 AC 1 — package.json and package-lock.json name the same release', () => {
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+  const lock = JSON.parse(readFileSync(resolve(process.cwd(), 'package-lock.json'), 'utf8'))
+
+  /** Every root version the pair states, labelled for the failure message. */
+  const rootVersions = (manifest, lockfile) => ({
+    'package.json': manifest.version,
+    'package-lock.json': lockfile.version,
+    'package-lock.json packages[""]': lockfile.packages?.['']?.version,
+  })
+
+  const disagreeing = (versions) => {
+    const values = Object.values(versions)
+    return values.every((value) => value === values[0]) ? [] : Object.entries(versions)
+  }
+
+  it('all three root version fields agree', () => {
+    const versions = rootVersions(pkg, lock)
+    expect(disagreeing(versions), `the root versions disagree: ${JSON.stringify(versions)}`).toEqual([])
+  })
+
+  it('and the value is a SemVer release, not the scaffold’s 0.0.0', () => {
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/)
+    expect(pkg.version).not.toBe('0.0.0')
+  })
+
+  it('POSITIVE CONTROL: a hand-edited package.json is refused', () => {
+    // Routed through the same two functions the real check uses, with the
+    // mistake the check exists for: one file moved, the lockfile left behind.
+    const moved = { ...pkg, version: '9.9.9' }
+    expect(disagreeing(rootVersions(moved, lock))).not.toEqual([])
+    const lockMoved = { ...lock, packages: { ...lock.packages, '': { ...lock.packages[''], version: '9.9.9' } } }
+    expect(disagreeing(rootVersions(pkg, lockMoved))).not.toEqual([])
+  })
+})
+
+// #540 AC 6 — a promotion into `release` is refused without a new version.
+//
+// The comparison is scripts/check-release-version.mjs, and its own test proves
+// the ordering. What only this suite can see is the WIRING: a step in the job
+// the ruleset requires, running on a pull request into `release` and nowhere
+// else, fetching `release` itself because the checkout is depth 1. The GitHub
+// expression cannot be evaluated here — a real promotion run is what proves
+// it — but an edit dropping the step, moving it to a job nothing requires, or
+// widening its condition reads exactly like a working file until then.
+describe('#540 AC 6 — the promotion version check is wired into the required job', () => {
+  const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+  // Comments stripped for #243's reason: the header block describes the step.
+  const code = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+
+  /** One `- name:` step's block, up to the next step or the end of the file. */
+  const stepBlock = (text, name) => {
+    const start = text.indexOf(`- name: ${name}`)
+    if (start === -1) return null
+    const next = text.indexOf('\n      - ', start + 1)
+    return text.slice(start, next === -1 ? undefined : next)
+  }
+
+  const step = stepBlock(code, 'A promotion into release carries a new version')
+
+  it('POSITIVE CONTROL: the step was found, so the assertions below are about something', () => {
+    expect(step, 'no promotion version step in ci.yml').not.toBeNull()
+    expect(step).toMatch(/\brun:/)
+  })
+
+  it('runs on a pull request whose base is release, and on nothing else', () => {
+    const condition = step.match(/^\s+if:\s*(.+)$/m)?.[1] ?? ''
+    expect(condition).toMatch(/github\.event_name\s*==\s*'pull_request'/)
+    expect(condition).toMatch(/github\.base_ref\s*==\s*'release'/)
+    expect(condition).not.toMatch(/develop|main|\|\|/)
+  })
+
+  it('fetches release and the pull request head itself, then runs the script on them', () => {
+    expect(step).toMatch(/git fetch[^\n]*refs\/heads\/release:refs\/remotes\/origin\/release/)
+    expect(step).toMatch(/HEAD_SHA:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\}\}/)
+    expect(step).toMatch(
+      /node scripts\/check-release-version\.mjs --head "\$HEAD_SHA" --base origin\/release/,
+    )
+  })
+
+  it('lives in the one job whose check the ruleset requires', () => {
+    // README's Branching section: ruleset 21859879 requires `Lint, test, build`.
+    // A second job would carry a check nothing requires, so a red one could
+    // still merge.
+    expect(code.match(/^\s+runs-on:/gm) ?? []).toHaveLength(1)
+    expect(code.indexOf('name: Lint, test, build')).toBeGreaterThan(-1)
+    expect(code.indexOf('name: Lint, test, build')).toBeLessThan(code.indexOf(step))
+  })
+
+  it('POSITIVE CONTROL: the condition check refuses a step widened to develop', () => {
+    const widened = code.replace(
+      "github.base_ref == 'release'",
+      "(github.base_ref == 'release' || github.base_ref == 'develop')",
+    )
+    const condition = stepBlock(widened, 'A promotion into release carries a new version').match(
+      /^\s+if:\s*(.+)$/m,
+    )[1]
+    expect(condition).toMatch(/develop|\|\|/)
+  })
+})
+
 // #412 — a pull request's own tracker-scan run is not cancelled by a run about
 // something else.
 //

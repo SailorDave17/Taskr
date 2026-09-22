@@ -9,11 +9,15 @@
  *
  * The tracker is public (docs/access-model.md, #328), so a report must not land
  * there as an issue. And because a person may forward the email, what goes in
- * it is an ALLOWLIST of four fields rather than app state with some fields
+ * it is an ALLOWLIST of five fields rather than app state with some fields
  * taken out. A household name, a member's name, an address, a row id or a chore
  * title cannot reach the message because nothing here reads one: a caller that
  * passes one has it ignored. A blocklist would have to know every field the app
- * will ever hold; the allowlist only has to know these four.
+ * will ever hold; the allowlist only has to know these five.
+ *
+ * #540 added the fifth, `version` — the release from package.json, beside the
+ * build's commit — so a report names a release a person can quote as well as a
+ * sha. Like the other four it describes the build, never the household.
  */
 
 /** The contact address madcowhq.com publishes. One constant, one place. */
@@ -21,6 +25,7 @@ export const REPORT_ADDRESS = 'dave@madcowhq.com'
 
 /** Every field a report carries, in the order the body lists them. */
 export const REPORT_FIELDS = [
+  ['version', 'Version'],
   ['build', 'Build'],
   ['environment', 'Environment'],
   ['screen', 'Screen'],

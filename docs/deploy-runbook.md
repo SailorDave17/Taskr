@@ -55,6 +55,34 @@ record in the SQL editor: `select * from public.household_purge_runs order by ra
    migrations that branch assumes have been pasted. `githooks/owner-only` lists `release` for that
    reason — a local push to it is refused, because a push to `release` is a production release.
 
+   **Bump the version before you open the promotion (#540).** Every build carries the release
+   version from `package.json` — the footer reads `Taskr · production · v<version> · build <sha>`,
+   the Report-a-problem mail names it, and `/version.json` answers it to `curl` — and it moves
+   exactly once per promotion. `develop` refuses a direct push, so the bump is its own ordinary pull
+   request into `develop`, merged **before** the promotion pull request is opened:
+
+   ```
+   npm version <patch|minor|major> --no-git-tag-version
+   ```
+
+   `--no-git-tag-version` because tags are not part of this scheme. The command moves
+   `package.json` and both root fields of `package-lock.json` together; a hand edit moves one, and
+   `src/test/gate.test.js` refuses the mismatch. Which part to bump, judged by what a person using
+   the app would notice:
+
+   - **patch** — fixes, copy and anything behind the scenes: nothing a person can newly do.
+   - **minor** — something new a person can see or do, with everything that worked still working.
+   - **major** — something a person relied on stops working or changes meaning: a surface removed,
+     a change that signs everyone out, or a migration an already-open older app cannot survive.
+
+   **CI refuses a promotion without it.** On a pull request into `release`, the required
+   `Lint, test, build` check runs `scripts/check-release-version.mjs`, which fails unless the
+   version on the pull request's head is strictly greater by SemVer than the one on `release`, and
+   names both. A pull request into `develop` or `main` is not checked. Merging the bump into
+   `develop` updates an already-open promotion, so the check reruns without reopening it. To ask
+   the same question locally first: `git fetch origin release && node
+   scripts/check-release-version.mjs`.
+
    **Changed again 2026-08-27: the source branch is `develop`, not `rebuild/v1`.** The repo's GitHub
    default branch moved to `develop` the same day, and story PRs go there too now — see *Branching*
    in the README. `rebuild/v1` retired; every commit it ever carried is an ancestor of `develop`

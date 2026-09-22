@@ -89,6 +89,46 @@ describe('#347 AC 1 — one registration path, and it is the app’s', () => {
   })
 })
 
+// #540 AC 5 — `/version.json`, emitted by the build and never precached.
+//
+// A REAL build for #347's reason: the file is written by a plugin, and the
+// precache list is written by another plugin reading what the first left on
+// disk, so only the artefacts can say what the two agreed on.
+describe('#540 AC 5 — the build emits /version.json, and the worker does not precache it', () => {
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+  // What buildInfo.commit reads in the same build: the host's sha cut to
+  // seven, or `local` off Vercel (vite.config.js).
+  const commit = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local'
+
+  it('holds exactly the release version and the commit, and nothing else', () => {
+    const path = join(out, 'version.json')
+    expect(existsSync(path), 'dist/version.json was not emitted').toBe(true)
+    const body = JSON.parse(readFileSync(path, 'utf8'))
+    expect(Object.keys(body)).toEqual(['version', 'commit'])
+    expect(body).toEqual({ version: pkg.version, commit })
+  })
+
+  it('is emitted by the build, not committed under public/', () => {
+    // A committed copy would be copied into dist/ verbatim and go on naming
+    // whatever release it was written for.
+    expect(existsSync(resolve(process.cwd(), 'public', 'version.json'))).toBe(false)
+  })
+
+  it('is absent from the service worker, so the network answers it, not a precached copy', () => {
+    // A precached copy is answered by the worker, and would name the release
+    // the worker was installed with — the stale-page shape #347 removed.
+    expect(worker).not.toMatch(/version\.json/)
+  })
+
+  it('POSITIVE CONTROL: the worker text is the precache list, so an absence in it means something', () => {
+    // Without this, a worker read as empty or wrong would satisfy the absence
+    // above perfectly. These are entries workbox does precache.
+    expect(worker).toMatch(/precacheAndRoute/)
+    expect(worker).toMatch(/"index\.html"|url:"index\.html"/)
+    expect(worker).toContain('manifest.webmanifest')
+  })
+})
+
 // #484 AC 1 — the three things iOS does not read from the manifest.
 //
 // A REAL build again, for the reason above: the link and the two metas are in

@@ -16,6 +16,7 @@ has any reason to trust.
 | Test | `npm test` (`vitest run`) | any failing test, **or zero tests found** |
 | Build | `npm run build` | Vite build error |
 | Artefact assertion | inline `test -f` | `dist/index.html`, `dist/manifest.webmanifest` or `dist/sw.js` missing |
+| Promotion version (#540) | `node scripts/check-release-version.mjs`, **on a pull request into `release` only** — it runs first, before Install | the pull request head's `package.json` version is not strictly greater by SemVer than `release`'s; skipped on every other event |
 
 The artefact assertion exists because a build step can succeed while emitting nothing useful. The
 manifest and service worker are the two files whose absence would mean the app silently stops being

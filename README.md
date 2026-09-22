@@ -363,6 +363,13 @@ dashboard answers about the deployment you asked it about, not about what the UR
 resolves to — the footer answers the actual question. It reads `build local` when running from a
 dev server.
 
+Beside the sha the footer names the **release**, `v<version>` from `package.json` (#540), so a row
+reads `Taskr · production · v1.0.0 · build <sha>`. The version is SemVer and moves once per
+promotion into `release` — `docs/deploy-runbook.md` section 1 step 4 has the command, and CI refuses
+a promotion that does not move it. `curl https://taskr.madcowhq.com/version.json` answers both
+without a browser: `{"version":"…","commit":"…"}`, emitted by the build and never precached by the
+service worker.
+
 ## Running it locally
 
 Requires **Node 22** (the version CI uses).

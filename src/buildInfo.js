@@ -9,4 +9,8 @@ export const buildInfo = {
   // from outside — deployment dashboards answer about the deployment they were
   // asked about, not about what the URL currently resolves to.
   commit: import.meta.env?.VITE_BUILD_SHA || 'local',
+  // #540 — which release: package.json's `version`, mapped in by vite.config.js
+  // and never written here, so `npm version` is the one place it moves. Set
+  // locally as well as on the host, because the file is in every checkout.
+  version: import.meta.env?.VITE_BUILD_VERSION || 'unknown',
 }

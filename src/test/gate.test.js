@@ -1345,6 +1345,11 @@ describe('#19 — no real household name reaches version control', () => {
     // refused one (which must say how to copy instead).
     AbortError: 'a DOMException name — a cancelled navigator.share() rejects with it',
     NotAllowedError: 'a DOMException name — a refused navigator.share() rejects with it',
+    // #419 — `vi.useFakeTimers({ toFake: ['Date'] })` in invitations.test.js
+    // and invitationExpiry.pglite.test.js: moving ONLY the device's clock, so
+    // a mint can be built on a phone a week out while the database answers on
+    // the real one.
+    Date: 'the global a fake timer replaces — vitest’s toFake list names it',
     'Placeholder Chore': 'a chore title',
     'Placeholder Other Chore': 'a chore title',
     // #37 AC 4's fixture needs four chores in one household. Declared rather

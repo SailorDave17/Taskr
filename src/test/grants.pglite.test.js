@@ -290,7 +290,8 @@ const CLIENT_OPERATIONS = [
   // #172 — the organizer's three statements on `0040`'s table. Every grant is BY
   // COLUMN, so each row names exactly the columns `invitations.js` sends: the
   // read omits `token_hash` (granted, and never wanted), the insert names the
-  // four `0040` grants, and the update names the one. `decode('00', 'hex')`
+  // three `0051` grants — `expires_at` left the client's insert with #419, the
+  // database's default stamps it — and the update names the one. `decode('00', 'hex')`
   // rather than `extensions.digest(...)` for the placeholder digest, because a
   // statement that matches no row must still PLAN, and planning a call checks
   // execute on the function — which would make this a test of pgcrypto's grant
@@ -305,7 +306,7 @@ const CLIENT_OPERATIONS = [
     table: 'invitations',
     op: 'insert',
     site: 'invitations.js mintInvitation()',
-    sql: "insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at) select gen_random_uuid(), decode('00', 'hex'), gen_random_uuid(), now() + interval '1 day' where false",
+    sql: "insert into public.invitations (household_id, token_hash, created_by_member_id) select gen_random_uuid(), decode('00', 'hex'), gen_random_uuid() where false",
   },
   {
     table: 'invitations',

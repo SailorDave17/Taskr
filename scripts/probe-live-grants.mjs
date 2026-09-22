@@ -291,6 +291,22 @@ export const MEASURED_GRANTS = Object.freeze([
     privileges: 'r',
     source: '0035 (#360) — `r` only; the stamp is archive_shopping_list’s to write',
   }),
+  // `0051` (#419): an invitation's expiry, and the row is here for
+  // `archived_at`'s reason with a withdrawal instead of a withholding. `0040`
+  // granted `a` as well and the phone computed the value; `0050` made it the
+  // column's default and `0051` took `a` away, so `r` alone is the content —
+  // the client reads when a code stops working and can no longer say. The
+  // only instrument for that half: `check:live` reads, so it is blind to the
+  // insert grant in both directions. RED as `ar` until `0051` is applied —
+  // and `0051` is applied AFTER the promotion carrying #419's client, the
+  // owner's sequencing (see the file's header), so this row is the deliberate
+  // red for that window.
+  Object.freeze({
+    table: 'invitations',
+    column: 'expires_at',
+    privileges: 'r',
+    source: '0051 (#419) — `r` only; `a` withdrawn, 0050’s default stamps it',
+  }),
 ])
 
 /** The role every expectation above is about. */
@@ -583,7 +599,8 @@ export const MEASURED_TABLE_ACLS = Object.freeze([
   // client-read table's.
   //
   // Every grant `0040` makes is BY COLUMN (nine select, four insert, one
-  // update), so the expected table-level reading is an absence, and a letter
+  // update — three insert since `0051`, #419), so the expected table-level
+  // reading is an absence, and a letter
   // appearing here for `authenticated` would mean a later migration granted a
   // whole-row privilege nobody decided on — DELETE most of all, which this
   // feature deliberately never grants: an invitation is withdrawn, never

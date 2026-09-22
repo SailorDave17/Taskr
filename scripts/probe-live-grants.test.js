@@ -406,6 +406,12 @@ describe('reconciling against what #150 measured — AC 4', () => {
       // the column — a probe that only ever reads cannot report being allowed a
       // write it never attempts.
       'shopping_lists.archived_at=r',
+      // 0051, story #419. `archived_at`'s shape, reached by withdrawal: `0040`
+      // granted `ar` and the phone computed the expiry; `0050`'s default stamps
+      // it now and `0051` took `a` away. `check:live` only reads, so the insert
+      // grant is invisible to it in both directions — this row is the one
+      // instrument for the half #419's AC 4 asks about.
+      'invitations.expires_at=r',
     ])
   })
 })

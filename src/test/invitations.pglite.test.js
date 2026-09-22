@@ -248,8 +248,10 @@ describe('the invitation record, run against a real Postgres', () => {
       const made = await asDevice(db, a.organizerDevice, () =>
         attempt(() =>
           db.query(
-            `insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at)
-             values ($1, extensions.digest('fresh', 'sha256'), $2, now() + interval '1 day')`,
+            // No `expires_at` since #419: `0051` withdrew it from the client's
+            // insert and `0050`'s default stamps it.
+            `insert into public.invitations (household_id, token_hash, created_by_member_id)
+             values ($1, extensions.digest('fresh', 'sha256'), $2)`,
             [a.household.id, a.organizer],
           ),
         ),
@@ -262,8 +264,8 @@ describe('the invitation record, run against a real Postgres', () => {
       const refused = await asDevice(db, a.organizerDevice, () =>
         attempt(() =>
           db.query(
-            `insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at)
-             values ($1, extensions.digest('spoofed', 'sha256'), $2, now() + interval '1 day')`,
+            `insert into public.invitations (household_id, token_hash, created_by_member_id)
+             values ($1, extensions.digest('spoofed', 'sha256'), $2)`,
             [a.household.id, a.memberTwo],
           ),
         ),
@@ -277,8 +279,8 @@ describe('the invitation record, run against a real Postgres', () => {
       const refused = await asDevice(db, a.memberTwoDevice, () =>
         attempt(() =>
           db.query(
-            `insert into public.invitations (household_id, token_hash, created_by_member_id, expires_at)
-             values ($1, extensions.digest('sneaky', 'sha256'), $2, now() + interval '1 day')`,
+            `insert into public.invitations (household_id, token_hash, created_by_member_id)
+             values ($1, extensions.digest('sneaky', 'sha256'), $2)`,
             [a.household.id, a.memberTwo],
           ),
         ),
@@ -340,11 +342,12 @@ describe('the invitation record, run against a real Postgres', () => {
       },
     )
 
-    it('grants exactly the columns 0040 names, and no more', async () => {
+    it('grants exactly the columns 0040 names, less the one 0051 withdrew, and no more', async () => {
       expect(await columnsWith('authenticated', 'invitations', 'SELECT')).toEqual(READABLE)
+      // THREE since `0051` (#419). `0040` granted `expires_at` here too, and the
+      // client computed it on the phone; the database's default stamps it now.
       expect(await columnsWith('authenticated', 'invitations', 'INSERT')).toEqual([
         'created_by_member_id',
-        'expires_at',
         'household_id',
         'token_hash',
       ])

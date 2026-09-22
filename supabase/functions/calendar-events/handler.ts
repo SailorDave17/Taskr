@@ -53,6 +53,9 @@ import {
   isWeekStart,
   weekBoundsUtc,
 } from '../calendar-busy/handler.ts'
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
 
 export { GOOGLE_TOKEN_ENDPOINT }
 
@@ -93,20 +96,8 @@ export const EVENT_READ_SCOPES = [
 export const NEEDS_SCOPE_MESSAGE =
   'This calendar is connected for free/busy only. Allow Taskr to read events to import one.'
 
-/**
- * Every header supabase-js puts on a `functions.invoke` call — the same list as
- * the four functions beside this one, restated rather than imported for the
- * reason all of them give: a deploy-path constant must not be resolved at
- * deploy time. `src/test/edge-function-cors.test.js` reads EVERY function
- * directory off the filesystem, so this one was covered from the moment the
- * directory existed.
- */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+/** The one list every function answers with (`_shared/http.ts`), re-exported for the test. */
+export { CORS }
 
 /** The two environment names this function cannot run without, beyond Supabase's own. */
 export const REQUIRED_GOOGLE_ENV = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
@@ -151,18 +142,6 @@ export interface ImportableEvent {
   durationMinutes: number | null
   /** The event's local date in the household's zone, `YYYY-MM-DD` — the chore's due date. */
   dueOn: string
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/** A refusal says what is wrong without saying whether anybody else exists. */
-function refuse(message: string, status: number, extra: Record<string, unknown> = {}): Response {
-  return json({ error: message, ...extra }, status)
 }
 
 /** Does a granted scope string let this token read events? */
@@ -321,21 +300,10 @@ export function createHandler(deps: CalendarEventsDeps) {
   const now = deps.now ?? (() => new Date())
 
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
-    let body: { householdId?: string; periodStart?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
-    // `req.json()` resolves for the JSON literal `null` as happily as for an
-    // object — `calendar-busy`'s guard, for its reason.
-    if (!body || typeof body !== 'object') return refuse('Send a JSON body.', 400)
+    // Method, Bearer and a JSON-object body, null guard included (`_shared/preamble.ts`).
+    const request = await callerRequest<{ householdId?: string; periodStart?: string }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     const householdId = String(body.householdId ?? '')
     const periodStart = String(body.periodStart ?? '')
@@ -360,16 +328,11 @@ export function createHandler(deps: CalendarEventsDeps) {
 
     // ---- 1 & 2: everything the CALLER is allowed to see and be ---------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
 
     // Constructed here but deliberately NOT used until the caller-scoped checks
     // below have passed — and used for exactly one read.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

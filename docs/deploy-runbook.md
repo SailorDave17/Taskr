@@ -457,6 +457,14 @@ typed. *(This said "two since #95" until 2026-09-04, a day after the third arriv
 in `scripts/deploy-function.mjs`'s `FUNCTION_NAMES` and this sentence is a copy of it; when they
 disagree, the script is right.)*
 
+**`supabase/functions/_shared/` is not a function (#562).** It holds what every function says over
+HTTP — the CORS list, `json`, `refuse`, the method/Bearer/body preamble and the two client factories
+— and the CLI uploads it with each function that imports it, so a deploy log shows
+`Uploading asset (<name>): supabase/functions/_shared/http.ts` beside the function's own files. The
+leading `_` is Supabase's convention for a directory that is not deployed on its own; nothing lists
+it in `FUNCTION_NAMES`. A commit to it makes `check:deployed` read **every** importing function
+STALE, because the bundle changed, so an edit there is a redeploy of all nine rather than one.
+
 Owner-only, and **separate from every other deploy on this page**: a `git push` rebuilds the front end
 and touches nothing here. Until `provision-member` has run, an organizer who adds somebody gets the
 row and a failed invitation (the row's *Email an invitation* button is the retry), and nobody but the

@@ -65,18 +65,12 @@
 // named, because a response body can end up in a log.
 
 import { GOOGLE_REVOKE_ENDPOINT } from '../calendar-disconnect/handler.ts'
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
 
-/**
- * Every header supabase-js puts on a `functions.invoke` call — the same list as
- * the other functions, restated for their reason (a deploy-path constant must not
- * change silently). `src/test/edge-function-cors.test.js` checks every directory.
- */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+/** The one list every function answers with (`_shared/http.ts`), re-exported for the test. */
+export { CORS }
 
 /** A filtered read that is awaitable as it stands, or bounded with `limit`. */
 export interface MemberRead extends PromiseLike<{ data: any; error: any }> {
@@ -100,18 +94,6 @@ export interface DeleteAccountDeps {
   createClient: (url: string, key: string, options?: unknown) => SupabaseLike
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/** Says what is wrong without saying whether anybody else exists — the siblings' rule. */
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
-}
-
 /** The sentence a person still in a household reads. The app routes them to Leave. */
 export const STILL_IN_A_HOUSEHOLD =
   'You are still in a household. Leave it first — or hand it over or delete it, if you organize it — and your sign-in goes when you leave the last one.'
@@ -132,14 +114,11 @@ async function revokeAtGoogle(deps: DeleteAccountDeps, refreshToken: string): Pr
 
 export function createHandler(deps: DeleteAccountDeps) {
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
     // The body is deliberately never read: there is nothing in it this
     // function may act on. See the header.
+    const request = await callerRequest(req, { readBody: false })
+    if (!request.ok) return request.response
+    const { authorization } = request
 
     const url = deps.env('SUPABASE_URL')
     const anonKey = deps.env('SUPABASE_ANON_KEY')
@@ -148,14 +127,9 @@ export function createHandler(deps: DeleteAccountDeps) {
 
     // ---- everything the CALLER is allowed to see and be --------------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
     // Constructed here, used only after the caller-scoped check has passed.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

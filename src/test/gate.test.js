@@ -3360,3 +3360,55 @@ describe('#426 — the link-styled buttons meet 4.5:1 on the dark surfaces they 
     expect(contrast(token('accent-line'), token('surface'))).toBeGreaterThan(contrast(token('accent'), token('surface')))
   })
 })
+
+// #562 — no Edge Function handler grows its own HTTP preamble back.
+//
+// Nine handlers each carried a CORS literal, a `json` and a `refuse`, and the
+// preamble beside them diverged: the null-body guard added after the 2026-09-04
+// review reached five of the seven handlers that read a body. They import all of
+// it from `supabase/functions/_shared/` now, and this refuses the first step of
+// the next divergence — a handler declaring its own copy again.
+//
+// Source text, for the reason `edge-function-cors.test.js` records: the handlers
+// are Deno modules and nothing under `src/` may import from
+// `supabase/functions/`. Comments are blanked first, because the handlers'
+// history is RECORDED in prose that names what used to be there.
+describe('#562 — every Edge Function handler takes its preamble from _shared', () => {
+  const FUNCTIONS = resolve(process.cwd(), 'supabase/functions')
+  const handlers = () =>
+    readdirSync(FUNCTIONS, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('_'))
+      .map((entry) => `supabase/functions/${entry.name}/handler.ts`)
+  const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, '$1')
+  const code = (path) => stripComments(readFileSync(resolve(process.cwd(), path), 'utf8'))
+  const LOCAL_COPIES = [/\bfunction\s+refuse\s*\(/, /\bconst\s+CORS\s*=/]
+
+  it('POSITIVE CONTROL: every function directory has a handler, and the patterns match the shared module', () => {
+    // Without the first half the scan below passes over an empty list; without
+    // the second, a pattern with a typo matches nothing anywhere and reads as a
+    // clean tree. `_shared/http.ts` is the one file that legitimately declares
+    // both, so each pattern must match it.
+    const paths = handlers()
+    expect(paths.length).toBeGreaterThanOrEqual(9)
+    for (const path of paths) expect(code(path).length, path).toBeGreaterThan(500)
+    const shared = code('supabase/functions/_shared/http.ts')
+    for (const pattern of LOCAL_COPIES) expect(shared).toMatch(pattern)
+  })
+
+  it('no handler declares a local refuse() or CORS literal', () => {
+    const offenders = handlers().flatMap((path) =>
+      LOCAL_COPIES.filter((pattern) => pattern.test(code(path))).map((pattern) => `${path}: ${pattern}`),
+    )
+    expect(offenders, 'import these from supabase/functions/_shared/http.ts instead').toEqual([])
+  })
+
+  it('nothing in _shared names an npm: specifier, so the handler suites still run under node', () => {
+    // The handler suites import these files in `npm test`, where `npm:` does not
+    // resolve; the platform binding that needs one is each function's `index.ts`.
+    const dir = resolve(FUNCTIONS, '_shared')
+    const files = readdirSync(dir).filter((file) => file.endsWith('.ts'))
+    expect(files.length).toBeGreaterThanOrEqual(3)
+    const offenders = files.filter((file) => /from\s*['"]npm:/.test(readFileSync(resolve(dir, file), 'utf8')))
+    expect(offenders).toEqual([])
+  })
+})

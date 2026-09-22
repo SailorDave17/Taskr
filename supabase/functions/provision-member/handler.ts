@@ -89,6 +89,10 @@
 // `members.email` stays NULL for those rows, and that null IS the
 // discriminator 0007 established.
 
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
+
 /**
  * Whether this member has a real inbox — the `0007` discriminator, in one place.
  *
@@ -102,35 +106,10 @@ export function hasRealAddress(member: { email?: string | null }): boolean {
   return typeof member.email === 'string' && member.email.trim().length > 0
 }
 
-// Every header supabase-js puts on a `functions.invoke` call — because a browser
-// preflight asks about ALL of them at once, and an allow-list missing even one
-// fails the whole request before it is sent. The client then reports
-// `FunctionsFetchError`, whose message is "Failed to send a request to the Edge
-// Function": it names no header, mentions no preflight, and reads exactly like a
-// dropped connection. That sentence is what #112 was reported as.
-//
-// `authorization` and `content-type` are the two you would think of. The other
-// two are sent whether or not you ask for them, which is why the short list
-// looked complete: the client's fetch wrapper sets `apikey` on every request,
-// and `X-Client-Info` is a default header on every Supabase client.
-// `x-retry-count` is postgrest-js's, and is listed so this stays a SUPERSET of
-// the SDK's canonical set rather than the subset we happened to notice.
-//
-// That canonical set ships as `@supabase/supabase-js/cors`, and
-// `src/test/edge-function-cors.test.js` asserts this list still covers it — so
-// an SDK release that adds a header fails the gate here rather than on a phone.
-// It is deliberately NOT imported: this list is a deploy-path constant, and a
-// value that must not change silently should not be resolved at deploy time.
-//
-// That check reads `index.ts` AND `handler.ts` and joins them, so moving this
-// literal here in #341 did not need the check changed — which is the difference
-// between a guard that names a file and one that names a question.
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+// The CORS literal that lived here from #112 (and in `index.ts` before #341) is
+// `_shared/http.ts` since #562, with the reasoning for its length moved beside
+// it. Re-exported for the test.
+export { CORS }
 
 /**
  * The three actions this endpoint takes. Exported so the test cannot drift from
@@ -203,20 +182,6 @@ export interface ProvisionMemberDeps {
   createClient: (url: string, key: string, options?: unknown) => SupabaseLike
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-// A refusal says what is wrong without saying whether the member exists — the
-// caller-scoped read already decided that, and echoing it back would turn this
-// endpoint into a way to probe other households for valid member ids.
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
-}
-
 /**
  * Whether GoTrue is telling us the address already has an account — #341 AC 3.
  *
@@ -243,20 +208,16 @@ export function isAddressTakenError(error: { code?: string; status?: number; mes
 
 export function createHandler(deps: ProvisionMemberDeps) {
   return async function handler(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) {
-      return refuse('Sign in first.', 401)
-    }
-
-    let body: { action?: string; memberId?: string; password?: string; redirectTo?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
+    // Method, Bearer and a JSON-object body — the null-body guard reached this
+    // handler with #562, where it had been missing since 2026-09-04.
+    const request = await callerRequest<{
+      action?: string
+      memberId?: string
+      password?: string
+      redirectTo?: string
+    }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     const action = String(body.action ?? '') as Action
     const memberId = String(body.memberId ?? '')
@@ -289,17 +250,12 @@ export function createHandler(deps: ProvisionMemberDeps) {
 
     // ---- 1 & 2: everything the CALLER is allowed to see and be ---------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
 
     // Constructed here but deliberately NOT used until the caller-scoped checks
     // below have passed. Creating a client grants nothing; the ordering that
     // matters is which one answers the authorization questions.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = await asCaller.auth.getUser()
     if (!caller?.user) return refuse('Sign in first.', 401)

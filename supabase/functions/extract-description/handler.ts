@@ -65,6 +65,9 @@
 
 import { DEPLOYED_CONFIG, attemptExtraction } from '../../../src/lib/extractionAdapter.js'
 import { INPUT_KINDS } from '../../../src/lib/extraction.js'
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
 
 /** The provider's Messages endpoint. Named so the test can assert it is the one used. */
 export const PROVIDER_ENDPOINT = 'https://api.anthropic.com/v1/messages'
@@ -73,27 +76,11 @@ export const PROVIDER_ENDPOINT = 'https://api.anthropic.com/v1/messages'
 export const PROVIDER_VERSION = '2023-06-01'
 
 /**
- * Every header supabase-js puts on a `functions.invoke` call.
- *
- * The same list as the three functions before it, restated rather than
- * imported, and #112 is why the list is this long: a browser preflight asks
- * about ALL of the headers at once and a list missing even one fails the whole
- * request before it is sent, with the client reporting "Failed to send a
- * request to the Edge Function" — a sentence that names no header and reads
- * like a dropped connection.
- *
- * Restated rather than imported for the reason the others give: this is a
- * deploy-path constant, and a value that must not change silently should not
- * be resolved at deploy time. `src/test/edge-function-cors.test.js` reads EVERY
- * function directory off the filesystem, so this one was covered by that check
- * from the moment the directory existed (AC 8).
+ * The one list every function answers with (`_shared/http.ts`), re-exported for
+ * the test. `src/test/edge-function-cors.test.js` holds every function
+ * directory to importing it (this story's AC 8, then #562).
  */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+export { CORS }
 
 /**
  * The one environment name this function cannot run without, beyond
@@ -186,24 +173,6 @@ export interface ExtractDescriptionDeps {
   now?: () => Date
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/**
- * A refusal says what is wrong without saying whether anybody else exists.
- *
- * Same rule as the three functions before it: the caller-scoped read already
- * decided what this caller may know, and echoing more back would turn the
- * endpoint into a way to probe other households.
- */
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
-}
-
 /**
  * The adapter's transport, and the ONE place in this function a URL, a header
  * and the credential exist. The same shape as `scripts/extraction-run.mjs`'s
@@ -250,21 +219,15 @@ export function createHandler(deps: ExtractDescriptionDeps) {
   const now = deps.now ?? (() => new Date())
 
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
-    let body: { householdId?: string; kind?: string; text?: string; speaker?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
-    // `req.json()` resolves for the literal `null` as happily as for an object
-    // (`calendar-busy`, review-fanout 2026-09-04).
-    if (!body || typeof body !== 'object') return refuse('Send a JSON body.', 400)
+    // Method, Bearer and a JSON-object body, null guard included (`_shared/preamble.ts`).
+    const request = await callerRequest<{
+      householdId?: string
+      kind?: string
+      text?: string
+      speaker?: string
+    }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     // WHICH household, and only which — #161. The body never says WHO this is
     // about: the person is `auth.uid()` off the JWT, and this narrows that
@@ -315,17 +278,12 @@ export function createHandler(deps: ExtractDescriptionDeps) {
 
     // ---- 1 & 2: everything the CALLER is allowed to see and be ---------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
 
     // Constructed here but deliberately NOT used until the caller-scoped checks
     // below have passed. Creating a client grants nothing; what matters is which
     // one answers the authorization questions.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

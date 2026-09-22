@@ -260,6 +260,71 @@ export function isIosSafariTab(target = globalThis) {
 }
 
 /**
+ * The short screen side, in CSS px, at which a touchscreen stops being a
+ * phone and becomes a tablet — #517. 600 is Android's own line (`sw600dp`, the
+ * smallest-width qualifier its tablet layouts key on), so what this app calls
+ * a tablet is what the platform lays out as one.
+ */
+export const TABLET_MIN_SHORT_SIDE = 600
+
+/**
+ * Which device this is, for the install line's wording — #517.
+ *
+ * PURE: it is handed what the browser exposes and reads nothing itself, so a
+ * table of cases proves the rule. `readDeviceClass` below does the reading.
+ *
+ * THE RULE, pointer first:
+ *
+ *   - A COARSE primary pointer (a finger) is a `'phone'` when the screen's
+ *     SHORT side is under `TABLET_MIN_SHORT_SIDE`, and a `'tablet'` at or over
+ *     it. The short side rather than the width, so a phone held landscape is
+ *     still a phone — which side is short depends on how the device is held,
+ *     so it is the smaller of the two.
+ *   - Anything else is a `'computer'`, whatever the size. The pointer decides
+ *     and the window does not: a laptop window dragged narrow is still a
+ *     laptop, and "this phone" there is the line from the wrong place that
+ *     this story exists to fix. A primary pointer that is neither coarse nor
+ *     fine — `pointer: none`, a keyboard-only browser — lands here too: it is
+ *     not a touchscreen, and "computer" is the nearer word.
+ *
+ * @param {{ coarse: boolean, width: number, height: number }} exposed — the
+ *   primary pointer, and the SCREEN (not the window) in CSS px
+ * @returns {'phone' | 'tablet' | 'computer'}
+ */
+export function classifyDevice({ coarse, width, height }) {
+  if (!coarse) return 'computer'
+  return Math.min(width, height) < TABLET_MIN_SHORT_SIDE ? 'phone' : 'tablet'
+}
+
+/**
+ * Read what `classifyDevice` needs off this browser and classify it — or
+ * null where the browser cannot say (#517 AC 3), which the line words as
+ * "this device".
+ *
+ * `(pointer: coarse)` asks about the PRIMARY pointer; `any-pointer` would ask
+ * whether ANY pointer is coarse, and a laptop with a touchscreen would answer
+ * yes. `screen.width` and `screen.height` are the screen in CSS px; the
+ * window's own size (`innerWidth`) is deliberately not read.
+ *
+ * Null, never a guess, in three cases: no `matchMedia` (jsdom, an old
+ * browser), a `matchMedia` that throws, and a coarse pointer with no usable
+ * screen size — the pointer alone cannot tell a phone from a tablet, and the
+ * wrong word is the defect being fixed. A fine pointer needs no screen size.
+ */
+export function readDeviceClass(target = globalThis) {
+  try {
+    if (typeof target.matchMedia !== 'function') return null
+    const coarse = target.matchMedia('(pointer: coarse)')?.matches === true
+    const width = target.screen?.width
+    const height = target.screen?.height
+    if (coarse && !(width > 0 && height > 0)) return null
+    return classifyDevice({ coarse, width, height })
+  } catch {
+    return null
+  }
+}
+
+/**
  * Capture the browser's install offer and decide whether to show it.
  *
  * Started once, before the app loads (`src/main.jsx`). `beforeinstallprompt`
@@ -292,16 +357,24 @@ export function isIosSafariTab(target = globalThis) {
  * and would mean the platform had grown a real prompt — in which case the
  * prompt is the better offer and the instruction is stale.
  *
+ * `device()` (#517) is which device the line names — `readDeviceClass`'s
+ * answer, also read once at start. It is wording, not a gate: it decides
+ * nothing about whether the line shows.
+ *
  * `target` and `now` are injected for the tests; `target` is the window.
  *
  * @returns {{ subscribe: (listener: () => void) => () => void, isOffered: () => boolean,
- *   reason: () => 'prompt' | 'ios' | null, install: () => Promise<void>,
- *   dismiss: () => void, stop: () => void }}
+ *   reason: () => 'prompt' | 'ios' | null, device: () => 'phone' | 'tablet' | 'computer' | null,
+ *   install: () => Promise<void>, dismiss: () => void, stop: () => void }}
  */
 export function startInstallOffer({ target = globalThis, now = () => Date.now() } = {}) {
   let captured = null
   // #484 — read once, for the life of the page. See above.
   const iosSafariTab = isIosSafariTab(target)
+  // #517 — likewise, so a Shell that renders often does not re-ask. The one
+  // device that can change kind under a live page is a convertible folded
+  // into tablet mode; it keeps the word it loaded with until the next load.
+  const device = readDeviceClass(target)
   // Set by anything that ends the offer on THIS page — a tap on either
   // button, an install — and never unset: a second `beforeinstallprompt` on
   // the same page (Chrome does re-fire after a dismissed sheet) is refused
@@ -361,6 +434,8 @@ export function startInstallOffer({ target = globalThis, now = () => Date.now() 
     // #484 — WHICH offer is showing, so the line can carry the right copy:
     // a button on Android, two taps to describe on iOS.
     reason: () => reason,
+    // #517 — which device the prompt line names; null words it "this device".
+    device: () => device,
     async install() {
       const event = captured
       // Nothing to prompt with. On iOS this is the ordinary case and not an

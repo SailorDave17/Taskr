@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import PropTypes from 'prop-types'
 
-// The offer to install Taskr — stories #483 and #484, the line itself.
+// The offer to install Taskr — stories #483, #484 and #517, the line itself.
 //
 // One line above whatever surface is on screen, never a modal and never over
 // a control (#483 AC 1): the browser owns the install sheet, so this says the
@@ -11,7 +11,9 @@ import PropTypes from 'prop-types'
 // this renders the decision.
 //
 // TWO VARIANTS, because the two platforms offer different things (#484). On
-// Android the browser has a sheet and this is a button that opens it. On iOS
+// Android the browser has a sheet and this is a button that opens it — and so
+// does Chrome on a computer or a tablet, which is why that line names the
+// device it is on rather than assuming a phone (#517). On iOS
 // there is no sheet to open and no way to ask for one, so the line NAMES THE
 // TWO TAPS — that sentence is the entire product here, and it is the
 // difference between an app that is installable and one that gets installed,
@@ -19,6 +21,12 @@ import PropTypes from 'prop-types'
 
 const noSubscription = () => () => {}
 const never = () => false
+
+// #517 — the devices the prompt line can name, from `readDeviceClass` in
+// `src/lib/installOffer.js`. Anything else, null included, is "this device":
+// true everywhere and wrong nowhere, which is the fallback for a browser that
+// cannot say what it is running on.
+const DEVICES = ['phone', 'tablet', 'computer']
 
 /**
  * Whether the offer is showing, read from the controller `src/main.jsx`
@@ -31,7 +39,7 @@ export function useInstallOffer(offer) {
   return useSyncExternalStore(offer ? offer.subscribe : noSubscription, offer ? offer.isOffered : never)
 }
 
-export default function InstallOffer({ variant = 'prompt', onInstall, onDismiss }) {
+export default function InstallOffer({ variant = 'prompt', device = null, onInstall, onDismiss }) {
   const ios = variant === 'ios'
   return (
     <div className="shell__install" data-testid="install-offer" data-variant={variant}>
@@ -45,7 +53,7 @@ export default function InstallOffer({ variant = 'prompt', onInstall, onDismiss 
             <strong>Add to Home Screen</strong>
           </>
         ) : (
-          'Install Taskr on this phone'
+          `Install Taskr on this ${DEVICES.includes(device) ? device : 'device'}`
         )}
       </span>
       {/* One group, so the two answers stay together if a width ever forces
@@ -70,6 +78,8 @@ export default function InstallOffer({ variant = 'prompt', onInstall, onDismiss 
 InstallOffer.propTypes = {
   /** `'prompt'` (Android, a captured event) or `'ios'` (Safari, instructions). */
   variant: PropTypes.oneOf(['prompt', 'ios']),
+  /** #517 — the device the prompt line names; null (the default) is "this device". The iOS line names none. */
+  device: PropTypes.oneOf(DEVICES),
   // Required on the prompt variant and meaningless on the iOS one, where no
   // button reaches it. A plain `.isRequired` would have had #484's call site
   // passing a handler nothing can call, and a plain `.func` would have stopped

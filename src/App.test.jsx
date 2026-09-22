@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PRIVACY_URL } from './lib/links.js'
 import { buildInfo } from './buildInfo.js'
+import { startInstallOffer } from './lib/installOffer.js'
 
 // #540 — the release version the footer and the report must both name, read
 // from the file `npm version` moves rather than from buildInfo, so the footer
@@ -9828,8 +9829,9 @@ describe('#483 — the install offer, in the shell', () => {
   }
   // #484 — the fake carries a REASON as well as a boolean, because the real
   // controller does: the two are set together there, so a fake that held only
-  // the boolean could not reproduce the state the shell reads.
-  const makeOffer = (offered = true, reason = 'prompt') => {
+  // the boolean could not reproduce the state the shell reads. #517 adds the
+  // DEVICE, a phone by default — #483's line was written for one.
+  const makeOffer = (offered = true, reason = 'prompt', device = 'phone') => {
     const listeners = new Set()
     const offer = {
       offered,
@@ -9840,6 +9842,7 @@ describe('#483 — the install offer, in the shell', () => {
       },
       isOffered: () => offer.offered,
       reason: () => (offer.offered ? offer.why : null),
+      device: () => device,
       install: vi.fn(),
       dismiss: vi.fn(),
       set(next) {
@@ -9987,6 +9990,36 @@ describe('#483 — the install offer, in the shell', () => {
     expect(line()).toBeInTheDocument()
     await act(async () => offer.set(false))
     expect(line()).not.toBeInTheDocument()
+  })
+
+  // #517 — what this adds over the component's own tests is that the SHELL
+  // passes the device through: a shell that dropped it, or pinned a word,
+  // would render one line everywhere and every component test would pass.
+  it.each(['phone', 'tablet', 'computer'])('#517 AC 2: on a %s, the line in the shell names it', async (device) => {
+    joined()
+    await renderWithOffer(makeOffer(true, 'prompt', device))
+    await screen.findByRole('button', { name: 'Who' })
+    expect(line().querySelector('.shell__install-text')).toHaveTextContent(new RegExp(`^Install Taskr on this ${device}$`))
+  })
+
+  it('#517 AC 3: the real controller in a browser with no matchMedia — this one — says "this device" and does not throw', async () => {
+    // The precondition, asserted rather than assumed: jsdom has no
+    // matchMedia, which is the old-browser case the AC names. A setup file
+    // that polyfilled it would make this test about something else.
+    expect(typeof window.matchMedia).toBe('undefined')
+    joined()
+    const offer = startInstallOffer({ target: window })
+    onTestFinished(() => offer.stop())
+    expect(offer.device()).toBeNull()
+    await renderWithOffer(offer)
+    await screen.findByRole('button', { name: 'Who' })
+    expect(line()).not.toBeInTheDocument()
+    // Chrome's event, as far as the controller reads it.
+    const event = new Event('beforeinstallprompt', { cancelable: true })
+    event.prompt = vi.fn(async () => ({ outcome: 'dismissed' }))
+    await act(async () => void window.dispatchEvent(event))
+    expect(line()).toBeInTheDocument()
+    expect(line().querySelector('.shell__install-text')).toHaveTextContent(/^Install Taskr on this device$/)
   })
 })
 

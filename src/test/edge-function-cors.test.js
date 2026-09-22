@@ -42,11 +42,20 @@ import { corsHeaders } from '@supabase/supabase-js/cors'
 // a function that is deployed but not yet called from the client would be absent
 // from it and unchecked here — and the subject of this file is a source file's
 // contents, which is a question about what is in the directory.
+//
+// #562 moved the literal to `_shared/http.ts`, so the question split in two:
+// is the ONE list right (checked once, below), and does every function answer
+// with it (checked per directory, by its import). A directory whose name starts
+// with `_` is Supabase's convention for code that is not a function, and is
+// excluded here by that rule rather than by name — with a control that the
+// shared directory exists, so the exclusion cannot quietly swallow everything.
 const FUNCTIONS_DIR = resolve(process.cwd(), 'supabase/functions')
-const FUNCTION_NAMES = readdirSync(FUNCTIONS_DIR, { withFileTypes: true })
+const DIRECTORIES = readdirSync(FUNCTIONS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
   .sort()
+const FUNCTION_NAMES = DIRECTORIES.filter((name) => !name.startsWith('_'))
+const SHARED_HTTP = 'supabase/functions/_shared/http.ts'
 
 function headerList(value) {
   return value
@@ -58,7 +67,7 @@ function headerList(value) {
 /** The `const CORS = { ... }` literal alone, so prose elsewhere cannot read as config. */
 function corsBlock(source) {
   const start = source.indexOf('const CORS = {')
-  expect(start, 'no `const CORS = {` in this Edge Function').toBeGreaterThan(-1)
+  expect(start, 'no `const CORS = {` in the shared module').toBeGreaterThan(-1)
   // No nested braces live inside the CORS literal, so the first closing brace
   // after it is its own.
   const end = source.indexOf('}', start)
@@ -82,27 +91,18 @@ describe('every function directory is actually scanned', () => {
     expect(FUNCTION_NAMES).toContain('provision-member')
     expect(FUNCTION_NAMES).toContain('calendar-connect')
   })
+
+  it('excludes the shared directory and nothing else — #562', () => {
+    // The `_` rule removes exactly one directory today. If it removed a real
+    // function, that function's preflight would go unchecked, so the excluded
+    // set is pinned rather than trusted.
+    expect(DIRECTORIES.filter((name) => name.startsWith('_'))).toEqual(['_shared'])
+  })
 })
 
-describe.each(FUNCTION_NAMES)('%s answers a browser preflight from supabase-js', (name) => {
+describe('the one CORS list (`_shared/http.ts`) answers a browser preflight from supabase-js', () => {
   const sdkHeaders = headerList(corsHeaders['Access-Control-Allow-Headers'])
-
-  // The CORS literal lives in `index.ts` for `provision-member` and in
-  // `handler.ts` for `calendar-connect`, whose decisions were split out so they
-  // could be unit-tested without a Deno runtime. Both files are read and joined
-  // rather than one being guessed at, because which file holds it is a property
-  // of how that function is organised and not something this check should have
-  // an opinion about.
-  const SOURCE = ['index.ts', 'handler.ts']
-    .map((file) => {
-      try {
-        return readFileSync(resolve(FUNCTIONS_DIR, name, file), 'utf8')
-      } catch {
-        return ''
-      }
-    })
-    .join('\n')
-
+  const SOURCE = readFileSync(resolve(process.cwd(), SHARED_HTTP), 'utf8')
   const declared = (key) => declaredIn(SOURCE, key)
 
   it('POSITIVE CONTROL: both sides of the comparison are non-empty', () => {
@@ -140,5 +140,43 @@ describe.each(FUNCTION_NAMES)('%s answers a browser preflight from supabase-js',
 
   it('answers with an allowed origin at all', () => {
     expect(declared('Access-Control-Allow-Origin')).toEqual(['*'])
+  })
+})
+
+// Every function answers with THAT list — #562.
+//
+// The list above being right says nothing about a function that stopped using
+// it. So each directory is held to importing `CORS` from the shared module, and
+// to declaring no literal of its own in either file: a local copy is exactly
+// how nine lists stayed in step only by luck. `gate.test.js` refuses a local
+// `const CORS =` in any handler too; this check is the one that also sees
+// `index.ts` and asserts the import is actually there.
+const SHARED_CORS_IMPORT = /import\s*\{[^}]*\bCORS\b[^}]*\}\s*from\s*'\.\.\/_shared\/http\.ts'/
+/** Comments blanked, so a sentence ABOUT the old literal cannot read as one. */
+const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, '$1')
+
+describe.each(FUNCTION_NAMES)('%s answers with the shared CORS list', (name) => {
+  const read = (file) => {
+    try {
+      return readFileSync(resolve(FUNCTIONS_DIR, name, file), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  const handler = read('handler.ts')
+
+  it('POSITIVE CONTROL: the handler is there to read', () => {
+    // An absent file reads as "declares no literal" below, which is a pass that
+    // proves nothing.
+    expect(handler.length).toBeGreaterThan(500)
+  })
+
+  it('imports CORS from _shared/http.ts', () => {
+    expect(handler).toMatch(SHARED_CORS_IMPORT)
+  })
+
+  it('declares no CORS literal of its own, in handler.ts or index.ts', () => {
+    const code = stripComments(handler + '\n' + read('index.ts'))
+    expect(code).not.toMatch(/\bCORS\s*=\s*\{/)
   })
 })

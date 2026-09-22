@@ -290,6 +290,24 @@ describe('the browser has to be able to reach it at all', () => {
       CORS['Access-Control-Allow-Headers'],
     )
   })
+
+  it('#562 — refuses a body that is the JSON literal null, with CORS headers on the refusal', async () => {
+    // `req.json()` resolves `null` without throwing, and `null.code` then
+    // escaped as a bare 500 with no CORS headers — which a browser reports as
+    // the network being down. The guard was in five handlers from 2026-09-04
+    // and not this one; it arrived with the shared preamble.
+    const response = await handler()(
+      new Request('https://x.test/', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer caller-jwt', 'content-type': 'application/json' },
+        body: 'null',
+      }),
+    )
+    expect(response.status).toBe(400)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(await response.json()).toEqual({ error: 'Send a JSON body.' })
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
 })
 
 describe('what it refuses before Google is involved at all', () => {

@@ -1,7 +1,7 @@
 {
   "name": "taskr",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Splits a household's chores by the time each person has.",
   "license": "MIT",

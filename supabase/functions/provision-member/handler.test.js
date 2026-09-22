@@ -685,6 +685,19 @@ describe('provision-member — the platform contract the split must not change',
     expect(world.ops).toHaveLength(0)
   })
 
+  it('#562 — refuses a body that is the JSON literal null, with CORS headers on the refusal', async () => {
+    // `req.json()` resolves `null` without throwing, and `null.action` then
+    // escaped as a bare 500 with no CORS headers — which a browser reports as
+    // the network being down. The guard was in five handlers from 2026-09-04
+    // and not this one; it arrived with the shared preamble.
+    const world = makeWorld()
+    const res = await call(world, null)
+    expect(res.status).toBe(400)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(await res.json()).toEqual({ error: 'Send a JSON body.' })
+    expect(world.ops).toHaveLength(0)
+  })
+
   it('carries the caller’s JWT on the caller-scoped client', async () => {
     // The tag says WHICH KEY built the client; this says the client was actually
     // authenticated. A caller-scoped client with no Authorization header reads

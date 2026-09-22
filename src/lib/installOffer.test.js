@@ -4,9 +4,12 @@ import {
   DISMISSAL_MS,
   KEY,
   NON_SAFARI_IOS_MARKERS,
+  TABLET_MIN_SHORT_SIDE,
+  classifyDevice,
   clearInstallOfferMemory,
   isIosSafariTab,
   isRunningInstalled,
+  readDeviceClass,
   readInstallOfferMemory,
   rememberInstallOfferDismissed,
   startInstallOffer,
@@ -30,6 +33,11 @@ const T0 = 1_760_000_000_000
  * agent at all, which is deliberately not an iOS one: every #483 test above
  * was written before the iOS path existed and must keep meaning what it meant
  * — a target that is not Safari-on-iOS, offering only when the event fires.
+ *
+ * `pointer`, `anyPointerCoarse`, `screen` and `inner` are #517's axis: the
+ * primary pointer, whether some OTHER pointer is a touchscreen, the screen in
+ * CSS px, and the window. The default is a fine pointer and no screen at all,
+ * which the reader answers `'computer'` without needing one.
  */
 function makeTarget({
   standaloneMedia = false,
@@ -37,16 +45,30 @@ function makeTarget({
   matchMedia = true,
   userAgent = undefined,
   maxTouchPoints = undefined,
+  pointer = 'fine',
+  anyPointerCoarse = false,
+  screen = undefined,
+  inner = undefined,
 } = {}) {
   const target = new EventTarget()
   target.navigator = {}
   if (navigatorStandalone !== undefined) target.navigator.standalone = navigatorStandalone
   if (userAgent !== undefined) target.navigator.userAgent = userAgent
   if (maxTouchPoints !== undefined) target.navigator.maxTouchPoints = maxTouchPoints
+  if (screen !== undefined) target.screen = screen
+  if (inner !== undefined) {
+    target.innerWidth = inner.width
+    target.innerHeight = inner.height
+  }
   if (matchMedia) {
-    target.matchMedia = vi.fn((query) => ({
-      matches: query === '(display-mode: standalone)' ? standaloneMedia : false,
-    }))
+    const answers = new Map([
+      ['(display-mode: standalone)', standaloneMedia],
+      ['(pointer: coarse)', pointer === 'coarse'],
+      ['(pointer: fine)', pointer === 'fine'],
+      ['(pointer: none)', pointer === 'none'],
+      ['(any-pointer: coarse)', pointer === 'coarse' || anyPointerCoarse],
+    ])
+    target.matchMedia = vi.fn((query) => ({ matches: answers.get(query) ?? false }))
   }
   return target
 }
@@ -707,6 +729,141 @@ describe('#484 — the iOS line shares #483’s dismissal, one key and not two',
     expect(offer.reason()).toBe('ios')
     fire(target)
     expect(offer.reason()).toBe('prompt')
+    offer.stop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #517 — the prompt line names the device it is on: phone, tablet or computer.
+// ---------------------------------------------------------------------------
+
+// Screens in CSS px, from real devices: a Pixel 8 (412×915), a 10-inch
+// Android tablet (800×1280), a common laptop panel (1366×768).
+const PHONE = { width: 412, height: 915 }
+const TABLET = { width: 800, height: 1280 }
+const LAPTOP = { width: 1366, height: 768 }
+
+describe('#517 AC 1 — classifyDevice: the pointer decides, then the short side', () => {
+  it.each([
+    ['a phone held upright', { coarse: true, ...PHONE }, 'phone'],
+    // The short side, not the width: turned sideways this is 915 wide.
+    ['a phone held landscape', { coarse: true, width: 915, height: 412 }, 'phone'],
+    ['a tablet held upright', { coarse: true, ...TABLET }, 'tablet'],
+    ['a tablet held landscape', { coarse: true, width: 1280, height: 800 }, 'tablet'],
+    // The line itself, from both sides: under is a phone, AT is a tablet.
+    ['a touchscreen one px under the line', { coarse: true, width: TABLET_MIN_SHORT_SIDE - 1, height: 960 }, 'phone'],
+    ['a touchscreen exactly on the line', { coarse: true, width: TABLET_MIN_SHORT_SIDE, height: 960 }, 'tablet'],
+    ['a laptop', { coarse: false, ...LAPTOP }, 'computer'],
+    // The pointer decides and the size does not: a fine pointer at a phone's
+    // size is still a computer. What a narrow laptop WINDOW turns into, since
+    // this function is never handed the window at all (see the reader below).
+    ['a fine pointer at a phone’s size', { coarse: false, width: 360, height: 640 }, 'computer'],
+    ['a fine pointer with no size to read', { coarse: false, width: undefined, height: undefined }, 'computer'],
+  ])('%s → %s', (_case, exposed, expected) => {
+    expect(classifyDevice(exposed)).toBe(expected)
+  })
+
+  it('the line is Android’s own tablet line, 600', () => {
+    expect(TABLET_MIN_SHORT_SIDE).toBe(600)
+  })
+})
+
+describe('#517 — readDeviceClass reads the primary pointer and the screen, never the window', () => {
+  it('a phone, upright and landscape', () => {
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse', screen: PHONE }))).toBe('phone')
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse', screen: { width: 915, height: 412 } }))).toBe('phone')
+  })
+
+  it('a tablet', () => {
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse', screen: TABLET }))).toBe('tablet')
+  })
+
+  it('a small laptop window is a computer: fine pointer, window a phone’s width', () => {
+    const target = makeTarget({ pointer: 'fine', screen: LAPTOP, inner: { width: 360, height: 700 } })
+    expect(readDeviceClass(target)).toBe('computer')
+  })
+
+  it('a laptop with a touchscreen is a computer: the PRIMARY pointer is asked, not any pointer', () => {
+    const target = makeTarget({ pointer: 'fine', anyPointerCoarse: true, screen: LAPTOP })
+    // The control: this window DOES have a coarse pointer, so a reader asking
+    // `any-pointer` would call it a tablet.
+    expect(target.matchMedia('(any-pointer: coarse)').matches).toBe(true)
+    expect(readDeviceClass(target)).toBe('computer')
+    expect(target.matchMedia).toHaveBeenCalledWith('(pointer: coarse)')
+  })
+
+  it('a browser with no pointer at all is a computer', () => {
+    expect(readDeviceClass(makeTarget({ pointer: 'none', screen: LAPTOP }))).toBe('computer')
+  })
+
+  it('a fine pointer needs no screen size', () => {
+    expect(readDeviceClass(makeTarget({ pointer: 'fine' }))).toBe('computer')
+  })
+})
+
+describe('#517 AC 3 — readDeviceClass answers null where the browser cannot say, and never throws', () => {
+  it('no matchMedia at all (jsdom, an old browser)', () => {
+    const target = makeTarget({ matchMedia: false, screen: PHONE })
+    expect(() => readDeviceClass(target)).not.toThrow()
+    expect(readDeviceClass(target)).toBeNull()
+  })
+
+  it('this very jsdom window has no matchMedia, which is what the fallback is for', () => {
+    // The precondition the App-level fallback test rests on, stated where it
+    // would break first if a setup file ever polyfilled it.
+    expect(typeof window.matchMedia).toBe('undefined')
+    expect(readDeviceClass()).toBeNull()
+  })
+
+  it('a matchMedia that throws', () => {
+    const target = makeTarget({ screen: PHONE })
+    target.matchMedia = () => {
+      throw new Error('not in this browser')
+    }
+    expect(readDeviceClass(target)).toBeNull()
+  })
+
+  it('a coarse pointer with no usable screen size — a finger alone cannot tell a phone from a tablet', () => {
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse' }))).toBeNull()
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse', screen: { width: 0, height: 0 } }))).toBeNull()
+    expect(readDeviceClass(makeTarget({ pointer: 'coarse', screen: { width: 412 } }))).toBeNull()
+  })
+})
+
+describe('#517 — the controller carries the device, read once, deciding nothing', () => {
+  it('device() is the reader’s answer for the window it was started on', () => {
+    const cases = [
+      [makeTarget({ pointer: 'coarse', screen: PHONE }), 'phone'],
+      [makeTarget({ pointer: 'coarse', screen: TABLET }), 'tablet'],
+      [makeTarget({ pointer: 'fine', screen: LAPTOP }), 'computer'],
+      [makeTarget({ matchMedia: false }), null],
+    ]
+    for (const [target, expected] of cases) {
+      const offer = startInstallOffer({ target, now })
+      expect(offer.device()).toBe(expected)
+      offer.stop()
+    }
+  })
+
+  it('asks the browser once, at start, however often it is read', () => {
+    const target = makeTarget({ pointer: 'coarse', screen: PHONE })
+    const offer = startInstallOffer({ target, now })
+    fire(target)
+    for (let i = 0; i < 5; i += 1) offer.device()
+    offer.dismiss()
+    const asked = target.matchMedia.mock.calls.filter(([query]) => query === '(pointer: coarse)')
+    expect(asked).toHaveLength(1)
+    expect(offer.device()).toBe('phone')
+    offer.stop()
+  })
+
+  it('a device it cannot name still gets the offer — the word is wording, not a gate', () => {
+    const target = makeTarget({ matchMedia: false })
+    const offer = startInstallOffer({ target, now })
+    fire(target)
+    expect(offer.isOffered()).toBe(true)
+    expect(offer.reason()).toBe('prompt')
+    expect(offer.device()).toBeNull()
     offer.stop()
   })
 })

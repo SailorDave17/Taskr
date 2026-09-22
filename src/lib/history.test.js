@@ -116,8 +116,8 @@ describe('weeklyHistory', () => {
     expect(rowsFor(rows, 'm2')[3].busyMinutes).toBe(0)
   })
 
-  it('carries a work term of zero on every row, the field #479 fills', () => {
-    for (const row of rows) expect(row.workMinutes).toBe(0)
+  it('carries no work term — the slot was retired with #479 (#518)', () => {
+    for (const row of rows) expect(row).not.toHaveProperty('workMinutes')
   })
 
   it('a member is in a week from the week they joined — the join week counts, earlier ones do not', () => {

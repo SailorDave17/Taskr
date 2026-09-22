@@ -60,31 +60,15 @@
 // holds a credential and refuses to let go of it, which is the precise shape of
 // the thing #99 exists to prevent.
 
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { callerRequest } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
+
 /** Google's OAuth 2.0 revocation endpoint. Named so the test can assert it is the one used. */
 export const GOOGLE_REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
 
-/**
- * Every header supabase-js puts on a `functions.invoke` call.
- *
- * The same list as `provision-member`, `calendar-connect` and `calendar-busy`,
- * restated rather than imported, and #112 is why the list is this long: a
- * browser preflight asks about ALL of the headers at once and a list missing
- * even one fails the whole request before it is sent, with the client reporting
- * "Failed to send a request to the Edge Function" — a sentence that names no
- * header and reads like a dropped connection.
- *
- * Restated rather than imported for the reason all three of the others give:
- * this is a deploy-path constant, and a value that must not change silently
- * should not be resolved at deploy time. `src/test/edge-function-cors.test.js`
- * reads EVERY function directory off the filesystem, so this one is covered by
- * that check from the moment the directory exists.
- */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+/** The one list every function answers with (`_shared/http.ts`), re-exported for the test. */
+export { CORS }
 
 /**
  * The three tables this deletes, in the order it deletes them.
@@ -128,24 +112,6 @@ export interface CalendarDisconnectDeps {
   env: (name: string) => string | undefined
   /** Built per request, because the caller-scoped one carries the caller's JWT. */
   createClient: (url: string, key: string, options?: unknown) => SupabaseLike
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-/**
- * A refusal says what is wrong without saying whether anybody else exists.
- *
- * Same rule as the three functions beside it: the caller-scoped read already
- * decided what this caller may know, and echoing more back would turn the
- * endpoint into a way to probe other households.
- */
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
 }
 
 /**
@@ -193,24 +159,10 @@ async function revokeAtGoogle(
  */
 export function createHandler(deps: CalendarDisconnectDeps) {
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
-
-    const authorization = req.headers.get('Authorization') ?? ''
-    if (!authorization.startsWith('Bearer ')) return refuse('Sign in first.', 401)
-
-    let body: { householdId?: string }
-    try {
-      body = await req.json()
-    } catch {
-      return refuse('Send a JSON body.', 400)
-    }
-    // `req.json()` resolves for the JSON literal `null` as happily as for an
-    // object, and `null.householdId` is a TypeError the try above does not
-    // cover — escaping as a bare 500 with no CORS headers, which a browser
-    // reports as the network being down. `calendar-busy` carries the same guard
-    // for the same reason (review-fanout, 2026-09-04).
-    if (!body || typeof body !== 'object') return refuse('Send a JSON body.', 400)
+    // Method, Bearer and a JSON-object body, null guard included (`_shared/preamble.ts`).
+    const request = await callerRequest<{ householdId?: string }>(req)
+    if (!request.ok) return request.response
+    const { authorization, body } = request
 
     // WHICH household, and only which. The body never says WHO this is about:
     // the person is `auth.uid()` off the JWT, exactly as `calendar-connect` and
@@ -231,17 +183,12 @@ export function createHandler(deps: CalendarDisconnectDeps) {
 
     // ---- 1 & 2: everything the CALLER is allowed to see and be ---------------
 
-    const asCaller = deps.createClient(url, anonKey, {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asCaller = clients.asCaller(deps.createClient, url, anonKey, authorization)
 
     // Constructed here but deliberately NOT used until the caller-scoped checks
     // below have passed. Creating a client grants nothing; what matters is which
     // one answers the authorization questions.
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: caller } = (await asCaller.auth.getUser()) ?? { data: null }
     const callerId = caller?.user?.id

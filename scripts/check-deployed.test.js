@@ -204,10 +204,20 @@ describe('#208 — the source a deploy is compared against is the BUNDLE, not th
     expect(files).toContain('src/lib/dueDates.js')
   })
 
-  it('and the other three functions carry nothing outside their own directory', () => {
+  it('and the other three functions carry nothing outside their own directory but _shared/', () => {
+    // #562 moved every function's HTTP preamble into `supabase/functions/_shared/`,
+    // so each bundle now reaches exactly those three files beyond its own
+    // directory — which is also what makes a commit to `_shared/` read as every
+    // importing function going stale. Pinned as the exact set, so a fourth
+    // shared file or a stray `../` import is still a red here, not a widening.
+    const SHARED = [
+      'supabase/functions/_shared/clients.ts',
+      'supabase/functions/_shared/http.ts',
+      'supabase/functions/_shared/preamble.ts',
+    ]
     for (const name of ['provision-member', 'calendar-connect', 'calendar-busy']) {
       const outside = bundleFilesOf(name).filter((f) => !f.startsWith(`supabase/functions/${name}/`))
-      expect(outside, name).toEqual([])
+      expect(outside.sort(), name).toEqual(SHARED)
     }
   })
 })

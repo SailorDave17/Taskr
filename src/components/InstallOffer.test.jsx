@@ -42,7 +42,7 @@ Probe.propTypes = {
 
 describe('#483 — the line', () => {
   it('says the app can be installed, with Install and Not now, and nothing modal', () => {
-    render(<InstallOffer onInstall={() => {}} onDismiss={() => {}} />)
+    render(<InstallOffer device="phone" onInstall={() => {}} onDismiss={() => {}} />)
     expect(screen.getByText(/install taskr on this phone/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^install$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /not now/i })).toBeInTheDocument()
@@ -113,10 +113,11 @@ describe('#484 — the iOS line', () => {
   it('the prompt variant is unchanged, and is the default', () => {
     // The control for the variant switch: #483's line must not have moved.
     // Rendered with no `variant` at all, which is how a caller that predates
-    // #484 would call it.
+    // #484 would call it — and with no `device` either, so since #517 the
+    // line names no particular device.
     render(<InstallOffer onInstall={() => {}} onDismiss={() => {}} />)
     const strip = screen.getByTestId('install-offer')
-    expect(strip).toHaveTextContent(/install taskr on this phone/i)
+    expect(strip).toHaveTextContent(/install taskr on this device/i)
     expect(strip).not.toHaveTextContent(/home screen/i)
     expect(screen.getByRole('button', { name: /^install$/i })).toBeInTheDocument()
     expect(strip.querySelectorAll('strong')).toHaveLength(0)
@@ -150,5 +151,51 @@ describe('#484 — the iOS line', () => {
     unmount()
     render(<InstallOffer onInstall={() => {}} onDismiss={() => {}} />)
     expect(screen.getByTestId('install-offer')).toHaveAttribute('data-variant', 'prompt')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #517 — the prompt line names the device it is on.
+// ---------------------------------------------------------------------------
+
+const sentence = () => screen.getByTestId('install-offer').querySelector('.shell__install-text').textContent
+
+describe('#517 AC 2 — the prompt line names the device it is shown on', () => {
+  const WORDS = ['phone', 'tablet', 'computer', 'device']
+
+  it.each(['phone', 'tablet', 'computer'])('on a %s it says so, and names nothing else', (device) => {
+    render(<InstallOffer device={device} onInstall={() => {}} onDismiss={() => {}} />)
+    expect(sentence()).toBe(`Install Taskr on this ${device}`)
+    // The other words are absent, so a line that named two devices, or kept
+    // one fixed word beside the right one, is refused as well.
+    for (const other of WORDS.filter((word) => word !== device)) {
+      expect(sentence()).not.toMatch(new RegExp(`\b${other}\b`))
+    }
+  })
+
+  it('the iOS line names no device — its copy is the two taps, #484’s', () => {
+    render(<InstallOffer variant="ios" device="tablet" onDismiss={() => {}} />)
+    expect(screen.getByTestId('install-offer')).not.toHaveTextContent(/tablet|this device/i)
+  })
+})
+
+describe('#517 AC 3 — a device nobody could name reads "this device"', () => {
+  it('with no device at all, which is what a browser with no matchMedia hands it', () => {
+    render(<InstallOffer onInstall={() => {}} onDismiss={() => {}} />)
+    expect(sentence()).toBe('Install Taskr on this device')
+  })
+
+  it('with null, which is what the controller says for that browser', () => {
+    render(<InstallOffer device={null} onInstall={() => {}} onDismiss={() => {}} />)
+    expect(sentence()).toBe('Install Taskr on this device')
+  })
+
+  it('with a word it does not know, rather than printing it', () => {
+    // A propType warning as well; silenced here, since the render is the
+    // subject. The line must never say "this undefined" or a stray value.
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<InstallOffer device="watch" onInstall={() => {}} onDismiss={() => {}} />)
+    expect(sentence()).toBe('Install Taskr on this device')
+    warn.mockRestore()
   })
 })

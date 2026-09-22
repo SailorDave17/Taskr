@@ -50,6 +50,9 @@
 // households a failure left due.
 
 import { GOOGLE_REVOKE_ENDPOINT } from '../calendar-disconnect/handler.ts'
+import { CORS, json, refuse } from '../_shared/http.ts'
+import { acceptPost } from '../_shared/preamble.ts'
+import * as clients from '../_shared/clients.ts'
 
 /** The header the Vercel function sends the shared secret in. */
 export const PURGE_SECRET_HEADER = 'x-purge-secret'
@@ -58,18 +61,12 @@ export const PURGE_SECRET_HEADER = 'x-purge-secret'
 export const PURGE_SECRET_ENV = 'PURGE_SHARED_SECRET'
 
 /**
- * Every header supabase-js puts on a `functions.invoke` call — the same list as
- * the other functions, restated for their reason. Nothing invokes this one from
- * a browser; the literal is here because src/test/edge-function-cors.test.js
- * checks every function directory, and a function that one day is called from
- * one should not fail its preflight.
+ * The one list every function answers with (`_shared/http.ts`), re-exported for
+ * the test. Nothing invokes this one from a browser; it carries the headers
+ * anyway so a function that one day is called from one does not fail its
+ * preflight.
  */
-export const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-retry-count',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+export { CORS }
 
 export interface Filtered {
   neq(column: string, value: unknown): Filtered
@@ -87,17 +84,6 @@ export interface PurgeDeps {
   fetch: (input: string, init?: unknown) => Promise<Response>
   env: (name: string) => string | undefined
   createClient: (url: string, key: string, options?: unknown) => PurgeClient
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'content-type': 'application/json' },
-  })
-}
-
-function refuse(message: string, status: number): Response {
-  return json({ error: message }, status)
 }
 
 /**
@@ -145,8 +131,10 @@ async function revokeAtGoogle(deps: PurgeDeps, refreshToken: string): Promise<bo
 
 export function createHandler(deps: PurgeDeps) {
   return async function handle(req: Request): Promise<Response> {
-    if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-    if (req.method !== 'POST') return refuse('Use POST.', 405)
+    // Method only: the caller is a cron holding a shared secret, not a person
+    // holding a session, so there is no Bearer to check and no body to read.
+    const early = acceptPost(req)
+    if (early) return early
 
     const expected = deps.env(PURGE_SECRET_ENV)
     const url = deps.env('SUPABASE_URL')
@@ -159,9 +147,7 @@ export function createHandler(deps: PurgeDeps) {
       return refuse('Not allowed.', 401)
     }
 
-    const asService = deps.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
+    const asService = clients.asService(deps.createClient, url, serviceKey)
 
     const { data: due, error: dueError } = await asService.rpc('households_due_for_purge')
     if (dueError) return refuse('Could not read the households due for purge.', 500)

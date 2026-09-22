@@ -305,6 +305,9 @@ const installOfferShape = PropTypes.shape({
   // propType warning rather than a line that silently renders Android's copy
   // to somebody on an iPhone.
   reason: PropTypes.func.isRequired,
+  // #517 — which device the prompt line names: `'phone'`, `'tablet'`,
+  // `'computer'`, or null for "this device". Required, like `reason`.
+  device: PropTypes.func.isRequired,
   install: PropTypes.func.isRequired,
   dismiss: PropTypes.func.isRequired,
 })
@@ -3100,6 +3103,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
       {status === 'joined' && installOffered ? (
         <InstallOffer
           variant={installOffer.reason() ?? 'prompt'}
+          device={installOffer.device()}
           onInstall={installOffer.install}
           onDismiss={installOffer.dismiss}
         />

@@ -6,12 +6,13 @@
 // asserts only that the code still does what it did. The arithmetic is shown
 // beside each case so a reader can check it without the module.
 //
-// `shape` names which of the six shapes the story asks for the case covers
-// (steady person, busier week, quieter week, one blank week, no calendar,
-// work hours only); the test asserts every one of the six is present, so a
-// deleted case cannot leave the corpus quietly covering five. The rest are
-// the edges the rule has: the window, the floor, rounding, a calendar read
-// on one side only, less work than usual.
+// `shape` names which of the story's shapes the case covers (steady person,
+// busier week, quieter week, one blank week, no calendar); the test asserts
+// every one is present, so a deleted case cannot leave the corpus quietly
+// covering four. The story named a sixth, work hours only — that case, and
+// the two others that ran a work term, were retired with #479 (#518; the
+// reason is in docs/capacity-model.md). The rest are the edges the rule has:
+// the window, the floor, rounding, a calendar read on one side only.
 //
 // Fixtures are ONE member's weeks. `member` is `{ id }` only — the function
 // never reads the baseline, and a fixture that carried `weekly_minutes` would
@@ -29,10 +30,9 @@ const SIX_MONDAYS = ['2026-08-03', '2026-08-10', ...PRIOR_MONDAYS]
 
 /**
  * History rows from parallel arrays, most recent LAST. `busy` may be omitted
- * (every week unread) or carry nulls for unread weeks; `work` defaults to 0,
- * which is what `weeklyHistory` writes until #479 lands.
+ * (every week unread) or carry nulls for unread weeks.
  */
-export function weeks(done, busy = null, work = null) {
+export function weeks(done, busy = null) {
   if (done.length > SIX_MONDAYS.length) throw new Error('the corpus helper knows six Mondays')
   const mondays = SIX_MONDAYS.slice(-done.length)
   return done.map((doneMinutes, i) => ({
@@ -40,7 +40,6 @@ export function weeks(done, busy = null, work = null) {
     periodStart: mondays[i],
     doneMinutes,
     busyMinutes: busy ? busy[i] : null,
-    workMinutes: work ? work[i] : 0,
   }))
 }
 
@@ -56,18 +55,16 @@ export const SCENARIOS = [
     name: 'steady: four alike weeks, calendar as busy as usual',
     why:
       'Done 180, 210, 210, 260 → sorted the same, median (210 + 210) / 2 = 210. Busy 90 in every ' +
-      'prior week and 90 this week → difference 0. No work term. 210. The mean would be 215, ' +
+      'prior week and 90 this week → difference 0. 210. The mean would be 215, ' +
       'which is the number this case exists to NOT produce.',
     member: MEMBER,
     history: weeks([180, 210, 210, 260], [90, 90, 90, 90]),
     busyWeek: busyThisWeek(90),
-    workMinutes: 0,
     expect: {
       minutes: 210,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'calendar about as busy as usual'],
     },
   },
@@ -79,13 +76,11 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([180, 210, 210, 260], [90, 90, 90, 90]),
     busyWeek: busyThisWeek(180),
-    workMinutes: 0,
     expect: {
       minutes: 120,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: 90,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'calendar 90 min busier this week'],
     },
   },
@@ -97,13 +92,11 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([180, 210, 210, 260], [90, 90, 90, 90]),
     busyWeek: busyThisWeek(30),
-    workMinutes: 0,
     expect: {
       minutes: 270,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: -60,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'calendar 60 min quieter this week'],
     },
   },
@@ -118,13 +111,11 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([240, 0, 200, 220]),
     busyWeek: null,
-    workMinutes: 0,
     expect: {
       minutes: 210,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'no calendar read this week'],
     },
   },
@@ -139,60 +130,12 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([150, 180, 160]),
     busyWeek: null,
-    workMinutes: 0,
     expect: {
       minutes: 160,
       weeks: 3,
       typicalMinutes: 160,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 160 min done over 3 weeks', 'no calendar read this week'],
-    },
-  },
-
-  {
-    shape: 'work-only',
-    name: 'work hours only: no calendar, and 120 minutes more at work than usual this week',
-    why:
-      'Done 300, 300, 280, 320 → sorted 280, 300, 300, 320 → median 300 (the mean is also 300, so ' +
-      'this case does not discriminate the median; the ones above do). Work 0 in every prior week ' +
-      'and 120 this week → 120 more → 300 − 120 = 180. The calendar line still says there was no ' +
-      'read, and the work term follows it on the same line.',
-    member: MEMBER,
-    history: weeks([300, 300, 280, 320]),
-    busyWeek: null,
-    workMinutes: 120,
-    expect: {
-      minutes: 180,
-      weeks: 4,
-      typicalMinutes: 300,
-      calendarDelta: 0,
-      workDelta: 120,
-      reason: [
-        'typically 300 min done over 4 weeks',
-        'no calendar read this week; 120 min more at work this week',
-      ],
-    },
-  },
-
-  {
-    shape: 'edge',
-    name: 'both terms: 60 minutes busier and 90 minutes more at work',
-    why: 'Typical 210. Busy 120 against a median of 60 → 60. Work 90 against 0 → 90. 210 − 60 − 90 = 60.',
-    member: MEMBER,
-    history: weeks([180, 210, 210, 260], [60, 60, 60, 60]),
-    busyWeek: busyThisWeek(120),
-    workMinutes: 90,
-    expect: {
-      minutes: 60,
-      weeks: 4,
-      typicalMinutes: 210,
-      calendarDelta: 60,
-      workDelta: 90,
-      reason: [
-        'typically 210 min done over 4 weeks',
-        'calendar 60 min busier this week; 90 min more at work this week',
-      ],
     },
   },
 
@@ -206,13 +149,11 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([30, 40, 30, 40], [60, 60, 60, 60]),
     busyWeek: busyThisWeek(600),
-    workMinutes: 0,
     expect: {
       minutes: 0,
       weeks: 4,
       typicalMinutes: 35,
       calendarDelta: 540,
-      workDelta: 0,
       reason: ['typically 35 min done over 4 weeks', 'calendar 540 min busier this week'],
     },
   },
@@ -227,13 +168,11 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([900, 900, 180, 210, 210, 260], [90, 90, 90, 90, 90, 90]),
     busyWeek: busyThisWeek(90),
-    workMinutes: 0,
     expect: {
       minutes: 210,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'calendar about as busy as usual'],
     },
   },
@@ -248,37 +187,12 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([180, 210, 210, 260]),
     busyWeek: busyThisWeek(300),
-    workMinutes: 0,
     expect: {
       minutes: 210,
       weeks: 4,
       typicalMinutes: 210,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 210 min done over 4 weeks', 'no calendar read in those weeks'],
-    },
-  },
-
-  {
-    shape: 'edge',
-    name: 'less at work than usual: 120 minutes of work in every prior week, none this week',
-    why:
-      'Typical 210, calendar as usual. Work 0 this week against a median of 120 → 120 LESS → added ' +
-      'back → 330. The #479 shape, run before #479 lands, by handing the history rows a work term.',
-    member: MEMBER,
-    history: weeks([180, 210, 210, 260], [90, 90, 90, 90], [120, 120, 120, 120]),
-    busyWeek: busyThisWeek(90),
-    workMinutes: 0,
-    expect: {
-      minutes: 330,
-      weeks: 4,
-      typicalMinutes: 210,
-      calendarDelta: 0,
-      workDelta: -120,
-      reason: [
-        'typically 210 min done over 4 weeks',
-        'calendar about as busy as usual; 120 min less at work this week',
-      ],
     },
   },
 
@@ -291,17 +205,15 @@ export const SCENARIOS = [
     member: MEMBER,
     history: weeks([200, 205, 210, 220], [90, 90, 90, 90]),
     busyWeek: busyThisWeek(90),
-    workMinutes: 0,
     expect: {
       minutes: 208,
       weeks: 4,
       typicalMinutes: 208,
       calendarDelta: 0,
-      workDelta: 0,
       reason: ['typically 208 min done over 4 weeks', 'calendar about as busy as usual'],
     },
   },
 ]
 
-/** The six shapes the story names; the test holds the corpus to all of them. */
-export const REQUIRED_SHAPES = ['steady', 'busier', 'quieter', 'blank', 'no-calendar', 'work-only']
+/** The story's shapes, less work-only (#518); the test holds the corpus to all of them. */
+export const REQUIRED_SHAPES = ['steady', 'busier', 'quieter', 'blank', 'no-calendar']

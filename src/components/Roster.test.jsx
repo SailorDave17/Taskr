@@ -2854,7 +2854,6 @@ describe('the history-based suggestion — #480', () => {
       periodStart: PRIOR.slice(-done.length)[i],
       doneMinutes,
       busyMinutes: busy ? busy[i] : null,
-      workMinutes: 0,
     }))
   // 180, 210, 210, 260 done → median 210; 90 busy in each of those weeks.
   const steady = historyFor('m1', [180, 210, 210, 260], [90, 90, 90, 90])

@@ -158,9 +158,8 @@ function CapacityControl({
   const suggestion = calendarSuggestion(member, busyWeek)
   // #480 — the figure built from what this person got done lately. Null with
   // fewer than SUGGESTION_MIN_WEEKS of history, and then the calendar's
-  // suggestion above is the only one on offer (AC 2). `workMinutes` is 0
-  // until #479 records hours at work; that story hands the figure in here.
-  const suggested = suggestCapacity({ member, history, busyWeek, workMinutes: 0 })
+  // suggestion above is the only one on offer (AC 2).
+  const suggested = suggestCapacity({ member, history, busyWeek })
   // #480 — the week already holds this figure FROM the suggestion: keep the
   // block (the reason is still worth reading) and drop its tap, since a
   // control whose only position is the current one is not a control

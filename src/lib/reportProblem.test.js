@@ -14,6 +14,7 @@ import {
 // deliberately lower-case where they are not a declared placeholder — see #19.
 
 const FIELDS = {
+  version: '1.4.2',
   build: 'abc1234',
   environment: 'production',
   screen: 'Sign-in screen',
@@ -51,6 +52,15 @@ describe('the report link (#425)', () => {
     expect(body).toContain('Environment: production')
     expect(body).toContain('Screen: Sign-in screen')
     expect(body).toContain('Browser: mozilla/5.0 (linux; android 14) placeholder')
+  })
+
+  it('carries the release version too, first among the details (#540)', () => {
+    // The release a person can quote, beside the sha that names the commit.
+    const body = parse(reportHref(FIELDS)).body
+    expect(body).toContain('Version: 1.4.2')
+    const details = body.split('\r\n').slice(body.split('\r\n').indexOf('---') + 1)
+    expect(details[0]).toBe('Version: 1.4.2')
+    expect(details[1]).toBe('Build: abc1234')
   })
 
   it('carries NOTHING it was not asked for: household data passed in is ignored', () => {

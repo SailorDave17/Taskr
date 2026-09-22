@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PRIVACY_URL } from './lib/links.js'
+import { buildInfo } from './buildInfo.js'
+
+// #540 — the release version the footer and the report must both name, read
+// from the file `npm version` moves rather than from buildInfo, so the footer
+// test compares the page against its source and not against itself.
+const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
 
 // The shell's own assertions (heading, fairness rule, build stamp) survive from
 // #4 unchanged — they are what makes a deploy observable. What changed in #5 is
@@ -550,6 +556,25 @@ describe('the shell, unchanged from #4', () => {
     expect(stamp.textContent.replace(/^build\s+/, '')).not.toBe('')
   })
 
+  it('names the release beside the commit, and the row still ends with the stamp (#540)', async () => {
+    await renderApp()
+    const version = screen.getByTestId('build-version')
+    expect(version.textContent).toBe(`v${pkg.version}`)
+    // The whole row as a reader sees it. The links row above is excluded; the
+    // separators are aria-hidden spans, so they are read off textContent too.
+    const stamp = screen.getByTestId('build-commit')
+    const footer = stamp.closest('footer')
+    const row = [...footer.children]
+      .filter((child) => child.tagName === 'SPAN')
+      .map((child) => child.textContent)
+      .join('')
+    expect(row).toBe(`${buildInfo.name} · ${buildInfo.env} · v${pkg.version} · build ${buildInfo.commit}`)
+    // README's "read the page footer" paragraph and #451's comment both depend
+    // on the row ENDING in `build <sha>`: the version sits before it.
+    expect(footer.lastElementChild).toBe(stamp)
+    expect(version.nextElementSibling.nextElementSibling).toBe(stamp)
+  })
+
   it('offers "Report a problem" above the build stamp, as a message naming the build and the screen (#425)', async () => {
     await renderApp()
     const link = screen.getByRole('link', { name: /report a problem/i })
@@ -558,6 +583,8 @@ describe('the shell, unchanged from #4', () => {
     const body = url.searchParams.get('body')
     const stamp = screen.getByTestId('build-commit')
     expect(body).toContain(`Build: ${stamp.textContent.replace(/^build\s+/, '')}`)
+    // #540 AC 4 — and the release, from the same buildInfo the footer reads.
+    expect(body).toContain(`Version: ${buildInfo.version}`)
     // A session and no household: the onboarding screen, and the report says so.
     expect(body).toContain('Screen: Onboarding screen')
     // README tells a reader the footer ENDS with the build stamp, so the links

@@ -3527,6 +3527,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           <a
             className="shell__report"
             href={reportHref({
+              version: buildInfo.version,
               build: buildInfo.commit,
               environment: buildInfo.env,
               screen: reportScreen({ status, view, surfaces: SURFACES }),
@@ -3545,6 +3546,10 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
         <span>{buildInfo.name}</span>
         <span aria-hidden="true"> · </span>
         <span>{buildInfo.env}</span>
+        <span aria-hidden="true"> · </span>
+        {/* #540 — the release beside the commit, placed BEFORE the stamp so
+            the row still ends with `build <sha>`. */}
+        <span data-testid="build-version">v{buildInfo.version}</span>
         <span aria-hidden="true"> · </span>
         <span data-testid="build-commit">build {buildInfo.commit}</span>
       </footer>

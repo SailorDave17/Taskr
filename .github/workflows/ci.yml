@@ -37,6 +37,24 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # #540 AC 6 -- a promotion into `release` must carry a new release
+      # version, strictly greater by SemVer than the one `release` has now.
+      # Only a pull request INTO release is checked: a story into `develop`
+      # does not bump, and `main` is entered from `release`, which already did.
+      # `actions/checkout@v4` clones at depth 1 (the merge commit alone), so
+      # `release` and the pull request's head are fetched here by name rather
+      # than assumed present. It is a step of THIS job, not a job of its own,
+      # because the ruleset requires this job's check (`Lint, test, build`) on
+      # `release` -- a separate job would be a check nothing requires.
+      # src/test/gate.test.js holds this step to that shape.
+      - name: A promotion into release carries a new version
+        if: github.event_name == 'pull_request' && github.base_ref == 'release'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/release:refs/remotes/origin/release "$HEAD_SHA"
+          node scripts/check-release-version.mjs --head "$HEAD_SHA" --base origin/release
+
       - name: Install
         run: npm ci
 

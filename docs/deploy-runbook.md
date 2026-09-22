@@ -1136,4 +1136,9 @@ the general command is exactly what a token of this authority makes easy and wha
 against building.
 
 **What is still the owner's either way: deciding to paste.** Neither route changes that a migration
-reaching the live project is a deliberate act with a sequence — apply, then promote.
+reaching the live project is a deliberate act with a sequence — apply, then promote. **The one
+exception, and it inverts the order: a file that takes away something the production bundle still
+uses.** `0051` (#419) withdraws `invitations.expires_at` from the client's insert grant, and every
+bundle before #419 sends that column, so its sequence is promote, then apply; `0050`, its other
+half, went first. Such a file says so in its first lines — read a migration's header before
+applying it, not only its filename.

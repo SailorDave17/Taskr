@@ -7,7 +7,18 @@
   #34 (chores, which inherits the column-grant convention), #36 (assignment, which is the first
   to make the convention's rule structural as well as procedural) and **#62 (per-member sign-in,
   which retires device auth entirely)**
-- Status: **`0001`–`0049` are ALL applied to the live project** (`0049` on 2026-09-18 in #481's own
+- Status: **`0001`–`0050` are applied to the live project, and `0051` is NOT — by design, until the
+  `develop → release` promotion carrying #419's client** (owner decision at #419's pickup: `0051`
+  withdraws `expires_at` from the client's insert grant, and the bundle in production until that
+  promotion still sends it, so applying it first would refuse every mint there — see the #419
+  section). `0050` on 2026-09-21 in #419's own session, before its PR opened, at md5
+  `9dc2ca885206fcaee35f99dff6b8e4e7` (`4718 characters, 2 statements`), read back identical — a
+  column default that **`npm run check:live` cannot see**, *measured* **77 of 78** before the apply
+  (the one red `delete-account`, #432's undeployed function) and the same after, and that
+  `npm run probe:live-grants` cannot see either — **20 of 21** on both sides, the one DIFF being
+  #419's own `invitations.expires_at` row, RED as `ar` until `0051`; the read-only catalog query
+  in the #419 section read the default absent before and `(now() + '168:00:00'::interval)` after.
+  `0049` on 2026-09-18 in #481's own
   session, before its PR opened, at md5 `41ae68f8964e592d590f338f246aa64a` (`15157 characters,
   15 statements`), read back identical — a table the client reads, so `npm run check:live` moved
   *measured* **75 of 77 → 77 of 77** on the apply (the second red was a hand list, see the #481
@@ -2341,8 +2352,12 @@ the stated reason. What it did not name:
   exists. And, since `0041`, **`0040`**, which carries the `redeem_invitation` body `0041` superseded:
   re-pasted alone it takes the widened whitespace normalisation away and a code pasted with its
   line ending is refused again (*measured under #173, both directions in one run in
-  `invitationWhitespace.pglite.test.js`*). `check:live` cannot see a function body, so the reversion
-  is silent to it too; the repair is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
+  `invitationWhitespace.pglite.test.js`*). And, since `0051`, `0040` reverts a GRANT as well as a
+  body: re-pasted alone it hands `invitations.expires_at` back to the client's insert, so a phone may
+  choose an invitation's expiry again (*asserted under #419, both directions in
+  `invitationExpiry.pglite.test.js`*; `0050`'s default survives the re-paste). `check:live` cannot
+  see a function body or an insert grant, so the reversion is silent to it too — `probe:live-grants`
+  sees the grant; the repair is re-pasting the newest file. *(This bullet read "every other file here is" with no qualifier
   until 2026-09-02.)* Clearing `claimed_by`
   is correct exactly once; a second paste clears the identities the Edge Function has since written
   and locks the household out with no client-side recovery.
@@ -2879,6 +2894,68 @@ it is doled out — create a logic to account for that.* The logic is in
   full suite does not run (integration config) and that the overlay's list of six did not name;
   corrected in the same commit. `probe:live-grants` **20 of 20** after, its new
   `chore_assignment_history` row reading the expected absence.
+
+## An invitation's expiry is the database's clock — #419, 2026-09-21
+
+`0040` gave `invitations.expires_at` no default and granted it to the client's insert, so
+`mintInvitation` computed it on the phone — `new Date()` plus seven days — while `created_at` was the
+server's `now()`. Two clocks on one row, compared only by `invitations_expires_after_creation`: a
+phone more than a week behind broke that check (the organizer read the raw constraint message), and
+one ahead lengthened the code past the seven days the card and the share message promise. Filed from
+#172's review fan-out, finding 11 of 12.
+
+- **Measured before anything was written** (read-only, 2026-09-21): all **6** invitations ever
+  minted were off 168 hours, by **−238 ms to +1,699 ms** — the negatives the request's own latency,
+  the positive a phone running ahead. Small in practice, and still no row kept the promise exactly.
+  The live session zone read `UTC`, with no role- or database-level `TimeZone` setting.
+- **The route (`0050`).** A column default, `now() + interval '168 hours'` — AC 1's first option,
+  argued in the file: it is how `created_at` is already stamped, so both stamps are one
+  transaction's `now()` and differ by exactly the interval; the mint stays an ordinary insert under
+  `0040`'s policies, where a `security definer` function would bypass row-level security and have to
+  re-implement `invitations_insert_organizer` in its body; and it is additive, which is what made the
+  sequencing below possible. **Hours, not `'7 days'`**: an interval's day field is calendar days in
+  the session's zone, so across a daylight-saving change `'7 days'` is 167 or 169 hours; a
+  time-field interval is the same number of seconds under every zone, which is what the client's
+  old arithmetic was.
+- **The withdrawal (`0051`).** Re-states the client's whole surface on the table in `0040`'s form —
+  revoke from `authenticated`, `anon` and `public`, then grant by name — with INSERT on three
+  columns (`household_id`, `token_hash`, `created_by_member_id`). SELECT (nine columns) and UPDATE
+  (`withdrawn_at`) are unchanged. After it a statement naming `expires_at` is refused at the
+  privilege layer, so "the client no longer sends it" is the database's rule and not one module's.
+- **Two files, and the order is the point** (owner decision at #419's pickup, at a clickable
+  question). Minting is live in production and the bundle there sends `expires_at`: applying
+  `0051` before the promotion refuses every one of its mints (`permission denied for table
+  invitations`), and the new bundle without `0050` fails `not null`. `0050` is safe under both
+  bundles, so the order is **`0050`, promote, `0051`**. Between them, `probe:live-grants` reads
+  **20 of 21** — the new `invitations.expires_at` row expecting `r` and reading `ar` — which is the
+  deliberate red for that window, and the old bundle's value is still accepted (it is what production
+  sent before `0050` too).
+- **Instruments.** `src/test/invitationExpiry.pglite.test.js` mints through `mintInvitation` itself
+  — its own payload, inserted the way PostgREST inserts it — with the device clock eight days behind
+  and eight ahead, and reads a stored lifetime of exactly 604,800 s with `created_at` inside the
+  database's own clock bracket. Its positive controls: the pre-#419 row on the same clock is refused
+  by the check or stretched to fifteen days under `0050` alone; the new row is refused `not null`
+  before `0050`; an honest row naming `expires_at` is accepted before `0051` and refused after. The
+  default is held equal to `INVITATION_LIFETIME_DAYS` by comparing its catalog deparse with the
+  constant. `check:live` is blind to both files — it reads, and neither changes what a read sees.
+  The live instrument for `0050` is `pg_get_expr` on the column default; for `0051` it is
+  `probe:live-grants`' row plus `has_column_privilege('authenticated', 'public.invitations',
+  'expires_at', 'INSERT')`, with `household_id` (granted on both sides) and `created_at` (granted on
+  neither) as the controls.
+- **Re-paste hazard.** Re-pasting `0040` after `0051` hands `expires_at` back to the client's insert,
+  because `0040`'s revoke-then-grant is `0051`'s shape with the fourth column in it; `0050`'s default
+  survives the re-paste (`create table if not exists` skips its whole statement). Re-paste `0051`
+  after it. The pglite suite asserts both directions.
+- **Applied: `0050`**, on 2026-09-21 from #419's own session, before the PR opened: `npm run
+  migrate:live`, 2 statements, md5 `9dc2ca885206fcaee35f99dff6b8e4e7` read back matching the file.
+  The catalog query read the default **absent** before and **`(now() + '168:00:00'::interval)`**
+  after, the column comment naming #419 after, `expires_at` still `not null`, the check unchanged,
+  and the grant still `authenticated=ar` on both sides — `0050` does not touch it. `check:live`
+  **77 of 78** on both sides (the red is `delete-account`, #432's undeployed function);
+  `probe:live-grants` **20 of 21** on both sides.
+- **Not yet applied: `0051`** — after the promotion carrying #419's client reaches production. Its
+  readings go here when it lands: `probe:live-grants` 20 of 21 → 21 of 21, and
+  `has_column_privilege(..., 'expires_at', 'INSERT')` true → false with the two controls unmoved.
 
 ## How the rules are enforced
 

@@ -78,6 +78,13 @@ export const INVITATION_CODE_LENGTH = 10
  * and `0040` refuses an unbounded row outright: `expires_at` is `not null` with
  * a check that it is after `created_at`, because a code that works forever is a
  * credential nobody remembers issuing.
+ *
+ * WHAT THE CARD AND THE SHARE MESSAGE QUOTE, AND NOT WHAT SETS THE EXPIRY —
+ * since #419. The database stamps it: `0050`'s column default is `now() + 168
+ * hours`, and `0051` took the column out of the client's insert grant. So this
+ * number is a promise made on screen about a value the client cannot write,
+ * and `invitationExpiry.pglite.test.js` holds the two equal — change either
+ * one alone and it reddens.
  */
 export const INVITATION_LIFETIME_DAYS = 7
 
@@ -103,8 +110,6 @@ export const INVITATION_LIFETIME_DAYS = 7
  * to change.
  */
 export const INVITATIONS_REDEEMABLE = true
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /**
  * Columns the organizer reads — `token_hash` deliberately not among them.
@@ -243,9 +248,29 @@ export async function hashInvitationCode(code) {
   return `\\x${hex}`
 }
 
-/** When a code minted at `now` stops working. */
-export function invitationExpiryFrom(now = new Date()) {
-  return new Date(now.getTime() + INVITATION_LIFETIME_DAYS * MS_PER_DAY).toISOString()
+/**
+ * The row a mint inserts — the three columns `0051` grants insert on, and no
+ * other. #419.
+ *
+ * NO `expires_at`, as no `created_at`: both stamps are the database's. Until
+ * #419 this module computed the expiry from the phone's clock while the
+ * database stamped `created_at` from its own, so a phone more than a week
+ * behind broke `invitations_expires_after_creation` and one ahead lengthened
+ * the code past the seven days the card promises. `0050` made the expiry a
+ * column default and `0051` withdrew the column from the client's insert
+ * grant, so a key added back here is refused at the privilege layer rather
+ * than quietly trusted.
+ *
+ * Its own pure function so that the pglite suites insert THIS object — the
+ * client's own statement, keys and all — rather than a hand copy that could
+ * keep a column after the module lost it.
+ */
+export function invitationMintRow({ householdId, tokenHash, createdByMemberId }) {
+  return {
+    household_id: householdId,
+    token_hash: tokenHash,
+    created_by_member_id: createdByMemberId,
+  }
 }
 
 /**
@@ -305,19 +330,20 @@ export async function listInvitations(householdId) {
  * resolve against a different household from the one the organizer is looking
  * at. That is the fault #159 measured on `addMember`.
  */
-export async function mintInvitation({ householdId, createdByMemberId, now = new Date() }) {
+export async function mintInvitation({ householdId, createdByMemberId }) {
   if (!householdId) throw new Error('Which household? Minting an invitation must name one.')
   if (!createdByMemberId) throw new Error('An invitation records who minted it.')
 
   const code = generateInvitationCode()
   const { data, error } = await getSupabase()
     .from('invitations')
-    .insert({
-      household_id: householdId,
-      token_hash: await hashInvitationCode(code),
-      created_by_member_id: createdByMemberId,
-      expires_at: invitationExpiryFrom(now),
-    })
+    .insert(
+      invitationMintRow({
+        householdId,
+        tokenHash: await hashInvitationCode(code),
+        createdByMemberId,
+      }),
+    )
     .select(INVITATION_COLUMNS)
     .single()
   if (error) {

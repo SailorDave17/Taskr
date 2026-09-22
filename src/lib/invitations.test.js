@@ -25,7 +25,7 @@ import {
   generateInvitationCode,
   hashInvitationCode,
   invitationDateLabel,
-  invitationExpiryFrom,
+  invitationMintRow,
   invitationShareText,
   listInvitations,
   mintInvitation,
@@ -361,16 +361,38 @@ describe('#172 — whether a code can be spent yet', () => {
   })
 })
 
-describe('#172 — the expiry', () => {
-  it('is seven days after the moment it is minted', () => {
+describe('#419 — the expiry is the database’s, and the client sends no clock', () => {
+  it('the card’s promise is still seven days', () => {
+    // What the card and the share message quote. The DATABASE sets the stored
+    // expiry since `0050`; `invitationExpiry.pglite.test.js` holds the two equal.
     expect(INVITATION_LIFETIME_DAYS).toBe(7)
-    const at = new Date('2026-09-10T12:00:00.000Z')
-    expect(invitationExpiryFrom(at)).toBe('2026-09-17T12:00:00.000Z')
   })
 
-  it('is always after creation, which is what 0040s check constraint demands', () => {
-    const at = new Date('2026-09-10T12:00:00.000Z')
-    expect(new Date(invitationExpiryFrom(at)).getTime()).toBeGreaterThan(at.getTime())
+  it('the mint row carries exactly the three columns 0051 grants insert on', () => {
+    expect(invitationMintRow({ householdId: 'h1', tokenHash: '\\x00', createdByMemberId: 'm1' })).toEqual({
+      household_id: 'h1',
+      token_hash: '\\x00',
+      created_by_member_id: 'm1',
+    })
+  })
+
+  it('and is the same row whatever this device’s clock says', () => {
+    // The #419 defect was a row that depended on the phone's date. With the
+    // clock moved a month either way the row must not move at all — there is
+    // nothing in it for a clock to reach.
+    const build = () => invitationMintRow({ householdId: 'h1', tokenHash: '\\x00', createdByMemberId: 'm1' })
+    const honest = build()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-08-11T12:00:00.000Z'))
+      const behind = build()
+      vi.setSystemTime(new Date('2026-10-11T12:00:00.000Z'))
+      const ahead = build()
+      expect(behind).toEqual(honest)
+      expect(ahead).toEqual(honest)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -441,29 +463,27 @@ describe('#172 — what each write actually sends', () => {
     await expect(listInvitations(null)).rejects.toThrow(/must name one/)
   })
 
-  it('mints with exactly the four columns 0040 grants insert on', async () => {
+  it('mints with exactly the three columns 0051 grants insert on', async () => {
     const client = stubClient({ single: { id: 'i1', household_id: 'h1' } })
     const { code, invitation } = await mintInvitation({
       householdId: 'h1',
       createdByMemberId: 'm1',
-      now: new Date('2026-09-10T12:00:00.000Z'),
     })
     expect(invitation).toEqual({ id: 'i1', household_id: 'h1' })
     expect(code).toMatch(new RegExp(`^[${INVITATION_ALPHABET}]{${INVITATION_CODE_LENGTH}}$`))
 
     const [payload] = argsOf(client, 'insert')
-    // The exact grant: `insert (household_id, token_hash, created_by_member_id,
-    // expires_at)`. A fifth key here would be refused at the privilege layer.
-    expect(Object.keys(payload).sort()).toEqual([
-      'created_by_member_id',
-      'expires_at',
-      'household_id',
-      'token_hash',
-    ])
-    expect(payload.household_id).toBe('h1')
-    expect(payload.created_by_member_id).toBe('m1')
-    expect(payload.expires_at).toBe('2026-09-17T12:00:00.000Z')
-    expect(payload.token_hash).toBe(await hashInvitationCode(code))
+    // The exact grant since `0051` (#419): `insert (household_id, token_hash,
+    // created_by_member_id)`. `expires_at` was the fourth until then, computed
+    // on this device; a key naming it now is refused at the privilege layer.
+    expect(Object.keys(payload).sort()).toEqual(['created_by_member_id', 'household_id', 'token_hash'])
+    expect(payload).toEqual(
+      invitationMintRow({
+        householdId: 'h1',
+        tokenHash: await hashInvitationCode(code),
+        createdByMemberId: 'm1',
+      }),
+    )
   })
 
   it('sends the HASH and never the code', async () => {

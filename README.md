@@ -311,7 +311,8 @@ reporting success.
 
 **What is still not automated, and deliberately: applying a migration is not coupled to a merge.**
 Both routes are a separate act somebody chooses, in a stated order — apply, then promote
-`develop` to `release`. #185 gave the paste a command; it did not give it a trigger. *That
+`develop` to `release` (inverted once: `0051`, #419, takes a column away from the client's insert
+that every earlier bundle still writes, so it is applied AFTER the promotion — its header says so). #185 gave the paste a command; it did not give it a trigger. *That
 distinction is the whole reason this paragraph survives: coupling a merge to a schema change is a
 real decision rather than a tidy-up, and it has not been taken. The 2026-08-09 outage in
 [`docs/access-model.md`](docs/access-model.md) is what happens when the two are coupled the other

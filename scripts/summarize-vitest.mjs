@@ -100,19 +100,91 @@ export function summaryLines(report) {
   return lines
 }
 
+/** The files the time budget sums — #555. */
+export const PGLITE_FILE = /\.pglite\.test\.js$/
+
+/**
+ * The summed wall time of every PGlite file, in seconds — #555 AC 2.
+ *
+ * Read from each file's `duration`, which `vitest-json-file-durations.mjs` adds
+ * and the stock JSON reporter does not carry. Deliberately NOT
+ * `endTime - startTime`: that span starts at the first test, so a database
+ * booted in `beforeAll` is outside it (that reporter's header has the
+ * measurement). A file without `duration` makes the whole reading unproven
+ * rather than cheaper.
+ *
+ * `{ ok: false }` when there is nothing honest to sum: no PGlite file at all
+ * (a budget over nothing passes every time), or one without its duration.
+ */
+export function pgliteTime(report) {
+  const files = (report.testResults ?? []).filter((file) => PGLITE_FILE.test(String(file.name ?? '')))
+  if (files.length === 0) {
+    return { ok: false, reason: 'the report names no *.pglite.test.js file, so there is nothing to time' }
+  }
+  const untimed = files.filter((file) => !Number.isFinite(file.duration))
+  if (untimed.length > 0) {
+    return {
+      ok: false,
+      reason:
+        `${untimed.length} of ${files.length} PGlite file(s) carry no duration — ` +
+        'was the report written by scripts/vitest-json-file-durations.mjs?',
+    }
+  }
+  const seconds = files.reduce((sum, file) => sum + file.duration, 0) / 1000
+  const slowest = [...files].sort((a, b) => b.duration - a.duration).slice(0, 5)
+  return { ok: true, files: files.length, seconds, slowest }
+}
+
+/** The budget verdict and its rendering — within or over the ceiling. */
+export function budgetLines(report, ceilingSeconds) {
+  const time = pgliteTime(report)
+  if (!time.ok) return { code: 2, lines: [`PGlite time budget: UNPROVEN — ${time.reason}`] }
+  const over = time.seconds > ceilingSeconds
+  const lines = [
+    `PGlite time budget: ${over ? 'OVER' : 'within'} — ${time.seconds.toFixed(1)} s across ${time.files} ` +
+      `files, ceiling ${ceilingSeconds} s` +
+      (over ? ` (${(time.seconds - ceilingSeconds).toFixed(1)} s over)` : ''),
+    '  slowest:',
+    ...time.slowest.map((file) => `    ${(file.duration / 1000).toFixed(1).padStart(7)} s  ${file.name}`),
+  ]
+  return { code: over ? 1 : 0, lines }
+}
+
+/** `<report> [--budget <seconds>]`, or an error naming what was wrong. */
+export function parseArgs(argv) {
+  const rest = [...argv]
+  let budget = null
+  const at = rest.indexOf('--budget')
+  if (at !== -1) {
+    const value = rest[at + 1]
+    budget = Number(value)
+    if (value === undefined || !Number.isFinite(budget) || budget <= 0) {
+      return { error: `--budget needs a positive number of seconds, got ${value ?? 'nothing'}` }
+    }
+    rest.splice(at, 2)
+  }
+  if (rest.length !== 1) return { error: null }
+  return { path: rest[0], budget }
+}
+
 /**
  * Read a report and render it. Returns the process exit code.
  *
  * An unreadable or absent file is an ERROR, never an empty summary: the run
  * that never wrote a report and the run that found nothing wrong produce the
  * same silence otherwise, and the second is the one a reader believes.
+ *
+ * With `--budget <seconds>` it also sums the PGlite files' time and exits 1
+ * when the sum passes the ceiling (#555), and 2 when it cannot be read.
  */
 export function main(argv = process.argv.slice(2), out = console.log, err = console.error) {
-  const path = argv[0]
-  if (!path) {
-    err('usage: node scripts/summarize-vitest.mjs <vitest-json-report>')
+  const args = parseArgs(argv)
+  if (!args.path) {
+    if (args.error) err(args.error)
+    err('usage: node scripts/summarize-vitest.mjs <vitest-json-report> [--budget <seconds>]')
     return 2
   }
+  const { path } = args
   let raw
   try {
     raw = fs.readFileSync(path, 'utf8')
@@ -130,7 +202,12 @@ export function main(argv = process.argv.slice(2), out = console.log, err = cons
     return 2
   }
   for (const line of summaryLines(report)) out(line)
-  return verdictOf(report).ok ? 0 : 1
+  const verdictCode = verdictOf(report).ok ? 0 : 1
+  if (args.budget === null) return verdictCode
+  const budget = budgetLines(report, args.budget)
+  out('')
+  for (const line of budget.lines) out(line)
+  return Math.max(verdictCode, budget.code)
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('summarize-vitest.mjs')) {

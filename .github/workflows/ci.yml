@@ -64,8 +64,21 @@ jobs:
       # `vitest run` exits non-zero when it finds no test files, and
       # passWithNoTests is pinned to false in vite.config.js so that stays true
       # if the default ever changes. src/test/gate.test.js asserts the pin.
+      # #555 -- it also writes the JSON report the next step reads, through a
+      # reporter that adds each file's own duration (the stock one leaves a
+      # beforeAll out; the reporter's header has the measurement).
       - name: Test
-        run: npm test
+        run: npm test -- --reporter=default --reporter=./scripts/vitest-json-file-durations.mjs --outputFile.json=vitest-report.json
+
+      # #555 -- the summed wall time of every *.pglite.test.js file stays under
+      # a ceiling, so the PGlite work in the tune-up (#557) is a gain that
+      # stays. 3200 s is CI's highest reading over the 12 green runs before
+      # 2026-09-22 (2,317-2,915 s, read off each run's per-file lines) plus
+      # about 10% -- an owner decision at #555's pickup, over the 4,400 s the
+      # issue named, which was a local run with 23 workers contending. The
+      # story that makes PGlite faster lowers it.
+      - name: PGlite test time stays under its ceiling
+        run: node scripts/summarize-vitest.mjs vitest-report.json --budget 3200
 
       - name: Build
         run: npm run build

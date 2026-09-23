@@ -13,7 +13,8 @@ has any reason to trust.
 | Step | Command | Fails when |
 |---|---|---|
 | Lint | `npm run lint` | any ESLint error |
-| Test | `npm test` (`vitest run`) | any failing test, **or zero tests found** |
+| Test | `npm test` (`vitest run`), writing `vitest-report.json` through `scripts/vitest-json-file-durations.mjs` (#555) | any failing test, **or zero tests found** — including the #555 Brotli budget on the entry and App chunks, which `src/test/pwaBuild.test.js` holds against a real production build |
+| PGlite time budget (#555) | `node scripts/summarize-vitest.mjs vitest-report.json --budget 3200` | the summed wall time of every `*.pglite.test.js` file passes 3,200 s, or the report cannot say (no PGlite file, or a file without its duration) |
 | Build | `npm run build` | Vite build error |
 | Artefact assertion | inline `test -f` | `dist/index.html`, `dist/manifest.webmanifest` or `dist/sw.js` missing |
 | Promotion version (#540) | `node scripts/check-release-version.mjs`, **on a pull request into `release` only** — it runs first, before Install | the pull request head's `package.json` version is not strictly greater by SemVer than `release`'s; skipped on every other event |

@@ -44,6 +44,9 @@ case-study/
 Thumbs.db
 
 # Logs
+# #555 — the JSON test report CI's Test step writes for the PGlite time budget;
+# the same command run locally writes it to the root too.
+/vitest-report.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { signInAddressFor } from '../lib/household.js'
@@ -2696,6 +2696,61 @@ describe('#540 AC 6 — the promotion version check is wired into the required j
       /^\s+if:\s*(.+)$/m,
     )[1]
     expect(condition).toMatch(/develop|\|\|/)
+  })
+})
+
+// #555 AC 2 — CI holds the summed PGlite time under a ceiling.
+//
+// scripts/summarize-vitest.test.js proves the sum and the exit codes. What only
+// this suite can see is the WIRING, and it has three ways to be wrong with every
+// test green: the budget step missing or in a job the ruleset does not require,
+// the Test step not writing the report the budget step reads (the budget then
+// exits 2 on a missing file, or 0 on a stale one), and the Test step writing the
+// STOCK JSON report, which leaves every beforeAll out of the sum.
+describe('#555 AC 2 — the PGlite time budget runs in the required job, on the report the Test step writes', () => {
+  const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+  // Comments stripped for #243's reason: the step's own comment names the
+  // ceiling it replaced.
+  const code = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+
+  const stepBlock = (text, name) => {
+    const start = text.indexOf(`- name: ${name}\n`)
+    if (start === -1) return null
+    const next = text.indexOf('\n      - ', start + 1)
+    return text.slice(start, next === -1 ? undefined : next)
+  }
+
+  const test = stepBlock(code, 'Test')
+  const budget = stepBlock(code, 'PGlite test time stays under its ceiling')
+
+  it('POSITIVE CONTROL: both steps were found', () => {
+    expect(test, 'no Test step in ci.yml').not.toBeNull()
+    expect(budget, 'no PGlite time budget step in ci.yml').not.toBeNull()
+    expect(test).toMatch(/\brun:\s*npm test\b/)
+  })
+
+  it('the Test step writes its JSON report through the reporter that carries each file’s duration', () => {
+    expect(test).toMatch(/--reporter=\.\/scripts\/vitest-json-file-durations\.mjs/)
+    expect(test).toMatch(/--reporter=default/)
+    expect(test).toMatch(/--outputFile\.json=vitest-report\.json/)
+    expect(existsSync(resolve(process.cwd(), 'scripts/vitest-json-file-durations.mjs'))).toBe(true)
+  })
+
+  it('the budget step reads that same report, with a ceiling, after the Test step', () => {
+    const ceiling = budget.match(/node scripts\/summarize-vitest\.mjs vitest-report\.json --budget (\d+)\b/)
+    expect(ceiling, 'the budget step does not run the summary with --budget on vitest-report.json').not.toBeNull()
+    expect(Number(ceiling[1])).toBeGreaterThan(0)
+    expect(code.indexOf(budget)).toBeGreaterThan(code.indexOf(test))
+    // No `if:` on it — a condition is how a step runs on some events only.
+    expect(budget).not.toMatch(/^\s+if:/m)
+  })
+
+  it('lives in the one job whose check the ruleset requires', () => {
+    expect(code.match(/^\s+runs-on:/gm) ?? []).toHaveLength(1)
+    expect(code.indexOf('name: Lint, test, build')).toBeLessThan(code.indexOf(budget))
   })
 })
 

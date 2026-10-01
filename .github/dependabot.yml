@@ -1,0 +1,31 @@
+# Dependabot version updates (#569). Weekly, against develop, the integration
+# branch. Security updates are switched on in the repository's settings, not
+# here, and open against the default branch, which is develop too.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    groups:
+      # react and react-dom peer each other at an exact version. Opened as
+      # separate PRs, either one alone writes a lockfile `npm ci` refuses
+      # (ERESOLVE), so they move together. A group's `applies-to` covers
+      # version updates or security updates, never both, hence two entries.
+      react:
+        applies-to: version-updates
+        patterns:
+          - react
+          - react-dom
+      react-security:
+        applies-to: security-updates
+        patterns:
+          - react
+          - react-dom
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly

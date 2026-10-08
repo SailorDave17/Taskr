@@ -1334,7 +1334,7 @@ describe('#19 — no real household name reaches version control', () => {
   // each is asserted below to still be NEEDED — an exemption whose subject has
   // left is a hole waiting for somebody to reuse the string.
   const NOT_NAMES = {
-    Dishes: 'a chore title in App.test.jsx',
+    Dishes: 'a chore title in App.chores.test.jsx and App.shell.test.jsx',
     // #173 — the display name `redeem_invitation` writes on the member row it
     // creates (`0040`), which the recipient replaces with their own (#191). It
     // sits in a `display_name:` position in the redemption fixtures and is
@@ -1398,7 +1398,7 @@ describe('#19 — no real household name reaches version control', () => {
     Laundry: 'a chore title in reassignment.pglite.test.js',
     Vacuuming: 'a chore title in reassignment.pglite.test.js',
     Taskr: 'the application name',
-    // #47 — the three tab labels. They are literals in App.test.jsx because
+    // #47 — the three tab labels. They are literals in App's tests because
     // the tests click the real control by its accessible name, which is the
     // point: a helper that set the view directly would walk past the
     // navigation criterion 11 is about. Declared rather than lower-cased,
@@ -1421,7 +1421,7 @@ describe('#19 — no real household name reaches version control', () => {
     'Sign out everywhere': 'a button label — the every-session sign-out control',
     'Keep them': 'a button label — backing out of the sign-out-everywhere confirm',
     // #440 — the reason phrase of an HTTP 500, which is what the auth server's
-    // refusal of a Sign out everywhere carries in App.test.jsx's fixture.
+    // refusal of a Sign out everywhere carries in App.signIn.test.jsx's fixture.
     'Internal Server Error': 'an HTTP 500 reason phrase — the refused logout in the #440 sign-out tests',
     // #164 — the household switcher's ACCESSIBLE name. It is a literal in the
     // tests because they find the control by that name, which is the point:
@@ -1627,7 +1627,11 @@ describe('#19 — no real household name reaches version control', () => {
     // matching — a directory rename, a move to .ts, a git invocation that
     // returns nothing. An always-empty scan reads exactly like a clean tree.
     expect(corpus.length).toBeGreaterThan(20)
-    expect(corpus).toContain('src/App.test.jsx')
+    // #553 — App's tests are one file per surface plus a shared harness; the
+    // harness carries fixtures too and lives outside the `*.test.jsx` pattern,
+    // so it is named here rather than assumed covered by `src/test/`.
+    expect(corpus).toContain('src/App.roster.test.jsx')
+    expect(corpus).toContain('src/test/support/appHarness.jsx')
     expect(corpus).toContain('src/test/migrations.pglite.test.js')
     expect(corpus).toContain('supabase/migrations/0001_household_and_roster.sql')
     // BOTH corpora, named individually. The `*.corpus.js` clause replaced a
@@ -2751,6 +2755,81 @@ describe('#555 AC 2 — the PGlite time budget runs in the required job, on the 
   it('lives in the one job whose check the ruleset requires', () => {
     expect(code.match(/^\s+runs-on:/gm) ?? []).toHaveLength(1)
     expect(code.indexOf('name: Lint, test, build')).toBeLessThan(code.indexOf(budget))
+  })
+})
+
+// #553 AC 2 — CI holds every non-PGlite file under a per-file ceiling.
+//
+// The same three wiring faults as the PGlite budget above, for the step that
+// keeps a single test file from becoming the floor under the run again. It is a
+// step of its own rather than a second flag on that one, so a red run names
+// which ceiling it was — the assertion that it stays separate is the last one.
+describe('#553 AC 2 — the per-file ceiling runs in the required job, on the report the Test step writes', () => {
+  const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+  const code = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+  const stepBlock = (text, name) => {
+    const start = text.indexOf(`- name: ${name}\n`)
+    if (start === -1) return null
+    const next = text.indexOf('\n      - ', start + 1)
+    return text.slice(start, next === -1 ? undefined : next)
+  }
+  const test = stepBlock(code, 'Test')
+  const perFile = stepBlock(code, 'No test file outside PGlite runs past its ceiling')
+  const pglite = stepBlock(code, 'PGlite test time stays under its ceiling')
+
+  it('POSITIVE CONTROL: the step was found', () => {
+    expect(perFile, 'no per-file ceiling step in ci.yml').not.toBeNull()
+    expect(test, 'no Test step in ci.yml').not.toBeNull()
+  })
+
+  it('reads the Test step’s report with a ceiling, after the Test step, on every event', () => {
+    const ceiling = perFile.match(/node scripts\/summarize-vitest\.mjs vitest-report\.json --file-ceiling (\d+)\b/)
+    expect(ceiling, 'the step does not run the summary with --file-ceiling on vitest-report.json').not.toBeNull()
+    expect(Number(ceiling[1])).toBeGreaterThan(0)
+    expect(code.indexOf(perFile)).toBeGreaterThan(code.indexOf(test))
+    expect(perFile).not.toMatch(/^\s+if:/m)
+  })
+
+  it('lives in the one job whose check the ruleset requires', () => {
+    expect(code.match(/^\s+runs-on:/gm) ?? []).toHaveLength(1)
+    expect(code.indexOf('name: Lint, test, build')).toBeLessThan(code.indexOf(perFile))
+  })
+
+  it('is its own step, and the PGlite step does not carry the per-file flag', () => {
+    expect(pglite).not.toMatch(/--file-ceiling/)
+    expect(perFile).not.toMatch(/--budget/)
+  })
+})
+
+// #553 — every App test file imports the shared harness FIRST.
+//
+// The harness's `vi.mock` calls are registered when it is evaluated, so a
+// module a test file imports ahead of it loads unmocked. Measured on #553: a
+// `listChores` imported ahead of the harness was the REAL function while App,
+// imported inside the harness afterwards, got the fake. Nothing goes red when
+// that happens — the test asserts on one function and the app calls the other —
+// so the order is held here rather than left to the harness's header.
+describe('#553 — every App test file imports the shared harness first', () => {
+  const HARNESS = './test/support/appHarness.jsx'
+  const appTests = readdirSync(resolve(process.cwd(), 'src'))
+    .filter((name) => /^App\.\w+\.test\.jsx$/.test(name))
+    .map((name) => ({
+      name,
+      firstImport: /^import .* from '([^']+)'$/m.exec(readFileSync(resolve(process.cwd(), 'src', name), 'utf8'))?.[1],
+    }))
+
+  it('POSITIVE CONTROL: finds the surface files, and no unsplit App.test.jsx beside them', () => {
+    expect(appTests.length).toBeGreaterThanOrEqual(8)
+    expect(appTests.map((file) => file.name)).toContain('App.shell.test.jsx')
+    expect(existsSync(resolve(process.cwd(), 'src/App.test.jsx'))).toBe(false)
+  })
+
+  it('the first import of each is the harness', () => {
+    const wrong = appTests.filter((file) => file.firstImport !== HARNESS)
+    expect(wrong.map((file) => `${file.name} imports ${file.firstImport} first`)).toEqual([])
   })
 })
 

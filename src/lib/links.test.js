@@ -11,7 +11,7 @@ describe('published links (#451)', () => {
 
   it('is the exact address madcowsailing.com #66 published', () => {
     // Pinned as a literal ON PURPOSE, and it is the only place one appears.
-    // App.test.jsx asserts the footer renders whatever this constant says —
+    // App.shell.test.jsx asserts the footer renders whatever this constant says —
     // the right question for it, but it moves WITH the constant, so a silent
     // edit to some other page would redden nothing there. Measured on #451:
     // changing the host reddened 1 of 578, and that 1 was this file.

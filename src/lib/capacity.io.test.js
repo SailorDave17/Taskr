@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // them a caller. capacity.test.js covers only the pure half (the period
 // boundary, effectiveCapacity, capacitiesFor, the normalizer);
 // capacity.pglite.test.js issues raw SQL without ever importing the module; and
-// App.test.jsx now stubs all three.
+// App's test harness (src/test/support/appHarness.jsx) now stubs all three.
 //
 // A mutation pass could not have found that — mutation proves the tests you have
 // can fail and says nothing about code no test reaches

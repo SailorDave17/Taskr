@@ -24,7 +24,7 @@ const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[
 //
 // The re-read half of AC 6 is NOT tested here and cannot be: the re-read is
 // App's `mutate()`, and this component only calls the handler it is given. It
-// is covered in src/App.test.jsx, which is where deleting the re-read turns
+// is covered in src/App.chores.test.jsx, which is where deleting the re-read turns
 // something red.
 
 const chores = [
@@ -2039,7 +2039,7 @@ describe('#305 — a chore that did not get done, on the Chores tab', () => {
 // free/busy-only connection gets the consent step and never a list, that
 // picking an event prefills the ONE form and marks it, and that Add then
 // reaches `onImportEvent` with the event id rather than `onAdd`. The two
-// writes App makes behind that handler — and their order — are App.test.jsx's.
+// writes App makes behind that handler — and their order — are App.chores.test.jsx's.
 // Names are synthetic — see #19.
 describe('#101 — import from calendar', () => {
   const FREEBUSY = 'https://www.googleapis.com/auth/calendar.freebusy'

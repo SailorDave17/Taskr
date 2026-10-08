@@ -1,6 +1,6 @@
 // #106 — should a calendar read that just landed write the week? The policy
 // the owner decided on 2026-09-08 (docs/capacity-model.md), tested where it is
-// pure. What App does with a `true` is App.test.jsx's; what the roster shows
+// pure. What App does with a `true` is App.calendar.test.jsx's; what the roster shows
 // for the row it writes is Roster.test.jsx's; what the constraint and the
 // trigger admit is calendarAutoApply.pglite.test.js's. This file is the
 // decision, its bound, and the anchor the bound is measured from.

@@ -235,7 +235,7 @@ household* over *Open Taskr* — the verb is the thing the visitor is deciding.
 
 **The return leg needs no flag.** The confirmation email's link lands on the origin the signup came
 from (`confirmationRedirectTo`, #129 — the origin only, never the query), and a signed-in person with
-no household gets *Name the household* on the bare root. `App.test.jsx`'s #343 describe proves it on
+no household gets *Name the household* on the bare root. `App.signIn.test.jsx`'s #343 describe proves it on
 the bare root with a session and no household; a confirmation followed from a second device is the
 same boot.
 

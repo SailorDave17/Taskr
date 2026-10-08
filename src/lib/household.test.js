@@ -1592,7 +1592,7 @@ describe('#341 — the invitation path, at the data layer', () => {
     })
 
     it('#155 AC 5: reads only the fragment, and the consent reader reads only the query — one URL, three readers, no overlap', async () => {
-      // The pure half of the measurement App.test.jsx makes on a boot: each
+      // The pure half of the measurement App.roster.test.jsx makes on a boot: each
       // reader sees exactly its own channel of a URL carrying a recovery in the
       // fragment and a calendar consent in the query, and the sign-in-return
       // reader, which reads both channels, sees nothing of either.

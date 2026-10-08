@@ -28,7 +28,7 @@
 
 /**
  * The key. Deliberately NOT `taskr.household` or `taskr.members` — those two
- * names are asserted absent by App.test.jsx's "reads the household from the
+ * names are asserted absent by App.roster.test.jsx's "reads the household from the
  * server on every load" test, whose subject is the household ROW and the
  * ROSTER. Reusing either would make that test pass or fail for a reason that
  * has nothing to do with what it is about, and picking a non-colliding key to

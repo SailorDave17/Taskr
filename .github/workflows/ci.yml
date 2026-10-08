@@ -80,6 +80,19 @@ jobs:
       - name: PGlite test time stays under its ceiling
         run: node scripts/summarize-vitest.mjs vitest-report.json --budget 3200
 
+      # #553 -- no file outside the PGlite set runs past 12 s on its own, so no
+      # single file is a floor under the run's wall time. vitest gives a file one
+      # worker; App.test.jsx was one file of 432 tests until #553 split it by
+      # surface. 12 s was the owner's decision at #553's pickup, from this
+      # runner's readings, not a local one: the unsplit file read 17.0, 21.8 and
+      # 18.9 s on the last three green develop runs (2026-09-23 to 2026-10-07; it
+      # read 46 s only in a local run with 23 workers contending), so 12 s catches a
+      # file that size every time, and the slowest other file read 7.0 s at most
+      # (pwaBuild.test.js), which leaves it room for this runner's ~30% swing
+      # between runs. A step of its own, so a red run says which ceiling it was.
+      - name: No test file outside PGlite runs past its ceiling
+        run: node scripts/summarize-vitest.mjs vitest-report.json --file-ceiling 12
+
       - name: Build
         run: npm run build
 

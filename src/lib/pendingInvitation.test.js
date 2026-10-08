@@ -5,7 +5,7 @@
 // nothing is stored for a blank or impossible value, that junk is discarded on
 // read, and that a browser refusing storage degrades to "nothing held" rather
 // than a throw. What it cannot answer is WHEN the invitation is applied — that
-// is App's, and `App.test.jsx` asserts both halves of the per-browser
+// is App's, and `App.roster.test.jsx` asserts both halves of the per-browser
 // guarantee.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -87,7 +87,7 @@ describe('#173 — holding an invitation on this device', () => {
   })
 
   it('holds exactly one key, and never the household or the roster', () => {
-    // `App.test.jsx`'s "reads the household from the server on every load"
+    // `App.roster.test.jsx`'s "reads the household from the server on every load"
     // asserts `taskr.household` and `taskr.members` absent; this must not be
     // either of them, and must not be a second key.
     writePendingInvitation({ code: 'k7m3qp4rwn', name: 'Placeholder Three' })

@@ -924,7 +924,7 @@ a wrong value implies a person, a default implies none.
 - **How the recurrence is guarded.** The scope-asserting tests are the deliverable, not a
   by-product. `household.test.js`'s fake now records the **options** (`{ op: 'signOut', options }`),
   because the old one took no argument and a test asserting the call happened passed identically
-  under either scope — which is precisely how this shipped unnoticed for a month. `App.test.jsx`
+  under either scope — which is precisely how this shipped unnoticed for a month. `App.roster.test.jsx`
   walks from the tab to the tap and asserts what reaches the data layer, since a unit test cannot
   answer whether the button passes anything at all (cairn: `exported-is-not-reachable`).
 

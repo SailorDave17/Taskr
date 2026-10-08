@@ -5,7 +5,7 @@ import Shopping from './Shopping.jsx'
 // #353 — the Shop tab: what a person sees and which handler a gesture reaches.
 //
 // Everything about WHICH household is read, the re-read on arrival and the
-// error strip's wiring is App's and lives in App.test.jsx; what the DATABASE
+// error strip's wiring is App's and lives in App.shopping.test.jsx; what the DATABASE
 // refuses (a delete of a bought item affecting zero rows) is
 // shopping.pglite.test.js's. This file proves the surface: the empty state is
 // a form and not a write, the add form refuses before calling, the item row
@@ -531,7 +531,7 @@ describe('#355 AC 7 — a second tap while the first is in flight', () => {
 // over, that the way out restores the button having written nothing either,
 // and that the confirming tap reaches the handler with the run THIS SCREEN is
 // showing. What happens after the write — the re-read, the new run, the
-// refusal path — is App.test.jsx's, because this component never sees it.
+// refusal path — is App.shopping.test.jsx's, because this component never sees it.
 // ---------------------------------------------------------------------------
 
 const doneShopping = () => screen.getByRole('button', { name: /done shopping/i })
@@ -759,7 +759,7 @@ describe('#357 — a write in flight', () => {
 // which one is chosen in the attribute a screen reader reads, and that a
 // rename is an edit on the heading and not a form somewhere else. WHICH list is
 // chosen after a re-read, and whether the choice survives a tab switch, is
-// App's and lives in App.test.jsx — this component is handed the id.
+// App's and lives in App.shopping.test.jsx — this component is handed the id.
 // ---------------------------------------------------------------------------
 
 /** Two lists, each with its own open run and its own items. */
@@ -975,7 +975,7 @@ describe('#358 AC 4 — renaming, on the heading', () => {
 //
 // The arithmetic (which run, what order, how many, whose name) is
 // groupClosedRuns's and is tested in shopping.test.js; the read and its trigger
-// are App's and are tested in App.test.jsx. What is proved here is the SCREEN:
+// are App's and are tested in App.shopping.test.jsx. What is proved here is the SCREEN:
 // the disclosure is closed until somebody opens it, opening asks for this list's
 // history, only the newest run is open, a row is one compact line with no
 // affordance on it, and nothing counts a person.
@@ -1284,7 +1284,7 @@ describe('#358 AC 8, as #360 leaves it — nothing on this tab DESTROYS a list',
 // a fixture rather than a gesture: App decides which lists this tab is handed
 // (`visibleShoppingLists`) and how many it withheld (`archivedCount`), and this
 // file proves what the tab does with each answer. That App computes them from
-// `partitionShoppingLists` and the toggle is App.test.jsx's.
+// `partitionShoppingLists` and the toggle is App.shopping.test.jsx's.
 // ---------------------------------------------------------------------------
 
 /** Hardware, put away. The stamp is all that distinguishes it. */

@@ -1112,7 +1112,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           // one query this branch DOES own is GoTrue's bad-flow-state return
           // (`source: 'query'`), which carries no `state` and is nobody
           // else's — so that is the case that strips whole. Measured rather
-          // than asserted: App.test.jsx boots on a URL carrying both.
+          // than asserted: App.roster.test.jsx boots on a URL carrying both.
           const { pathname, search } = globalThis.location
           const keepQuery = signInReturn?.source !== 'query' && search
           globalThis.history?.replaceState?.(null, '', keepQuery ? `${pathname}${search}` : pathname)
@@ -1449,7 +1449,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // in `pendingInvitation.js`). What it guarantees is per browser: the same
   // browser applies the code without it being re-typed; a confirmation link
   // opened in a different browser finds nothing here and shows the join form
-  // instead — AC 5, asserted in both directions in `App.test.jsx`.
+  // instead — AC 5, asserted in both directions in `App.roster.test.jsx`.
   //
   // Keyed on `userId`, which `refresh()` sets from the session on every boot
   // and after every sign-in, so one effect covers the returning-from-inbox

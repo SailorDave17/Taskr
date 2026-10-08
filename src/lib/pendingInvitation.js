@@ -33,7 +33,7 @@
  * browser that is not the one the code was typed into — finds nothing here,
  * and the person lands on the no-household screen with the join form, where
  * they type the code again. That is the whole guarantee: same browser,
- * automatic; another browser, once more by hand. `App.test.jsx` asserts both
+ * automatic; another browser, once more by hand. `App.roster.test.jsx` asserts both
  * halves explicitly rather than leaving the second to a passing happy path.
  *
  * THE NAME RIDES WITH IT (owner decision at the design pass, 2026-09-11).
@@ -71,7 +71,7 @@ import { normalizeInvitationCode } from './invitations.js'
 /**
  * The key. Says what it holds — an invitation waiting to be applied — and is
  * deliberately neither `taskr.household` nor `taskr.members`, the two names
- * `App.test.jsx`'s "reads the household from the server on every load" test
+ * `App.roster.test.jsx`'s "reads the household from the server on every load" test
  * asserts absent (the same rule `activeHousehold.js` records).
  */
 const KEY = 'taskr.pendingInvitation'

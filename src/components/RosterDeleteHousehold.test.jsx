@@ -35,7 +35,7 @@ function setup(overrides = {}) {
       periodStart="2026-08-10"
       isOrganizer
       // 5, not the product's 7: a Roster that printed a hardcoded 7 would pass
-      // a fixture of 7 (#430 review). App.test proves App passes the real one.
+      // a fixture of 7 (#430 review). App.households.test.jsx proves App passes the real one.
       deletionGraceDays={5}
       {...handlers}
       {...overrides}

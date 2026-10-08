@@ -1740,7 +1740,7 @@ describe('applying the calendar suggestion — #97', () => {
   })
 
   // #106 — a week the calendar set with nobody tapping. The write is App's
-  // (App.test.jsx); what this file owes is what the person SEES for such a
+  // (App.calendar.test.jsx); what this file owes is what the person SEES for such a
   // row (AC 4) and what their Save on it means.
   describe('a week set automatically from the calendar — #106', () => {
     const autoRow = (minutes, previous) => ({ ...calendarRow(minutes, 'calendar_auto'), previous_minutes: previous })
@@ -2548,7 +2548,7 @@ describe('#172 — the invitation card follows the organizer role', () => {
   it('AC 6 — follows the ROLE it is handed, not the person: the same roster flips with it', () => {
     // At this level the "active household" is whatever `isOrganizer` says, so
     // the component half of AC 6 is that the card tracks the prop in both
-    // directions on one mounted roster. App.test.jsx proves the prop itself is
+    // directions on one mounted roster. App.roster.test.jsx proves the prop itself is
     // computed within the active household.
     const handlers = wired()
     const props = {

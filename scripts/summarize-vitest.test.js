@@ -9,9 +9,11 @@ import path from 'node:path'
 import {
   budgetLines,
   failureLines,
+  fileCeilingLines,
   main,
   parseArgs,
   pgliteTime,
+  slowFiles,
   suiteErrorLines,
   summaryLines,
   verdictOf,
@@ -322,9 +324,125 @@ describe('#555 AC 2 — main --budget', () => {
   })
 
   it('parseArgs reads the path and the ceiling in either order', () => {
-    expect(parseArgs(['r.json', '--budget', '3200'])).toEqual({ path: 'r.json', budget: 3200 })
-    expect(parseArgs(['--budget', '3200', 'r.json'])).toEqual({ path: 'r.json', budget: 3200 })
-    expect(parseArgs(['r.json'])).toEqual({ path: 'r.json', budget: null })
+    expect(parseArgs(['r.json', '--budget', '3200'])).toEqual({ path: 'r.json', budget: 3200, fileCeiling: null })
+    expect(parseArgs(['--budget', '3200', 'r.json'])).toEqual({ path: 'r.json', budget: 3200, fileCeiling: null })
+    expect(parseArgs(['r.json'])).toEqual({ path: 'r.json', budget: null, fileCeiling: null })
+  })
+})
+
+// #553 AC 2 — no file outside the PGlite set runs past a ceiling on its own.
+//
+// The fixture's PGlite file is the slowest in it on purpose: a check that
+// forgot to leave the PGlite files out would report it, and the tests below
+// would see one file over where there is none.
+const perFile = {
+  ...passing,
+  testResults: [
+    { name: 'C:/Taskr/src/test/a.pglite.test.js', status: 'passed', assertionResults: [], duration: 90_000 },
+    { name: 'C:/Taskr/src/App.roster.test.jsx', status: 'passed', assertionResults: [], duration: 4_057 },
+    { name: 'C:/Taskr/src/App.test.jsx', status: 'passed', assertionResults: [], duration: 21_796 },
+    { name: 'C:/Taskr/src/test/pwaBuild.test.js', status: 'passed', assertionResults: [], duration: 7_036 },
+  ],
+}
+
+describe('#553 AC 2 — slowFiles holds every non-PGlite file to the ceiling', () => {
+  it('names the files past the ceiling and leaves the PGlite files out, however slow', () => {
+    const time = slowFiles(perFile, 12)
+    expect(time.ok).toBe(true)
+    expect(time.files).toBe(3)
+    expect(time.over.map((file) => file.name)).toEqual(['C:/Taskr/src/App.test.jsx'])
+  })
+
+  it('a file exactly at the ceiling is within it, and a step under puts it over', () => {
+    expect(slowFiles(perFile, 21.796).over).toEqual([])
+    expect(slowFiles(perFile, 21.795).over).toHaveLength(1)
+  })
+
+  it('reads each file’s own duration, not the stock span', () => {
+    // The stock span says 21 ms; the file's own duration says it ran 21.8 s.
+    const spanned = {
+      ...perFile,
+      testResults: perFile.testResults.map((file) => ({ ...file, startTime: 0, endTime: 21 })),
+    }
+    expect(slowFiles(spanned, 12).over).toHaveLength(1)
+  })
+
+  it('refuses a file with no duration — a stock report is unproven, not quicker', () => {
+    const stock = { ...perFile, testResults: perFile.testResults.map((file) => ({ ...file, duration: undefined })) }
+    const time = slowFiles(stock, 12)
+    expect(time.ok).toBe(false)
+    expect(time.reason).toMatch(/3 of 3 file\(s\) carry no duration/)
+  })
+
+  it('refuses a report with nothing outside the PGlite set, since a ceiling over nothing always passes', () => {
+    const only = { ...perFile, testResults: [perFile.testResults[0]] }
+    expect(slowFiles(only, 12).ok).toBe(false)
+    expect(slowFiles(only, 12).reason).toMatch(/nothing to hold to a ceiling/)
+  })
+})
+
+describe('#553 AC 2 — fileCeilingLines names what is over, or the slowest when nothing is', () => {
+  it('over: exits 1 and lists only the files past the ceiling', () => {
+    const verdict = fileCeilingLines(perFile, 12)
+    expect(verdict.code).toBe(1)
+    expect(verdict.lines[0]).toMatch(/OVER — 1 of 3 non-PGlite file\(s\) past 12 s/)
+    expect(verdict.lines.slice(2)).toEqual(['       21.8 s  C:/Taskr/src/App.test.jsx'])
+  })
+
+  it('within: exits 0 and lists the three slowest, slowest first', () => {
+    const verdict = fileCeilingLines(perFile, 30)
+    expect(verdict.code).toBe(0)
+    expect(verdict.lines[0]).toMatch(/within — 3 non-PGlite files, none past 30 s/)
+    expect(verdict.lines.slice(2).map((line) => line.trim())).toEqual([
+      '21.8 s  C:/Taskr/src/App.test.jsx',
+      '7.0 s  C:/Taskr/src/test/pwaBuild.test.js',
+      '4.1 s  C:/Taskr/src/App.roster.test.jsx',
+    ])
+  })
+
+  it('exits 2 when the durations cannot be read', () => {
+    expect(fileCeilingLines({ ...perFile, testResults: [] }, 12).code).toBe(2)
+  })
+})
+
+describe('#553 AC 2 — main --file-ceiling', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-vitest-file-ceiling-'))
+  const report = path.join(tmp, 'per-file.json')
+  fs.writeFileSync(report, JSON.stringify(perFile))
+
+  it('exits 1 over the ceiling and 0 within it, and prints the reading', () => {
+    const out = []
+    expect(main([report, '--file-ceiling', '12'], (l) => out.push(l), () => {})).toBe(1)
+    expect(out.join('\n')).toMatch(/Per-file ceiling: OVER/)
+    expect(main([report, '--file-ceiling', '30'], () => {}, () => {})).toBe(0)
+  })
+
+  it('without --file-ceiling, the per-file time is not read at all', () => {
+    const out = []
+    expect(main([report], (l) => out.push(l), () => {})).toBe(0)
+    expect(out.join('\n')).not.toMatch(/Per-file ceiling/)
+  })
+
+  it('beside --budget, either verdict going red turns the exit red', () => {
+    expect(main([report, '--budget', '3200', '--file-ceiling', '30'], () => {}, () => {})).toBe(0)
+    expect(main([report, '--budget', '10', '--file-ceiling', '30'], () => {}, () => {})).toBe(1)
+    expect(main([report, '--budget', '3200', '--file-ceiling', '12'], () => {}, () => {})).toBe(1)
+  })
+
+  it('exits 2 with usage on a --file-ceiling that is not a positive number', () => {
+    for (const bad of [[report, '--file-ceiling'], [report, '--file-ceiling', 'soon'], [report, '--file-ceiling', '-1']]) {
+      const err = []
+      expect(main(bad, () => {}, (l) => err.push(l))).toBe(2)
+      expect(err.join('\n')).toMatch(/--file-ceiling needs a positive number of seconds/)
+    }
+  })
+
+  it('parseArgs reads both ceilings in any order', () => {
+    expect(parseArgs(['--file-ceiling', '12', 'r.json', '--budget', '3200'])).toEqual({
+      path: 'r.json',
+      budget: 3200,
+      fileCeiling: 12,
+    })
   })
 })
 

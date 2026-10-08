@@ -442,7 +442,7 @@ describe('AC 9 — one definition of fair share, one of level', () => {
   it('POSITIVE CONTROL: the import scan sees the imports that are there', () => {
     // Without this the assertion above passes the moment the regex stops
     // matching, which is how an empty result reads as a clean bill of health —
-    // the same control App.test.jsx keeps for its own import scans.
+    // the same control App.split.test.jsx keeps for its own import scans.
     const surface = readFileSync(resolve(process.cwd(), 'src/components/Split.jsx'), 'utf8')
     expect([...surface.matchAll(/from '([^']+)'/g)].length).toBeGreaterThan(2)
   })

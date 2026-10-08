@@ -45,7 +45,7 @@
 /**
  * The key. One key for the whole install offer — a dismissal and an install
  * both land here — so #484 (iOS) shares it rather than adding a second.
- * Deliberately not `taskr.household` or `taskr.members`, which App.test.jsx
+ * Deliberately not `taskr.household` or `taskr.members`, which App.roster.test.jsx
  * asserts absent (see `activeHousehold.js` for why that matters).
  */
 export const KEY = 'taskr.installOffer'

@@ -641,6 +641,32 @@ ActualsFeedback.propTypes = {
   chores: PropTypes.array.isRequired,
 }
 
+/**
+ * The writes a chore row can make, as one object — #551.
+ *
+ * App builds it once and it travels whole: to the chore list and the Done
+ * surface, and from each of those to every row. Neither surface reads it; they
+ * pass it on. Until #551 each write was its own prop, declared again on this
+ * row, on the chore list and on Done, and listed again at both row call sites
+ * and both of App's, so adding a write meant the same edit in every one of
+ * those places and nothing held them in step. A new row write is now a key
+ * here and an entry in App's object.
+ */
+export const choreActionsShape = PropTypes.shape({
+  onSave: PropTypes.func.isRequired,
+  onRemove: PropTypes.func.isRequired,
+  onComplete: PropTypes.func.isRequired,
+  onUncomplete: PropTypes.func.isRequired,
+  onMiss: PropTypes.func.isRequired,
+  onUnmiss: PropTypes.func.isRequired,
+  onAssign: PropTypes.func.isRequired,
+  onUnassign: PropTypes.func.isRequired,
+  onExclude: PropTypes.func.isRequired,
+  onAllow: PropTypes.func.isRequired,
+  onSkip: PropTypes.func.isRequired,
+  onRecordActual: PropTypes.func.isRequired,
+})
+
 // Exported since #302: the Done surface renders completed rows with this same
 // component, so "Not done after all" and "Took (minutes)" are one
 // implementation on two screens rather than two.
@@ -652,19 +678,22 @@ export function ChoreRow({
   repeatExceptions,
   todayIso,
   busy,
-  onSave,
-  onRemove,
-  onComplete,
-  onUncomplete,
-  onMiss,
-  onUnmiss,
-  onAssign,
-  onUnassign,
-  onExclude,
-  onAllow,
-  onSkip,
-  onRecordActual,
+  choreActions,
 }) {
+  const {
+    onSave,
+    onRemove,
+    onComplete,
+    onUncomplete,
+    onMiss,
+    onUnmiss,
+    onAssign,
+    onUnassign,
+    onExclude,
+    onAllow,
+    onSkip,
+    onRecordActual,
+  } = choreActions
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(chore.title)
   const [minutes, setMinutes] = useState(String(chore.expected_minutes))
@@ -1080,18 +1109,7 @@ ChoreRow.propTypes = {
   repeatExceptions: PropTypes.array.isRequired,
   todayIso: PropTypes.string,
   busy: PropTypes.bool,
-  onSave: PropTypes.func.isRequired,
-  onRemove: PropTypes.func.isRequired,
-  onComplete: PropTypes.func.isRequired,
-  onUncomplete: PropTypes.func.isRequired,
-  onMiss: PropTypes.func.isRequired,
-  onUnmiss: PropTypes.func.isRequired,
-  onAssign: PropTypes.func.isRequired,
-  onUnassign: PropTypes.func.isRequired,
-  onExclude: PropTypes.func.isRequired,
-  onAllow: PropTypes.func.isRequired,
-  onSkip: PropTypes.func.isRequired,
-  onRecordActual: PropTypes.func.isRequired,
+  choreActions: choreActionsShape.isRequired,
 }
 
 /**
@@ -1307,18 +1325,7 @@ export default function Chores({
   onFetchCalendarEvents,
   onWidenCalendarConsent,
   onImportEvent,
-  onSave,
-  onRemove,
-  onComplete,
-  onUncomplete,
-  onMiss,
-  onUnmiss,
-  onAssign,
-  onUnassign,
-  onExclude,
-  onAllow,
-  onSkip,
-  onRecordActual,
+  choreActions,
 }) {
   const [title, setTitle] = useState('')
   const [minutes, setMinutes] = useState('')
@@ -1696,18 +1703,7 @@ export default function Chores({
                 repeatExceptions={repeatExceptions}
                 todayIso={todayIso}
                 busy={busy}
-                onSave={onSave}
-                onRemove={onRemove}
-                onComplete={onComplete}
-                onUncomplete={onUncomplete}
-                onMiss={onMiss}
-                onUnmiss={onUnmiss}
-                onAssign={onAssign}
-                onUnassign={onUnassign}
-                onExclude={onExclude}
-                onAllow={onAllow}
-                onSkip={onSkip}
-                onRecordActual={onRecordActual}
+                choreActions={choreActions}
               />
             ))}
           </ul>
@@ -1923,16 +1919,6 @@ Chores.propTypes = {
   onWidenCalendarConsent: PropTypes.func,
   onImportEvent: PropTypes.func,
   onShowDone: PropTypes.func.isRequired,
-  onSave: PropTypes.func.isRequired,
-  onRemove: PropTypes.func.isRequired,
-  onComplete: PropTypes.func.isRequired,
-  onUncomplete: PropTypes.func.isRequired,
-  onMiss: PropTypes.func.isRequired,
-  onUnmiss: PropTypes.func.isRequired,
-  onAssign: PropTypes.func.isRequired,
-  onUnassign: PropTypes.func.isRequired,
-  onExclude: PropTypes.func.isRequired,
-  onAllow: PropTypes.func.isRequired,
-  onSkip: PropTypes.func.isRequired,
-  onRecordActual: PropTypes.func.isRequired,
+  // #551 — the row writes, passed on to every row unread.
+  choreActions: choreActionsShape.isRequired,
 }

@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types'
-import { ChoreRow } from './Chores.jsx'
+import { ChoreRow, choreActionsShape } from './Chores.jsx'
 import { groupDoneByWeek, weekRangeLabel } from '../lib/done.js'
 
 // Completed work, by capacity week — story #302, owner's option (a).
@@ -27,18 +27,7 @@ export default function Done({
   timezone,
   busy,
   error,
-  onSave,
-  onRemove,
-  onComplete,
-  onUncomplete,
-  onMiss,
-  onUnmiss,
-  onAssign,
-  onUnassign,
-  onExclude,
-  onAllow,
-  onSkip,
-  onRecordActual,
+  choreActions,
 }) {
   // Grouped by the week `periodStartFor` derives — the capacity week, in the
   // household's zone — newest first. See src/lib/done.js for why that week and
@@ -97,18 +86,7 @@ export default function Done({
                 repeatExceptions={repeatExceptions}
                 todayIso={todayIso}
                 busy={busy}
-                onSave={onSave}
-                onRemove={onRemove}
-                onComplete={onComplete}
-                onUncomplete={onUncomplete}
-                onMiss={onMiss}
-                onUnmiss={onUnmiss}
-                onAssign={onAssign}
-                onUnassign={onUnassign}
-                onExclude={onExclude}
-                onAllow={onAllow}
-                onSkip={onSkip}
-                onRecordActual={onRecordActual}
+                choreActions={choreActions}
               />
             ))}
             </ul>
@@ -141,16 +119,6 @@ Done.propTypes = {
   timezone: PropTypes.string.isRequired,
   busy: PropTypes.bool,
   error: PropTypes.string,
-  onSave: PropTypes.func.isRequired,
-  onRemove: PropTypes.func.isRequired,
-  onComplete: PropTypes.func.isRequired,
-  onUncomplete: PropTypes.func.isRequired,
-  onMiss: PropTypes.func.isRequired,
-  onUnmiss: PropTypes.func.isRequired,
-  onAssign: PropTypes.func.isRequired,
-  onUnassign: PropTypes.func.isRequired,
-  onExclude: PropTypes.func.isRequired,
-  onAllow: PropTypes.func.isRequired,
-  onSkip: PropTypes.func.isRequired,
-  onRecordActual: PropTypes.func.isRequired,
+  // #551 — the row writes, the same object the chore list passes on.
+  choreActions: choreActionsShape.isRequired,
 }

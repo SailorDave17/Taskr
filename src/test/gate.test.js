@@ -127,6 +127,15 @@ describe('the credential flow is reachable from the app, not just exported', () 
   })
 })
 
+// #551 — the body of the `choreActions` object App builds for the chore rows,
+// or null. Read to the first closing brace, which is the literal's own while
+// every entry is a `name: handler,` line. An entry that grew braces of its own
+// would cut the read short and redden the guards using this, not pass them.
+function choreActionsIn(app) {
+  const match = app.match(/\bconst choreActions = \{([^}]*)\}/)
+  return match ? match[1] : null
+}
+
 // #34 — the same shape as the #63 guard above, applied to the chore flow while
 // it is being built rather than after it ships broken.
 //
@@ -158,10 +167,19 @@ describe('the chore flow is reachable from the app, not just exported', () => {
     const element = app.match(/<Chores[\s\S]*?\/>/)
     expect(element, 'no <Chores .../> element in App.jsx').not.toBeNull()
     expect(element[0]).toMatch(/onAdd=\{/)
-    expect(element[0]).toMatch(/onSave=\{/)
-    expect(element[0]).toMatch(/onRemove=\{/)
-    expect(element[0]).toMatch(/onAssign=\{/)
-    expect(element[0]).toMatch(/onUnassign=\{/)
+    // #551 — the row writes MOVED into one `choreActions` object rather than
+    // leaving, the same move `capacities` made below. So the claim is now two
+    // halves, and neither is enough alone: the element carries the object by
+    // that name, and the object App builds under that name carries the writes.
+    // The object is scoped too, for the reason above — <Roster> still carries
+    // onSave and onRemove as props of its own.
+    expect(element[0]).toMatch(/choreActions=\{choreActions\}/)
+    const actions = choreActionsIn(app)
+    expect(actions, 'no `const choreActions = {...}` in App.jsx').not.toBeNull()
+    expect(actions).toMatch(/\bonSave:\s*\w/)
+    expect(actions).toMatch(/\bonRemove:\s*\w/)
+    expect(actions).toMatch(/\bonAssign:\s*\w/)
+    expect(actions).toMatch(/\bonUnassign:\s*\w/)
     // The assignee picker is drawn from these, so a <Chores> that renders
     // without them offers nobody to give a chore to — a plausible screen rather
     // than a broken one, which is why it is pinned here.
@@ -1963,8 +1981,14 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
     const onboardingElement = app.match(/<Onboarding[\s\S]*?\/>/)
 
     expect(choreElement, 'no chore element in App.jsx').not.toBeNull()
-    expect(choreElement[0]).toMatch(/onExclude=\{/)
-    expect(choreElement[0]).toMatch(/onAllow=\{/)
+    // #551 — the two writes travel inside `choreActions` now, so the element
+    // carries the object and the object carries the writes. The #34 guard
+    // states why both halves are needed.
+    expect(choreElement[0]).toMatch(/choreActions=\{choreActions\}/)
+    const actions = choreActionsIn(app)
+    expect(actions, 'no `const choreActions = {...}` in App.jsx').not.toBeNull()
+    expect(actions).toMatch(/\bonExclude:\s*\w/)
+    expect(actions).toMatch(/\bonAllow:\s*\w/)
     expect(choreElement[0]).toMatch(/exclusions=\{/)
 
     for (const [name, element] of [
@@ -1972,7 +1996,11 @@ describe('#37 AC 3 — an exclusion is set from a chore, and from nowhere else',
       ['onboarding', onboardingElement],
     ]) {
       expect(element, `no ${name} element in App.jsx`).not.toBeNull()
-      expect(element[0], `${name} must not be a second route in`).not.toMatch(/onExclude=|onAllow=/)
+      // The object is a route in too: handing it to either element would hand
+      // over both writes without either name appearing on that element.
+      expect(element[0], `${name} must not be a second route in`).not.toMatch(
+        /onExclude=|onAllow=|choreActions=/,
+      )
     }
   })
 

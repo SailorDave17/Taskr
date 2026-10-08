@@ -994,8 +994,19 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // own write followed by its echo is two reads, not three, and any number of
   // echoes during one read is still two. `refresh` itself is unchanged; this
   // is the only place it is called.
-  const reads = useMemo(() => createReadQueue(refresh), [refresh])
-  const requestRefresh = useCallback(() => reads.request(), [reads])
+  //
+  // The queue is built on the first request, not during render (#581).
+  // `refresh` reads refs, and react-hooks 7's `refs` rule refuses handing it
+  // to any function at render time, since nothing there says the callee will
+  // not call it. A `useMemo` or a `useState` initializer is still render time,
+  // so both were measured and both were refused. Built here, the queue is the
+  // same single one: `refresh` has no dependencies, so its identity never
+  // changes and there was only ever one queue.
+  const readsRef = useRef(null)
+  const requestRefresh = useCallback(() => {
+    if (!readsRef.current) readsRef.current = createReadQueue(refresh)
+    return readsRef.current.request()
+  }, [refresh])
 
   // #480 — one row per member per completed prior week, folded at render from
   // the chores every refresh already reads and the busy rows the background
@@ -1475,6 +1486,12 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
     if (!userId || busy || status === 'loading' || status === 'failed') return
     const carried = readPendingInvitation()
     if (!carried) return
+    // react-hooks 7's `set-state-in-effect` (#581). The state comes from
+    // outside React, the browser's storage, and is read at a moment: when the
+    // read that set `userId` has settled, which is the whole of the ordering
+    // above. Derived at render, storage would be read on every render instead,
+    // and that is the impure read the rule's sibling `purity` exists to refuse.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPendingJoin(carried)
   }, [userId, busy, status])
 

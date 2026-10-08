@@ -88,6 +88,36 @@ const capacities = [
   { id: 'm2', capacityMinutes: 60 },
 ]
 
+// #551 — a row's writes reach this surface as one `choreActions` prop. The tests
+// below still name each handler on its own, as `setup({ onRemove })` and
+// `const { onSave } = setup()`, so the flat set is split here and every render
+// helper goes through it. A write missing from this list would stay a flat prop
+// the surface ignores, and the test that presses its control would go red.
+const CHORE_ACTION_NAMES = [
+  'onSave',
+  'onRemove',
+  'onComplete',
+  'onUncomplete',
+  'onMiss',
+  'onUnmiss',
+  'onAssign',
+  'onUnassign',
+  'onExclude',
+  'onAllow',
+  'onSkip',
+  'onRecordActual',
+]
+
+function choresProps(flat) {
+  const choreActions = {}
+  const rest = {}
+  for (const [name, value] of Object.entries(flat)) {
+    if (CHORE_ACTION_NAMES.includes(name)) choreActions[name] = value
+    else rest[name] = value
+  }
+  return { ...rest, choreActions }
+}
+
 function setup(overrides = {}) {
   const handlers = {
     onAdd: vi.fn().mockResolvedValue(undefined),
@@ -118,8 +148,7 @@ function setup(overrides = {}) {
       // completions are read in. Aug 24 2026 is a Monday.
       timezone="America/New_York"
       periodStart="2026-08-24"
-      {...handlers}
-      {...overrides}
+      {...choresProps({ ...handlers, ...overrides })}
     />,
   )
   return handlers
@@ -145,14 +174,14 @@ function setupRerenderable() {
     onSkip: vi.fn().mockResolvedValue(undefined),
     onRecordActual: vi.fn().mockResolvedValue(undefined),
   }
-  const props = {
+  const props = choresProps({
     members,
     capacities,
     exclusions: [],
     repeatExceptions: [],
     todayIso: '2026-08-24',
     ...handlers,
-  }
+  })
   const view = render(<Chores chores={chores} {...props} />)
   return {
     handlers,
@@ -649,7 +678,13 @@ function setupExclusionRerender(initialChores, initialExclusions) {
     onAllow: vi.fn().mockResolvedValue(undefined),
     onSkip: vi.fn().mockResolvedValue(undefined),
   }
-  const props = { members, capacities, repeatExceptions: [], todayIso: '2026-08-24', ...handlers }
+  const props = choresProps({
+    members,
+    capacities,
+    repeatExceptions: [],
+    todayIso: '2026-08-24',
+    ...handlers,
+  })
   const view = render(
     <Chores chores={initialChores} exclusions={initialExclusions} {...props} />,
   )

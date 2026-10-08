@@ -90,7 +90,8 @@ function setup(overrides = {}) {
       repeatExceptions={[]}
       todayIso="2026-08-24"
       timezone="America/New_York"
-      {...handlers}
+      // #551 — every handler here is a row write, so the set IS the object.
+      choreActions={handlers}
       {...overrides}
     />,
   )

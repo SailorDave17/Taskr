@@ -1,7 +1,10 @@
 // @vitest-environment node
+import { randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import vm from 'node:vm'
+import { brotliCompressSync, constants as zlib } from 'node:zlib'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -20,14 +23,26 @@ let indexHtml
 let worker
 let bundle
 let bundlePath
+let appChunk
 
 beforeAll(async () => {
   out = mkdtempSync(join(tmpdir(), 'taskr-347-build-'))
-  await build({
-    configFile: resolve(process.cwd(), 'vite.config.js'),
-    logLevel: 'silent',
-    build: { outDir: out, emptyOutDir: true },
-  })
+  // A PRODUCTION build, which is not what `build()` gives inside vitest (#555).
+  // Vite picks `production` only when NODE_ENV is unset, and vitest sets it to
+  // `test`, so until #555 this file built React's development flavour: 183,216
+  // Brotli bytes of entry chunk against 130,355 from `vite build`, measured.
+  // Every assertion here is about what ships, so the build is the one that does.
+  const nodeEnv = process.env.NODE_ENV
+  process.env.NODE_ENV = 'production'
+  try {
+    await build({
+      configFile: resolve(process.cwd(), 'vite.config.js'),
+      logLevel: 'silent',
+      build: { outDir: out, emptyOutDir: true },
+    })
+  } finally {
+    process.env.NODE_ENV = nodeEnv
+  }
   indexHtml = readFileSync(join(out, 'index.html'), 'utf8')
   worker = readFileSync(join(out, 'sw.js'), 'utf8')
   // Found from the page itself, not by listing the directory.
@@ -35,6 +50,9 @@ beforeAll(async () => {
   expect(script, 'index.html names its bundle').not.toBeNull()
   bundlePath = script[1]
   bundle = readFileSync(join(out, bundlePath), 'utf8')
+  // The App chunk, found the same way: through the import the entry makes.
+  const appImport = bundle.match(/import\(\s*["'`]\.\/(App-[\w-]+\.js)["'`]\s*\)/)
+  if (appImport) appChunk = readFileSync(join(out, 'assets', appImport[1]))
 }, 180_000)
 
 afterAll(() => {
@@ -129,6 +147,126 @@ describe('#540 AC 5 — the build emits /version.json, and the worker does not p
   })
 })
 
+// #595 — the tester, support and privacy pages, static files under `public/`
+// that the build copies as written. The paths are written out here, not read
+// from vite.config.js, so a page dropped from PUBLIC_PAGES fails rather than
+// leaving both sides in agreement.
+const PUBLIC_PAGES = [
+  { url: 'https://taskr.madcowhq.com/try/', file: 'try/index.html', title: 'Try Taskr' },
+  { url: 'https://taskr.madcowhq.com/support/', file: 'support/index.html', title: 'Taskr support' },
+  { url: 'https://taskr.madcowhq.com/privacy/', file: 'privacy/index.html', title: 'Taskr privacy' },
+]
+
+// Runs the built worker against a stand-in for workbox and keeps what it
+// registers. The worker defines itself through `self.define`, so handing it
+// one makes it skip its loader and call the factory with the stand-in. What
+// comes back is the worker's own deny-list RegExps and precache entries, read
+// from its behaviour rather than from however the minifier spelled them.
+function runWorker(source) {
+  const navigationRoutes = []
+  const precached = []
+  let defined = 0
+  const workbox = new Proxy(
+    {},
+    {
+      get(_, name) {
+        if (name === 'NavigationRoute') {
+          return class {
+            constructor(handler, options = {}) {
+              navigationRoutes.push(options)
+            }
+          }
+        }
+        if (name === 'precacheAndRoute') return (entries) => precached.push(...entries)
+        return () => {}
+      },
+    },
+  )
+  const context = { define: (deps, factory) => ((defined += 1), factory(workbox)) }
+  context.self = context
+  context.addEventListener = () => {}
+  vm.runInNewContext(source, context)
+  return { defined, navigationRoutes, precached }
+}
+
+describe('#595 — the tester, support and privacy pages ship as written, and the worker keeps out of them', () => {
+  let pages
+  let run
+  beforeAll(() => {
+    pages = PUBLIC_PAGES.map((page) => {
+      const path = join(out, page.file)
+      return { ...page, html: existsSync(path) ? readFileSync(path, 'utf8') : null }
+    })
+    run = runWorker(worker)
+  })
+
+  it('docs/deploy-runbook.md records exactly these URLs, and each one is a page in the build', () => {
+    // AC 1's record is the value #596, #597 and madcowlabs' redirect rows copy,
+    // so the record and the build are held to each other here.
+    const runbook = readFileSync(resolve(process.cwd(), 'docs', 'deploy-runbook.md'), 'utf8')
+    const section = runbook.split('\n### 1b. ')[1]?.split('\n## ')[0]
+    expect(section, 'the runbook has no section 1b').toBeTruthy()
+    const recorded = [...section.matchAll(/^\| [^|]+ \| `(https:\/\/taskr\.madcowhq\.com\/[^`]*)` \|$/gm)].map((m) => m[1])
+    expect(recorded).toEqual(PUBLIC_PAGES.map((page) => page.url))
+    for (const page of pages) {
+      expect(page.html, `${page.file} is not in the build`).not.toBeNull()
+      expect(page.file).toBe(`${new URL(page.url).pathname.slice(1)}index.html`)
+    }
+  })
+
+  it('each page carries its own title', () => {
+    for (const page of pages) expect(page.html.match(/<title>([^<]*)<\/title>/)?.[1]).toBe(page.title)
+    expect(new Set(pages.map((page) => page.title)).size).toBe(PUBLIC_PAGES.length)
+  })
+
+  it('each page loads no script at all, and nothing from another origin', () => {
+    for (const page of pages) {
+      expect(page.html, page.file).not.toMatch(/<script\b/i)
+      expect(page.html, page.file).not.toMatch(/\b(?:src|srcset)\s*=\s*["']?(?:https?:)?\/\//i)
+      expect(page.html, page.file).not.toMatch(/<link\b[^>]*\bhref\s*=\s*["']?(?:https?:)?\/\//i)
+      expect(page.html, page.file).not.toMatch(/url\(\s*["']?(?:https?:)?\/\//i)
+    }
+  })
+
+  it('each page links the app root, and every file it loads from this origin is in the build', () => {
+    for (const page of pages) {
+      expect(page.html, page.file).toMatch(/<a\b[^>]*\bhref="\/"/)
+      const loaded = [...page.html.matchAll(/\b(?:src|href)="(\/[^"?#]+\.(?:png|svg|ico))"/g)].map((m) => m[1])
+      expect(loaded.length, `${page.file} loads no image, so this checks nothing`).toBeGreaterThan(0)
+      for (const path of loaded) expect(existsSync(join(out, path)), `${page.file} loads ${path}`).toBe(true)
+    }
+  })
+
+  it('the three pages share one stylesheet, byte for byte', () => {
+    const styles = pages.map((page) => page.html.match(/<style>[\s\S]*?<\/style>/)?.[0])
+    expect(styles[0]).toBeTruthy()
+    for (const style of styles) expect(style).toBe(styles[0])
+  })
+
+  it('the worker sends every form of their paths to the network, and keeps the app on the rest', () => {
+    expect(run.defined).toBe(1)
+    expect(run.navigationRoutes).toHaveLength(1)
+    const denylist = run.navigationRoutes[0].denylist ?? []
+    // workbox tests the path plus the query against each entry.
+    const denied = (path) => denylist.some((re) => re.test(path))
+    for (const path of ['/try', '/try/', '/support', '/support/', '/privacy', '/privacy/', '/privacy/?from=app', '/privacy?from=app']) {
+      expect(denied(path), `${path} would be answered with the app`).toBe(true)
+    }
+    // POSITIVE CONTROL: the app's own navigations still get the app shell, so
+    // the deny-list is not simply refusing everything.
+    for (const path of ['/', '/?start', '/index.html', '/trying', '/supported', '/privacy-old']) {
+      expect(denied(path), `${path} lost the app shell`).toBe(false)
+    }
+  })
+
+  it('the worker precaches none of the pages, so nobody reads a stale copy from a cache', () => {
+    const urls = run.precached.map((entry) => (typeof entry === 'string' ? entry : entry.url))
+    // POSITIVE CONTROL: this is the real precache list.
+    expect(urls).toContain('index.html')
+    expect(urls.filter((url) => /^(?:try|support|privacy)\//.test(url))).toEqual([])
+  })
+})
+
 // #484 AC 1 — the three things iOS does not read from the manifest.
 //
 // A REAL build again, for the reason above: the link and the two metas are in
@@ -164,5 +302,82 @@ describe('#484 AC 1 — the iOS home-screen icon and meta tags ship', () => {
   it('the two Apple metas ship: full screen on older iOS, and the name under the icon', () => {
     expect(indexHtml).toMatch(/<meta[^>]+name="apple-mobile-web-app-capable"[^>]+content="yes"/)
     expect(indexHtml).toMatch(/<meta[^>]+name="apple-mobile-web-app-title"[^>]+content="Taskr"/)
+  })
+})
+
+// #555 AC 1 — the entry and App chunks stay under a Brotli budget.
+//
+// The tune-up (#550) is a run of stories that each make these two files
+// smaller. Without a budget every gain is a gain once: the next feature spends
+// it back and nothing says so. A REAL build again, for #347's reason — the
+// chunk split is decided by the bundler, and only its output can say what a
+// phone downloads.
+//
+// MEASURED 2026-09-22, `develop` at aa155c3, with this file's own instrument:
+//   entry chunk  438,481 bytes raw → 130,355 Brotli
+//   App chunk    155,105 bytes raw →  43,111 Brotli
+// Each budget is that figure plus about 7%, so a change has to be small to
+// fit under it and a ~20 kB import does not.
+//
+// BROTLI AT QUALITY 3, because that is what production serves. Node's default
+// (quality 11) reads the entry chunk as 108,570 bytes; quality 3 reads
+// 130,355, against 130,315 on the wire from https://taskr.madcowhq.com the same
+// day (the tune-up report on #550). A budget over the q11 figure would have
+// ~20 kB of slack the phone never sees.
+//
+// When a story moves these numbers on purpose it moves the constant here, with
+// its own measurement and date. #560 is expected to lower the entry budget and
+// RAISE the App one: the supabase client moves into App, it does not leave.
+const BUNDLE_BUDGET_MEASURED = '2026-09-22'
+const ENTRY_BUDGET_BROTLI_BYTES = 140_000
+const APP_BUDGET_BROTLI_BYTES = 46_000
+const BROTLI_QUALITY = 3
+
+/** What a phone downloads for these bytes, at production's compression. */
+const brotliBytes = (bytes) =>
+  brotliCompressSync(bytes, {
+    params: {
+      [zlib.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY,
+      [zlib.BROTLI_PARAM_SIZE_HINT]: bytes.length,
+    },
+  }).length
+
+describe(`#555 AC 1 — the entry and App chunks stay under their Brotli budgets (measured ${BUNDLE_BUDGET_MEASURED})`, () => {
+  it('POSITIVE CONTROL: both chunks were found and are the real ones', () => {
+    // Without this a budget passes against a chunk that was never read, or
+    // against the wrong file. The same markers #347's test uses: the updater's
+    // takeover in the entry, the footer's test id in App.
+    expect(appChunk, 'the entry imports no App chunk').toBeDefined()
+    expect(bundle).toMatch(/messageSkipWaiting/)
+    expect(appChunk.toString('utf8')).toMatch(/build-commit/)
+    // It is the production build, not vitest's `test` one: React's
+    // production bundle carries its minified-error text and none of the
+    // development checks. Measured on #555 with `NODE_ENV=test vite build`:
+    // 0 and 3, against 1 and 0 here.
+    expect(bundle).toMatch(/Minified React error/)
+    expect(bundle).not.toMatch(/validateDOMNesting/)
+    // And the instrument reads a real size, not an empty buffer's.
+    expect(brotliBytes(Buffer.from(bundle))).toBeGreaterThan(ENTRY_BUDGET_BROTLI_BYTES / 2)
+    expect(brotliBytes(appChunk)).toBeGreaterThan(APP_BUDGET_BROTLI_BYTES / 2)
+  })
+
+  it(`the entry chunk is at most ${ENTRY_BUDGET_BROTLI_BYTES} bytes Brotli`, () => {
+    const size = brotliBytes(Buffer.from(bundle))
+    expect(size, `entry chunk ${bundlePath} is ${size} bytes Brotli`).toBeLessThanOrEqual(ENTRY_BUDGET_BROTLI_BYTES)
+  })
+
+  it(`the App chunk is at most ${APP_BUDGET_BROTLI_BYTES} bytes Brotli`, () => {
+    const size = brotliBytes(appChunk)
+    expect(size, `the App chunk is ${size} bytes Brotli`).toBeLessThanOrEqual(APP_BUDGET_BROTLI_BYTES)
+  })
+
+  it('and each budget is tight: 20 kB of new code that does not compress would break it', () => {
+    // Guards the constants rather than the build. A budget loosened far past
+    // what ships is a budget no change can break, and it reads exactly like
+    // this one. Random bytes because they do not compress, so the added weight
+    // is the full 20 kB whatever the bundler would have made of real code.
+    const planted = randomBytes(20_000)
+    expect(brotliBytes(Buffer.concat([Buffer.from(bundle), planted]))).toBeGreaterThan(ENTRY_BUDGET_BROTLI_BYTES)
+    expect(brotliBytes(Buffer.concat([appChunk, planted]))).toBeGreaterThan(APP_BUDGET_BROTLI_BYTES)
   })
 })

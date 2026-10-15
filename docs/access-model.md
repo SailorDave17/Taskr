@@ -2581,7 +2581,7 @@ An organizer can delete their household from the Who tab. Owner decisions are on
   `householdDeletion.pglite.test.js` (`#181`) asserts the property that survives it: no client
   deletes the row directly, pending or not; the three client RPCs are executable by `authenticated`
   and revoked from `public, anon` by name; and a member of two households closing one still reads
-  exactly the other, its rows untouched. `App.test.jsx` (`#181`) pins where the person lands: their
+  exactly the other, its rows untouched. `App.households.test.jsx` (`#181`) pins where the person lands: their
   other household, or signed in with no household. #181's "a member who is not the last one is
   refused" was superseded by #430's decision that an organizer may delete a household that still
   has members; only a non-organizer is refused.
@@ -2684,7 +2684,7 @@ A member can leave from the Who tab. An organizer first hands the household over
     the file); one live redeemed invitation carried a member at the time, so exactly one member was
     stuck, and no row was changed by the apply. Two more tests there: the last member is the organizer
   and is refused (AC 6 — nothing a client holds can leave members with no organizer), and a member
-  of two households leaving one still reads exactly the other (AC 8). `App.test.jsx` asserts the
+  of two households leaving one still reads exactly the other (AC 8). `App.households.test.jsx` asserts the
   remembered household (#165) is forgotten on a leave while the list still names it — the gap
   PR #435 recorded as untestable is testable once the list is held still.
 - **Applied, and the excused reds drained.** `check:live` read `transfer_household` red until

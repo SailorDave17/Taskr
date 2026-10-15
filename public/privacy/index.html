@@ -1,0 +1,392 @@
+<!doctype html>
+<!-- #595: moved from madcowhq.com/apps/taskr/privacy on 2026-10-15. Its claims were
+     re-checked against Taskr's develop, and the pull request for #595 lists
+     every one that changed. It loads no script, and the service worker keeps
+     out of it (vite.config.js, PUBLIC_PAGES). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1f6f5c" />
+    <meta name="description" content="What Taskr stores, who can read it, which companies handle it, and how to get it deleted." />
+    <title>Taskr privacy</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+    <style>
+      /* One stylesheet, inline in each of the three pages so each stands alone
+         (#595). src/test/pwaBuild.test.js holds the three copies identical.
+         The colours are the app's own (src/index.css), dark as the app is. */
+      :root {
+        color-scheme: dark;
+        --bg: #12171c;
+        --surface: #1a2128;
+        --ink: #e8eef2;
+        --ink-dim: #9aa9b4;
+        --accent: #1f6f5c;
+        --accent-ink: #33b798;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.55;
+        overflow-wrap: break-word;
+      }
+      a { color: var(--accent-ink); }
+      a:focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 2px; }
+      .skip { position: absolute; left: -100vw; }
+      .skip:focus { left: 1rem; top: 1rem; padding: 0.5rem 1rem; background: var(--surface); }
+      header, main, footer { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1rem; }
+      .brand { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1.25rem; font-weight: 700; text-decoration: none; }
+      h1 { font-size: clamp(1.6rem, 6vw, 2.2rem); line-height: 1.2; margin: 0.25rem 0 1rem; }
+      h2 { margin-top: 2.25rem; }
+      .eyebrow { margin-bottom: 0; color: var(--accent-ink); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+      .eyebrow a { text-decoration: none; }
+      .lede { font-size: 1.125rem; }
+      .muted, caption, footer { color: var(--ink-dim); }
+      .button { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem; background: var(--accent); color: var(--ink); font-weight: 600; text-decoration: none; }
+      .steps li, .issues li { margin-bottom: 0.75rem; }
+      .phone-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; padding: 0; list-style: none; }
+      .phone-shots img { display: block; width: 100%; height: auto; border-radius: 0.75rem; }
+      .phone-shots span { display: block; margin-top: 0.25rem; text-align: center; }
+      .field-deep { margin-top: 2.25rem; padding: 0.25rem 1rem 1rem; border-radius: 0.75rem; background: var(--surface); }
+      .field-deep h2 { margin-top: 0.5rem; }
+      table { width: 100%; border-collapse: collapse; }
+      caption { text-align: left; padding-bottom: 0.5rem; }
+      /* A host name in a narrow cell would otherwise hold a 320px screen open
+         sideways (measured: the companies table at 342px in a 305px column). */
+      th, td { padding: 0.5rem 0.375rem; border-bottom: 1px solid var(--surface); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      dt { margin-top: 1rem; font-weight: 700; }
+      dd { margin-left: 0; }
+      footer { margin-top: 3rem; padding-block: 1.5rem; border-top: 1px solid var(--surface); }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="28" height="28" />Taskr</a>
+      <a href="/">Open the app</a>
+    </header>
+    <main id="main">
+  <section>
+    <p class="eyebrow"><a href="/try">Taskr</a></p>
+    <h1>Privacy</h1>
+    <p class="lede">Taskr keeps what a household types into it on a server,
+      so that every member's phone shows the same split. This page says what
+      that is, who can read it, which other companies handle it, and how to
+      get it deleted. Taskr publishes no other privacy policy, so this is the
+      one that governs.</p>
+  </section>
+  <section>
+    <h2>What it stores</h2>
+    <p>Everything in the table is kept on Taskr's server, in the household's
+      own records. The last column says who in the household can read each
+      row through the app. <strong>Every member can read every other member's
+      email address</strong>; it is stated here plainly because a household
+      app is likely to include people who did not expect that.</p>
+    <table class="stored">
+      <caption>Everything Taskr keeps about a household.</caption>
+      <thead>
+        <tr>
+          <th scope="col">What</th>
+          <th scope="col">Who in the household can read it</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>The name you are shown as</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>Your email address, which is your sign-in</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>Your password</td>
+          <td>Nobody. It is held by the sign-in service Taskr uses, not by
+            Taskr: the app hands it straight to that service, and Taskr's
+            database never stores it. A PIN issued before 11 September
+            2026 is held the same way, as the password of an account with no
+            email behind it.</td>
+        </tr>
+        <tr>
+          <td>Your available minutes for a week, and a note of where a
+            week's figure came from</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>Each chore: its name, how many minutes it takes and took, when
+            it is due and how it repeats, where it came from, who holds it,
+            who it is marked as unsuitable for, and when it was done or
+            missed</td>
+          <td>Everyone in the household. Any member can delete a chore.</td>
+        </tr>
+        <tr>
+          <td>Since 18 September 2026, a record of each time a chore changed
+            hands: who held it, who moved it, and in which week. It stays after
+            the chore is deleted, until the household is.</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>The household's name, its time zone, and who organizes it</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>Each invitation code the organizer creates: a scrambled
+            fingerprint of the code, never the code itself; who created it and
+            when; when it stops working; and whether it was withdrawn or used,
+            and by whom</td>
+          <td>The organizer only</td>
+        </tr>
+        <tr>
+          <td>When each invitation email was last sent, and whether it has
+            been accepted</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>The name the organizer typed when inviting you, kept by the
+            sign-in service with your account</td>
+          <td>Nobody through the app</td>
+        </tr>
+        <tr>
+          <td>Shopping lists, what is on them with any note, who added or
+            bought each item, and who finished each trip</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>If you connect Google Calendar: the key Google issues so Taskr
+            can read your calendar, which permission it covers, and Google's
+            identifier for the Google account it belongs to (not its
+            address)</td>
+          <td>Nobody through the app. Only Taskr's own server-side functions
+            can read it.</td>
+        </tr>
+        <tr>
+          <td>If you connect Google Calendar: how many minutes you are busy
+            each week, and how many events that came from. Not the events'
+            names, who is in them, or when they are.</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>If you import a calendar event as a chore: Google's identifier
+            for that event, kept so it is not imported twice. The event's name
+            becomes the chore's name, which everyone can see; the calendar
+            entry itself is kept nowhere.</td>
+          <td>Everyone in the household</td>
+        </tr>
+        <tr>
+          <td>Each time you use <strong>Work out the minutes</strong> or
+            <strong>Work out the chores</strong>: who asked and when, and
+            which of the two it was. Not what you typed.</td>
+          <td>Nobody through the app</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Everything you type has a limit. Taskr's server enforces these: a
+      person's name is at most forty characters, a household's name sixty, a
+      chore's name eighty, and a description you ask Taskr to work out two
+      thousand, and that one is not kept. The app enforces these: a shopping
+      list's or item's name is at most eighty characters, and an item's note a
+      hundred and twenty. There is no other free-text field that is kept.</p>
+  </section>
+  <section>
+    <h2>What it keeps on your device</h2>
+    <p>In your browser's own storage, and nowhere else: your sign-in session,
+      kept by the browser if <strong>Trust this device — stay signed
+      in</strong> is ticked, or by this tab alone until the browser closes if
+      it is not, with a marker saying so; which household you last switched
+      to, so the app reopens on it; an invitation code and the name you typed
+      with it before you were signed in, cleared the moment it is used or
+      refused, and on sign-out; and whether you said <strong>Not now</strong>
+      to installing Taskr (forgotten after thirty days) or installed it. While
+      a calendar connection is in progress, the tab holds a one-off token and
+      which household it is for, and forgets both on the way back or when the
+      tab closes. The browser also keeps the app's own files so that it opens
+      quickly; they hold nothing of yours.</p>
+    <p>Signing out removes all of it except the note about installing.
+      Clearing the site's data in your browser removes everything.</p>
+  </section>
+  <section>
+    <h2>Who else can read it</h2>
+    <p>Every read the app makes goes through the database's own row-level
+      rules, keyed on which household you are a member of. A member of one
+      household cannot read another household's records, and the app has no
+      way to ask for them.</p>
+    <p>As the person who runs Taskr I can read the database it stores this
+      in. I do that only to fix a problem you have reported or to delete data
+      you have asked me to delete. <span class="muted">Stated 15 October
+      2026.</span></p>
+  </section>
+  <section class="field-deep">
+    <div>
+      <p class="eyebrow">Third parties</p>
+      <h2>Which companies handle it</h2>
+      <p>Taskr is built on services other companies run. Each row says what
+        that company handles for Taskr and whether it is switched on today.
+        What each company keeps of what it handles is under its own privacy
+        policy, not this one.</p>
+      <table class="parties">
+        <caption>Every company that handles Taskr's data.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Who</th>
+            <th scope="col">What they handle</th>
+            <th scope="col">Is it on?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Supabase</td>
+            <td>The database that holds everything in the table above, the
+              sign-in service that holds your password, and the emails Taskr
+              sends: confirming your address, inviting you to a household,
+              and resetting a password. Supabase writes those emails; Resend
+              delivers them.</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>Resend</td>
+            <td>Delivers the emails Taskr sends: confirming your address,
+              inviting you to a household (which carries the name the
+              organizer typed for you), and resetting a password. It handles
+              the address each one goes to and what it says.</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>Vercel</td>
+            <td>Serves the app at taskr.madcowhq.com, and runs the once-a-day
+              job that purges deleted households. No analytics.</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>Google Calendar</td>
+            <td>Only if you connect a calendar: Taskr asks Google for your
+              free and busy times and which Google account they belong to, and,
+              if you choose to import an event, for a read-only view of your
+              events. Google's approval screen for Taskr is still in testing,
+              so only people registered with Google as Taskr's testers can
+              connect a calendar.</td>
+            <td>Yes, for registered testers</td>
+          </tr>
+          <tr>
+            <td>Google sign-in</td>
+            <td><strong>Continue with Google</strong> on the sign-in screen
+              signs you in with your Google account instead of a password;
+              Google tells Taskr's sign-in service your Google address and basic
+              profile. Taskr keeps no Google key for this and cannot withdraw
+              the permission for you: remove Taskr from your Google account's
+              third-party access yourself when you stop using it.</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>Anthropic</td>
+            <td>Only when you press <strong>Work out the minutes</strong> or
+              <strong>Work out the chores</strong>: the sentence you typed,
+              which of the two you asked for, and one name (yours for
+              <strong>Work out the chores</strong>; for <strong>Work out the
+              minutes</strong>, the person the minutes are for) are sent to
+              Anthropic's service to be turned into minutes or chores. Taskr keeps a record of who asked, when and which kind,
+              and not the sentence.</td>
+            <td>Yes</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>There is nothing else: no advertising, no analytics, no crash
+        reporting, and no tracking cookies. The only things kept in your
+        browser are the ones listed above.</p>
+    </div>
+  </section>
+  <section>
+    <h2>How to get it deleted</h2>
+    <p>All four routes are in the app, on the <strong>Who</strong> tab.
+      Deleting your account is also on the screen you see when you are
+      signed in to no household.</p>
+    <dl class="facts">
+      <dt>Leave a household</dt>
+      <dd><strong>Leave this household</strong>, near the foot of the Who tab.
+        The chores dealt to you go to the others; any placed on you by hand
+        become unassigned, and chores you finished stay finished without your
+        name. Then your row and what hangs from it go: your minutes, which
+        chores you were marked as unable to do, your calendar connection, and
+        your record in the table above. Things you added to shopping lists,
+        invitations you sent and calendar events you imported stay, without
+        your name, and the record of which chores changed hands keeps an
+        unnamed entry for you. If you had connected Google Calendar, Taskr asks
+        Google to cancel its access before your key is deleted, unless another
+        Taskr connection uses the same Google account, or the connection dates
+        from before 17 September 2026 and Taskr does not know which account it
+        was. If this was the only household you were in, your sign-in is
+        deleted as well. An organizer cannot leave without first handing the
+        household to another member who has signed in, or deleting it.</dd>
+      <dt>Delete a household</dt>
+      <dd>The organizer's <strong>Delete this household</strong>, near the
+        bottom of the Who tab. It disappears from everyone's app at once. For
+        seven days the organizer sees <strong>Restore</strong> with the
+        household's name on signing in, and can bring it back whole. After that
+        it is purged for good: Taskr asks Google to cancel each member's
+        calendar access, unless another household uses the same Google account
+        (or, for a connection made before 17 September 2026, the account is
+        unknown), and every sign-in that belonged only to this household is
+        deleted.</dd>
+      <dt>Be removed by the organizer</dt>
+      <dd>Your row and everything hanging from it go the same way. Taskr does
+        not, in this case, tell Google, so if you had connected a calendar,
+        cancel Taskr's access yourself from your Google account's connected
+        apps.</dd>
+      <dt>Delete your account</dt>
+      <dd><strong>Delete my account</strong>. On the Who tab it takes you
+        through leaving, and leaving the last household you are in deletes
+        your sign-in at once. If you are signed in but in no household, the
+        screen you see has <strong>Delete my account</strong>, which deletes
+        the sign-in immediately and cannot be undone; if you were in a
+        household waiting to be deleted, your calendar connection there is
+        cancelled first.</dd>
+    </dl>
+    <p>Nothing else is deleted on a timer. Apart from the seven-day purge of
+      a deleted household, Taskr keeps what it stores until somebody deletes
+      it by one of the routes above.</p>
+  </section>
+  <section>
+    <h2>Children</h2>
+    <p>Members of a household may be children; a child with sixty available
+      minutes and a parent with three hundred is the case Taskr was built
+      for. There is no age check. The organizer decides who is added, and
+      since 11 September 2026 every new member is added by their own email
+      address and sets their own password. Members added before that date
+      with a PIN keep it.</p>
+    <p>Whether a child's own school calendar should be connected is a
+      question Taskr has not settled, so nothing here recommends it.</p>
+  </section>
+  <section>
+    <h2>Security</h2>
+    <p>Passwords are held by the sign-in service, never by Taskr. The key
+      Google issues for a connected calendar can be read only by Taskr's own
+      server-side functions, and the credential those functions use never
+      reaches the app in your browser; a check at build time refuses a build
+      that would ship it. The row-level rules above are enforced by the
+      database itself, not by the app asking nicely.</p>
+  </section>
+  <section>
+    <h2>Changes to this policy</h2>
+    <p>If Taskr's behaviour changes in a way that affects this page, the page
+      is updated before that change reaches taskr.madcowhq.com. The date at
+      the foot is when it was last checked against the app.</p>
+  </section>
+  <section>
+    <h2>Contact</h2>
+    <p>Questions about this policy go to
+      <a href="mailto:dave@madcowhq.com">dave@madcowhq.com</a>.</p>
+    <p class="muted">This is the only privacy policy Taskr publishes, and it
+      governs. Checked against the app on 15 October 2026, version 1.0.2.
+      If the app and this page ever disagree, the page is the
+      defect &mdash; please say so at the address above.</p>
+  </section>
+    </main>
+    <footer>
+      <p><a href="/try">Try Taskr</a> &middot; <a href="/support">Support</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="/">Open the app</a></p>
+    </footer>
+  </body>
+</html>

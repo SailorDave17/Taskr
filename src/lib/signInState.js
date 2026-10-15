@@ -6,7 +6,7 @@
 // `member_sign_in_states` reads the two facts that can, off `auth.users`.
 //
 // Its own module rather than an export of `household.js`, for #339's measured
-// reason: `App.test.jsx` mocks `household.js` by spreading the real module
+// reason: `test/support/appHarness.jsx` mocks `household.js` by spreading the real module
 // first, so a new fetching export there would run for real in every App test.
 // Here it has its own `vi.mock`, and its default there is "no read yet".
 

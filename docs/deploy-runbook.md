@@ -83,6 +83,20 @@ record in the SQL editor: `select * from public.household_purge_runs order by ra
    the same question locally first: `git fetch origin release && node
    scripts/check-release-version.mjs`.
 
+   **Re-read the public pages before you merge the promotion (#595).** The privacy page promises
+   it is "updated before that change reaches taskr.madcowhq.com", and that promise has already
+   broken once. Resend (2026-09-15), Google sign-in (2026-09-16) and v1.0.1 (2026-09-22) all shipped
+   while `/privacy`, `/support` and `/try` (1b) still described the app from before them. So before
+   merging, read the three pages against what the promotion changes: what is stored, which companies
+   handle it, how to get it deleted, the known issues, and the controls the tester page names. Fix
+   any page that disagrees in a pull request into `develop` first, as with the version bump. Then
+   move the privacy page's *Checked against the app on …* line to the date and the release's
+   version, in the version-bump pull request. **Name the version only, not the build**: the build is
+   the promotion's merge commit, which does not exist until the owner merges, and the version moves
+   exactly once per promotion, so it names the release on its own. (#595 first wrote "version and
+   build" here; the 1.0.2 promotion dropped the build, 2026-10-15.) This check is a reading, not a
+   test: nothing in CI can tell whether a sentence is still true.
+
    **Changed again 2026-08-27: the source branch is `develop`, not `rebuild/v1`.** The repo's GitHub
    default branch moved to `develop` the same day, and story PRs go there too now — see *Branching*
    in the README. `rebuild/v1` retired; every commit it ever carried is an ancestor of `develop`
@@ -229,15 +243,50 @@ a redirect that keeps working for a link already printed — to `/?start`, so th
 never breaks whichever form a later story prefers. That is a criterion for the router story, and it is
 written here rather than on #175 because #175 is closed and tracks nothing.
 
-**What the website should say.** The `href` is this section's value; the anchor text is the other
-repo's decision (`SailorDave17/madcowsailing.com`, the `hq` app). Worth preferring *Start your
-household* over *Open Taskr* — the verb is the thing the visitor is deciding.
+**What the website should say.** The `href` is this section's value. Since #595 the website is this
+repo's own tester page (1b), whose button carries it as *Start your household*, served on the same
+origin as `/?start`. Until then the anchor text was the other repo's decision
+(`SailorDave17/madcowsailing.com`, the `hq` app). *Start your household* is preferred over *Open
+Taskr*, because the verb is the thing the visitor is deciding.
 
 **The return leg needs no flag.** The confirmation email's link lands on the origin the signup came
 from (`confirmationRedirectTo`, #129 — the origin only, never the query), and a signed-in person with
-no household gets *Name the household* on the bare root. `App.test.jsx`'s #343 describe proves it on
+no household gets *Name the household* on the bare root. `App.signIn.test.jsx`'s #343 describe proves it on
 the bare root with a session and no household; a confirmation followed from a second device is the
 same boot.
+
+### 1b. Taskr's public pages — tester, support and privacy (#595)
+
+The tester, support and privacy pages moved here from `madcowhq.com/apps/taskr/` on 2026-10-15,
+because madcowhq.com is becoming the Mad Cow Labs site (SailorDave17/madcowlabs#12). **These are the
+recorded URLs**, and the strings everything else uses: the app's Privacy link (#596), the
+account-deletion page beside them (#597), madcowlabs' redirect rows from the old addresses, and the
+Play listing (#489).
+
+| Page | URL |
+|---|---|
+| Tester page | `https://taskr.madcowhq.com/try/` |
+| Support | `https://taskr.madcowhq.com/support/` |
+| Privacy | `https://taskr.madcowhq.com/privacy/` |
+
+Each is a static file, `public/<page>/index.html`, which Vite copies into `dist/` as written. None is
+a React route, none loads a script, and there is still no router (1a). `src/test/pwaBuild.test.js`
+reads this table and holds each URL to its page in a real build.
+
+**Why the trailing slash.** *Measured 2026-10-15 under `vite preview`*: `/privacy/` answers 200 with
+the privacy page. `/privacy` also answers **200 with no `Location`, carrying the app**
+(`<title>Taskr</title>`), because `vite preview` answers any path it does not have with `index.html`.
+`/__probe-594` answered 200 the same way. So "200 with no `Location`" alone cannot tell a page from
+that fallback: read the `<title>` as well. Production has no fallback (1a's `/start` is a 404). The
+no-slash form on Vercel is read on production after the promotion (#595's first two criteria), and
+this table is confirmed or corrected then.
+
+**The service worker keeps out of them.** The app's worker answers every navigation it controls with
+`index.html`, so before #595 anybody who had opened Taskr would have been shown the app at these
+paths. `PUBLIC_PAGES` in `vite.config.js` puts them on the worker's navigation deny-list and out of
+its precache, so the network always answers them. A device whose worker predates that change still
+shows the app at these paths until it takes the update (§4, *What a member with the app open sees
+after a deploy*). Read production with the worker unregistered, or with `curl`.
 
 ## 2. Supabase — the backend
 

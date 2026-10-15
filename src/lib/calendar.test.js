@@ -865,7 +865,7 @@ describe('revokeNoteFor', () => {
   })
 })
 
-// #98 AC 1 — the staleness bound, and the predicate that applies it. App.test.jsx
+// #98 AC 1 — the staleness bound, and the predicate that applies it. App.calendar.test.jsx
 // proves WHEN the app asks; this proves what "older than the bound" means, with
 // the clock injected so the boundary itself can be pinned rather than sampled.
 describe('isBusyWeekStale', () => {

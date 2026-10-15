@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 //
 // This file exists because review-fanout found that `listChores`, `addChore`,
 // `updateChore`, `removeChore` and `unwrap` were tested at NO level:
-// chores.test.js covers only the three pure validators, App.test.jsx replaces
+// chores.test.js covers only the three pure validators, App's test harness replaces
 // all four with `vi.fn()` stubs, and chores.pglite.test.js issues raw SQL
 // without ever importing the module. The mutation pass could not have caught
 // that — mutation proves the tests you have can fail, and says nothing about

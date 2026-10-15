@@ -660,7 +660,7 @@ describe('why a chore was steered (#481)', () => {
 
 // #49 AC 7 — what the last automatic re-balance reported, rendered from the
 // verdict the run STORED rather than from any computation here. The wiring
-// that fetches it is App's (App.test.jsx); what the run stores is the pglite
+// that fetches it is App's (App.split.test.jsx); what the run stores is the pglite
 // suite's; this covers only what the screen says for a given stored verdict.
 describe('the last re-balance note (#49)', () => {
   const verdict = (extra = {}) => ({

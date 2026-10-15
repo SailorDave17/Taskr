@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import RenderFailure from './RenderFailure.jsx'
 
 // #478 — the floor under a render throw. What App does with it (where the
-// two boundaries sit and what stays on screen) is App.test.jsx; this is the
+// two boundaries sit and what stays on screen) is App.households.test.jsx; this is the
 // component on its own.
 
 function Boom({ message }) {

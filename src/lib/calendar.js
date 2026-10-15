@@ -49,7 +49,7 @@
 // by the `state` this file minted. Two channels, two readers, each reading only
 // its own: App's boot reads the fragment first (the client consumes it at
 // construction), strips ONLY the fragment, and then reads the query here. That
-// is measured rather than asserted — App.test.jsx boots on a URL carrying both
+// is measured rather than asserted — App.roster.test.jsx boots on a URL carrying both
 // and each reader gets its parameters — because the sequencing note on #155
 // said the story would block on a router if it inverted, and it did not.
 

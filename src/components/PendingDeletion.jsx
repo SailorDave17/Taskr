@@ -20,6 +20,14 @@ export function formatPurgeDate(iso) {
   })
 }
 
+// The clock is read at every render ON PURPOSE, so `react-hooks/purity` is
+// switched off for this one line (#581). A tab still open past a household's
+// purge_after must stop offering it on its next render (the #430 review), and
+// a clock frozen at mount by `useState` would keep offering it, against a
+// restore that refuses. That stays true only while no React Compiler is in the
+// build: `vite.config.js` runs none, and one that memoised this component
+// would freeze the clock without a word.
+// eslint-disable-next-line react-hooks/purity
 export default function PendingDeletion({ pending = [], onRestore, busy = false, now = Date.now() }) {
   // Past its purge_after a household belongs to the purge: restore refuses it,
   // so it is not offered (#430 review). The status RPC stops listing it at the

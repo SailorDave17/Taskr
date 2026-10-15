@@ -100,19 +100,146 @@ export function summaryLines(report) {
   return lines
 }
 
+/** The files the time budget sums — #555. */
+export const PGLITE_FILE = /\.pglite\.test\.js$/
+
+/**
+ * The summed wall time of every PGlite file, in seconds — #555 AC 2.
+ *
+ * Read from each file's `duration`, which `vitest-json-file-durations.mjs` adds
+ * and the stock JSON reporter does not carry. Deliberately NOT
+ * `endTime - startTime`: that span starts at the first test, so a database
+ * booted in `beforeAll` is outside it (that reporter's header has the
+ * measurement). A file without `duration` makes the whole reading unproven
+ * rather than cheaper.
+ *
+ * `{ ok: false }` when there is nothing honest to sum: no PGlite file at all
+ * (a budget over nothing passes every time), or one without its duration.
+ */
+export function pgliteTime(report) {
+  const files = (report.testResults ?? []).filter((file) => PGLITE_FILE.test(String(file.name ?? '')))
+  if (files.length === 0) {
+    return { ok: false, reason: 'the report names no *.pglite.test.js file, so there is nothing to time' }
+  }
+  const untimed = files.filter((file) => !Number.isFinite(file.duration))
+  if (untimed.length > 0) {
+    return {
+      ok: false,
+      reason:
+        `${untimed.length} of ${files.length} PGlite file(s) carry no duration — ` +
+        'was the report written by scripts/vitest-json-file-durations.mjs?',
+    }
+  }
+  const seconds = files.reduce((sum, file) => sum + file.duration, 0) / 1000
+  const slowest = [...files].sort((a, b) => b.duration - a.duration).slice(0, 5)
+  return { ok: true, files: files.length, seconds, slowest }
+}
+
+/** The budget verdict and its rendering — within or over the ceiling. */
+export function budgetLines(report, ceilingSeconds) {
+  const time = pgliteTime(report)
+  if (!time.ok) return { code: 2, lines: [`PGlite time budget: UNPROVEN — ${time.reason}`] }
+  const over = time.seconds > ceilingSeconds
+  const lines = [
+    `PGlite time budget: ${over ? 'OVER' : 'within'} — ${time.seconds.toFixed(1)} s across ${time.files} ` +
+      `files, ceiling ${ceilingSeconds} s` +
+      (over ? ` (${(time.seconds - ceilingSeconds).toFixed(1)} s over)` : ''),
+    '  slowest:',
+    ...time.slowest.map((file) => `    ${(file.duration / 1000).toFixed(1).padStart(7)} s  ${file.name}`),
+  ]
+  return { code: over ? 1 : 0, lines }
+}
+
+/**
+ * Every file OUTSIDE the PGlite set that ran past a per-file ceiling — #553 AC 2.
+ *
+ * vitest schedules whole files onto workers, so one long file is a floor under
+ * the run's wall time however many workers there are: `App.test.jsx` was one
+ * file of 432 tests until #553 split it by surface. The PGlite files are left
+ * to `pgliteTime`'s summed budget, because their cost is the database boot and
+ * #557 is the story that moves it.
+ *
+ * `{ ok: false }` on the same terms as `pgliteTime`: no such file at all (a
+ * ceiling over nothing passes every time), or one without its duration.
+ */
+export function slowFiles(report, ceilingSeconds) {
+  const files = (report.testResults ?? []).filter((file) => !PGLITE_FILE.test(String(file.name ?? '')))
+  if (files.length === 0) {
+    return { ok: false, reason: 'the report names no file outside *.pglite.test.js, so there is nothing to hold to a ceiling' }
+  }
+  const untimed = files.filter((file) => !Number.isFinite(file.duration))
+  if (untimed.length > 0) {
+    return {
+      ok: false,
+      reason:
+        `${untimed.length} of ${files.length} file(s) carry no duration — ` +
+        'was the report written by scripts/vitest-json-file-durations.mjs?',
+    }
+  }
+  const slowest = [...files].sort((a, b) => b.duration - a.duration)
+  const over = slowest.filter((file) => file.duration / 1000 > ceilingSeconds)
+  return { ok: true, files: files.length, over, slowest: slowest.slice(0, 3) }
+}
+
+/** The per-file verdict and its rendering — every file within, or the ones over. */
+export function fileCeilingLines(report, ceilingSeconds) {
+  const time = slowFiles(report, ceilingSeconds)
+  if (!time.ok) return { code: 2, lines: [`Per-file ceiling: UNPROVEN — ${time.reason}`] }
+  const listed = time.over.length > 0 ? time.over : time.slowest
+  const lines = [
+    time.over.length > 0
+      ? `Per-file ceiling: OVER — ${time.over.length} of ${time.files} non-PGlite file(s) past ${ceilingSeconds} s`
+      : `Per-file ceiling: within — ${time.files} non-PGlite files, none past ${ceilingSeconds} s`,
+    time.over.length > 0 ? '  over:' : '  slowest:',
+    ...listed.map((file) => `    ${(file.duration / 1000).toFixed(1).padStart(7)} s  ${file.name}`),
+  ]
+  return { code: time.over.length > 0 ? 1 : 0, lines }
+}
+
+/** A `--flag <positive seconds>` pair removed from `rest`, or an error. */
+function takeSeconds(rest, flag) {
+  const at = rest.indexOf(flag)
+  if (at === -1) return { value: null }
+  const raw = rest[at + 1]
+  const value = Number(raw)
+  if (raw === undefined || !Number.isFinite(value) || value <= 0) {
+    return { error: `${flag} needs a positive number of seconds, got ${raw ?? 'nothing'}` }
+  }
+  rest.splice(at, 2)
+  return { value }
+}
+
+/** `<report> [--budget <seconds>] [--file-ceiling <seconds>]`, or an error naming what was wrong. */
+export function parseArgs(argv) {
+  const rest = [...argv]
+  const budget = takeSeconds(rest, '--budget')
+  if (budget.error) return { error: budget.error }
+  const fileCeiling = takeSeconds(rest, '--file-ceiling')
+  if (fileCeiling.error) return { error: fileCeiling.error }
+  if (rest.length !== 1) return { error: null }
+  return { path: rest[0], budget: budget.value, fileCeiling: fileCeiling.value }
+}
+
 /**
  * Read a report and render it. Returns the process exit code.
  *
  * An unreadable or absent file is an ERROR, never an empty summary: the run
  * that never wrote a report and the run that found nothing wrong produce the
  * same silence otherwise, and the second is the one a reader believes.
+ *
+ * With `--budget <seconds>` it also sums the PGlite files' time and exits 1
+ * when the sum passes the ceiling (#555), and 2 when it cannot be read. With
+ * `--file-ceiling <seconds>` it exits 1 when any other file ran past that
+ * ceiling on its own (#553), and 2 when that cannot be read.
  */
 export function main(argv = process.argv.slice(2), out = console.log, err = console.error) {
-  const path = argv[0]
-  if (!path) {
-    err('usage: node scripts/summarize-vitest.mjs <vitest-json-report>')
+  const args = parseArgs(argv)
+  if (!args.path) {
+    if (args.error) err(args.error)
+    err('usage: node scripts/summarize-vitest.mjs <vitest-json-report> [--budget <seconds>] [--file-ceiling <seconds>]')
     return 2
   }
+  const { path } = args
   let raw
   try {
     raw = fs.readFileSync(path, 'utf8')
@@ -130,7 +257,18 @@ export function main(argv = process.argv.slice(2), out = console.log, err = cons
     return 2
   }
   for (const line of summaryLines(report)) out(line)
-  return verdictOf(report).ok ? 0 : 1
+  let code = verdictOf(report).ok ? 0 : 1
+  for (const [ceiling, render] of [
+    [args.budget, budgetLines],
+    [args.fileCeiling, fileCeilingLines],
+  ]) {
+    if (ceiling === null) continue
+    const verdict = render(report, ceiling)
+    out('')
+    for (const line of verdict.lines) out(line)
+    code = Math.max(code, verdict.code)
+  }
+  return code
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('summarize-vitest.mjs')) {

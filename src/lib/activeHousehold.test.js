@@ -51,7 +51,7 @@ describe('#165 — remembering a choice', () => {
   })
 
   // The key names the CHOICE, not the household — and it is deliberately not
-  // either of the two names App.test.jsx asserts absent. Pinned here because
+  // either of the two names App.roster.test.jsx asserts absent. Pinned here because
   // "pick a key that does not collide" is the cheap way to make that test green
   // while its subject moves underneath it, which is what #165 AC 4 forbids.
   it('stores the choice under a key that is neither the household nor the roster', () => {

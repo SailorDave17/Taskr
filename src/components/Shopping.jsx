@@ -164,7 +164,7 @@ import {
 //     surface is re-read on every tab press because what it returns is bounded;
 //     history grows by one run per trip forever. The read is `readClosedRuns`
 //     and the trigger is the disclosure's own `onToggle`, so a household that
-//     never looks back never pays for it. App.test.jsx asserts both halves —
+//     never looks back never pays for it. App.shopping.test.jsx asserts both halves —
 //     that arriving on Shop does not read it, and that opening does.
 //   - EACH RUN IS ITSELF A DISCLOSURE, and only the newest opens. That is
 //     `Done.jsx`'s `open={index === 0}` idiom, taken at the owner's design-bar
@@ -661,7 +661,7 @@ function ShoppingItem({
             the delete policy used to match zero rows — and a control that is
             always refused is worse than none. The window between another phone
             buying the item and this one re-reading is real, and it is settled
-            by the database rather than by the client — see App.test.jsx. What
+            by the database rather than by the client — see App.shopping.test.jsx. What
             a bought row offers instead is the way back. */}
         {bought ? (
           <button
@@ -1144,7 +1144,7 @@ function ShoppingList({
           The key is PREFIXED, and that is not decoration: `FinishRun` above is
           keyed on the same run id and they are siblings, so a bare `run.id`
           here made two children of one parent share a key — React warned and
-          rendered the finish control THREE times, which App.test.jsx caught by
+          rendered the finish control THREE times, which App.shopping.test.jsx caught by
           finding three "Done shopping" buttons on one list. */}
       <PastRuns
         key={`past-${run?.id ?? 'no-run'}`}

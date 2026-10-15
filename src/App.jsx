@@ -994,8 +994,19 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // own write followed by its echo is two reads, not three, and any number of
   // echoes during one read is still two. `refresh` itself is unchanged; this
   // is the only place it is called.
-  const reads = useMemo(() => createReadQueue(refresh), [refresh])
-  const requestRefresh = useCallback(() => reads.request(), [reads])
+  //
+  // The queue is built on the first request, not during render (#581).
+  // `refresh` reads refs, and react-hooks 7's `refs` rule refuses handing it
+  // to any function at render time, since nothing there says the callee will
+  // not call it. A `useMemo` or a `useState` initializer is still render time,
+  // so both were measured and both were refused. Built here, the queue is the
+  // same single one: `refresh` has no dependencies, so its identity never
+  // changes and there was only ever one queue.
+  const readsRef = useRef(null)
+  const requestRefresh = useCallback(() => {
+    if (!readsRef.current) readsRef.current = createReadQueue(refresh)
+    return readsRef.current.request()
+  }, [refresh])
 
   // #480 — one row per member per completed prior week, folded at render from
   // the chores every refresh already reads and the busy rows the background
@@ -1112,7 +1123,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           // one query this branch DOES own is GoTrue's bad-flow-state return
           // (`source: 'query'`), which carries no `state` and is nobody
           // else's — so that is the case that strips whole. Measured rather
-          // than asserted: App.test.jsx boots on a URL carrying both.
+          // than asserted: App.roster.test.jsx boots on a URL carrying both.
           const { pathname, search } = globalThis.location
           const keepQuery = signInReturn?.source !== 'query' && search
           globalThis.history?.replaceState?.(null, '', keepQuery ? `${pathname}${search}` : pathname)
@@ -1449,7 +1460,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
   // in `pendingInvitation.js`). What it guarantees is per browser: the same
   // browser applies the code without it being re-typed; a confirmation link
   // opened in a different browser finds nothing here and shows the join form
-  // instead — AC 5, asserted in both directions in `App.test.jsx`.
+  // instead — AC 5, asserted in both directions in `App.roster.test.jsx`.
   //
   // Keyed on `userId`, which `refresh()` sets from the session on every boot
   // and after every sign-in, so one effect covers the returning-from-inbox
@@ -1475,6 +1486,12 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
     if (!userId || busy || status === 'loading' || status === 'failed') return
     const carried = readPendingInvitation()
     if (!carried) return
+    // react-hooks 7's `set-state-in-effect` (#581). The state comes from
+    // outside React, the browser's storage, and is read at a moment: when the
+    // read that set `userId` has settled, which is the whole of the ordering
+    // above. Derived at render, storage would be read on every render instead,
+    // and that is the impure read the rule's sibling `purity` exists to refuse.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPendingJoin(carried)
   }, [userId, busy, status])
 
@@ -2243,6 +2260,25 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
     (choreId, date) => mutate(() => skipRepeatOccurrence(choreId, date)),
     [mutate],
   )
+  // #551 — the writes a chore row can make, built once and handed whole to the
+  // chore list and the Done surface, which pass it to every row without reading
+  // it. Its shape is `choreActionsShape`, beside ChoreRow. A plain object, not a
+  // useMemo: nothing it reaches is memoised, so a stable identity would buy
+  // nothing, and a dependency list would name all twelve a second time here.
+  const choreActions = {
+    onSave: handleSaveChore,
+    onRemove: handleRemoveChore,
+    onComplete: handleCompleteChore,
+    onUncomplete: handleUncompleteChore,
+    onMiss: handleMissChore,
+    onUnmiss: handleUnmissChore,
+    onAssign: handleAssignChore,
+    onUnassign: handleUnassignChore,
+    onExclude: handleExcludeMember,
+    onAllow: handleAllowMember,
+    onSkip: handleSkipOccurrence,
+    onRecordActual: handleRecordActual,
+  }
   // #46 — set or clear THIS period's capacity. Both take the period from state
   // rather than recomputing it, so the write lands in the same week the screen
   // is showing even if midnight passes mid-session.
@@ -3437,18 +3473,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           onFetchCalendarEvents={handleFetchCalendarEvents}
           onWidenCalendarConsent={handleWidenCalendarConsent}
           onImportEvent={handleImportEvent}
-          onSave={handleSaveChore}
-          onRemove={handleRemoveChore}
-          onComplete={handleCompleteChore}
-          onUncomplete={handleUncompleteChore}
-          onMiss={handleMissChore}
-          onUnmiss={handleUnmissChore}
-          onAssign={handleAssignChore}
-          onUnassign={handleUnassignChore}
-          onExclude={handleExcludeMember}
-          onAllow={handleAllowMember}
-          onSkip={handleSkipOccurrence}
-          onRecordActual={handleRecordActual}
+          choreActions={choreActions}
           // #302 AC 1 — the "N done this week" line is a second way onto the
           // Done tab, and it arrives the same way the tab does: through goTo,
           // so the re-read criterion 11 requires of every arrival holds here.
@@ -3459,7 +3484,8 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
       {/* #302 — completed work, by capacity week. Same rows, same handlers as
           the chore list (a done row still offers "Not done after all" and
           "Took"); it needs no add form and no complete handler of its own, but
-          ChoreRow takes the full set, so the full set is passed. */}
+          ChoreRow takes the whole actions object, so the same object is
+          passed (#551). */}
       {status === 'joined' && household && view === 'done' ? (
         <Done
           chores={chores}
@@ -3470,18 +3496,7 @@ function Shell({ carriedNotice = null, onSessionEnded, installOffer = null }) {
           timezone={household.timezone}
           busy={busy}
           error={error}
-          onSave={handleSaveChore}
-          onRemove={handleRemoveChore}
-          onComplete={handleCompleteChore}
-          onUncomplete={handleUncompleteChore}
-          onMiss={handleMissChore}
-          onUnmiss={handleUnmissChore}
-          onAssign={handleAssignChore}
-          onUnassign={handleUnassignChore}
-          onExclude={handleExcludeMember}
-          onAllow={handleAllowMember}
-          onSkip={handleSkipOccurrence}
-          onRecordActual={handleRecordActual}
+          choreActions={choreActions}
         />
       ) : null}
 

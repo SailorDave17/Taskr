@@ -2,7 +2,7 @@
 // calendar. Pure functions only: the fold that builds the history is
 // history.test.js, what the roster does with the figure is Roster.test.jsx,
 // what the constraint and the trigger admit is suggestedCapacity.pglite.test.js,
-// and what App reads and does not wait for is App.test.jsx. This file is the
+// and what App reads and does not wait for is App.split.test.jsx. This file is the
 // arithmetic, its constants, and the corpus.
 
 import { describe, expect, it } from 'vitest'

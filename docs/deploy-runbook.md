@@ -90,8 +90,12 @@ record in the SQL editor: `select * from public.household_purge_runs order by ra
    merging, read the three pages against what the promotion changes: what is stored, which companies
    handle it, how to get it deleted, the known issues, and the controls the tester page names. Fix
    any page that disagrees in a pull request into `develop` first, as with the version bump. Then
-   move the privacy page's *Checked against the app on …* line to the release's version and build.
-   This check is a reading, not a test: nothing in CI can tell whether a sentence is still true.
+   move the privacy page's *Checked against the app on …* line to the date and the release's
+   version, in the version-bump pull request. **Name the version only, not the build**: the build is
+   the promotion's merge commit, which does not exist until the owner merges, and the version moves
+   exactly once per promotion, so it names the release on its own. (#595 first wrote "version and
+   build" here; the 1.0.2 promotion dropped the build, 2026-10-15.) This check is a reading, not a
+   test: nothing in CI can tell whether a sentence is still true.
 
    **Changed again 2026-08-27: the source branch is `develop`, not `rebuild/v1`.** The repo's GitHub
    default branch moved to `develop` the same day, and story PRs go there too now — see *Branching*

@@ -95,6 +95,20 @@ function versionFile() {
   }
 }
 
+// #595 — Taskr's three public pages: the tester page, support and privacy.
+// They are static files under `public/<page>/index.html`, moved here from
+// madcowhq.com, and they are web pages rather than parts of the app. The
+// plugin's worker answers EVERY navigation it controls with `index.html`
+// (its default `navigateFallback`, with no deny-list), so without the two
+// options below anybody who had ever opened Taskr was shown the app at
+// `/privacy` — the link #596 puts inside the app — and never the page. Each
+// page is on the navigation deny-list, so the network answers it, and none is
+// precached, so nobody reads last week's privacy policy from a cache. Offline,
+// the browser's own error shows instead. workbox matches the deny-list against
+// the path plus the query, hence `?` beside `/` and the end of the string.
+// src/test/pwaBuild.test.js reads both off a real build's `sw.js`.
+const PUBLIC_PAGES = ['try', 'support', 'privacy']
+
 export default defineConfig({
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(commitSha),
@@ -130,7 +144,14 @@ export default defineConfig({
       // takeover reach that page too; the SKIP_WAITING handler still decides
       // WHEN, and src/lib/appUpdate.js reloads that one page itself, because
       // the plugin only reloads a page that had a controller at registration.
-      workbox: { clientsClaim: true },
+      workbox: {
+        clientsClaim: true,
+        // #595 — the public pages above stay out of the worker. `globIgnores`
+        // replaces workbox-build's default rather than adding to it, so its one
+        // default entry is restated.
+        navigateFallbackDenylist: [new RegExp(`^/(?:${PUBLIC_PAGES.join('|')})(?:[/?]|$)`)],
+        globIgnores: ['**/node_modules/**/*', ...PUBLIC_PAGES.map((page) => `${page}/**`)],
+      },
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Taskr',

@@ -1,0 +1,129 @@
+<!doctype html>
+<!-- #595: moved from madcowhq.com/apps/taskr/support on 2026-10-15. Its claims were
+     re-checked against Taskr's develop, and the pull request for #595 lists
+     every one that changed. It loads no script, and the service worker keeps
+     out of it (vite.config.js, PUBLIC_PAGES). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1f6f5c" />
+    <meta name="description" content="How to reach the person who runs Taskr, what to include, and what is currently wrong with it." />
+    <title>Taskr support</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+    <style>
+      /* One stylesheet, inline in each of the three pages so each stands alone
+         (#595). src/test/pwaBuild.test.js holds the three copies identical.
+         The colours are the app's own (src/index.css), dark as the app is. */
+      :root {
+        color-scheme: dark;
+        --bg: #12171c;
+        --surface: #1a2128;
+        --ink: #e8eef2;
+        --ink-dim: #9aa9b4;
+        --accent: #1f6f5c;
+        --accent-ink: #33b798;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.55;
+        overflow-wrap: break-word;
+      }
+      a { color: var(--accent-ink); }
+      a:focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 2px; }
+      .skip { position: absolute; left: -100vw; }
+      .skip:focus { left: 1rem; top: 1rem; padding: 0.5rem 1rem; background: var(--surface); }
+      header, main, footer { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1rem; }
+      .brand { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1.25rem; font-weight: 700; text-decoration: none; }
+      h1 { font-size: clamp(1.6rem, 6vw, 2.2rem); line-height: 1.2; margin: 0.25rem 0 1rem; }
+      h2 { margin-top: 2.25rem; }
+      .eyebrow { margin-bottom: 0; color: var(--accent-ink); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+      .eyebrow a { text-decoration: none; }
+      .lede { font-size: 1.125rem; }
+      .muted, caption, footer { color: var(--ink-dim); }
+      .button { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem; background: var(--accent); color: var(--ink); font-weight: 600; text-decoration: none; }
+      .steps li, .issues li { margin-bottom: 0.75rem; }
+      .phone-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; padding: 0; list-style: none; }
+      .phone-shots img { display: block; width: 100%; height: auto; border-radius: 0.75rem; }
+      .phone-shots span { display: block; margin-top: 0.25rem; text-align: center; }
+      .field-deep { margin-top: 2.25rem; padding: 0.25rem 1rem 1rem; border-radius: 0.75rem; background: var(--surface); }
+      .field-deep h2 { margin-top: 0.5rem; }
+      table { width: 100%; border-collapse: collapse; }
+      caption { text-align: left; padding-bottom: 0.5rem; }
+      /* A host name in a narrow cell would otherwise hold a 320px screen open
+         sideways (measured: the companies table at 342px in a 305px column). */
+      th, td { padding: 0.5rem 0.375rem; border-bottom: 1px solid var(--surface); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      dt { margin-top: 1rem; font-weight: 700; }
+      dd { margin-left: 0; }
+      footer { margin-top: 3rem; padding-block: 1.5rem; border-top: 1px solid var(--surface); }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="28" height="28" />Taskr</a>
+      <a href="/">Open the app</a>
+    </header>
+    <main id="main">
+  <section>
+    <p class="eyebrow"><a href="/try">Taskr</a></p>
+    <h1>Support</h1>
+    <p class="lede">Something not working, or a question the
+      <a href="/try">tester page</a> does not answer? Write to me,
+      from inside the app or by email.</p>
+  </section>
+  <section>
+    <h2>Getting in touch</h2>
+    <dl class="facts">
+      <dt>From inside the app</dt>
+      <dd>Every screen but the one where you set a password from an email has a
+        <strong>Report a problem</strong> link in its footer. It opens your own
+        email app with a message already started: which version and build you
+        are on, which screen you were looking at, and which browser. Nothing is
+        sent until you press send, and you can read and
+        change every word first. Add what happened and what you expected
+        instead.</dd>
+      <dt>By email</dt>
+      <dd><a href="mailto:dave@madcowhq.com">dave@madcowhq.com</a>.</dd>
+      <dt>How long you will wait</dt>
+      <dd>I read that address daily, so expect a reply within a couple of
+        days. If you write during a regatta weekend it will probably be
+        Monday.</dd>
+      <dt>What helps</dt>
+      <dd>The version and build from the footer, which screen you were on, and
+        what the screen said. The in-app link fills in the first three. A
+        screenshot is worth a paragraph, but check that it shows no name or
+        email you would rather not send.</dd>
+      <dt>Which version you are on</dt>
+      <dd>The footer of every screen ends with a version and a build, for
+        example <strong>v1.0.1 &middot; build a90fd5b</strong>. The build's
+        seven characters name the exact code, so quote both when you write.
+        Taskr is deployed the same day a change is finished, and an open app
+        picks the new build up on its own.</dd>
+    </dl>
+  </section>
+  <section class="field-deep">
+    <div>
+      <p class="eyebrow">Known issues</p>
+      <h2>What is currently wrong with it</h2>
+      <p>This one is open, and listed here rather than left for you to
+        discover.</p>
+      <ul class="issues">
+        <li><strong>A connected calendar that stops being readable offers no
+          way to reconnect it.</strong> Disconnect it and connect it
+          again.</li>
+      </ul>
+    </div>
+  </section>
+    </main>
+    <footer>
+      <p><a href="/try">Try Taskr</a> &middot; <a href="/support">Support</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="/">Open the app</a></p>
+    </footer>
+  </body>
+</html>

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import vm from 'node:vm'
 import { brotliCompressSync, constants as zlib } from 'node:zlib'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -143,6 +144,126 @@ describe('#540 AC 5 — the build emits /version.json, and the worker does not p
     expect(worker).toMatch(/precacheAndRoute/)
     expect(worker).toMatch(/"index\.html"|url:"index\.html"/)
     expect(worker).toContain('manifest.webmanifest')
+  })
+})
+
+// #595 — the tester, support and privacy pages, static files under `public/`
+// that the build copies as written. The paths are written out here, not read
+// from vite.config.js, so a page dropped from PUBLIC_PAGES fails rather than
+// leaving both sides in agreement.
+const PUBLIC_PAGES = [
+  { url: 'https://taskr.madcowhq.com/try/', file: 'try/index.html', title: 'Try Taskr' },
+  { url: 'https://taskr.madcowhq.com/support/', file: 'support/index.html', title: 'Taskr support' },
+  { url: 'https://taskr.madcowhq.com/privacy/', file: 'privacy/index.html', title: 'Taskr privacy' },
+]
+
+// Runs the built worker against a stand-in for workbox and keeps what it
+// registers. The worker defines itself through `self.define`, so handing it
+// one makes it skip its loader and call the factory with the stand-in. What
+// comes back is the worker's own deny-list RegExps and precache entries, read
+// from its behaviour rather than from however the minifier spelled them.
+function runWorker(source) {
+  const navigationRoutes = []
+  const precached = []
+  let defined = 0
+  const workbox = new Proxy(
+    {},
+    {
+      get(_, name) {
+        if (name === 'NavigationRoute') {
+          return class {
+            constructor(handler, options = {}) {
+              navigationRoutes.push(options)
+            }
+          }
+        }
+        if (name === 'precacheAndRoute') return (entries) => precached.push(...entries)
+        return () => {}
+      },
+    },
+  )
+  const context = { define: (deps, factory) => ((defined += 1), factory(workbox)) }
+  context.self = context
+  context.addEventListener = () => {}
+  vm.runInNewContext(source, context)
+  return { defined, navigationRoutes, precached }
+}
+
+describe('#595 — the tester, support and privacy pages ship as written, and the worker keeps out of them', () => {
+  let pages
+  let run
+  beforeAll(() => {
+    pages = PUBLIC_PAGES.map((page) => {
+      const path = join(out, page.file)
+      return { ...page, html: existsSync(path) ? readFileSync(path, 'utf8') : null }
+    })
+    run = runWorker(worker)
+  })
+
+  it('docs/deploy-runbook.md records exactly these URLs, and each one is a page in the build', () => {
+    // AC 1's record is the value #596, #597 and madcowlabs' redirect rows copy,
+    // so the record and the build are held to each other here.
+    const runbook = readFileSync(resolve(process.cwd(), 'docs', 'deploy-runbook.md'), 'utf8')
+    const section = runbook.split('\n### 1b. ')[1]?.split('\n## ')[0]
+    expect(section, 'the runbook has no section 1b').toBeTruthy()
+    const recorded = [...section.matchAll(/^\| [^|]+ \| `(https:\/\/taskr\.madcowhq\.com\/[^`]*)` \|$/gm)].map((m) => m[1])
+    expect(recorded).toEqual(PUBLIC_PAGES.map((page) => page.url))
+    for (const page of pages) {
+      expect(page.html, `${page.file} is not in the build`).not.toBeNull()
+      expect(page.file).toBe(`${new URL(page.url).pathname.slice(1)}index.html`)
+    }
+  })
+
+  it('each page carries its own title', () => {
+    for (const page of pages) expect(page.html.match(/<title>([^<]*)<\/title>/)?.[1]).toBe(page.title)
+    expect(new Set(pages.map((page) => page.title)).size).toBe(PUBLIC_PAGES.length)
+  })
+
+  it('each page loads no script at all, and nothing from another origin', () => {
+    for (const page of pages) {
+      expect(page.html, page.file).not.toMatch(/<script\b/i)
+      expect(page.html, page.file).not.toMatch(/\b(?:src|srcset)\s*=\s*["']?(?:https?:)?\/\//i)
+      expect(page.html, page.file).not.toMatch(/<link\b[^>]*\bhref\s*=\s*["']?(?:https?:)?\/\//i)
+      expect(page.html, page.file).not.toMatch(/url\(\s*["']?(?:https?:)?\/\//i)
+    }
+  })
+
+  it('each page links the app root, and every file it loads from this origin is in the build', () => {
+    for (const page of pages) {
+      expect(page.html, page.file).toMatch(/<a\b[^>]*\bhref="\/"/)
+      const loaded = [...page.html.matchAll(/\b(?:src|href)="(\/[^"?#]+\.(?:png|svg|ico))"/g)].map((m) => m[1])
+      expect(loaded.length, `${page.file} loads no image, so this checks nothing`).toBeGreaterThan(0)
+      for (const path of loaded) expect(existsSync(join(out, path)), `${page.file} loads ${path}`).toBe(true)
+    }
+  })
+
+  it('the three pages share one stylesheet, byte for byte', () => {
+    const styles = pages.map((page) => page.html.match(/<style>[\s\S]*?<\/style>/)?.[0])
+    expect(styles[0]).toBeTruthy()
+    for (const style of styles) expect(style).toBe(styles[0])
+  })
+
+  it('the worker sends every form of their paths to the network, and keeps the app on the rest', () => {
+    expect(run.defined).toBe(1)
+    expect(run.navigationRoutes).toHaveLength(1)
+    const denylist = run.navigationRoutes[0].denylist ?? []
+    // workbox tests the path plus the query against each entry.
+    const denied = (path) => denylist.some((re) => re.test(path))
+    for (const path of ['/try', '/try/', '/support', '/support/', '/privacy', '/privacy/', '/privacy/?from=app', '/privacy?from=app']) {
+      expect(denied(path), `${path} would be answered with the app`).toBe(true)
+    }
+    // POSITIVE CONTROL: the app's own navigations still get the app shell, so
+    // the deny-list is not simply refusing everything.
+    for (const path of ['/', '/?start', '/index.html', '/trying', '/supported', '/privacy-old']) {
+      expect(denied(path), `${path} lost the app shell`).toBe(false)
+    }
+  })
+
+  it('the worker precaches none of the pages, so nobody reads a stale copy from a cache', () => {
+    const urls = run.precached.map((entry) => (typeof entry === 'string' ? entry : entry.url))
+    // POSITIVE CONTROL: this is the real precache list.
+    expect(urls).toContain('index.html')
+    expect(urls.filter((url) => /^(?:try|support|privacy)\//.test(url))).toEqual([])
   })
 })
 

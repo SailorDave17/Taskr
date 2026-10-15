@@ -1,0 +1,174 @@
+<!doctype html>
+<!-- #595: moved from madcowhq.com/apps/taskr/ on 2026-10-15. Its claims were
+     re-checked against Taskr's develop, and the pull request for #595 lists
+     every one that changed. It loads no script, and the service worker keeps
+     out of it (vite.config.js, PUBLIC_PAGES). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1f6f5c" />
+    <meta name="description" content="Taskr splits a household's chores by the minutes each person has. How to start, what it keeps, and how to report a problem." />
+    <title>Try Taskr</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+    <style>
+      /* One stylesheet, inline in each of the three pages so each stands alone
+         (#595). src/test/pwaBuild.test.js holds the three copies identical.
+         The colours are the app's own (src/index.css), dark as the app is. */
+      :root {
+        color-scheme: dark;
+        --bg: #12171c;
+        --surface: #1a2128;
+        --ink: #e8eef2;
+        --ink-dim: #9aa9b4;
+        --accent: #1f6f5c;
+        --accent-ink: #33b798;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.55;
+        overflow-wrap: break-word;
+      }
+      a { color: var(--accent-ink); }
+      a:focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 2px; }
+      .skip { position: absolute; left: -100vw; }
+      .skip:focus { left: 1rem; top: 1rem; padding: 0.5rem 1rem; background: var(--surface); }
+      header, main, footer { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1rem; }
+      .brand { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1.25rem; font-weight: 700; text-decoration: none; }
+      h1 { font-size: clamp(1.6rem, 6vw, 2.2rem); line-height: 1.2; margin: 0.25rem 0 1rem; }
+      h2 { margin-top: 2.25rem; }
+      .eyebrow { margin-bottom: 0; color: var(--accent-ink); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+      .eyebrow a { text-decoration: none; }
+      .lede { font-size: 1.125rem; }
+      .muted, caption, footer { color: var(--ink-dim); }
+      .button { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem; background: var(--accent); color: var(--ink); font-weight: 600; text-decoration: none; }
+      .steps li, .issues li { margin-bottom: 0.75rem; }
+      .phone-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; padding: 0; list-style: none; }
+      .phone-shots img { display: block; width: 100%; height: auto; border-radius: 0.75rem; }
+      .phone-shots span { display: block; margin-top: 0.25rem; text-align: center; }
+      .field-deep { margin-top: 2.25rem; padding: 0.25rem 1rem 1rem; border-radius: 0.75rem; background: var(--surface); }
+      .field-deep h2 { margin-top: 0.5rem; }
+      table { width: 100%; border-collapse: collapse; }
+      caption { text-align: left; padding-bottom: 0.5rem; }
+      /* A host name in a narrow cell would otherwise hold a 320px screen open
+         sideways (measured: the companies table at 342px in a 305px column). */
+      th, td { padding: 0.5rem 0.375rem; border-bottom: 1px solid var(--surface); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      dt { margin-top: 1rem; font-weight: 700; }
+      dd { margin-left: 0; }
+      footer { margin-top: 3rem; padding-block: 1.5rem; border-top: 1px solid var(--surface); }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="28" height="28" />Taskr</a>
+      <a href="/">Open the app</a>
+    </header>
+    <main id="main">
+  <section>
+    <p class="eyebrow">Taskr &middot; Open for testing</p>
+    <h1>Chores, split by the minutes each of you actually has.</h1>
+    <p class="lede">Write down what needs doing and how long it takes, say how
+      many minutes each person has this week, and Taskr deals the work out in
+      proportion. When the split cannot be made fair, it says so instead of
+      pretending. It runs in a phone's browser, and it is free to try.</p>
+    <p class="actions"><a class="button" href="/?start">Start your household</a></p>
+  </section>
+  <section>
+    <h2>How to start</h2>
+    <p>Three steps, and the first two happen once. Everything in bold is the
+      name of a control as the app shows it.</p>
+    <ol class="steps">
+      <li><strong>Make your own account.</strong> Tap Start your household
+        above; Taskr opens on <strong>Start a household</strong>. Type
+        <strong>Your email</strong> and <strong>Your password</strong> and tap
+        <strong>Create account</strong>. An email called <em>Confirm your
+        email address</em> arrives; tap <strong>Confirm email address</strong>
+        in it, and you land back in Taskr, signed in.</li>
+      <li><strong>Name the household.</strong> Under <strong>Start a
+        household</strong>, type a <strong>Household name</strong> and
+        <strong>Your name</strong>, and tap <strong>Create household</strong>.
+        You are its organizer: the one person who adds everyone else.</li>
+      <li><strong>Add the people and the chores.</strong> On the
+        <strong>Who</strong> tab, under <strong>Add someone</strong>, give
+        each person a <strong>Name</strong>, their <strong>Available minutes
+        per week</strong> and an <strong>Email address</strong>, and tap
+        <strong>Add to household</strong>; they get an email and choose their
+        own password. On the <strong>Chores</strong> tab, under <strong>What
+        needs doing</strong>, give each job a name, its <strong>Expected
+        minutes</strong> and when it is <strong>Due</strong>, and tap
+        <strong>Add chore</strong>. Or type a sentence about the week and tap
+        <strong>Work out the chores</strong>. The <strong>Split</strong> tab
+        shows how it falls.</li>
+    </ol>
+    <p class="muted">Taskr can send about thirty emails an hour, so a whole
+      household can be added in one sitting. An invitation's link works for an
+      hour; if somebody misses it, the organizer taps <strong>Send the
+      invitation again</strong> on their row of the <strong>Who</strong> tab.</p>
+  </section>
+  <section>
+    <h2>What it looks like</h2>
+    <p>A demo household of three, on a phone.</p>
+    <ul class="phone-shots">
+      <li>
+        <img src="/try/split.png" width="360" height="780" loading="lazy" decoding="async"
+             alt="The Split tab: three bars, one per person, each drawn as a share of that person's own minutes, and a verdict above them saying how far off level the week is.">
+        <span>Split</span>
+      </li>
+      <li>
+        <img src="/try/chores.png" width="360" height="780" loading="lazy" decoding="async"
+             alt="The Chores tab: two of the week's jobs, Dishes and Cook dinner, each with its minutes, due date and repeat, a Who control naming the person holding it, and Done and Didn't happen buttons.">
+        <span>Chores</span>
+      </li>
+      <li>
+        <img src="/try/who.png" width="360" height="780" loading="lazy" decoding="async"
+             alt="The Who tab: Alex, Robin and Sam, each with their available minutes for the week and the controls for changing them.">
+        <span>Who</span>
+      </li>
+    </ul>
+  </section>
+  <section class="field-deep">
+    <div>
+      <p class="eyebrow">Testing</p>
+      <h2>What "open for testing" means</h2>
+      <p>Taskr changes often. A finished change goes live the same day, and an
+        open app picks it up on its own, so a screen you saw last week may
+        have moved. What you enter lives on the server, not in the app, so an
+        update does not lose it.</p>
+      <p>Some things are known to be wrong with it and are listed on the
+        <a href="/support">support page</a> so you do not have to find
+        them yourself.</p>
+    </div>
+  </section>
+  <section>
+    <h2>What it keeps</h2>
+    <p>The names you type, the minutes, the chores, and each person's email
+      address, on a server, so every phone in the household sees the same
+      split. Everyone in the household can see everyone else's email address.
+      There is no advertising and no analytics. A member can leave, the
+      organizer can delete the household, and anybody can delete their own
+      account, from inside the app. The
+      <a href="/privacy">privacy page</a> lists every item, who can read
+      it, and which companies handle it.</p>
+  </section>
+  <section>
+    <h2>How to report a problem</h2>
+    <p>Every screen but the one where you set a password from an email has a
+      <strong>Report a problem</strong> link in its footer. It opens your email
+      app with the version, build, screen and browser already filled in; add
+      what happened and send it. Or write to
+      <a href="mailto:dave@madcowhq.com">dave@madcowhq.com</a>. The
+      <a href="/support">support page</a> says how long a reply takes.</p>
+  </section>
+    </main>
+    <footer>
+      <p><a href="/try">Try Taskr</a> &middot; <a href="/support">Support</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="/">Open the app</a></p>
+    </footer>
+  </body>
+</html>

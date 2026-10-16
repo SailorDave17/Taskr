@@ -277,9 +277,15 @@ reads this table and holds each URL to its page in a real build.
 the privacy page. `/privacy` also answers **200 with no `Location`, carrying the app**
 (`<title>Taskr</title>`), because `vite preview` answers any path it does not have with `index.html`.
 `/__probe-594` answered 200 the same way. So "200 with no `Location`" alone cannot tell a page from
-that fallback: read the `<title>` as well. Production has no fallback (1a's `/start` is a 404). The
-no-slash form on Vercel is read on production after the promotion (#595's first two criteria), and
-this table is confirmed or corrected then.
+that fallback: read the `<title>` as well. Production has no fallback (1a's `/start` is a 404).
+
+**Confirmed on production** *(measured 2026-10-15, 23:47Z, on 1.0.2 at `87c5a5e`, the first release
+to carry the pages)*. Both forms of each page answer 200 with no `Location` and the page's own
+`<title>`: *Try Taskr*, *Taskr support*, *Taskr privacy*. `/__probe-594` answers 404 in both forms,
+the control that shows the 200s are not a fallback. Before the promotion, every one of those paths
+answered 404 on 1.0.1. The table stands as recorded. The no-slash form also works, and the pages link
+each other that way. Every asset they load is root-absolute, so it renders the same, and the service
+worker's deny-list matches both forms. But the slash form is the one string everything else uses.
 
 **The service worker keeps out of them.** The app's worker answers every navigation it controls with
 `index.html`, so before #595 anybody who had opened Taskr would have been shown the app at these
